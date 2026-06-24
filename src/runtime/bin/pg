@@ -288,7 +288,7 @@ def cmd_upgrade(args) -> int:
         changed_files = _compute_changed_files(project_root, ref)
         return _upgrade_interactive(project_root, pg_skills_root, current, ref, changed_files)
 
-    return _upgrade_pull(project_root, current, ref)
+    return _upgrade_pull(project_root, current, ref, args.force)
 
 
 def _normalize_ref(version: str | None) -> str:
@@ -344,7 +344,7 @@ def _compute_changed_files(project_root: Path, ref: str) -> list:
     return [f for f in result.stdout.strip().split('\n') if f]
 
 
-def _upgrade_pull(project_root: Path, current: str, ref: str) -> int:
+def _upgrade_pull(project_root: Path, current: str, ref: str, force: bool = False) -> int:
     """执行 git subtree pull."""
     remote = 'pg-skills'
     prefix = '.pg/skills'
@@ -359,6 +359,20 @@ def _upgrade_pull(project_root: Path, current: str, ref: str) -> int:
         print(f'  Run: git fetch {remote}')
         return 1
 
+    stashed = False
+    if force:
+        status = subprocess.run(
+            ['git', '-C', str(project_root), 'status', '--porcelain'],
+            capture_output=True, text=True,
+        )
+        if status.stdout.strip():
+            print('Working tree has modifications, stashing...')
+            subprocess.run(
+                ['git', '-C', str(project_root), 'stash', 'push', '-m', 'pg-upgrade-auto-stash'],
+                capture_output=True, text=True,
+            )
+            stashed = True
+
     if not (project_root / prefix).exists():
         print(f'INFO: {prefix}/ not found, performing initial subtree add')
         cmd = ['git', 'subtree', 'add', f'--prefix={prefix}', remote, ref, '--squash']
@@ -370,7 +384,20 @@ def _upgrade_pull(project_root: Path, current: str, ref: str) -> int:
     if result.returncode != 0:
         print(f'ERROR: git subtree failed (exit {result.returncode})')
         print(f'  Try: pg upgrade --interactive')
+        if stashed:
+            subprocess.run(
+                ['git', '-C', str(project_root), 'stash', 'pop'],
+                capture_output=True, text=True,
+            )
+            print('Stash restored.')
         return 1
+
+    if stashed:
+        subprocess.run(
+            ['git', '-C', str(project_root), 'stash', 'pop'],
+            capture_output=True, text=True,
+        )
+        print('Stash restored.')
 
     pg_skills_root = find_pg_skills_root()
     new_version = (pg_skills_root / 'VERSION').read_text().strip()
@@ -444,6 +471,7 @@ def main():
                            help='Version tag to upgrade to (e.g., 0.2.0). Default: master')
     p_upgrade.add_argument('--list', action='store_true', help='Fetch remote tags, list available versions')
     p_upgrade.add_argument('--interactive', action='store_true', help='Show conflict files before upgrade')
+    p_upgrade.add_argument('--force', action='store_true', help='Stash working tree modifications before pull')
     p_upgrade.set_defaults(func=cmd_upgrade)
 
     args = parser.parse_args()

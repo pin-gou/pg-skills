@@ -37,14 +37,14 @@ pg-skills/
 
 ## Versioning
 
-- **0.1.x** — skeleton + de-webvirtification (current)
-- **0.2.x** — hook protocol + error propagation + pg CLI MVP
+- **0.1.x** — skeleton + de-webvirtification
+- **0.2.x** — hook protocol + error propagation + pg CLI MVP (current)
 - **0.3.x** — full project init flow (`pg init` + `pg doctor`)
 - **1.0.x** — production-ready, dogfooded on 2+ external projects
 
 ## Quick Start (新项目接入)
 
-**0.1.x 当前状态**: `pg upgrade` 仅 `--list` 可用; 完整 upgrade (`pg upgrade` / `pg upgrade --interactive`) 在 0.2.x。
+**0.2.x 当前状态**: `pg upgrade` 已支持指定版本号、`--list` 查看可用版本、`--interactive` 交互式 diff、`--force` 自动 stash 脏工作区。
 
 ### 4 步接入流程
 
@@ -97,7 +97,7 @@ python3 .pg/skills/src/runtime/bin/pg init
 
 - **自定义 hook（仅 environments 维度）**：如果默认模板不满足，把 `.pg/hooks/<role>-<action>.sh` 或 `.pg/hooks/{prepare_env,clean_env}.sh` 复制一份修改。`pg-run-hook.py` 优先看项目里的 `.pg/hooks/`，找不到对应脚本时回退到 `project.yaml` 里 `environments.<env>.roles.<r>.actions.<action>.script` 字段直接执行。**module 维度的命令不进 hook**——直接编辑 `.pg/project.yaml` 的 `modules.<m>.{build,lint,test.<key>}` 字段。
 - **添加项目专属 agent / command / skill**：直接在 `.opencode/<dir>/` 下**真实**放文件，和 symlink 项并存。`pg init` 不会触碰真实文件。
-- **再次同步 pg-skills**：`pg upgrade`（0.2.x 之后，等价于 `git subtree pull --prefix=.pg/skills pg-skills master --squash`）。
+- **再次同步 pg-skills**：`pg upgrade`（0.2.x 之后，等价于 `git subtree pull --prefix=.pg/skills pg-skills master --squash`）。支持指定版本号：`pg upgrade 0.2.0`、`pg upgrade v0.2.0`。工作区不干净时加 `--force` 自动 stash 后再拉取。
 - **跳过 symlink 创建**：`pg init --no-symlinks`（已有 `.opencode/` 的项目）。
 
 ### 一次性命令一览
@@ -211,20 +211,29 @@ hook 脚本作者须知：如果 hook 脚本需要读取日志行数，从 `$@` 
 
 ## Consuming pg-skills via git subtree
 
-(0.2.x 之后推荐路径, 0.1.x 暂手动 cp)
-
 ```bash
 # 一次性
 git remote add pg-skills git@gitee.com:shao_hq/pg-skills.git
 git fetch pg-skills
 git subtree add --prefix=.pg/skills pg-skills master --squash
 
-# 升级
-pg upgrade           # = git subtree pull --prefix=.pg/skills pg-skills master --squash
-pg doctor         # 校验
+# 升级到最新版 (master)
+pg upgrade
+
+# 升级到指定版本
+pg upgrade v0.2.0
+
+# 查看远程可用版本
+pg upgrade --list
+
+# 工作区有修改时强制升级 (自动 stash)
+pg upgrade --force
 
 # 交互式升级 (冲突多时)
 pg upgrade --interactive
+
+# 校验
+pg doctor
 ```
 
 注意: 0.1.x 阶段, hook 脚本里的 `source $PG_SKILLS_PATH/...` **手动写死绝对路径**。0.2.x 之后 subtree 嵌入, 自动用相对路径 `.pg/skills/...`。
