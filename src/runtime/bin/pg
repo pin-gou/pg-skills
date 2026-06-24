@@ -401,6 +401,10 @@ def _upgrade_pull(project_root: Path, current: str, ref: str, force: bool = Fals
 
     pg_skills_root = find_pg_skills_root()
     new_version = (pg_skills_root / 'VERSION').read_text().strip()
+
+    # 刷新 .opencode/ symlink (处理新增/删除的 agent/command/skill)
+    create_opencode_symlinks(project_root, pg_skills_root)
+
     print(f'✓ pg-skills {current} → {new_version}: {n_changed(project_root)} files updated')
     return 0
 
