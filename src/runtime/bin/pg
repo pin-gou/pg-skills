@@ -1,0 +1,428 @@
+#!/usr/bin/env python3
+"""pg-skills CLI — minimal MVP (Phase 1 §1.4)
+
+Subcommands:
+    pg init              Ensure .pg/ structure + .opencode/ symlinks (idempotent, requires .pg/skills present)
+    pg doctor            Validate .pg/ structure and project.yaml
+    pg sync --check      Compare .pg-version against pg-skills VERSION
+
+Usage:
+    python3 pg <subcommand> [options]
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import subprocess
+import sys
+from pathlib import Path
+
+
+# ----- 路径解析 -----
+
+def find_pg_skills_root() -> Path:
+    """从本脚本位置反推 pg-skills 仓库根.
+
+    Layout: pg-skills/src/runtime/bin/pg
+            → parent (bin/) → parent (runtime/) → parent (src/) → parent (pg-skills/)
+    """
+    return Path(__file__).resolve().parent.parent.parent.parent
+
+
+def find_project_root(start: Path | None = None) -> Path:
+    """向上找项目根（包含 .pg/ 或常见标记）."""
+    cur = (start or Path.cwd()).resolve()
+    markers = ['.pg', 'package.json', 'pom.xml', 'go.mod', 'pyproject.toml']
+    while cur != cur.parent:
+        for m in markers:
+            if (cur / m).exists():
+                return cur
+        cur = cur.parent
+    return Path.cwd().resolve()
+
+
+# ----- subcommand: init -----
+
+def cmd_init(args) -> int:
+    """初始化项目内的 pg-skills 目录结构.
+
+    前提: .pg/skills/ 已被 git subtree 或手动方式同步进项目 (不是本命令的职责).
+
+    本命令只做三件事, **全部幂等**, 可重复运行:
+      1. 创建 .pg/{hooks,context,scripts,changes,runs}/ 目录结构
+      2. 写入 .pg-version
+      3. 在 .opencode/agents/ / .opencode/commands/ / .opencode/skills/ 下
+         为 .pg/skills/src/opencode/ 对应项创建 symlink
+
+    业务配置 (.pg/project.yaml 真实内容 / .pg/hooks/ shell 脚本) 由
+    pg-init-project SKILL 在 opencode 中扫描仓库后生成, 不在本命令职责内.
+    """
+    project_root = find_project_root()
+    pg_dir = project_root / '.pg'
+    pg_skills_root = find_pg_skills_root()
+    version = (pg_skills_root / 'VERSION').read_text().strip()
+
+    if not pg_dir.exists():
+        print(f'ERROR: .pg/ not found at {pg_dir}.')
+        print(f'  .pg/skills must be present before running pg init.')
+        print(f'  If you have not yet synced pg-skills, run:')
+        print(f'    git subtree add --prefix=.pg/skills pg-skills master --squash')
+        return 1
+
+    # 1. 创建目录结构 (exist_ok=True, 幂等)
+    for sub in ['hooks', 'context', 'scripts', 'changes', 'runs']:
+        (pg_dir / sub).mkdir(exist_ok=True)
+
+    # 2. 写入 .pg-version (始终覆盖, 幂等)
+    version_file = project_root / '.pg-version'
+    version_file.write_text(f'{version}\n')
+
+    # 3. 生成 placeholder project.yaml (仅在不存在时, 避免覆盖 SKILL 已生成的)
+    project_yaml = pg_dir / 'project.yaml'
+    if not project_yaml.exists():
+        project_yaml.write_text(generate_project_yaml(project_root))
+
+    # 4. 创建 .opencode/ → .pg/skills/src/opencode/ 下的逐项 symlink
+    if not args.no_symlinks:
+        create_opencode_symlinks(project_root, pg_skills_root)
+
+    print(f'✓ pg-skills init in {project_root}')
+    print(f'  - pg-skills version: {version}')
+    print(f'  - .pg-version written')
+    if not args.no_symlinks:
+        print(f'  - .opencode/ symlinks ensured')
+    print()
+    print('Next steps:')
+    print('  1. (重启 opencode 让 .opencode/ 下的 symlink 生效)')
+    print('  2. 在 opencode 中输入：加载 pg-init-project skill')
+    return 0
+
+
+def create_opencode_symlinks(project_root: Path, pg_skills_root: Path) -> None:
+    """在 .opencode/ 下创建逐项 symlink, 指向 .pg/skills/src/opencode/.
+
+    Layout:
+        .opencode/agents/   <--  .pg/skills/src/opencode/agents/   下每个文件/文件夹
+        .opencode/commands/ <--  .pg/skills/src/opencode/commands/ 下每个文件
+        .opencode/skills/   <--  .pg/skills/src/opencode/skills/   下每个文件夹
+        (scripts/ 不创建 symlink)
+
+    设计意图: 逐项 symlink 而非目录 symlink, 让用户能在 .opencode/ 下
+    添加项目专属的 agents/commands/skills, 与 pg-skills 的版本并存.
+    """
+    opencode_dir = project_root / '.opencode'
+    skills_root = pg_skills_root / 'src' / 'opencode'
+
+    symlink_subdirs = ['agents', 'commands', 'skills']
+    for sub in symlink_subdirs:
+        target_dir = opencode_dir / sub
+        src_dir = skills_root / sub
+        if not src_dir.exists():
+            print(f'  WARN: {src_dir} not found, skip')
+            continue
+        target_dir.mkdir(parents=True, exist_ok=True)
+        for entry in sorted(src_dir.iterdir()):
+            link = target_dir / entry.name
+            if link.exists() or link.is_symlink():
+                continue
+            link.symlink_to(entry.resolve())
+            print(f'  - symlink: .opencode/{sub}/{entry.name} → .pg/skills/src/opencode/{sub}/{entry.name}')
+
+
+def generate_project_yaml(project_root: Path) -> str:
+    name = project_root.name
+    return f"""# pg-skills project declaration
+# Edit this file to declare your modules, environments, and tracks.
+# Schema: pg-skills/src/runtime/spec/project.schema.json
+#
+# 注: 项目元信息 (项目名/语言) 暂存于 comment; schema 仅校验 SSOT 4 段.
+# Phase 2 将扩展 schema 支持 project 顶层字段.
+#
+# init 模板包含一个 placeholder module 满足 schema 的 minProperties 约束.
+# pg-init-project SKILL 扫描仓库后会用真实 module 替换整个 modules 段.
+# placeholder 的 language 用 schema 允许的占位值 'python', 仅供 schema 校验通过,
+# 实际项目语言由 SKILL 推断.
+
+schema: spec-driven
+# project: name={name}
+
+modules:
+  placeholder:
+    root: .
+    language: python
+    description: "Placeholder module; replaced by pg-init-project SKILL."
+environments:
+  placeholder:
+    description: "Placeholder env; replace after defining real envs."
+    roles:
+      placeholder:
+        instances:
+          - name: placeholder-1
+            host: localhost
+            port: 9999
+tracks:
+  placeholder:
+    modules: [placeholder]
+    max_fail_retries: 1
+    max_fix_retries: 1
+    description: "Placeholder track; replace after defining real modules."
+stages:
+  - name: placeholder
+    tracks: [placeholder]
+    test_key: unit
+    gate: all_pass
+    environment:
+      required: false
+    description: "Placeholder stage; replace after defining real modules."
+
+fix_issue:
+  max_iteration_count: 5
+  max_per_iteration_subcalls: 3
+"""
+
+
+# ----- subcommand: doctor -----
+
+def cmd_doctor(args) -> int:
+    project_root = find_project_root()
+    pg_dir = project_root / '.pg'
+
+    errors = []
+    warnings = []
+    ok_count = 0
+
+    # 1. .pg/ 存在?
+    if not pg_dir.exists():
+        errors.append('.pg/ directory not found. Run: pg init')
+    else:
+        ok_count += 1
+
+    # 2. .pg/project.yaml 存在?
+    project_yaml = pg_dir / 'project.yaml'
+    if not project_yaml.exists():
+        errors.append('.pg/project.yaml not found')
+    else:
+        ok_count += 1
+        # schema 校验
+        try:
+            validate_project_yaml(project_yaml, find_pg_skills_root() / 'src/runtime/spec/project.schema.json')
+            ok_count += 1
+            print(f'✓ .pg/project.yaml schema valid')
+        except Exception as e:
+            errors.append(f'.pg/project.yaml schema invalid: {e}')
+
+    # 3. .pg-version 存在?
+    version_file = project_root / '.pg-version'
+    if not version_file.exists():
+        errors.append('.pg-version not found')
+    else:
+        ok_count += 1
+        current = version_file.read_text().strip()
+        print(f'✓ .pg-version: {current}')
+
+    # 4. .pg/hooks/ 下文件可执行?
+    hooks_dir = pg_dir / 'hooks'
+    if hooks_dir.exists():
+        for sh in hooks_dir.glob('*.sh'):
+            if not os.access(sh, os.X_OK):
+                warnings.append(f'.pg/hooks/{sh.name} not executable (chmod +x)')
+
+    # 5. .pg/context/summary.yaml 存在?（如果声明了 context）
+    summary = pg_dir / 'context' / 'summary.yaml'
+    if not summary.exists():
+        warnings.append('.pg/context/summary.yaml not found (optional but recommended)')
+
+    # 输出
+    print()
+    if errors:
+        print(f'ERRORS ({len(errors)}):')
+        for e in errors:
+            print(f'  ✗ {e}')
+        return 1
+    if warnings:
+        print(f'WARNINGS ({len(warnings)}):')
+        for w in warnings:
+            print(f'  ⚠ {w}')
+    print(f'OK ({ok_count} checks passed)')
+    return 0
+
+
+def validate_project_yaml(project_yaml: Path, schema_path: Path) -> None:
+    """用 jsonschema 校验 project.yaml. 没有 jsonschema 时退化为最小校验."""
+    try:
+        import jsonschema  # type: ignore
+        import yaml  # type: ignore
+    except ImportError:
+        # 最小校验: 必填字段存在
+        import yaml  # type: ignore
+        data = yaml.safe_load(project_yaml.read_text(encoding='utf-8'))
+        for required in ['modules', 'environments', 'tracks', 'stages']:
+            if required not in data:
+                raise ValueError(f'missing required field: {required}')
+        return
+
+    import yaml  # type: ignore
+    import jsonschema  # type: ignore
+    schema = json.loads(schema_path.read_text(encoding='utf-8'))
+    data = yaml.safe_load(project_yaml.read_text(encoding='utf-8'))
+    jsonschema.validate(instance=data, schema=schema)
+
+
+# ----- subcommand: sync (--check / --interactive / 默认 upgrade) -----
+
+def cmd_sync(args) -> int:
+    """Sync with pg-skills upstream via git subtree.
+
+    Modes:
+        --check:     只检查是否有新版本, 不修改项目
+        --interactive: 列出冲突文件, 让用户逐文件决策 (overwrite / keep-mine / abort)
+        (默认):      执行 git subtree pull, 更新 .pg-version
+    """
+    project_root = find_project_root()
+    version_file = project_root / '.pg-version'
+
+    if not version_file.exists():
+        print('ERROR: .pg-version not found. Run: pg init')
+        return 1
+
+    pinned = version_file.read_text().strip()
+    pg_skills_root = find_pg_skills_root()
+    latest = (pg_skills_root / 'VERSION').read_text().strip()
+
+    if pinned == latest:
+        print(f'✓ pg-skills {pinned} (up to date)')
+        return 0
+
+    # 计算变更文件数 (供 --check 使用)
+    try:
+        result = subprocess.run(
+            ['git', '-C', str(pg_skills_root), 'diff', '--name-only', f'v{pinned}', 'HEAD'],
+            capture_output=True, text=True, check=False,
+        )
+        changed_files = [f for f in result.stdout.strip().split('\n') if f]
+        n = len(changed_files)
+    except Exception:
+        n = '?'
+        changed_files = []
+
+    if args.check:
+        print(f'pg-skills {pinned} → {latest}: {n} files pending')
+        print(f'  Run: pg sync    (to upgrade)')
+        return 0
+
+    if args.interactive:
+        return _sync_interactive(project_root, pg_skills_root, pinned, latest, changed_files)
+
+    # 默认: 执行 git subtree pull
+    return _sync_pull(project_root, pinned, latest)
+
+
+def _sync_pull(project_root: Path, pinned: str, latest: str) -> int:
+    """执行 git subtree pull."""
+    remote = 'pg-skills'
+    prefix = '.pg/skills'
+
+    # 检查 remote 是否存在
+    check = subprocess.run(
+        ['git', '-C', str(project_root), 'remote', 'get-url', remote],
+        capture_output=True, text=True,
+    )
+    if check.returncode != 0:
+        print(f'ERROR: remote "{remote}" not configured.')
+        print(f'  Run: git remote add {remote} git@gitee.com:shao_hq/pg-skills.git')
+        print(f'  Run: git fetch {remote}')
+        return 1
+
+    # 检查 .pg/skills/ 是否存在
+    if not (project_root / prefix).exists():
+        print(f'INFO: {prefix}/ not found, performing initial subtree add')
+        cmd = ['git', 'subtree', 'add', f'--prefix={prefix}', remote, 'master', '--squash']
+    else:
+        cmd = ['git', 'subtree', 'pull', f'--prefix={prefix}', remote, 'master', '--squash']
+
+    print(f'Running: {" ".join(cmd)}')
+    result = subprocess.run(cmd, cwd=str(project_root), text=True)
+    if result.returncode != 0:
+        print(f'ERROR: git subtree failed (exit {result.returncode})')
+        print(f'  Try: pg sync --interactive')
+        return 1
+
+    # 更新 .pg-version
+    (project_root / '.pg-version').write_text(f'{latest}\n')
+    print(f'✓ pg-skills {pinned} → {latest}: {n_changed(project_root)} files updated')
+    return 0
+
+
+def _sync_interactive(project_root: Path, pg_skills_root: Path, pinned: str, latest: str, changed_files: list) -> int:
+    """dry-run diff, 列出冲突文件, 让用户逐文件决策."""
+    if not changed_files:
+        print(f'No file changes detected between {pinned} and {latest}')
+        return 0
+
+    print(f'pg-skills {pinned} → {latest}')
+    print(f'  Files that would change ({len(changed_files)}):')
+    for f in changed_files[:20]:
+        print(f'    - {f}')
+    if len(changed_files) > 20:
+        print(f'    ... and {len(changed_files) - 20} more')
+
+    # 检查本地修改
+    has_local = False
+    for f in changed_files:
+        local = project_root / '.pg/skills' / f
+        if local.exists():
+            status = subprocess.run(
+                ['git', '-C', str(project_root), 'status', '--porcelain', str(local)],
+                capture_output=True, text=True,
+            )
+            if status.stdout.strip():
+                has_local = True
+                break
+
+    if has_local:
+        print('\n⚠ WARNING: Local changes detected in .pg/skills/ that conflict with upstream.')
+        print('  Recommend: keep-mine for files you have customized, overwrite for the rest.')
+        print('  Run: pg sync    (with default keep-mine strategy)')
+
+    print(f'\nTo upgrade: pg sync')
+    return 0
+
+
+def n_changed(project_root: Path) -> int:
+    """数最新一次 commit 改了 .pg/skills/ 几个文件."""
+    result = subprocess.run(
+        ['git', '-C', str(project_root), 'diff', '--name-only', 'HEAD~1', 'HEAD', '--', '.pg/skills/'],
+        capture_output=True, text=True,
+    )
+    files = [f for f in result.stdout.strip().split('\n') if f]
+    return len(files)
+
+
+# ----- main -----
+
+def main():
+    parser = argparse.ArgumentParser(prog='pg', description='pg-skills CLI')
+    subparsers = parser.add_subparsers(dest='subcommand', required=True)
+
+    # init
+    p_init = subparsers.add_parser('init', help='Initialize .pg/ in current project (idempotent)')
+    p_init.add_argument('--no-symlinks', action='store_true', help='Skip .opencode/ symlink creation')
+    p_init.set_defaults(func=cmd_init)
+
+    # doctor
+    p_doctor = subparsers.add_parser('doctor', help='Validate .pg/ structure')
+    p_doctor.set_defaults(func=cmd_doctor)
+
+    # sync (--check / --interactive / 默认 upgrade)
+    p_sync = subparsers.add_parser('sync', help='Sync with latest pg-skills')
+    p_sync.add_argument('--check', action='store_true', help='Just check, do not sync')
+    p_sync.add_argument('--interactive', action='store_true', help='Show conflict files before sync')
+    p_sync.set_defaults(func=cmd_sync)
+
+    args = parser.parse_args()
+    sys.exit(args.func(args))
+
+
+if __name__ == '__main__':
+    main()

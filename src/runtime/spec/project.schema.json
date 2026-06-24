@@ -1,0 +1,471 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pg-skills.local/spec/project.schema.json",
+  "title": "pg-skills project.yaml",
+  "description": "项目级 SSOT 配置. v3.0: 4 段结构 (modules / environments / tracks / stages) + fix_issue + regression. environments 下每个 role 带 lifecycle actions (start/stop), environment 级带 cross-role orchestration actions (health/verify). 任何 per-change 信息(verify 任务)都应写到 tasks.md, 不写到这里. dev-isolated stage 通过 environment.required:false 跳过部署, 仅跑 modules.<m>.test.unit. regression 段定义 pg-regression 跑的测试套件, 完全显式声明, 与 tracks/stages 解耦.",
+  "type": "object",
+  "required": ["schema", "modules", "environments", "tracks", "stages"],
+  "additionalProperties": false,
+  "properties": {
+    "schema": {
+      "type": "string",
+      "enum": ["spec-driven"],
+      "description": "配置 schema 版本, 当前固定为 spec-driven"
+    },
+    "$schema": {
+      "type": "string",
+      "description": "指向本 schema 文件, IDE/编辑器用于自动补全与校验"
+    },
+
+    "modules": {
+      "type": "object",
+      "description": "代码单位: 改在哪里, 怎么 build/lint/test. 不带部署信息.",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/definitions/module" }
+    },
+
+    "environments": {
+      "type": "object",
+      "description": "运行时拓扑: 哪些 role 跑在哪些 host 上, 每个 role 几个 instance.",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/definitions/environment" }
+    },
+
+    "tracks": {
+      "type": "object",
+      "description": "TDV 循环编排: 在哪些 module 上跑, 跑几次, 失败怎么分派.",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/definitions/track" }
+    },
+
+    "stages": {
+      "type": "array",
+      "description": "阶段编排: pipeline 分几个阶段, 阶段内哪些 track 并行, gate 条件.",
+      "minItems": 1,
+      "items": { "$ref": "#/definitions/stage" }
+    },
+
+    "verifyMerge": {
+      "type": "object",
+      "description": "pg-verify-and-merge SKILL 专用配置. 顶层段, SKILL 通过 pg-parse-config.py pg-verify-and-merge 子命令消费.",
+      "additionalProperties": false,
+      "properties": {
+        "skipTestsIfNoConflict": {
+          "type": "boolean",
+          "default": true,
+          "description": "merge 无冲突时是否跳过 Phase 2 全部测试. 默认 true 加速合并."
+        }
+      }
+    },
+    "flyway": {
+      "type": "object",
+      "description": "Flyway 数据库迁移路径. pg-verify-and-merge Phase 0 用此路径做 migration 重编号.",
+      "additionalProperties": false,
+      "properties": {
+        "migration-path": { "type": "string", "minLength": 1, "description": "Flyway migration 目录, 相对项目根" }
+      }
+    },
+    "git": {
+      "type": "object",
+      "description": "Git 仓库配置. pg-verify-and-merge Phase 1/3 用 default-branch 切到目标分支.",
+      "additionalProperties": false,
+      "properties": {
+        "default-branch": { "type": "string", "minLength": 1, "description": "主分支名 (master / main)" }
+      }
+    },
+    "rules":      { "type": "object", "additionalProperties": true },
+    "proposal_rules":   { "type": "array", "items": { "type": "object" } },
+    "apply_change_rules": { "type": "array", "items": { "type": "object" } },
+    "test_strategy":    { "type": "object", "additionalProperties": true },
+    "coding_standards": { "type": "array", "items": { "type": "string" } },
+    "fix_issue": { "$ref": "#/definitions/fix_issue" },
+    "regression": { "$ref": "#/definitions/regression" }
+  },
+
+  "definitions": {
+    "executable_command": {
+      "description": "可执行命令. string=纯 shell 命令; object=带元数据 (cmd 必填, timeout_seconds 可选). 优先级: command.timeout_seconds > module.timeout_seconds > 1800.",
+      "oneOf": [
+        { "type": "string", "minLength": 1 },
+        {
+          "type": "object",
+          "required": ["cmd"],
+          "additionalProperties": false,
+          "properties": {
+            "cmd":            { "type": "string", "minLength": 1, "description": "shell 命令" },
+            "timeout_seconds": { "type": "integer", "minimum": 1, "description": "覆盖 module.timeout_seconds" }
+          }
+        }
+      ]
+    },
+    "module": {
+      "type": "object",
+      "description": "代码单位",
+      "required": ["root", "language"],
+      "additionalProperties": false,
+      "properties": {
+        "root":         { "type": "string", "minLength": 1, "description": "模块代码根路径, 相对项目根" },
+        "language":     { "type": "string", "enum": ["java", "go", "typescript", "python", "proto", "shell"] },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "default": 1800,
+                             "description": "build/lint/test 命令默认超时 (秒). 命令级 timeout_seconds 覆盖此值." },
+        "build":        { "$ref": "#/definitions/executable_command" },
+        "lint":         { "$ref": "#/definitions/executable_command" },
+        "test":         {
+          "type": "object",
+          "description": "测试命令集合, key 是测试类型 (unit/integration/e2e/mock_integration/real_integration)",
+          "additionalProperties": { "$ref": "#/definitions/executable_command" }
+        },
+        "review_level": { "type": "string", "enum": ["none", "standard", "security"], "default": "standard" },
+        "description": { "type": "string" }
+      }
+    },
+
+    "instance": {
+      "type": "object",
+      "description": "运行时实例",
+      "required": ["name", "host", "port"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "实例名. 命名约定: source-agent / target-agent / backend-1 / agent-a"
+        },
+        "host": {
+          "type": "string",
+          "minLength": 1,
+          "description": "物理主机标识, 字符串. 实际执行时 runner 通过 ssh / 本机切换."
+        },
+        "port": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 65535,
+          "description": "端口. 同 host 内同 role 的 port 必须唯一, runner 启动时校验."
+        },
+        "libvirt_uri": { "type": "string", "description": "agent 专用: libvirt 连接 URI" }
+      }
+    },
+
+    "environment": {
+      "type": "object",
+      "description": "环境定义: role × host × instance topology + per-role lifecycle actions + cross-role orchestration + env-level lifecycle hooks (prepare_env / clean_env)",
+      "required": ["roles"],
+      "additionalProperties": false,
+      "properties": {
+        "description": { "type": "string" },
+        "prepare_env": {
+          "description": "env 级生命周期 hook: 启动该 env 前的准备工作 (db migrate / seed / dependencies). runner 在 environment.required=true 的 stage 开头调一次.",
+          "$ref": "#/definitions/action"
+        },
+        "clean_env": {
+          "description": "env 级生命周期 hook: 跑完该 env 后的清理工作 (drop temp data / stop services). runner 在 environment.required=true 的 stage 结尾调一次.",
+          "$ref": "#/definitions/action"
+        },
+        "roles": {
+          "type": "object",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/definitions/role" }
+        },
+        "actions": {
+          "type": "object",
+          "description": "cross-role orchestration actions: health / verify / setup. runner 在 real-integration 阶段调用.",
+          "additionalProperties": { "$ref": "#/definitions/action" }
+        }
+      }
+    },
+
+    "role": {
+      "type": "object",
+      "description": "运行时角色: 实例拓扑 + per-role lifecycle actions (start/stop/restart)",
+      "required": ["instances"],
+      "additionalProperties": false,
+      "properties": {
+        "host":      { "type": "string", "description": "role 默认 host, 实例未指定 host 时用此. 可选: 若 instances 每项都自带 host, role.host 可省略" },
+        "instances": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/instance" }
+        },
+        "actions": {
+          "type": "object",
+          "description": "per-role lifecycle actions: start / stop / restart / deploy. runner 在 environment.required=true 的阶段调用.",
+          "additionalProperties": { "$ref": "#/definitions/action" }
+        }
+      }
+    },
+
+    "action": {
+      "type": "object",
+      "description": "单条部署动作",
+      "additionalProperties": false,
+      "properties": {
+        "host":     { "type": "string", "description": "执行 host, 支持模板 {instance.host}" },
+        "hosts":    {
+          "type": "string",
+          "description": "单 host 简写, 等价于 hosts: ['<value>'] 但支持模板 {instance.host}. 若需多 host 并行, 改用 array 形态."
+        },
+        "parallel": { "type": "boolean", "default": false, "description": "hosts 列表下是否并行" },
+        "script":   { "type": "string", "description": "执行的脚本路径或命令" },
+        "args":     {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "脚本参数, 支持模板 {role} / {instance.name} / {instance.host}"
+        },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "description": "执行超时 (秒)" },
+        "description": { "type": "string", "description": "动作语义说明, 仅供 LLM 阅读" }
+      },
+      "anyOf": [
+        { "required": ["host"]  },
+        { "required": ["hosts"] }
+      ]
+    },
+
+    "track": {
+      "type": "object",
+      "description": "TDV 循环编排. test/dev 各做一次, verify 失败后进入 fix→verify 循环 (上限 max_fix_retries), 超限后跳过强制 gate. v3.0 simple type 必须带 commands 而非 modules (schema 仅放宽 required, runner 强校验).",
+      "additionalProperties": false,
+      "minProperties": 1,
+      "properties": {
+        "type": {
+          "type": "string",
+          "enum": ["standard", "simple"],
+          "default": "standard",
+          "description": "standard=完整 TDVG 序列 (test→dev→verify→gate); simple=跳过所有 sub-agent, runner 直接串行执行 tracks.<id>.commands 列表, 命令 exit 0 即视为 track 通过. 失败时按命令 on_failure 策略处理 (默认 workflow_failed 整体终止)."
+        },
+        "lint": {
+          "type": "object",
+          "description": "Track-level lint override. pg-verify-and-merge 优先用此字段; 缺省时 fallback 到 tracks.<t>.modules[0] 的 module.lint. 字段值是 normalize 后的 executable_command 形态 (cmd + 可选 timeout_seconds).",
+          "additionalProperties": false,
+          "required": ["cmd"],
+          "properties": {
+            "cmd":            { "type": "string", "minLength": 1, "description": "shell 命令" },
+            "timeout_seconds": { "type": "integer", "minimum": 1, "description": "覆盖 module.timeout_seconds" }
+          }
+        },
+        "modules": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "该 track 可写入的 module 列表. 空数组表示此 track 不写代码 (如 real-integration)."
+        },
+        "commands": {
+          "type": "array",
+          "description": "simple 类型 track 的命令列表. 仅 type=simple 时生效. 每条可以是 string (简写, 等价于 {cmd: <string>, on_failure: fail, timeout_seconds: null}) 或对象 (完整控制).",
+          "items": {
+            "oneOf": [
+              { "type": "string", "description": "简写: 等价于 {cmd: <string>}, on_failure 默认 fail." },
+              {
+                "type": "object",
+                "additionalProperties": false,
+                "properties": {
+                  "cmd": {
+                    "type": "string",
+                    "minLength": 1,
+                    "description": "要执行的 bash 命令. 必须非空."
+                  },
+                  "timeout_seconds": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "description": "单条命令超时 (秒). null 表示使用 track.timeout_seconds 默认值, 再 null 表示不超时."
+                  },
+                  "on_failure": {
+                    "type": "string",
+                    "enum": ["fail", "continue", "retry"],
+                    "default": "fail",
+                    "description": "命令失败的处置策略. fail=按 track.on_failure 默认 (通常 workflow_failed); continue=记录 warn 并继续跑下一条; retry=立即重试 retry_max 次再按 fail 处理."
+                  },
+                  "retry_max": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "default": 2,
+                    "description": "on_failure=retry 时的最大重试次数. 仅 retry 策略生效."
+                  },
+                  "retry_timeout_seconds": {
+                    "type": ["integer", "null"],
+                    "minimum": 1,
+                    "description": "每次重试时使用的 timeout_seconds. null = 沿用 command.timeout_seconds. 用于给重试单独更短超时, 防止 hang 的命令拖太久."
+                  }
+                },
+                "required": ["cmd"]
+              }
+            ]
+          }
+        },
+        "timeout_seconds": {
+          "type": ["integer", "null"],
+          "minimum": 1,
+          "default": 1800,
+          "description": "simple track 默认命令超时 (秒), 作为 command.timeout_seconds=null 时的回退值. 再 null 表示不超时 (危险, 可能永久 hang). 默认 1800s = 30min."
+        },
+        "on_failure": {
+          "type": "string",
+          "enum": ["workflow_failed", "continue_all"],
+          "default": "workflow_failed",
+          "description": "simple track 整体失败默认策略. workflow_failed=任一命令 fail 时整个 pipeline workflow_failed; continue_all=忽略所有失败继续跑 (通常用于 ad-hoc 脚本). 单条 command 可通过 on_failure 字段覆盖."
+        },
+        "max_fix_retries": { "type": "integer", "minimum": 1, "default": 5, "description": "verify→fix 循环最大重试次数. T/D 只做一次, verify 失败后进入 fix→verify→fix 循环, 直到通过或达到此上限. 达到上限后强制进 gate 评估." },
+        "max_fail_retries": { "type": "integer", "minimum": 1, "default": 3, "description": "subagent (test/dev/gate) 单次失败后的重派次数. 区别于 max_fix_retries (verify 失败循环)." },
+        "max_gate_fix_retries": { "type": "integer", "minimum": 1, "default": 2, "description": "gate FAIL 后 fix-gate agent 的最大重试次数." },
+        "fix_routing": {
+          "type": "string",
+          "enum": ["source", "auto", "manual"],
+          "default": "source",
+          "description": "verify 失败时如何分派修复: source=本 track 内修; auto=按 git diff 跳到对应 module track; manual=ESCALATE LLM"
+        },
+        "review_level": { "type": "string", "enum": ["none", "standard", "security"], "default": "standard" },
+        "description":  { "type": "string" }
+      }
+    },
+
+    "stage": {
+      "type": "object",
+      "description": "阶段编排: 按 stages 顺序执行, 每 stage 内 track 按列表顺序依次执行 (非并发).",
+      "required": ["name", "tracks"],
+      "additionalProperties": false,
+      "properties": {
+        "name":                  { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
+        "tracks":                { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "test_key":              { "type": "string", "default": "unit", "description": "runner 根据此 key 从 modules.<m>.test 中取测试命令注入 agent context. 标准化值: unit / integration / e2e." },
+        "environment": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "stage 所需的运行环境配置.",
+          "properties": {
+            "required": {
+              "type": "boolean",
+              "default": true,
+              "description": "true=runner 启动 stage 的 environment (调 environments.<env>.prepare_env + per-role actions.start); false=纯单元/模拟测试, runner 不启停服务, 仅跑 modules.<m>.test.unit / test.integration(mocked). dev-isolated / dev-frontend=false; dev-mock-integration / real-integration=true."
+            },
+            "selection_rules": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "per-change environment 选择规则 (自然语言). pg-propose 读取这些规则作为推理依据, 为每个 environment.required=true 的 stage 在 changes/<change>/environment.yaml 中选定一个 environment 名称 (或 skip). 同一架构下不同项目可在此处定义自己的选择规则."
+            }
+          }
+        },
+        "gate":                  {
+          "type": "string",
+          "enum": ["all_pass", "any_pass", "no_gate"],
+          "default": "all_pass"
+        },
+        "on_conditions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "本 stage 是否启用的自然语言规则 (pg-propose 解析). 任一命中即启用 stage (OR 语义). 字段缺省 = stage 视为常驻 (永远生成 tasks.md 章节). runner 不读此字段."
+        },
+        "description": { "type": "string" }
+      }
+    },
+
+    "fix_issue": {
+      "type": "object",
+      "description": "pg-fix-issue SKILL 专用配置. 与 tracks.<id>.max_fix_retries 区分: 后者描述 subagent 重试, 本段描述主 agent 整体迭代.",
+      "additionalProperties": false,
+      "properties": {
+        "max_iteration_count": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 5,
+          "description": "主 agent 整体修复迭代上限. 每轮: 跑 Phase 1 调用链路分析 + Phase 2 规划 + Phase 4 修复 + Phase 5 验证. 超限进入 ESCALATE 3 选项 menu. 区别于 tracks.<id>.max_fix_retries (subagent 重试)."
+        },
+        "max_per_iteration_subcalls": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 3,
+          "description": "单次 iteration 内 executor 重派上限 (防卡死 / 防 prompt-injection 死循环)."
+        },
+        "partial_success_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.7,
+          "description": "success_criteria 通过率低于此值算修复失败 (即使无 failure_criteria 触发). 0=禁用此阈值 (允许任何部分成功)."
+        },
+        "ask_environment_choice": {
+          "type": "boolean",
+          "default": true,
+          "description": "Phase 3 是否用 question 询问用户选择 environment. environment 列表从 config.yaml 顶层 environments 动态读取, 不预置."
+        },
+        "ask_prepare_env": {
+          "type": "boolean",
+          "default": true,
+          "description": "Phase 3 是否询问用户在修复前执行 environments.<env>.prepare_env. 重置 services + db + agent."
+        },
+        "ask_clean_env": {
+          "type": "boolean",
+          "default": true,
+          "description": "Phase 3 是否询问用户在修复后执行 environments.<env>.clean_env. 停止 services + 清理 db 状态."
+        },
+        "allow_manual_verification": {
+          "type": "boolean",
+          "default": true,
+          "description": "executor 全部失败时是否允许用户手动验证 (curl / virsh / 浏览器). 开启则 ESCALATE menu 增加'手动验证后回报'选项."
+        },
+        "escalation_artifacts": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "enum": ["diag_logs", "call_chain_analysis", "phase2_output", "executor_json_history", "git_diff_state"]
+          },
+          "description": "ESCALATE 时保留的诊断产物清单, 切人工修复时输出."
+        }
+      }
+    },
+
+    "regression": {
+      "type": "object",
+      "description": "pg-regression SKILL 专用配置. 完全显式声明 (无全局默认), 每个 suite 独立声明 env / required_roles / module / test_keys. 与 tracks / stages / fix_issue 解耦.",
+      "additionalProperties": false,
+      "properties": {
+        "suite": {
+          "type": "object",
+          "description": "测试套件定义. key = suite 名 (= 问题清单文件名后缀, 存放在 .pg/regression/<suite>.json). (注: pgs/regression/ 引用为历史命名)",
+          "minProperties": 1,
+          "additionalProperties": { "$ref": "#/definitions/regression_suite" }
+        }
+      }
+    },
+
+    "regression_suite": {
+      "type": "object",
+      "description": "单个测试套件: 跑哪个 module 的哪些 test_key, 用哪个 env, 启哪些 service role.",
+      "additionalProperties": false,
+      "required": ["module", "test_keys", "environment"],
+      "properties": {
+        "output_format": {
+          "type": "string",
+          "enum": ["maven-surefire", "playwright", "go-test", "shell"],
+          "description": "测试结果解析器格式. pg-verify-and-merge 优先用此字段; 缺省时根据 modules.<m>.language + test_key 推断 (e.g. java→maven-surefire, go→go-test, e2e→playwright)."
+        },
+        "module": {
+          "type": "string",
+          "minLength": 1,
+          "description": "被测 module id, 必须对应 modules 段已定义的 key. 通常与 suite 名同名 (frontend / backend / agent)."
+        },
+        "test_keys": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "enum": ["unit", "integration", "e2e", "mock_integration", "real_integration"] },
+          "description": "要跑的 test 类型列表, 串行执行. 每项必须对应 modules.<m>.test.* 中已定义的 key."
+        },
+        "environment": {
+          "type": "object",
+          "description": "suite 级 env 声明. 必填, 不读全局.",
+          "additionalProperties": false,
+          "required": ["name", "required_roles"],
+          "properties": {
+            "name": {
+              "type": "string",
+              "minLength": 1,
+              "description": "目标 env name, 必须对应 environments 段已定义的 key."
+            },
+            "required_roles": {
+              "type": "array",
+              "items": { "type": "string" },
+              "description": "跑此 suite 前需要启动的 role 列表. 单元测试可传空数组. 每项必须 ∈ environments.<env_name>.roles."
+            }
+          }
+        }
+      }
+    }
+  }
+}

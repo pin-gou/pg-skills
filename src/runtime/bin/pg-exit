@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# pg-exit — 显式报告 hook 成功
+#
+# 用法 (在 hook 内部):
+#   pg-exit --status=pass --duration=42 --metadata="port=9080,url=http://localhost:9080/health"
+
+set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/hook-helpers.sh
+source "$SELF_DIR/../lib/hook-helpers.sh"
+pg_exit "$@"

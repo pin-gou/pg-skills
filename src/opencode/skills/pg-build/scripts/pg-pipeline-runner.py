@@ -1,0 +1,3441 @@
+#!/usr/bin/env python3
+"""pg-pipeline-runner.py — Pipeline execution state machine for pg-build.
+
+Replaces the LLM orchestrator's manual state management with a deterministic
+runner. The LLM calls `next` to get the next action, dispatches sub-agents
+when told, and calls `record` to report results.
+
+Usage:
+  python3 pg-pipeline-runner.py next <change>
+    Advance pipeline, return next action JSON.
+
+  python3 pg-pipeline-runner.py record <change> <status> [report_path]
+    Record sub-agent result, advance, return next action JSON.
+
+  python3 pg-pipeline-runner.py invoke-hook \
+      --change <C> --env <ENV> --role <ROLE> --instance <I> --action <A> \
+      [--stage <S>] [--tail-lines <N>]
+    LLM-facing entry to trigger a role action (start/stop/logs/tail).
+    Runner resolves the action from project.yaml, builds the pg-run-hook.py
+    spec, and spawns it. timeout_seconds is read from project.yaml (not a
+    CLI flag). --tail-lines (logs/tail only) is appended to the hook args.
+
+Status values for record:
+  completed  — test/dev agent succeeded
+  failed     — test/dev agent failed (runner handles retries)
+  escalate   — verify agent needs fix cycle
+  pass       — gate assessment passed
+  fail       — gate assessment failed
+
+Action JSON formats:
+
+  # LLM must dispatch a sub-agent
+  {"action": "dispatch", "item": "backend", "sub": "test",
+   "agent": "pg-build/test", "context": {track config}}
+  {"action": "dispatch", "item": "backend", "sub": "dev",
+   "agent": "pg-build/dev", ...}
+  {"action": "dispatch", "item": "backend", "sub": "verify",
+   "agent": "pg-build/verify", ...}
+  {"action": "dispatch", "item": "backend", "sub": "gate",
+   "agent": "pg-build/gate", ...}
+  {"action": "dispatch_fix", "item": "backend",
+   "agent": "pg-build/fix", "cycle": 1}
+  {"action": "dispatch_final_gate", "agent": "pg-build/gate"}
+
+  # Runner executes a phase command directly
+  {"action": "execute_phase", "item": "proto-compile",
+   "command": "cd <module-name> && make proto"}
+
+  # Terminal states
+  {"action": "done", "status": "completed"}
+  {"action": "workflow_failed", "fatal": True, "reason": "...", "item": "backend"}
+"""
+
+import json
+import os
+import re
+import shlex
+import subprocess
+import sys
+import threading
+from datetime import datetime, timezone, timedelta
+
+try:
+    import yaml
+except ImportError:
+    print('{"error": "PyYAML required: pip install pyyaml"}', file=sys.stderr)
+    sys.exit(1)
+
+import pg_context_chain
+from pg_pipeline_common import (
+    get_track_type, parse_tasks, load_config,
+    normalize_simple_command,
+)
+
+
+# ============================================================
+# Path resolution
+# ============================================================
+
+def find_project_root():
+    env_root = os.environ.get("PG_PROJECT_ROOT")
+    if env_root and _has_config(env_root):
+        return env_root
+    cwd = os.getcwd()
+    if _has_config(cwd):
+        return cwd
+    p = os.path.dirname(os.path.abspath(__file__))
+    for _ in range(6):
+        if _has_config(p):
+            return p
+        p = os.path.dirname(p)
+    return cwd
+
+
+def _has_config(path):
+    return (os.path.isfile(os.path.join(path, ".pg", "project.yaml"))
+            or os.path.isfile(os.path.join(path, "pg-spec", "config.yaml")))
+
+
+PROJECT_ROOT = find_project_root()
+CONFIG_PATH = os.path.join(PROJECT_ROOT, ".pg/project.yaml")
+SCRIPTS_DIR = os.path.join(PROJECT_ROOT, ".opencode", "skills", "pg-build", "scripts")
+PIPELINE_STATE_PY = os.path.join(SCRIPTS_DIR, "pg-pipeline-state.py")
+CHANGES_DIR = os.path.join(PROJECT_ROOT, ".pg", "changes")
+PG_ARCHIVE_PY = os.path.join(
+    PROJECT_ROOT, ".opencode", "skills", "pg-archive", "scripts", "pg-archive.py"
+)
+# Unified hook command executor (env hooks + role actions).
+# Lives in pg-skills subtree so manual scripts (up-dev-local.sh) can also
+# reuse it. Module hooks (build/lint/test.<key>) stay as raw commands.
+PG_HOOK_RUNNER = os.path.join(
+    PROJECT_ROOT, ".pg", "skills", "src", "runtime", "lib", "pg-run-hook.py"
+)
+
+# pg-build 过程产物统一存放在此子目录下（与 1-propose-review/ 平行）。
+# 核心交付物（proposal/design/tasks）仍保留在 change 根。
+APPLY_DIR = "2-build"
+
+# State / hidden files located in APPLY_DIR (relative to change dir).
+APPLY_STATE_FILES = (
+    ".context-chain.state",
+    ".pipeline-state.json",
+)
+
+DEFAULT_FAIL_RETRIES = 3
+MAX_FIX_CYCLES = 4
+DEFAULT_GATE_FIX_RETRIES = 2
+
+
+# ============================================================
+# Helpers
+# ============================================================
+
+def load_config():
+    with open(CONFIG_PATH, encoding="utf-8") as f:
+        return yaml.safe_load(f)
+
+
+def get_pipeline_order(config, change=None):
+    stages = config.get("stages") or []
+    order = []
+    env_map = {}
+    if change:
+        try:
+            env_map = _read_environment_yaml(change)
+        except FileNotFoundError:
+            pass  # No environment.yaml → caller decides whether to fail
+    for stage in stages:
+        stage_name = stage.get("name", "")
+        requires_environment = bool((stage.get("environment") or {}).get("required", False))
+        stage_tracks = stage.get("tracks") or []
+
+        # Resolve stage environment from environment.yaml (SSOT).
+        # prepare_env / clean_env are stage-level lifecycle hooks tied to the
+        # environment; injecting them as phase items lets the runner execute
+        # them deterministically once per stage deployment cycle.
+        prepare_env_item = None
+        clean_env_item = None
+        stage_env_name = env_map.get(stage_name)
+        if requires_environment and stage_env_name and stage_env_name != "skip":
+            env_cfg = (config.get("environments") or {}).get(stage_env_name, {})
+            if env_cfg.get("prepare_env"):
+                prepare_env_item = f"{stage_name}.prepare_env"
+            if env_cfg.get("clean_env"):
+                clean_env_item = f"{stage_name}.clean_env"
+
+        if prepare_env_item:
+            order.append(prepare_env_item)
+
+        for t in stage_tracks:
+            qualified = f"{stage_name}.{t}" if stage_name else t
+            if stage_env_name == "skip":
+                continue
+            order.append(qualified)
+
+        if clean_env_item:
+            order.append(clean_env_item)
+    return order
+
+
+def get_track_config(config, item):
+    # v3.0: tracks live at top level (config["tracks"]), not under config["pipeline"].
+    bare = _bare_track(item)
+    return (config.get("tracks") or {}).get(bare, {})
+
+
+def get_state_path(change):
+    return os.path.join(CHANGES_DIR, change, APPLY_DIR, ".pipeline-state.json")
+
+
+def get_apply_dir(change):
+    """Return absolute path to 2-build/ subdir under change root."""
+    return os.path.join(CHANGES_DIR, change, APPLY_DIR)
+
+
+def migrate_legacy_state_files(change):
+    """One-shot migration of state files from change root → 2-build/.
+
+    Runs idempotently: if 2-build/ already contains the file, the legacy
+    file at change root is removed. Returns a list of filenames that were moved.
+    """
+    change_root = os.path.join(CHANGES_DIR, change)
+    apply_dir = get_apply_dir(change)
+    if not os.path.isdir(change_root):
+        return []
+
+    os.makedirs(apply_dir, exist_ok=True)
+
+    # Cleanup legacy .pg-spec.yaml at change root (no longer generated)
+    legacy_pg_spec = os.path.join(change_root, ".pg-spec.yaml")
+    if os.path.isfile(legacy_pg_spec):
+        os.remove(legacy_pg_spec)
+
+    moved = []
+    for fname in APPLY_STATE_FILES:
+        legacy = os.path.join(change_root, fname)
+        target = os.path.join(apply_dir, fname)
+        if not os.path.isfile(legacy):
+            continue
+        if os.path.isfile(target):
+            # Target already exists — legacy is stale, just remove it.
+            os.remove(legacy)
+            moved.append(f"{fname} (legacy removed, target existed)")
+        else:
+            os.rename(legacy, target)
+            moved.append(fname)
+    return moved
+
+
+def run_script(script_path, *args, change=None, track_id=None):
+    env = os.environ.copy()
+    if change:
+        env["PG_CHANGE_DIR"] = os.path.join(CHANGES_DIR, change)
+    if track_id:
+        env["PG_TRACK_ID"] = track_id
+    result = subprocess.run(
+        [sys.executable if script_path.endswith(".py") else "bash", script_path, *args],
+        capture_output=True, text=True, cwd=PROJECT_ROOT, env=env,
+    )
+    if result.returncode != 0:
+        return {"error": result.stderr.strip()}
+    try:
+        return json.loads(result.stdout)
+    except json.JSONDecodeError:
+        return {"error": f"Invalid JSON from {script_path}: {result.stdout[:200]}"}
+
+
+def run_bash(command, timeout_seconds=None, log_path=None, header="", change=None, track_id=None):
+    """Execute a bash command, optionally teeing output to a log file in real time.
+
+    When log_path is provided, opens the file in append mode and writes each
+    line of stdout/stderr to both the log file and the parent process's
+    stdout/stderr as the command executes. The header (if given) is written
+    at open time for context.
+
+    Returns (ok, stdout_summary, stderr_summary). In streaming mode the
+    summary is empty — the full output is in the log file.
+    """
+    env = os.environ.copy()
+    if change:
+        env["PG_CHANGE_DIR"] = os.path.join(CHANGES_DIR, change)
+    if track_id:
+        env["PG_TRACK_ID"] = track_id
+    # pg-skills hook protocol: inject env vars that hook scripts expect
+    # (see .pg/skills/README.md § Hook 协议 > env 变量)
+    env.setdefault("PG_PROJECT_ROOT", PROJECT_ROOT)
+    env.setdefault("PG_SKILLS_PATH", os.path.join(PROJECT_ROOT, ".pg", "skills"))
+    if log_path:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, "a", encoding="utf-8") as log_f:
+            if header:
+                log_f.write(header + "\n")
+            proc = subprocess.Popen(
+                ["bash", "-c", command],
+                stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                text=True, bufsize=1, cwd=PROJECT_ROOT, env=env,
+            )
+
+            def _tee(stream, dest_f, label=""):
+                for line in iter(stream.readline, ""):
+                    if label:
+                        dest_f.write(f"[{label}] {line}")
+                    else:
+                        dest_f.write(line)
+                    dest_f.flush()
+                    sys.stdout.write(line)
+                    sys.stdout.flush()
+                stream.close()
+
+            threads = []
+            for s, label in [(proc.stdout, ""), (proc.stderr, "stderr")]:
+                t = threading.Thread(target=_tee, args=(s, log_f, label))
+                t.daemon = True
+                t.start()
+                threads.append(t)
+
+            try:
+                proc.wait(timeout=timeout_seconds)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait()
+            for t in threads:
+                t.join(timeout=10)
+
+            if proc.returncode == 0:
+                log_f.write(f"--- exit: OK ---\n\n")
+                return True, "", ""
+            else:
+                reason = f"Timeout after {timeout_seconds}s" if proc.returncode == -9 else f"exit={proc.returncode}"
+                log_f.write(f"--- exit: FAILED ({reason}) ---\n\n")
+                return False, "", reason
+    else:
+        kwargs = dict(capture_output=True, text=True, cwd=PROJECT_ROOT, env=env)
+        if timeout_seconds is not None:
+            kwargs["timeout"] = timeout_seconds
+        try:
+            result = subprocess.run(["bash", "-c", command], **kwargs)
+        except subprocess.TimeoutExpired:
+            return False, "", f"Timeout after {timeout_seconds}s"
+        return result.returncode == 0, result.stdout.strip(), result.stderr.strip()
+
+
+_TIMEOUT_CACHE = None
+
+def _get_next_call_timeout(config):
+    """Scan all environments for the maximum prepare_env/clean_env timeout,
+    add a 30s safety margin, and return the recommended timeout for the
+    LLM's next `next` or `record` call via bash tool."""
+    global _TIMEOUT_CACHE
+    if _TIMEOUT_CACHE is not None:
+        return _TIMEOUT_CACHE
+    max_to = 120
+    for env_name, env_cfg in config.get("environments", {}).items():
+        for hook in ("prepare_env", "clean_env"):
+            to = env_cfg.get(hook, {}).get("timeout_seconds")
+            if to and to > max_to:
+                max_to = to
+    _TIMEOUT_CACHE = max_to + 30
+    return _TIMEOUT_CACHE
+
+
+def _inject_next_call_timeout(result, config):
+    """Inject next_call_timeout_seconds into any result dict."""
+    if isinstance(result, dict):
+        result["next_call_timeout_seconds"] = _get_next_call_timeout(config)
+    return result
+
+
+def _phase_log_path(change, item_id):
+    """Determine the next log file path for a phase execution.
+    Naming: {item_id.replace('.', '-')}-{N}.log where N increments on each run.
+    Scans 2-build/ for existing logs and picks max N + 1."""
+    apply_dir = get_apply_dir(change)
+    os.makedirs(apply_dir, exist_ok=True)
+    safe_name = item_id.replace(".", "-")
+    pattern = re.compile(rf"^{re.escape(safe_name)}-(\d+)\.log$")
+    max_n = 0
+    try:
+        for fname in os.listdir(apply_dir):
+            m = pattern.match(fname)
+            if m:
+                max_n = max(max_n, int(m.group(1)))
+    except FileNotFoundError:
+        pass
+    return os.path.join(apply_dir, f"{safe_name}-{max_n + 1}.log")
+
+
+def _phase_log_path_latest(change, item_id):
+    """Return the path of the most recent {item_id}-{N}.log in 2-build/, or ''.
+
+    Unlike _phase_log_path (which returns the *next* N+1 path), this returns
+    the *latest existing* log file path so agents can inspect prepare_env output
+    without having to know the file naming convention.
+    """
+    apply_dir = get_apply_dir(change)
+    if not os.path.isdir(apply_dir):
+        return ""
+    safe_name = item_id.replace(".", "-")
+    pattern = re.compile(rf"^{re.escape(safe_name)}-(\d+)\.log$")
+    max_n = 0
+    latest = ""
+    for fname in os.listdir(apply_dir):
+        m = pattern.match(fname)
+        if m and int(m.group(1)) >= max_n:
+            max_n = int(m.group(1))
+            latest = os.path.join(apply_dir, fname)
+    return latest
+
+
+def _build_prepare_status(change, stage_name):
+    """Return prepare_env status dict for stage.environment.prepare.
+
+    Returns:
+      {"status": "skipped", "log_path": "", "message": ""}    — change=None OR stage not required
+      {"status": "ok",       "log_path": "<abs>", "message": ""}    — prepare_env 已完成
+      {"status": "error",    "log_path": "<abs>", "message": "<stderr 摘要>"}  — 失败
+    """
+    skipped = {"status": "skipped", "log_path": "", "message": ""}
+    if not change:
+        return skipped
+    stage_cfg = None
+    for s in (load_config().get("stages") or []):
+        if s.get("name") == stage_name:
+            stage_cfg = s
+            break
+    if not stage_cfg or not bool((stage_cfg.get("environment") or {}).get("required", False)):
+        return skipped
+    item_id = f"{stage_name}.prepare_env"
+    log_path = _phase_log_path_latest(change, item_id)
+    try:
+        state = load_state(change)
+        completed = state.get("completed_items", []) or []
+    except Exception:
+        completed = []
+    if item_id in completed:
+        return {"status": "ok", "log_path": log_path or "", "message": ""}
+    msg = ""
+    if log_path and os.path.isfile(log_path):
+        try:
+            with open(log_path, encoding="utf-8", errors="replace") as f:
+                content = f.read()
+            msg = content[-500:].strip()
+        except Exception:
+            msg = ""
+    return {"status": "error", "log_path": log_path or "", "message": msg}
+
+
+# ============================================================
+# State management
+# ============================================================
+
+def load_state(change):
+    path = get_state_path(change)
+    if os.path.isfile(path):
+        with open(path, encoding="utf-8") as f:
+            return json.load(f)
+    return {
+        "version": 1,
+        "change": change,
+        "failed": False,
+        "current": None,
+    }
+
+
+def save_state(state):
+    path = get_state_path(state["change"])
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(state, f, indent=2)
+
+
+# ============================================================
+# Track config helpers
+# ============================================================
+
+SUB_PHASES = ["test", "dev", "verify", "gate"]
+SUB_AGENTS = {
+    "test": "pg-build/test",
+    "dev": "pg-build/dev",
+    "verify": "pg-build/verify",
+    "gate": "pg-build/gate",
+}
+FIX_AGENT = "pg-build/fix"
+FINAL_GATE_AGENT = "pg-build/gate"
+
+
+def _bare_track(qualified):
+    """Strip stage prefix from qualified item name.
+    'dev-isolated.backend' -> 'backend', 'real-integration' -> 'real-integration'
+    """
+    return qualified.rsplit(".", 1)[1] if "." in qualified else qualified
+
+# Per-sub track field allowlist — each agent type only gets what it needs.
+# v3.0 schema: a track references modules[] (resolved by _build_module_context)
+# and binds to an environment (resolved by _build_stage_context). Sub-agents
+# never see raw `root`/`port`/`rebuild_and_restart` fields — those are
+# derived per-module / per-role by the helper functions below.
+_SUB_TRACK_FIELDS = {
+    "test":   ["id", "review_level", "modules", "module_details", "stage",
+               "module_roots", "module_names",
+               "max_fix_retries", "fix_routing",
+               "tasks_preformatted", "tasks_validation", "tasks_noop"],
+    "dev":    ["id", "review_level", "modules", "module_details", "stage",
+               "module_roots", "module_names",
+               "max_fix_retries", "fix_routing",
+               "tasks_preformatted", "tasks_validation", "tasks_noop"],
+    "verify": ["id", "review_level", "modules", "module_details", "stage",
+               "module_roots", "module_names",
+               "max_fix_retries", "fix_routing",
+               "tasks_preformatted", "tasks_validation", "tasks_noop"],
+    "fix":    ["id", "review_level", "modules", "module_details", "stage",
+               "module_roots", "module_names",
+               "max_fix_retries", "fix_routing",
+               "issue_title", "source_track", "source_phase",
+               "verification_step", "expected", "actual",
+               "root_cause_phase", "affected_tasks",
+               "design_doc_path", "tasks_path", "fix_cycle",
+               "tasks_preformatted"],
+    "gate":   ["id", "review_level", "modules", "module_details", "stage",
+               "module_roots", "module_names",
+               "max_fix_retries", "fix_routing",
+               "tasks_preformatted", "next_report_n"],
+    "final-gate": [
+               "_change", "proposal_path", "tasks_path",
+               "design_doc_path", "design_doc_paths", "report_paths",
+               "tasks_preformatted"],
+}
+
+# Subs that get tasks_validation / tasks_noop from _enrich_context_with_tasks
+_TASKS_META_SUBS = {"test", "dev", "verify"}
+
+
+def _track_meta(config, track_id):
+    """Return the v3.0 track-level metadata (id / label / review_level / etc.).
+    Uses bare track name for config lookup: 'dev-isolated.backend' -> 'backend'."""
+    bare = _bare_track(track_id)
+    tc = get_track_config(config, track_id) or {}
+    return {
+        "id": track_id,
+        "label": tc.get("label", bare),
+        "review_level": tc.get("review_level", "none"),
+        "modules": list(tc.get("modules") or []),
+        "max_fix_retries": tc.get("max_fix_retries", 5),
+        "fix_routing": tc.get("fix_routing", "source"),
+        "description": tc.get("description", ""),
+    }
+
+
+# ============================================================
+# Prompt template renderer (Jinja-compatible syntax, stdlib-only)
+# ============================================================
+#
+# A minimal regex-based renderer that supports the subset of Jinja syntax
+# actually used by the prompt templates in this file (and SKILL.md reference):
+#
+#   {{var}}                       — value lookup (dotted paths allowed)
+#   {{context.field.sub}}         — dotted lookup with "context." prefix fallback
+#                                  to top-level ctx key (LLM templates historically
+#                                  prefix everything with "context." but the
+#                                  flat ctx dict stores them at top level)
+#   {{var | filter(arg=N)}}        — filter; only "tojson(indent=N)" supported
+#   {#if cond}...{/if}            — conditional block (cond: truthy expr,
+#                                  "X in [...]" membership, "this.X" loop var)
+#   {#each list}...{/each}        — loop block; binds 'this' to each item
+#
+# Missing values render as empty string (not template literal), so LLMs never
+# see unfilled placeholders in the final prompt.
+#
+# Pure stdlib (re + json), no jinja2 dependency.
+
+import re as _re_prompt
+import json as _json_prompt
+
+_VAR_RE = _re_prompt.compile(r"\{\{([^{}]+?)\}\}")
+_BLOCK_RE = _re_prompt.compile(
+    r"\{#(each|if)\s+([^}]+?)\}(.*?)\{/\1\}", _re_prompt.DOTALL
+)
+
+
+def _walk(d, path):
+    cur = d
+    for p in path.split("."):
+        if isinstance(cur, dict) and p in cur:
+            cur = cur[p]
+        else:
+            return None
+    return cur
+
+
+def _resolve_dotted(ctx, dotted):
+    """Resolve a dotted path. Special-case 'context.X' → fallback to top-level X."""
+    if dotted.startswith("context."):
+        path = dotted[len("context."):]
+        if isinstance(ctx.get("context"), dict):
+            v = _walk(ctx["context"], path)
+            if v is not None:
+                return v
+        return _walk(ctx, path)
+    return _walk(ctx, dotted)
+
+
+def _eval_condition(cond, ctx):
+    cond = cond.strip()
+    m = _re_prompt.match(r"(\w+)\s+in\s+\[(.*?)\]", cond)
+    if m:
+        var = m.group(1)
+        items = [s.strip().strip('"').strip("'") for s in m.group(2).split(",")]
+        return ctx.get(var) in items
+    # For 'this.X.Y.Z' we use resolve_dotted which walks the dotted path
+    # via ctx["this"] (so all `this.X` lookups are scoped to the loop var).
+    return bool(_resolve_dotted(ctx, cond))
+
+
+def _sub_vars(text, ctx):
+    def repl(m):
+        expr = m.group(1).strip()
+        if "|" in expr:
+            name, filt = expr.split("|", 1)
+            name = name.strip()
+            value = _resolve_dotted(ctx, name)
+            filt = filt.strip()
+            if filt.startswith("tojson"):
+                mm = _re_prompt.search(r"indent=(\d+)", filt)
+                indent = int(mm.group(1)) if mm else 2
+                if value is None:
+                    return "null"
+                return _json_prompt.dumps(value, indent=indent, ensure_ascii=False)
+        else:
+            value = _resolve_dotted(ctx, expr)
+            if value is None:
+                return ""
+        return str(value)
+    return _VAR_RE.sub(repl, text)
+
+
+def _render_prompt_template(template, ctx):
+    """Render a Jinja-style prompt template against ctx.
+
+    Recursively expands {#if} / {#each} blocks and substitutes {{var}} /
+    {{var|filter}} expressions. Loop block binds `this` to each item dict.
+    """
+    out = []
+    i = 0
+    while i < len(template):
+        m = _BLOCK_RE.search(template, i)
+        if not m:
+            out.append(_sub_vars(template[i:], ctx))
+            break
+        out.append(_sub_vars(template[i:m.start()], ctx))
+        kind = m.group(1)
+        cond_or_list = m.group(2)
+        body = m.group(3)
+        if kind == "if":
+            if _eval_condition(cond_or_list, ctx):
+                out.append(_render_prompt_template(body, ctx))
+        elif kind == "each":
+            items = _resolve_dotted(ctx, cond_or_list) or []
+            for item in items:
+                inner = dict(ctx)
+                inner["this"] = item
+                out.append(_render_prompt_template(body, inner))
+        i = m.end()
+    return "".join(out)
+
+
+# ============================================================
+# Prompt templates (Jinja-compatible syntax)
+# ============================================================
+#
+# Each sub-agent type has its own template. Templates use {{var}}, {#if},
+# {#each}, {this.X} syntax. Renderer is _render_prompt_template (stdlib-only).
+# These are the single source of truth (SSOT) for what sub-agent prompts look
+# like. SKILL.md keeps a human-readable copy for reference but the runner
+# does the actual rendering — so LLM orchestrators can simply do:
+#
+#   prompt = action["prompt_template"]
+#
+# instead of hand-assembling the prompt from ctx fields.
+
+_PROMPT_TEMPLATE_BASE = """\
+## 任务：{{context.id}} - {{context.label}}
+
+### 变更名称
+{{context._change}}
+
+### Track 配置
+- track.id: {{context.id}}
+- track.review_level: {{context.review_level}}
+- track.modules: {{context.modules}}
+- track.max_fix_retries: {{context.max_fix_retries}}
+- track.fix_routing: {{context.fix_routing}}
+
+### Module 配置
+{#each context.module_details}
+- module: {{this.name}}
+  - root: {{this.root}}
+  - language: {{this.language}}
+  - build: {{this.build}}
+  - lint: {{this.lint}}
+  - test.unit: {{this.test.unit}}
+  - test.integration: {{this.test.integration}}
+  {#if this.test.e2e}- test.e2e: {{this.test.e2e}}{/if}
+{/each}
+
+### Stage 配置
+- stage.name: {{context.stage.name}}
+- stage.test_key: {{context.stage.test_key}}  # unit / integration / e2e
+- stage.gate: {{context.stage.gate}}  # all_pass / any_pass / no_gate
+- stage.environment.required: {{context.stage.environment.required}}
+- stage.environment.prepare.status: {{context.stage.environment.prepare.status}}
+- stage.environment.prepare.log_path: {{context.stage.environment.prepare.log_path}}
+- stage.environment.prepare.message: {{context.stage.environment.prepare.message}}
+- stage.environment.name: {{context.stage.environment.name}}
+{#if context.stage.environment.instances}
+- stage.environment.instances:
+```json
+{{context.stage.environment.instances | tojson(indent=2)}}
+```
+  每个 instance 是 project.yaml 原样 dict，包含 name/host/port/(可选)libvirt_uri。
+{/if}
+- stage.test_commands: {{context.stage.test_commands}}
+
+{{context.sub_specific_block}}
+
+### 运行时环境查询
+
+如需在运行时查询 prepare_env 状态，用 runner 子命令（避免硬编码日志路径）：
+
+```bash
+python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py prepare-env-status {{context._change}} [stage_name]
+```
+
+服务启停由 LLM 自行判断时机：runner 不替你启停任何 role 服务。
+
+### 产物路径
+- proposal: .pg/changes/{{context._change}}/proposal.md
+- design: .pg/changes/{{context._change}}/design.md
+- tasks: .pg/changes/{{context._change}}/tasks.md
+
+### 模块路径约束（硬约束）
+
+本 track 只允许修改以下模块根目录：
+{{context.module_roots | tojson(indent=2)}}
+track 名称 `{{context.id}}` 拥有模块：{{context.module_names}}，各模块根目录已去重合并。
+
+硬规则：
+1. **只能**在 {{context.module_roots}} + `.pg/` 下创建/修改文件
+2. 写入其他模块目录（如本 track 是 `backend` 时写入 `<other-module-dir>/`）或项目根目录 → 严重违规
+3. `real-integration` track（modules=[]）跳过此约束
+
+### 执行要求
+
+执行 {{context.id}} 阶段，任务如下：
+
+{#each context.tasks_preformatted}
+{{this}}
+{/each}
+
+**验证要求**：
+{{context.tasks_validation}}
+
+{#if context.tasks_noop}
+（此 sub 的任务是 noop，跳过任务执行。）
+{/if}
+
+### 返回格式
+
+- summary: 一句话总结执行结果
+- outputs: 产物文件列表（具体文件名）
+- tasks_updated: 是否已更新 tasks.md 复选框（true/false）
+- status: SUCCESS / FAILED
+
+{#if context.rollback_context}
+[ROLLBACK CONTEXT]
+- failed_at: {{context.rollback_context.failed_at}}
+- reason: {{context.rollback_context.reason}}
+- source: {{context.rollback_context.source}}
+
+你必须优先审查该根因是否已修复，再执行本阶段的正常任务。
+{/if}
+"""
+
+_PROMPT_BLOCK_TEST = """\
+### 测试要求
+
+TDD 红 Phase：本阶段只写测试代码，绝不创建或修改任何生产代码。
+运行 `{{context.stage.test_commands.0}}` 后预期结果是编译失败
+（找不到符号/类/方法/模块）。任何测试通过都视为 TDD_VIOLATION。
+"""
+
+_PROMPT_BLOCK_DEV = """\
+### Hooks 调用约定 (LLM 触发 role action 的唯一入口)
+runner **不**预渲染 cmd 字典；LLM 通过 `runner invoke-hook` CLI 触发 hook，
+runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-hook.py。
+
+**必填参数**：`--change` `--env` `--role` `--instance` `--action`
+**可选参数**：`--stage` (默认 manual) `--tail-lines` (仅 logs/tail 生效)
+
+```json
+{{context.stage.environment.hooks | tojson(indent=2)}}
+```
+
+调用示例：
+```bash
+# 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
+python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \\
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start
+
+# 看 100 行日志 (runner 把 --tail-lines 100 追加到 hook args 末尾)
+python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \\
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
+  --tail-lines 100
+```
+
+**重要不变量**：
+- `timeout_seconds` 是 INFORMATION（来自 project.yaml 的 `actions.<action>.timeout_seconds`）。
+  LLM **不**传 `--timeout` flag（不存在）；runner 内部读取并通过 `pg-run-hook.py` 强制执行。
+- `--host` / `--port` 也不是 CLI flag；runner 从 `environment.instances[role][].host` 自动反查。
+- LLM **不**自己拼 spec / 不解析 PG_* env vars / 不算 log_path；这些都由 runner 完成。
+"""
+
+_PROMPT_BLOCK_VERIFY = _PROMPT_BLOCK_DEV  # verify uses the same hooks block
+
+_PROMPT_BLOCK_GATE = """\
+### Gate 审计要求
+- `stage.gate` 已写入 Track 配置（见上）。
+- **只读不写**源码；**完成后用 `cat >` 自行写盘**到
+  `2-build/{{context.id}}-{{context.next_report_n}}-gate-assessment.md`，
+  不要把 markdown 全文塞进返回里。
+- 按 design.md 列 P-N 审计项逐项核对 evidence。
+"""
+
+_PROMPT_BLOCK_FIX = """\
+### Hooks 调用约定 (LLM 触发 role action 的唯一入口)
+runner **不**预渲染 cmd 字典；LLM 通过 `runner invoke-hook` CLI 触发 hook，
+runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-hook.py。
+
+**必填参数**：`--change` `--env` `--role` `--instance` `--action`
+**可选参数**：`--stage` (默认 manual) `--tail-lines` (仅 logs/tail 生效)
+
+```json
+{{context.stage.environment.hooks | tojson(indent=2)}}
+```
+
+调用示例：
+```bash
+# 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
+python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \\
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start
+
+# 看 100 行日志
+python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \\
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
+  --tail-lines 100
+```
+
+**重要不变量**：
+- `timeout_seconds` 是 INFORMATION（来自 project.yaml）。
+  LLM **不**传 `--timeout` flag（不存在）；runner 内部读取并通过 `pg-run-hook.py` 强制执行。
+- `--host` / `--port` 也不是 CLI flag；runner 从 `environment.instances[role][].host` 自动反查。
+
+### FIX ISSUE REQUEST
+
+**{{context.issue_title}}**
+- source_track: {{context.source_track}}
+- source_phase: {{context.source_phase}}
+- verification_step: {{context.verification_step}}
+- expected: {{context.expected}}
+- actual: {{context.actual}}
+- root_cause_phase: {{context.root_cause_phase}}
+- affected_tasks: {{context.affected_tasks}}
+- change_name: {{context._change}}
+- design_doc_path: {{context.design_doc_path}}
+- tasks_path: {{context.tasks_path}}
+
+fix_cycle: {{context.fix_cycle}} / {{context.max_fix_retries}}
+
+**修复后必跑流程**（fix agent 必须自检通过才能返回 SUCCESS）：
+
+1. 修改源码
+2. 跑 `{{context.stage.test_commands.0}}` 单元测试（必须通过）
+3. 跑模块 lint（必须 0 警告）
+4. 启动 `runner invoke-hook --action start` 服务（如需）
+5. 跑 tasks.md verify 章节的所有 V-* 验证项（curl 等）
+6. 抓 `runner invoke-hook --action logs --tail-lines 100` 日志确认无 ERROR
+7. 停止 `runner invoke-hook --action stop` 服务（如启动过）
+8. 用 `cat > 2-build/{{context.id}}-{{context.next_report_n}}-verify-fix.md << 'EOF' ... EOF` 自行写盘
+
+返回格式同 base dispatch（summary / outputs / tasks_updated / status）。
+"""
+
+_PROMPT_TEMPLATE_FINAL_GATE = """\
+## 任务：Final Gate — 跨 track 依赖审查
+
+### 变更名称
+{{context._change}}
+
+### Track 配置
+- track.id: final（特殊标记，runner 内部 marker，不在 config.yaml 中）
+- track.review_level: standard
+
+### 产物路径
+- proposal: {{context.proposal_path}}
+- tasks: {{context.tasks_path}}
+- design_doc_path（首个）: {{context.design_doc_path}}
+- design_doc_paths: {{context.design_doc_paths | tojson(indent=2)}}
+- report_paths: {{context.report_paths | tojson(indent=2)}}
+
+### 必读上下文清单
+
+final-gate agent 必须读取以下 4 类文件才能做完整审计：
+
+1. **所有 design.md**（`context.design_doc_paths`）—— 找 🆕 标记的跨 track 验证项
+2. **所有 track 的 gate assessment 报告**（`context.report_paths`）—— 路径模式 `2-build/{track.id}-{N}-gate-assessment.md`
+3. **context-chain.md**（`.pg/changes/{{context._change}}/2-build/context-chain.md`）—— 了解 sub-agent 执行历史与已知问题
+4. **2-build/known-issues.md**（如存在）—— 累积的 gate-fix 兜底问题
+
+### 执行要求
+
+**🆕 标记语义**：design.md 中以 `🆕` 开头的验证项表示**跨 track 依赖**（如「V-backend-1 → frontend 必须能用」）。每个 🆕 项必须找到至少一个其他 track 的 gate-assessment.md 证明已实现。
+
+**审计步骤**：
+
+1. 遍历所有 `context.design_doc_paths`，提取所有 🆕 标记的跨 track 验证项
+2. 对每条 🆕 项，确认目标 track 的 `gate-assessment.md` 里有对应实现证据
+3. 检查所有 `context.report_paths` 都是 PASS 状态
+4. 检查 `context-chain.md` 没有未解决的 error
+5. 列出跨 track 不一致 / 缺失项（如有）
+
+**写盘要求（必须）**：完成所有审计后，用 `cat > .pg/changes/{{context._change}}/2-build/final-gate-assessment.md << 'EOF' ... EOF` 自行写盘。**不要**把 markdown 全文塞进返回里——编排器不会替你落盘。
+
+### 返回格式
+
+- summary: 一句话总结整体判定（PASS / FAIL）
+- **不要**返回 markdown 全文（已落盘到 `final-gate-assessment.md`）
+"""
+
+
+def _build_prompt_template(item_id, sub):
+    """Return the prompt template string for this (item_id, sub) pair.
+
+    item_id may be 'final-gate' (special-cased) or any track id matching a
+    track in config.yaml (frontend / backend / agent / etc.).
+    """
+    if item_id == "final-gate":
+        return _PROMPT_TEMPLATE_FINAL_GATE
+
+    sub_blocks = {
+        "test": _PROMPT_BLOCK_TEST,
+        "dev": _PROMPT_BLOCK_DEV,
+        "verify": _PROMPT_BLOCK_VERIFY,
+        "gate": _PROMPT_BLOCK_GATE,
+        "fix": _PROMPT_BLOCK_FIX,
+    }
+    block = sub_blocks.get(sub, "")
+    return _PROMPT_TEMPLATE_BASE.replace(
+        "{{context.sub_specific_block}}", block
+    )
+
+
+def _render_role_action(act_cfg, *, role, instance_name, instance_host,
+                       change, stage_name, env_name):
+    """Pre-render a role action (start / stop / logs / tail) as a complete
+    pg-run-hook.py invocation.
+
+    The returned dict's `cmd` field is a heredoc-style bash command. Sub-agents
+    invoke it via `bash {cmd}` (no further assembly needed). All PG_* env
+    variables that hook scripts depend on (PG_CHANGE_NAME / PG_ENV / PG_ROLE /
+    PG_INSTANCE_NAME / PG_INSTANCE_HOST / PG_SKILLS_PATH / PG_PROJECT_ROOT)
+    are baked into the spec, so the LLM cannot accidentally omit them.
+
+    Args:
+        act_cfg: the action config (script / args / timeout_seconds / etc.)
+        role: role name (backend / frontend / agent)
+        instance_name: target instance name (e.g. backend-1)
+        instance_host: target instance host (e.g. localhost)
+        change: change name; injected as PG_CHANGE_NAME
+        stage_name: stage name; injected as PG_STAGE
+        env_name: environment name; injected as PG_ENV
+
+    Returns:
+        dict with keys: host, cmd, timeout_seconds, hook_type, description.
+        Sub-agents use `cmd` directly; the other fields are for context.
+    """
+    script = act_cfg.get("script")
+    args = act_cfg.get("args") or []
+    timeout = act_cfg.get("timeout_seconds")
+
+    # Template substitution: {role} / {instance.name} / {instance.host} /
+    # {lines:100} etc.
+    rendered_args = []
+    for raw in args:
+        a = str(raw)
+        a = a.replace("{role}", role)
+        a = a.replace("{instance.name}", instance_name)
+        a = a.replace("{instance.host}", instance_host)
+        rendered_args.append(a)
+
+    inner_cmd = "bash " + shlex.quote(script) + (
+        " " + " ".join(shlex.quote(a) for a in rendered_args) if rendered_args else ""
+    )
+
+    # log_path: prefer runner-side path; hook scripts read it from $LOG_DIR
+    # (parent dir of $BACKEND_LOG / $FRONTEND_LOG / etc.). Use
+    # 2-build/<env>/logs for log aggregation, matching the env hooks.
+    log_dir_rel = f".pg/changes/{change}/2-build/{env_name}/logs"
+    log_name = f"role.{role}.{act_cfg.get('name', 'action')}@{instance_name}.log"
+    log_path = os.path.join(PROJECT_ROOT, log_dir_rel, log_name)
+
+    spec = {
+        "cmd": inner_cmd,
+        "change": change,
+        "stage": stage_name,
+        "env": env_name,
+        "role": role,
+        "instance_name": instance_name,
+        "instance_host": instance_host,
+        "hook_type": act_cfg.get("name", ""),
+        "timeout_seconds": timeout,
+        "log_path": log_path,
+    }
+    cmd = (
+        f"python3 {shlex.quote(PG_HOOK_RUNNER)}"
+        f" <<'EOF'\n{json.dumps(spec, indent=2)}\nEOF"
+    )
+
+    return {
+        "host": instance_host or act_cfg.get("host", "localhost"),
+        "cmd": cmd,
+        "timeout_seconds": timeout,
+        "hook_type": act_cfg.get("name", ""),
+        "description": act_cfg.get("description"),
+    }
+
+
+def _build_module_context(config, modules):
+    """Resolve modules[] from v3.0 schema into per-module context dicts.
+
+    Each entry carries: name, root, language, timeout_seconds, build, lint,
+    test.{unit,integration,e2e}. All build/lint/test.<key> values are
+    pre-rendered as `timeout N bash -c '<cmd>'` strings so sub-agents see a
+    plain shell command and the timeout is enforced by GNU `timeout` rather
+    than relying on the LLM agent's own timeout.
+
+    Missing keys are left out (not blank-filled) so the agent sees the SSOT
+    shape.
+    """
+    from pg_pipeline_common import normalize_module_command, render_module_command
+
+    out = []
+    for mod_name in modules or []:
+        mod = (config.get("modules") or {}).get(mod_name) or {}
+        entry = {"name": mod_name}
+        for k in ("root", "language", "review_level"):
+            if k in mod:
+                entry[k] = mod[k]
+        if "timeout_seconds" in mod:
+            entry["timeout_seconds"] = mod["timeout_seconds"]
+        module_default = mod.get("timeout_seconds")
+
+        for cmd_key in ("build", "lint"):
+            if cmd_key in mod and mod[cmd_key]:
+                normalized = normalize_module_command(mod[cmd_key], module_default)
+                entry[cmd_key] = render_module_command(normalized)
+
+        if "test" in mod and isinstance(mod["test"], dict):
+            tests = {}
+            for tk, tv in mod["test"].items():
+                if not tv:
+                    continue
+                normalized = normalize_module_command(tv, module_default)
+                tests[tk] = render_module_command(normalized)
+            if tests:
+                entry["test"] = tests
+        out.append(entry)
+    return out
+
+
+def _build_stage_context(config, item, change=None):
+    """Resolve the v3.0 stage that owns this track item.
+
+    `item` can be qualified (dev-isolated.backend) or bare (backend).
+    Uses qualified name to find the correct stage; falls back to bare name
+    for backward compatibility.
+
+    Returns a dict with: name, test_key, gate, test_commands,
+    environment.{required, prepare.{status, log_path, message}, name,
+    instances, actions}. Falls back to safe defaults if the item is not
+    bound to any stage (e.g. final-gate).
+    """
+    stage_name, stage = _find_stage_for_track(config, item)
+    if not stage:
+        bare = _bare_track(item)
+        if bare != item:
+            stage_name, stage = _find_stage_for_track(config, bare)
+    if not stage:
+        return {
+            "name": None,
+            "test_key": "unit",
+            "gate": "all_pass",
+            "test_commands": [],
+            "environment": {
+                "required": True,
+                "prepare": {"status": "skipped", "log_path": "", "message": ""},
+                "name": None,
+                "instances": None,
+                "actions": None,
+            },
+        }
+
+    requires_environment = bool((stage.get("environment") or {}).get("required", True))
+    test_key = stage.get("test_key", "unit")
+    track_cfg = get_track_config(config, item) or {}
+    test_commands = _resolve_test_commands(config, track_cfg, test_key)
+
+    # Environment resolution priority:
+    #   1. environment.yaml (per-change decision; SSOT) — when change is given
+    #   2. config.yaml `track.environment` — deprecated fallback (no SSOT)
+    # env_name is resolved by _resolve_stage_env which raises on error.
+    env_name = None
+    if change:
+        if requires_environment:
+            env_name = _resolve_stage_env(change, stage_name)
+        else:
+            env_name = "__skip__"
+    elif requires_environment:
+        env_name = track_cfg.get("environment")
+    prepare_status = _build_prepare_status(change, stage_name)
+    if env_name == "__skip__":
+        return {
+            "name": stage.get("name"),
+            "test_key": test_key,
+            "gate": stage.get("gate", "all_pass"),
+            "test_commands": test_commands,
+            "environment": {
+                "required": requires_environment,
+                "prepare": prepare_status,
+                "name": "__skip__",
+                "instances": None,
+                "actions": None,
+            },
+        }
+
+    hooks_payload = None
+    env_summary = None
+    if requires_environment and env_name:
+        env_cfg = (config.get("environments") or {}).get(env_name) or {}
+        instances = {}
+        action_metadata = {}
+        for role_name, role_cfg in env_cfg.get("roles", {}).items():
+            # Pass-through: copy each instance dict as-is so LLM sees every
+            # schema-allowed field (name/host/port/libvirt_uri/...).
+            instances[role_name] = [
+                dict(inst) for inst in (role_cfg.get("instances") or [])
+            ]
+            # Per-action metadata: action name -> timeout + description.
+            # timeout_seconds is INFORMATION only (LLM does not pass it to
+            # invoke-hook); runner reads it from project.yaml at call time.
+            for act_name, act_cfg in (role_cfg.get("actions") or {}).items():
+                meta = {}
+                if "timeout_seconds" in act_cfg:
+                    meta["timeout_seconds"] = act_cfg["timeout_seconds"]
+                if act_cfg.get("description"):
+                    meta["description"] = act_cfg["description"]
+                action_metadata.setdefault(role_name, {})[act_name] = meta
+        env_summary = {"name": env_name, "instances": instances}
+
+        # invoke-hook CLI template — the only LLM-facing entry for triggering
+        # role actions. timeout_seconds is NOT exposed as a flag; LLM only
+        # learns it via action_metadata above.
+        command_template = (
+            "python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py "
+            "invoke-hook "
+            "--change <CHANGE> --env <ENV> --role <ROLE> "
+            "--instance <INSTANCE> --action <ACTION> "
+            "[--stage <STAGE>] [--tail-lines <N>]"
+        )
+        hooks_payload = {
+            "supported_actions": sorted({
+                act
+                for r_meta in action_metadata.values()
+                for act in r_meta.keys()
+            }),
+            "action_metadata": action_metadata,
+            "invocation": {
+                "command_template": command_template,
+                "required_args": [
+                    "--change", "--env", "--role", "--instance", "--action",
+                ],
+                "optional_args": ["--stage", "--tail-lines"],
+                "notes": [
+                    "timeout_seconds is INFORMATION (read from project.yaml "
+                    "via action_metadata). LLM does NOT pass it.",
+                    "--tail-lines only applies to --action logs|tail; runner "
+                    "appends it to the hook's args list as the last two "
+                    "elements.",
+                    "host / port are NOT CLI flags; runner resolves them "
+                    "from instances[] in project.yaml by instance name.",
+                ],
+            },
+        }
+
+    return {
+        "name": stage.get("name"),
+        "test_key": test_key,
+        "gate": stage.get("gate", "all_pass"),
+        "test_commands": test_commands,
+        "environment": {
+            "required": requires_environment,
+            "prepare": prepare_status,
+            "name": env_name,
+            "instances": env_summary["instances"] if env_summary else None,
+            "hooks": hooks_payload,
+        },
+    }
+
+
+def _resolve_stage_env(change, stage_name):
+    """Resolve the environment for a single stage from environment.yaml.
+
+    Raises:
+        FileNotFoundError: environment.yaml missing for the change.
+        KeyError: stage_name not declared in environment.yaml.
+        ValueError: stage value is not a valid environment name (not in
+                    config.yaml's environments list).
+
+    Returns:
+        "__skip__"        — stage marked as skip
+        "<env-name>"      — resolved environment name
+    """
+    env_map = _read_environment_yaml(change)
+    if stage_name not in env_map:
+        raise KeyError(
+            f"environment.yaml 未声明 stage '{stage_name}'. "
+            f"已声明: {list(env_map.keys())}. "
+            f"请用 pg-propose 重新生成 environment.yaml, 或手工编辑补上."
+        )
+    candidate = env_map[stage_name]
+    if candidate == "skip":
+        return "__skip__"
+    if candidate in (load_config().get("environments") or {}):
+        return candidate
+    raise ValueError(
+        f"environment.yaml 中 stage '{stage_name}' 的值 '{candidate}' "
+        f"不在 config.yaml 的 environments 列表中. "
+        f"有效值: {list((load_config().get('environments') or {}).keys())}"
+    )
+
+
+def filter_track_context(config, track_id, sub=None, change=None):
+    """Return the v3.0 track context that the given sub-agent type needs.
+
+    Output shape (filtered by sub via _SUB_TRACK_FIELDS):
+      id                str                  — track id (e.g. "agent")
+      review_level      str                  — none | standard | security
+      modules           [str]                — module names from tracks.<id>.modules
+      module_details    [dict]               — resolved per-module context
+                                              ({name, root, language, build,
+                                                lint, test: {...}})
+      module_roots      [str]                — unique root paths for module path
+                                              constraint (from module_details)
+      module_names      [str]                — module names (same as modules)
+      stage             dict                 — resolved stage context
+                                              ({name, test_key, gate,
+                                                environment, test_commands})
+      rollback_context  dict | None          — nested rollback info when present
+      issue_*           str                  — only populated for fix subs
+      proposal_path     str                  — only populated for final-gate
+      ...
+
+    `change` (optional) is forwarded to _build_stage_context so the
+    per-change environment decision (.pg/changes/<change>/environment.yaml)
+    is reflected in the stage context — not the config.yaml default.
+    """
+    meta = _track_meta(config, track_id)
+    if not meta["modules"] and not get_track_config(config, track_id):
+        return {}
+    ctx = dict(meta)
+    ctx["module_details"] = _build_module_context(config, meta["modules"])
+    # Derive module_roots / module_names from module_details (single SSOT).
+    ctx["module_roots"] = list(dict.fromkeys(
+        m.get("root") for m in ctx["module_details"] if m.get("root")
+    ))
+    ctx["module_names"] = list(ctx["module_details"][i]["name"]
+                               for i in range(len(ctx["module_details"])))
+    ctx["stage"] = _build_stage_context(config, track_id, change=change)
+    if sub is None:
+        return ctx
+    allowed = _SUB_TRACK_FIELDS.get(sub)
+    if allowed is None:
+        return ctx
+    return {k: ctx[k] for k in allowed if k in ctx}
+
+
+# ============================================================
+# Dispatch action builders
+# ============================================================
+
+_TASKS_SECTION_HEADING_RE = re.compile(r"^##\s+\d+\.\s+([a-zA-Z0-9_.-]+:[a-zA-Z0-9_-]+)\s*-\s*(.+)$")
+_TASKS_CHECKBOX_RE = re.compile(r"^- \[[ x]\]\s+(\d+\.\d+\s+.+)$")
+_TASKS_NOOP_RE = re.compile(r"^- 无$")
+_TASKS_VALIDATION_END_RE = re.compile(r"^##\s+\d+\.")
+_TASKS_CHANGE_NAME = None  # set at call time
+
+
+def _extract_task_prompt(change, item, sub):
+    """Extract and reformat tasks.md section for item:sub into actionable instructions.
+
+    Returns dict with:
+      preformatted_tasks  — list of "**N.M title**\ncommand" strings
+      validation_block    — validation requirement paragraph (or empty string)
+      noop                — True if section is all "- 无"
+    """
+    tasks_path = os.path.join(CHANGES_DIR, change, "tasks.md")
+    if not os.path.isfile(tasks_path):
+        return {"preformatted_tasks": [], "validation_block": "", "noop": False}
+
+    with open(tasks_path, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    # Find target section: "## N. item:sub - label"
+    section_start = None
+    section_end = None
+    target_prefix = f"{item}:{sub}"
+    for i, line in enumerate(lines):
+        m = _TASKS_SECTION_HEADING_RE.match(line.strip())
+        if m and m.group(1) == target_prefix:
+            section_start = i
+            continue
+        if section_start is not None and _TASKS_SECTION_HEADING_RE.match(line.strip()):
+            section_end = i
+            break
+
+    if section_start is None:
+        return {"preformatted_tasks": [], "validation_block": "", "noop": False}
+
+    if section_end is None:
+        section_end = len(lines)
+
+    section_lines = lines[section_start + 1:section_end]
+
+    # Extract checkboxes and validation block
+    tasks = []
+    validation_block = ""
+    in_validation = False
+    validation_parts = []
+    all_noop = True
+
+    for line in section_lines:
+        stripped = line.strip()
+
+        # Check for noop
+        if _TASKS_NOOP_RE.match(stripped):
+            continue  # skip " - 无" line, all_noop stays true
+
+        # Checkbox line
+        cm = _TASKS_CHECKBOX_RE.match(stripped)
+        if cm:
+            all_noop = False
+            tasks.append(f"**{cm.group(1)}**")
+            continue
+
+        # Validation block
+        if stripped.startswith("**验证要求**"):
+            in_validation = True
+            continue
+        if in_validation:
+            if _TASKS_VALIDATION_END_RE.match(stripped):
+                in_validation = False
+                continue
+            if stripped:
+                validation_parts.append(stripped)
+
+    if validation_parts:
+        validation_block = "\n".join(validation_parts)
+
+    return {
+        "preformatted_tasks": tasks,
+        "validation_block": validation_block,
+        "noop": all_noop and len(tasks) == 0,
+    }
+
+
+def _read_environment_yaml(change):
+    """Read .pg/changes/<change>/environment.yaml.
+
+    Returns a dict mapping stage-name to environment-name (or "skip").
+    Each environment.required=true stage in config.yaml should have an entry.
+
+    Raises:
+        FileNotFoundError: if environment.yaml does not exist for the change.
+        yaml.YAMLError / ValueError: on parse errors (caller decides severity).
+    """
+    yaml_path = os.path.join(CHANGES_DIR, change, "environment.yaml")
+    if not os.path.isfile(yaml_path):
+        raise FileNotFoundError(
+            f".pg/changes/{change}/environment.yaml 不存在, "
+            f"必须由 pg-propose 生成. 请先跑 pg-propose 创建该文件."
+        )
+    with open(yaml_path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if data is None:
+        return {}
+    if not isinstance(data, dict):
+        raise ValueError(
+            f"environment.yaml 顶层必须是 per-stage map (dict), 实际: {type(data).__name__}"
+        )
+    result = {}
+    for stage_name, env_value in data.items():
+        if not isinstance(stage_name, str):
+            raise ValueError(
+                f"environment.yaml 的 stage key 必须是 string, 实际: {type(stage_name).__name__}"
+            )
+        result[stage_name] = str(env_value)
+    return result
+
+
+def _get_deployment_override(change, stage_name):
+    """Resolve environment for a single stage from environment.yaml.
+
+    Args:
+        change: change name
+        stage_name: stage name (e.g. "dev-mock-integration", "real-integration")
+
+    Returns:
+      None           — yaml exists but stage not declared (caller may treat as error)
+      "skip"         — stage explicitly marked as skip
+      "<env-name>"   — chosen environment name from yaml
+
+    Raises:
+        FileNotFoundError: environment.yaml missing for the change.
+    """
+    env_map = _read_environment_yaml(change)
+    return env_map.get(stage_name)
+
+
+def _enrich_context_with_rollback(ctx, rb):
+    """Populate ctx["rollback_context"] as a nested dict (prompt-template friendly).
+
+    Older schema put `rollback_reason` / `rollback_source` flat at ctx top
+    level. The prompt template expects `ctx["rollback_context"]["failed_at"]`
+    / `["reason"]` / `["source"]` (nested), so we normalize on write.
+    """
+    if not rb or not rb.get("found"):
+        return
+    ctx["rollback_context"] = {
+        "failed_at": rb.get("failed_at", ""),
+        "reason": rb.get("reason", ""),
+        "source": rb.get("source", ""),
+    }
+
+
+def _build_fix_issue_context(change, item_id, cycle):
+    """Read the most recent verify report and extract FIX ISSUE REQUEST fields.
+
+    Verify agents must write a `## FIX ISSUE REQUEST` block in their report.
+    This parser is forgiving: missing fields default to empty strings so the
+    prompt template still renders (rather than crashing).
+    """
+    from pathlib import Path
+    base = Path(CHANGES_DIR) / change / APPLY_DIR
+    # Find the highest-N verify report for this track
+    pattern = f"{item_id.replace('dev.', '').replace('.', '-')}-*-verify.md"
+    candidates = sorted(base.glob(pattern), reverse=True)
+    if not candidates:
+        return {}
+    text = candidates[0].read_text(encoding="utf-8")
+    # Extract the FIX ISSUE REQUEST block (between "## FIX ISSUE REQUEST"
+    # and the next "---" or "## " heading).
+    block_start = text.find("## FIX ISSUE REQUEST")
+    if block_start == -1:
+        # Some verify agents wrote a "### Issue #N" block with structured
+        # fields; fall back to parsing that.
+        return _parse_verify_issues_legacy(text, item_id, cycle)
+    block_end = text.find("\n## ", block_start + 1)
+    if block_end == -1:
+        block_end = len(text)
+    block = text[block_start:block_end]
+    out = {
+        "issue_title": "",
+        "source_track": item_id,
+        "source_phase": "verify",
+        "verification_step": "",
+        "expected": "",
+        "actual": "",
+        "root_cause_phase": "",
+        "affected_tasks": "",
+        "fix_cycle": cycle,
+        "design_doc_path": f".pg/changes/{change}/design.md",
+        "tasks_path": f".pg/changes/{change}/tasks.md",
+    }
+    # Bullet-style: "- field: value"
+    for line in block.splitlines():
+        m = re.match(r"^\s*-\s*([\w_]+)\s*:\s*(.+?)\s*$", line)
+        if not m:
+            continue
+        key, val = m.group(1), m.group(2).strip()
+        # First non-empty wins for these:
+        if key in out and not out[key]:
+            out[key] = val
+    # The block also has a non-bullet "**{issue_title}**" header line right
+    # after the "## FIX ISSUE REQUEST" heading.
+    title_m = re.search(r"## FIX ISSUE REQUEST\s*\n+\s*\*\*([^*]+)\*\*", block)
+    if title_m:
+        out["issue_title"] = title_m.group(1).strip()
+    return out
+
+
+def _parse_verify_issues_legacy(text, item_id, cycle):
+    """Fallback: parse `### Issue #N: ...` blocks (older verify-agent format)."""
+    out = {
+        "issue_title": "",
+        "source_track": item_id,
+        "source_phase": "verify",
+        "verification_step": "",
+        "expected": "",
+        "actual": "",
+        "root_cause_phase": "",
+        "affected_tasks": "",
+        "fix_cycle": cycle,
+        "design_doc_path": "",
+        "tasks_path": "",
+    }
+    # Pull title from first "### Issue #N: title"
+    title_m = re.search(r"###\s+Issue\s+#\d+\s*:\s*(.+)", text)
+    if title_m:
+        out["issue_title"] = title_m.group(1).strip()
+    for line in text.splitlines():
+        m = re.match(r"^\s*-\s*\*\*(\w+)\*\*\s*:\s*(.+?)\s*$", line)
+        if not m:
+            continue
+        key = m.group(1)
+        val = m.group(2).strip()
+        if key in out and not out[key]:
+            out[key] = val
+    return out
+
+
+def _build_final_gate_context(change):
+    """Collect paths for final-gate agent (proposal/tasks/designs/reports)."""
+    from pathlib import Path
+    base = Path(CHANGES_DIR) / change
+    design_paths = sorted(
+        str(p.relative_to(PROJECT_ROOT))
+        for p in base.glob("design*.md")
+    )
+    proposal_path = str(base / "proposal.md")
+    tasks_path = str(base / "tasks.md")
+    # report_paths: collect all *-gate-assessment.md under 2-build/
+    build_dir = base / APPLY_DIR
+    report_paths = sorted(
+        str(p.relative_to(PROJECT_ROOT))
+        for p in build_dir.glob("*-gate-assessment.md")
+        if p.is_file()
+    )
+    design_doc_path = design_paths[0] if design_paths else ""
+    return {
+        "_change": change,
+        "proposal_path": proposal_path,
+        "tasks_path": tasks_path,
+        "design_doc_path": design_doc_path,
+        "design_doc_paths": design_paths,
+        "report_paths": report_paths,
+    }
+
+
+def _enrich_context_with_stage(ctx, config, item, change=None):
+    """Ensure ctx["stage"] reflects the v3.0 schema.
+
+    Always re-resolves stage context so that `change`-dependent environment
+    selection (.pg/changes/<change>/environment.yaml) is always honored.
+    Previous idempotent no-op behavior was a bug: if filter_track_context was
+    called without `change`, the stage was resolved against config.yaml's
+    track.environment default and could not be re-resolved here.
+
+    deployment_actions lives inside ctx["stage"]["environment"]["actions"] and is
+    surfaced to dev/verify/fix agents via _SUB_TRACK_FIELDS["stage"] (the
+    nested key is enough — no separate top-level key needed).
+    """
+    ctx["stage"] = _build_stage_context(config, item, change=change)
+    return ctx
+
+
+def _resolve_test_commands(config, track_cfg, test_key):
+    """Collect test commands for a track's modules matching the given test_key."""
+    commands = []
+    for mod_name in (track_cfg.get("modules") or []):
+        mod = config.get("modules", {}).get(mod_name, {})
+        cmd = mod.get("test", {}).get(test_key)
+        if cmd:
+            commands.append(cmd)
+    return commands
+
+
+def _find_stage_for_track(config, track_id):
+    """Return (stage_name, stage_dict) for the stage containing track_id.
+    Supports qualified names (dev-isolated.backend) — matches by stage prefix.
+    Falls back to bare track name matching."""
+    if "." in track_id:
+        stage_name, bare = track_id.split(".", 1)
+        for stage in (config.get("stages") or []):
+            if stage.get("name") == stage_name and bare in (stage.get("tracks") or []):
+                return stage.get("name"), stage
+    # Fallback: match by bare track name
+    for stage in (config.get("stages") or []):
+        if track_id in (stage.get("tracks") or []):
+            return stage.get("name"), stage
+    return None, None
+
+
+def _enrich_context_with_tasks(ctx, change, item, sub):
+    """Add preformatted tasks to context dict.
+
+    tasks_validation and tasks_noop are only injected for subs in _TASKS_META_SUBS
+    (test, dev, verify) — fix and gate agents don't need them.
+    """
+    task_info = _extract_task_prompt(change, item, sub)
+    ctx["tasks_preformatted"] = task_info["preformatted_tasks"]
+    if sub in _TASKS_META_SUBS:
+        ctx["tasks_validation"] = task_info["validation_block"]
+        ctx["tasks_noop"] = task_info["noop"]
+    return ctx
+
+
+def _enrich_context_with_prompt_injection(ctx, config, item, sub):
+    """Build the pre-assembled prompt injection for the dispatch action.
+
+    Reads `apply_change_rules` from config.yaml and, for the current
+    (item, sub), assembles the prepend / append fragments that the LLM
+    orchestrator should splice into the sub-agent prompt.
+
+    The LLM does NOT need to know how apply_change_rules works — it
+    just receives `prompt_injection` already shaped for direct use:
+
+        prompt = (prompt_injection["prepend"]
+                  + "\n\n"
+                  + default_prompt_template
+                  + "\n\n"
+                  + prompt_injection["append"])
+
+    Field reference:
+      target_agent: "pg-build/{sub}"  (which agent this targets)
+      prepend:     ""  | <assembled block>
+      append:      ""  | <assembled block>
+      rules_applied: list[rule_id]  (for traceability / debug)
+
+    Rules with type != "inject-prompt" or target_agent mismatch are
+    silently skipped. Position "prepend" goes to prepend; "append"
+    (default) goes to append. Multiple rules in the same position are
+    concatenated in config order, separated by two newlines.
+    """
+    target = f"pg-build/{sub}"
+    rules = (config.get("apply_change_rules") or [])
+
+    prepend_parts = []
+    append_parts = []
+    applied = []
+
+    for rule in rules:
+        if not isinstance(rule, dict):
+            continue
+        rtype = rule.get("type")
+        rtarget = rule.get("target_agent")
+        rtemplate = rule.get("template", "")
+        if rtype != "inject-prompt":
+            continue
+        if rtarget != target:
+            continue
+        if not rtemplate:
+            continue
+        rposition = rule.get("position", "append")
+        if rposition == "prepend":
+            prepend_parts.append(rtemplate)
+        else:
+            append_parts.append(rtemplate)
+        rid = rule.get("id", "<no-id>")
+        applied.append(rid)
+
+    ctx["prompt_injection"] = {
+        "target_agent": target,
+        "prepend": "\n\n".join(prepend_parts),
+        "append": "\n\n".join(append_parts),
+        "rules_applied": applied,
+    }
+    return ctx
+
+
+def dispatch_action(agent, item, sub, context, attempt, init_commit=None):
+    # Inject `sub` into context so prompt templates can use {{context.sub}}
+    # in {#if sub in [...]} blocks (sub is the dispatched sub type).
+    if "sub" not in context:
+        context["sub"] = sub
+    # Render the prompt template here so the LLM orchestrator doesn't need
+    # to know how templates work — it just reads `prompt_template`.
+    template_str = _build_prompt_template(item, sub)
+    rendered = _render_prompt_template(template_str, context)
+    result = {
+        "action": "dispatch",
+        "item": item,
+        "sub": sub,
+        "agent": agent,
+        "attempt": attempt,
+        "prompt_template": rendered,
+        "prompt_injection": context.get("prompt_injection", {
+            "target_agent": f"pg-build/{sub}",
+            "prepend": "",
+            "append": "",
+            "rules_applied": [],
+        }),
+    }
+    # Surface bootstrap-init commit result only when it actually ran
+    # (first-dispatch path). Subsequent re-entries pass init_commit=None
+    # so the field is omitted and we don't clutter every dispatch response.
+    if init_commit is not None:
+        result["init_commit"] = init_commit
+    return result
+
+
+def dispatch_fix_action(item, cycle, context, config=None):
+    if config is not None:
+        _enrich_context_with_prompt_injection(context, config, item, "fix")
+    context["sub"] = "fix"
+    context["fix_cycle"] = cycle
+    # Populate fix-issue fields from the most recent verify report so the
+    # template's FIX ISSUE REQUEST block has real values (not empty strings).
+    change = context.get("_change", "")
+    if change:
+        issue_ctx = _build_fix_issue_context(change, item, cycle)
+        # Don't overwrite fields already set by callers (e.g. rollback_reason).
+        for k, v in issue_ctx.items():
+            context.setdefault(k, v)
+    template_str = _build_prompt_template(item, "fix")
+    rendered = _render_prompt_template(template_str, context)
+    return {
+        "action": "dispatch_fix",
+        "item": item,
+        "agent": FIX_AGENT,
+        "fix_cycle": cycle,
+        "prompt_template": rendered,
+        "prompt_injection": context.get("prompt_injection", {
+            "target_agent": "pg-build/fix",
+            "prepend": "",
+            "append": "",
+            "rules_applied": [],
+        }),
+    }
+
+
+# ============================================================
+# Context chain
+# ============================================================
+# 已迁移至 pg_context_chain.py — 直接调用 pg_context_chain.*
+
+
+# ============================================================
+# Pipeline state operations
+# ============================================================
+
+def pipeline_detect(change):
+    return run_script(PIPELINE_STATE_PY, "detect", change, change=change)
+
+
+def pipeline_mark(change, item, sub=None):
+    args = ["mark", change, item]
+    if sub:
+        args.append(sub)
+    return run_script(PIPELINE_STATE_PY, *args, change=change, track_id=item)
+
+
+def pipeline_rollback(change, track):
+    return run_script(PIPELINE_STATE_PY, "rollback", change, track, change=change, track_id=track)
+
+
+def pipeline_gate_rollback(change, track, gate_report_path):
+    return run_script(PIPELINE_STATE_PY, "gate-rollback", change, track, gate_report_path, change=change, track_id=track)
+
+
+def pipeline_progress(change):
+    return run_script(PIPELINE_STATE_PY, "progress", change, change=change)
+
+
+def gate_report_path_for(change, track):
+    """Infer next gate-assessment file path by scanning track's existing reports.
+
+    Naming pattern: {track}-{N}-gate-assessment.md where N is inferred as
+    max(existing track files) + 1. Returns the *next* path that will be used.
+    """
+    apply_dir = get_apply_dir(change)
+    if not os.path.isdir(apply_dir):
+        return os.path.join(apply_dir, f"{track}-1-gate-assessment.md")
+    pattern = re.compile(rf"^{re.escape(track)}-(\d+)-gate-assessment\.md$")
+    max_n = 0
+    for fname in os.listdir(apply_dir):
+        m = pattern.match(fname)
+        if m:
+            max_n = max(max_n, int(m.group(1)))
+    return os.path.join(apply_dir, f"{track}-{max_n + 1}-gate-assessment.md")
+
+
+def track_latest_report_path(change, track, kind):
+    """Return path of the latest (highest-N) {track}-{N}-{kind}.md in 2-build/.
+
+    Used by fix-gate / verify-fix cycles to locate the most recent input report.
+    """
+    apply_dir = get_apply_dir(change)
+    if not os.path.isdir(apply_dir):
+        return None
+    pattern = re.compile(rf"^{re.escape(track)}-(\d+)-{re.escape(kind)}\.md$")
+    max_n = 0
+    latest = None
+    for fname in os.listdir(apply_dir):
+        m = pattern.match(fname)
+        if m:
+            n = int(m.group(1))
+            if n > max_n:
+                max_n = n
+                latest = fname
+    return os.path.join(apply_dir, latest) if latest else None
+
+
+def _record_accepted_gaps(change, track, gate_report_path, max_gate_fix):
+    """Append all unfixed gaps from gate report to known-issues.md."""
+    known_issues_path = os.path.join(CHANGES_DIR, change, APPLY_DIR, "known-issues.md")
+    if not os.path.isfile(gate_report_path):
+        return
+
+    with open(gate_report_path, encoding="utf-8") as f:
+        report = f.read()
+
+    gap_pattern = re.compile(
+        r"###\s+" + re.escape(track) + r":G-\d+.*?(?=###\s+" + re.escape(track) + r":G-|\Z)",
+        re.DOTALL,
+    )
+    gaps = gap_pattern.findall(report)
+
+    if not gaps:
+        return
+
+    os.makedirs(os.path.dirname(known_issues_path), exist_ok=True)
+    if not os.path.isfile(known_issues_path):
+        with open(known_issues_path, "w", encoding="utf-8") as f:
+            f.write(f"# Known Issues - {change}\n\n")
+            f.write("_此文件由 gate-fix 循环耗尽时自动记录_\n\n")
+
+    from datetime import datetime, timezone, timedelta
+    _SHANGHAI = timezone(timedelta(hours=8))
+    ts = datetime.now(_SHANGHAI).strftime("%Y-%m-%dT%H:%M:%S+08:00")
+
+    with open(known_issues_path, "a", encoding="utf-8") as f:
+        f.write(f"\n## {ts} - {track} gate FAIL 耗尽后被接受的 gap\n\n")
+        f.write(f"源: `{gate_report_path}`\n\n")
+        f.write(f"经过 {max_gate_fix} 轮 fix-gate 循环仍未修复, 已被接受继续推进:\n\n")
+        for gap in gaps:
+            f.write(gap.strip() + "\n\n")
+
+
+# ============================================================
+# Helpers — context chain init
+# ============================================================
+
+_CHANGE_DIR = os.path.join(CHANGES_DIR, "__placeholder__")
+
+
+def _auto_archive(change):
+    """Move .pg/changes/<change>/ to archive/ via shared pg-archive.py.
+
+    Returns dict with keys: ok, target_name (str|None), src, target, reason (on failure).
+    Never raises — caller decides how to react to failure.
+    """
+    if not os.path.isfile(PG_ARCHIVE_PY):
+        return {
+            "ok": False,
+            "reason": f"找不到归档脚本: {PG_ARCHIVE_PY}",
+            "src": os.path.relpath(os.path.join(CHANGES_DIR, change), PROJECT_ROOT),
+        }
+    src = os.path.join(CHANGES_DIR, change)
+    if not os.path.isdir(src):
+        return {
+            "ok": False,
+            "reason": f"源目录不存在: {src}",
+            "src": os.path.relpath(src, PROJECT_ROOT),
+        }
+    result = run_script(PG_ARCHIVE_PY, "move", change, change=change)
+    if result.get("error"):
+        return {
+            "ok": False,
+            "reason": result["error"],
+            "src": os.path.relpath(src, PROJECT_ROOT),
+        }
+    return result
+
+
+def _git_commit_archive(archive_result):
+    """Commit the archive move on the current feature branch.
+
+    Best-effort: returns a dict describing what happened. Never raises.
+    Does NOT push — pushing happens in pg-verify-and-merge.
+    """
+    if not archive_result.get("ok"):
+        return {
+            "attempted": False,
+            "committed": False,
+            "reason": "归档未成功，跳过 commit",
+        }
+
+    src_rel = archive_result.get("src")
+    target_rel = archive_result.get("target")
+    target_name = archive_result.get("target_name", "")
+
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+
+    status_r = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    )
+    porcelain = status_r.stdout.strip()
+
+    git_rm = subprocess.run(
+        ["git", "rm", "-r", "--cached", "--ignore-unmatch", src_rel],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    )
+
+    git_add = subprocess.run(
+        ["git", "add", "--", target_rel],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    )
+    if git_add.returncode != 0:
+        return {
+            "attempted": True,
+            "committed": False,
+            "branch": branch,
+            "reason": f"git add 失败: {git_add.stderr.strip() or git_add.stdout.strip()}",
+        }
+
+    staged_after = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+    if not staged_after:
+        return {
+            "attempted": True,
+            "committed": False,
+            "branch": branch,
+            "reason": "无 staged 变更（src/target 均未在 git 跟踪中），无需 commit",
+            "porcelain": porcelain,
+        }
+
+    msg = f"archive change {target_name}"
+    commit = subprocess.run(
+        ["git", "commit", "-m", msg],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    )
+    if commit.returncode != 0:
+        return {
+            "attempted": True,
+            "committed": False,
+            "branch": branch,
+            "reason": f"git commit 失败: {commit.stderr.strip() or commit.stdout.strip()}",
+        }
+
+    sha = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+
+    return {
+        "attempted": True,
+        "committed": True,
+        "branch": branch,
+        "sha": sha,
+        "message": msg,
+    }
+
+
+def _auto_commit_on_init(change):
+    """Auto-commit proposal artifacts before the first dispatch.
+
+    Behavior:
+      - Runs synchronously in cmd_next before the first sub-agent dispatch,
+        AFTER `_ensure_feature_branch` and AFTER `save_state({init_committed: True})`
+        (so the commit lands on feat/pg/<change> and includes the freshly
+        written `.pipeline-state.json`).
+      - Uses `git add -A` (full-tree add), matching the record-path decision.
+      - Skips (records reason) when `git status --porcelain` is empty.
+      - Never raises; never pushes.
+      - Returns dict: {attempted, committed, branch, sha, message, reason}.
+    """
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+
+    porcelain = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+
+    if not porcelain:
+        return {
+            "attempted": True,
+            "committed": False,
+            "branch": branch,
+            "reason": "工作区干净，无可提交内容（init 阶段）",
+        }
+
+    add = subprocess.run(
+        ["git", "add", "-A"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    )
+    if add.returncode != 0:
+        return {
+            "attempted": True,
+            "committed": False,
+            "branch": branch,
+            "reason": f"git add 失败: {add.stderr.strip() or add.stdout.strip()}",
+        }
+
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+    if not staged:
+        return {
+            "attempted": True,
+            "committed": False,
+            "branch": branch,
+            "reason": "无 staged 变更可提交",
+        }
+
+    msg = f"chore({change}): bootstrap apply-change"
+    commit = subprocess.run(
+        ["git", "commit", "-m", msg],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    )
+    if commit.returncode != 0:
+        return {
+            "attempted": True,
+            "committed": False,
+            "branch": branch,
+            "message": msg,
+            "reason": f"git commit 失败: {commit.stderr.strip() or commit.stdout.strip()}",
+        }
+
+    sha = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+
+    return {
+        "attempted": True,
+        "committed": True,
+        "branch": branch,
+        "sha": sha,
+        "message": msg,
+        "reason": None,
+    }
+
+
+def _auto_commit_on_record(change, item, sub, status):
+    """Auto-commit working-tree changes after every record call.
+
+    Behavior:
+      - Runs synchronously in the record path so the next `next` sees the commit.
+      - Uses `git add -A` (full-tree add), matching the "git add -A 全量提交" decision.
+      - Skips (records reason) when `git status --porcelain` is empty.
+      - Never raises; never pushes.
+      - Returns dict: {attempted, committed, branch, sha, message, reason}.
+    """
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+
+    porcelain = subprocess.run(
+        ["git", "status", "--porcelain"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+
+    if not porcelain:
+        return {
+            "attempted": True,
+            "committed": False,
+            "branch": branch,
+            "reason": "工作区干净，无可提交内容",
+        }
+
+    add = subprocess.run(
+        ["git", "add", "-A"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    )
+    if add.returncode != 0:
+        return {
+            "attempted": True,
+            "committed": False,
+            "branch": branch,
+            "reason": f"git add 失败: {add.stderr.strip() or add.stdout.strip()}",
+        }
+
+    staged = subprocess.run(
+        ["git", "diff", "--cached", "--name-only"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+    if not staged:
+        return {
+            "attempted": True,
+            "committed": False,
+            "branch": branch,
+            "reason": "无 staged 变更可提交",
+        }
+
+    msg = f"chore({change}): auto-record {item}:{sub} {status}"
+    commit = subprocess.run(
+        ["git", "commit", "-m", msg],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    )
+    if commit.returncode != 0:
+        return {
+            "attempted": True,
+            "committed": False,
+            "branch": branch,
+            "message": msg,
+            "reason": f"git commit 失败: {commit.stderr.strip() or commit.stdout.strip()}",
+        }
+
+    sha = subprocess.run(
+        ["git", "rev-parse", "--short", "HEAD"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+
+    return {
+        "attempted": True,
+        "committed": True,
+        "branch": branch,
+        "sha": sha,
+        "message": msg,
+        "reason": None,
+    }
+
+
+def _inject_commit(result, change, item, sub, status):
+    """Inject auto-commit result into a record-returned dict.
+
+    No-op when result is not a dict (e.g. workflow_failed paths still
+    return dicts, but defensive for any future non-dict returns).
+    """
+    if not isinstance(result, dict):
+        return result
+    result["commit"] = _auto_commit_on_record(change, item, sub, status)
+    return result
+
+
+def _ensure_context_chain(change):
+    pg_context_chain.ensure(change)
+
+
+def _ensure_feature_branch(change):
+    """Create feat/pg/{change} branch if not already on it."""
+    expected = f"feat/pg/{change}"
+    branch = subprocess.run(
+        ["git", "rev-parse", "--abbrev-ref", "HEAD"],
+        capture_output=True, text=True, cwd=PROJECT_ROOT,
+    ).stdout.strip()
+    if branch == expected:
+        return
+    subprocess.run(["git", "stash"], capture_output=True, cwd=PROJECT_ROOT)
+    r = subprocess.run(["git", "rev-parse", "--verify", expected],
+                       capture_output=True, cwd=PROJECT_ROOT)
+    if r.returncode == 0:
+        subprocess.run(["git", "checkout", expected],
+                       capture_output=True, cwd=PROJECT_ROOT)
+    else:
+        subprocess.run(["git", "checkout", "-b", expected, branch],
+                       capture_output=True, cwd=PROJECT_ROOT)
+
+
+def _maybe_bootstrap_init_commit(change, state):
+    """Run the bootstrap commit exactly once per change, on first dispatch.
+
+    Args:
+        change: change name.
+        state: the in-memory state dict owned by cmd_next. The function
+            mutates this dict in place to set `init_committed=True` so
+            the caller's subsequent `save_state(state)` calls persist the
+            marker (otherwise a later save_state would overwrite the
+            marker the helper just wrote to disk with a version that
+            lacks the field).
+
+    Returns:
+        dict | None — the auto-commit result dict when this call actually ran
+        the bootstrap commit (so callers can surface it to the LLM); None when
+        the commit was already performed on a previous invocation.
+
+    Mechanics:
+      - If the caller's state already has `init_committed=True` → skip.
+      - Else mark the field True in-place (caller will save_state later),
+        call `_auto_commit_on_init(change)`, and return its result.
+        Failures are non-fatal: dispatch still proceeds, and the marker
+        is set so we do not retry on the next invocation.
+
+    Note: the side effect of writing `.pipeline-state.json` to disk happens
+    implicitly when cmd_next's next `save_state(state)` call executes —
+    no explicit save_state call is needed inside this helper.
+    """
+    if state.get("init_committed"):
+        return None
+
+    state["init_committed"] = True
+    return _auto_commit_on_init(change)
+
+
+# ============================================================
+# Simple track section normalization
+# ============================================================
+
+# Body line used to mark a simple-track section as noop. count_tasks
+# (pg_pipeline_common.py) treats a literal "- 无" line as a noop marker,
+# which causes cmd_detect and _advance_to_next_sub to skip the TDVG
+# sub-phase entirely.
+SIMPLE_TRACK_NOOP_LINE = "- 无"
+
+
+def _noopify_simple_track_sections(change):
+    """Rewrite tasks.md sections for simple tracks to a single noop line.
+
+    Simple tracks (tracks.<id>.type == "simple") are executed by the runner
+    directly via _execute_phase; they should NOT trigger TDVG sub-phase
+    dispatch. However, pg-propose currently still emits a section for every
+    pipeline item, including simple tracks.
+
+    To keep the runner's cmd_detect / _advance_to_next_sub logic unchanged
+    (which keys off the "all_noop" flag emitted by count_tasks), we rewrite
+    every section whose item matches a simple track to a single "- 无" line.
+    After rewriting, cmd_detect treats those sections as "all_noop" and
+    skips the TDVG sub-phase entirely.
+
+    A descriptive suffix is appended to the heading label so that humans
+    (and downstream LLM agents) reading tasks.md can still understand the
+    intent: e.g. "## 1. simple-openapi-gen:dev - simple track (runner 直接执行 commands)".
+
+    The rewrite is idempotent: a section is detected as already-rewritten
+    when its body is exactly one "- 无" line.
+
+    Args:
+        change: change name.
+
+    Returns:
+        int: number of sections rewritten (0 if tasks.md missing or no
+        simple-track sections present).
+    """
+    tasks_path = os.path.join(CHANGES_DIR, change, "tasks.md")
+    if not os.path.isfile(tasks_path):
+        return 0
+
+    config = load_config()
+    tracks = config.get("tracks") or {}
+    simple_track_ids = {
+        tid for tid, tcfg in tracks.items()
+        if (tcfg or {}).get("type") == "simple"
+    }
+    if not simple_track_ids:
+        return 0
+
+    sections, all_lines = parse_tasks(tasks_path)
+    rewrite_count = 0
+
+    for sec in sections:
+        bare = sec["item"]
+        if bare not in simple_track_ids:
+            continue
+        body = sec["lines"]
+        heading_line = all_lines[sec["start_line"]]
+        heading_already_annotated = "(simple track" in heading_line
+        # Body may contain trailing blank lines. Filter to non-blank content.
+        body_non_blank = [ln for ln in body if ln.strip()]
+        body_already_noop = (
+            len(body_non_blank) == 1
+            and body_non_blank[0].strip() == SIMPLE_TRACK_NOOP_LINE
+        )
+        # Skip sections already in the canonical rewritten form.
+        if heading_already_annotated and body_already_noop:
+            continue
+        # Append a "(simple track: ...)" suffix to the heading so the
+        # intent is documented inline without breaking the heading parser.
+        if not heading_already_annotated:
+            heading_line = heading_line.rstrip("\n").rstrip() + "  (simple track: runner 直接执行 commands)\n"
+            all_lines[sec["start_line"]] = heading_line
+        # Replace section body with a single noop line.
+        all_lines[sec["start_line"] + 1: sec["end_line"]] = [SIMPLE_TRACK_NOOP_LINE + "\n"]
+        rewrite_count += 1
+
+    if rewrite_count > 0:
+        with open(tasks_path, "w", encoding="utf-8") as f:
+            f.writelines(all_lines)
+
+    return rewrite_count
+
+
+# ============================================================
+# Core logic — next
+# ============================================================
+
+# Items that are always appended after pipeline.order
+ALWAYS_ITEMS = ["final-gate"]
+
+
+def cmd_next(change):
+    config = load_config()
+    order = get_pipeline_order(config, change)
+    state = load_state(change)
+
+    # If already terminal, return immediately
+    if state.get("completed"):
+        return {"action": "done", "status": "completed"}
+    if state.get("failed"):
+        return {"action": "workflow_failed", "fatal": True, "reason": _last_fail_reason(state)}
+
+    # One-shot migration: legacy state files at change root → 2-build/.
+    # Idempotent; safe to run every invocation.
+    moved = migrate_legacy_state_files(change)
+    if moved:
+        print(f"[migrate] moved legacy state files to {APPLY_DIR}/: {moved}", file=sys.stderr)
+        # Reload state after migration (file path changed)
+        state = load_state(change)
+
+    # Auto-init context chain on first run
+    _ensure_context_chain(change)
+
+    # Ensure feature branch exists on first run. Must happen BEFORE init commit
+    # so that the bootstrap commit lands on feat/pg/<change>.
+    _ensure_feature_branch(change)
+
+    # Bootstrap commit: on the first dispatch ever, commit the proposal
+    # artifacts together with a freshly written `.pipeline-state.json`
+    # (carrying the `init_committed: True` marker). Subsequent dispatches
+    # see the marker and skip this step, ensuring idempotency across
+    # session restarts. Done before `migrate_legacy_state_files` would
+    # overwrite the state file with legacy contents from change root.
+    # The helper mutates `state` in place so the caller's later save_state
+    # persists the marker.
+    init_commit = _maybe_bootstrap_init_commit(change, state)
+
+    # Normalize simple-track sections in tasks.md to noop markers so that
+    # cmd_detect treats them as "all_noop" and skips TDVG sub-phase
+    # dispatch. Must run BEFORE pipeline_detect (called below) so the
+    # detected sections reflect the noop rewrite. Idempotent — safe to
+    # call on every cmd_next invocation.
+    _noopify_simple_track_sections(change)
+
+    # If we have a current item in waiting state, return the same action (idempotent)
+    cur = state.get("current")
+    if cur and cur.get("waiting"):
+        return _resume_waiting(config, change, state, cur, init_commit=init_commit)
+
+    # No current item — detect the next one
+    detect_result = pipeline_detect(change)
+
+    if detect_result.get("error"):
+        return {"action": "workflow_failed", "fatal": True, "reason": detect_result["error"]}
+
+    item_id = detect_result.get("item")
+
+    # All completed
+    if item_id is None:
+        state["current"] = {"item": "final-gate", "sub": None, "waiting": False}
+        save_state(state)
+        return _enter_final_gate(config, change, state)
+
+    # Determine if track or phase
+    item_type = detect_result.get("type", "track")
+
+    if item_type == "phase":
+        return _execute_phase(config, change, state, item_id)
+
+    # Track: determine which sub-phase
+    sub = detect_result.get("subPhase", "test")
+
+    # Check for rollback context
+    rb = pg_context_chain.rollback_get(change, item_id)
+    has_rollback = rb.get("found", False)
+
+    # Build dispatch context (with stage info for v3.0)
+    ctx = filter_track_context(config, item_id, sub, change=change)
+    ctx["_change"] = change
+    _enrich_context_with_rollback(ctx, rb)
+    _enrich_context_with_stage(ctx, config, item_id, change)
+    _enrich_context_with_tasks(ctx, change, item_id, sub)
+    _enrich_context_with_prompt_injection(ctx, config, item_id, sub)
+
+    # Persist state (including the init_committed marker mutated by
+    # _maybe_bootstrap_init_commit above) BEFORE returning. This is the
+    # earliest save_state call in the dispatch path; subsequent
+    # sub_phase transitions (line 1218+ below) update current/waiting
+    # flags for resume idempotency, but the init marker must land on
+    # disk before the first dispatch returns to the LLM, otherwise a
+    # second `cmd_next` would re-enter the bootstrap branch.
+    state["current"] = {
+        "item": item_id,
+        "sub": sub,
+        "attempt": 1,
+        "fix_cycles": 0,
+        "waiting": False,
+        "has_rollback": has_rollback,
+    }
+    save_state(state)
+
+    # Dispatch — no auto-record commit here. The init commit (if any) has
+    # already been produced by _maybe_bootstrap_init_commit above; the
+    # "started" status carries no state change worth a separate commit.
+    # Subsequent `record completed/failed/...` calls drive auto-record.
+    return dispatch_action(
+        agent=SUB_AGENTS[sub],
+        item=item_id,
+        sub=sub,
+        context=ctx,
+        attempt=1,
+        init_commit=init_commit,
+    )
+
+    state["current"] = {
+        "item": item_id,
+        "sub": sub,
+        "attempt": 1,
+        "fix_cycles": 0,
+        "waiting": False,
+        "has_rollback": has_rollback,
+    }
+    save_state(state)
+
+    pg_context_chain.sub_start(change, item_id, sub)
+    state["current"]["waiting"] = True
+    save_state(state)
+
+    ctx = filter_track_context(config, item_id, sub, change=change)
+    _enrich_context_with_rollback(ctx, rb)
+    _enrich_context_with_tasks(ctx, change, item_id, sub)
+    _enrich_context_with_prompt_injection(ctx, config, item_id, sub)
+
+    return dispatch_action(
+        agent=SUB_AGENTS[sub],
+        item=item_id,
+        sub=sub,
+        context=ctx,
+        attempt=1,
+        init_commit=init_commit,
+    )
+
+
+def _resume_waiting(config, change, state, cur, init_commit=None):
+    """Return the same waiting action (idempotent on next()."""
+    item_id = cur["item"]
+    sub = cur["sub"]
+    attempt = cur.get("attempt", 1)
+    has_rollback = cur.get("has_rollback", False)
+
+    # Fix: when in fix cycle, dispatch fix agent regardless of cur["sub"]
+    # (cur["sub"] stays at the pre-fix value like "verify" - it is not
+    #  changed to "fix" by the escalate handler in cmd_record)
+    if cur.get("in_fix_cycle"):
+        ctx = filter_track_context(config, item_id, "fix", change=change)
+        return dispatch_fix_action(item_id, cur.get("fix_cycles", 1), ctx)
+
+    ctx = filter_track_context(config, item_id, sub, change=change)
+    if has_rollback:
+        rb = pg_context_chain.rollback_get(change, item_id)
+        _enrich_context_with_rollback(ctx, rb)
+    _enrich_context_with_tasks(ctx, change, item_id, sub)
+
+    return dispatch_action(
+        agent=SUB_AGENTS.get(sub, FINAL_GATE_AGENT),
+        item=item_id,
+        sub=sub,
+        context=ctx,
+        attempt=attempt,
+        init_commit=init_commit,
+    )
+
+
+def _execute_phase(config, change, state, item_id):
+    """Execute a phase directly (no sub-agent).
+
+    Three kinds of phase items are supported:
+      1. prepare_env / clean_env — environment lifecycle hooks. The runner
+         resolves the environment from the stage's first track's deployment
+         override (tasks.md ## Deployments) and runs the corresponding
+         `script` from config.yaml's environment definition.
+      2. Simple tracks (type=simple) — runner reads `commands` from the
+         track config and runs them sequentially. Any command failure
+         returns workflow_failed (entire pipeline terminates).
+      3. Legacy track-level phases — read `commands` from the track config
+         and run them sequentially. Kept for backward compatibility.
+    """
+    bare = _bare_track(item_id)
+    is_env_hook = bare in ("prepare_env", "clean_env")
+    is_simple_track = (not is_env_hook) and get_track_type(config, item_id) == "phase"
+
+    if is_env_hook:
+        # Resolve the stage's environment from the first track's deployment override.
+        stage_name = item_id.rsplit(".", 1)[0] if "." in item_id else None
+        stage_cfg = None
+        for s in (config.get("stages") or []):
+            if s.get("name") == stage_name:
+                stage_cfg = s
+                break
+        if stage_cfg is None:
+            return {"action": "workflow_failed", "fatal": True,
+                    "reason": f"Cannot find stage {stage_name} for {item_id}"}
+
+        stage_tracks = stage_cfg.get("tracks") or []
+        if not stage_tracks:
+            return {"action": "workflow_failed", "fatal": True,
+                    "reason": f"Stage {stage_name} has no tracks for {item_id}"}
+
+        qualified_first = f"{stage_name}.{stage_tracks[0]}"
+        try:
+            env_name = _resolve_stage_env(change, stage_name)
+        except FileNotFoundError as e:
+            return {"action": "workflow_failed", "fatal": True, "reason": str(e)}
+        except (KeyError, ValueError) as e:
+            return {"action": "workflow_failed", "fatal": True, "reason": str(e)}
+        if env_name == "__skip__":
+            return {"action": "phase_result",
+                    "phase_item": item_id,
+                    "terminate": False,
+                    "environment": None}
+
+        env_cfg = (config.get("environments") or {}).get(env_name, {})
+        action = env_cfg.get(bare)
+        if not action:
+            return {"action": "workflow_failed", "fatal": True,
+                    "reason": f"Environment {env_name} has no {bare} action"}
+
+        script_path = action.get("script")
+        if not script_path:
+            return {"action": "workflow_failed", "fatal": True,
+                    "reason": f"Environment {env_name}.{bare} has no script"}
+
+        timeout_seconds = action.get("timeout_seconds")
+
+        args = action.get("args") or []
+        # Env hooks go through pg-run-hook.py so PG_CHANGE_NAME / PG_ENV /
+        # PG_STAGE / PG_SKILLS_PATH / PG_PROJECT_ROOT are guaranteed to be
+        # injected. The script itself handles its own SSH / sub-orchestration
+        # as needed (e.g. dev-3tier scripts handle SSH to box-1/box-2
+        # internally).
+        inner_cmd = "bash " + shlex.quote(script_path) + (
+            " " + " ".join(shlex.quote(str(a)) for a in args) if args else ""
+        )
+        spec = {
+            "cmd": inner_cmd,
+            "change": change,
+            "stage": stage_name,
+            "env": env_name,
+            "hook_type": bare,  # prepare_env or clean_env
+            "timeout_seconds": timeout_seconds,
+            "log_path": str(_phase_log_path(change, item_id)),
+        }
+        cmd = (
+            f"python3 {shlex.quote(PG_HOOK_RUNNER)}"
+            f" <<'EOF'\n{json.dumps(spec, indent=2)}\nEOF"
+        )
+        commands = [(cmd, timeout_seconds)]
+        label = f"{item_id} ({env_name})"
+    else:
+        tc = get_track_config(config, item_id)
+        commands = tc.get("commands") or []
+        label = tc.get("label", item_id)
+        # Simple tracks MUST declare commands; empty list is a config error.
+        if is_simple_track and not commands:
+            return {"action": "workflow_failed", "fatal": True,
+                    "reason": f"Simple track {item_id} 缺少 commands 配置"}
+
+    state["current"] = {"item": item_id, "sub": None, "waiting": False}
+    save_state(state)
+
+    pg_context_chain.phase_start(change, item_id)
+
+    log_path = _phase_log_path(change, item_id)
+    ts = datetime.now(timezone(timedelta(hours=8))).strftime("%Y-%m-%dT%H:%M:%S+08:00")
+
+    # Track-level default timeout for simple tracks. Read from track config
+    # (schema default 1800s); falls back to 1800 if config field is missing
+    # entirely. None means "no timeout".
+    track_default_timeout = None
+    track_on_failure = "workflow_failed"  # track-level failure policy
+    if is_simple_track:
+        tc_for_defaults = get_track_config(config, item_id)
+        track_default_timeout = tc_for_defaults.get("timeout_seconds", 1800)
+        track_on_failure = tc_for_defaults.get("on_failure", "workflow_failed")
+
+    ok = True
+    last_err = ""
+    for i, entry in enumerate(commands, 1):
+        # Env hooks produce (cmd, timeout) tuples; simple tracks / legacy
+        # tracks produce strings or dicts. Normalize to a uniform dict.
+        if is_env_hook:
+            # env hook path — entry is always a (cmd, timeout) tuple built
+            # above (line ~1776). timeout may be None.
+            cmd_str, timeout_val = entry[0], entry[1]
+            per_cmd = {
+                "cmd": cmd_str,
+                "timeout_seconds": timeout_val,
+                "on_failure": "fail",  # env hooks have no retry/continue
+                "retry_max": 0,
+                "retry_timeout_seconds": timeout_val,
+            }
+        else:
+            try:
+                per_cmd = normalize_simple_command(
+                    entry, track_default_timeout=track_default_timeout)
+            except ValueError as ve:
+                ok = False
+                last_err = (
+                    f"Simple track {item_id} 命令 #{i} 配置错误: {ve}")
+                break
+            cmd_str = per_cmd["cmd"]
+            timeout_val = per_cmd["timeout_seconds"]
+        if not cmd_str or not cmd_str.strip():
+            continue
+        timeout_msg = f" --timeout {timeout_val}s" if timeout_val else ""
+        header = f"=== {item_id} ({label}) [{ts}] #exec ===\n--- command ---\n{cmd_str}{timeout_msg}"
+        # Run with retry loop if on_failure=retry.
+        attempts_remaining = 1
+        if is_simple_track and per_cmd["on_failure"] == "retry":
+            attempts_remaining = max(1, int(per_cmd["retry_max"])) + 1
+        ok_i = False
+        err_i = ""
+        for attempt in range(1, attempts_remaining + 1):
+            attempt_timeout = (
+                per_cmd["retry_timeout_seconds"]
+                if (is_simple_track and attempt > 1
+                    and per_cmd["on_failure"] == "retry")
+                else timeout_val
+            )
+            attempt_header = header if attempt == 1 else (
+                header + f"\n[retry {attempt-1}/{attempts_remaining-1}]")
+            ok_i, _out_i, err_i = run_bash(
+                cmd_str, timeout_seconds=attempt_timeout,
+                log_path=log_path, header=attempt_header,
+                change=change, track_id=item_id)
+            if ok_i:
+                break
+            if attempt < attempts_remaining:
+                print(
+                    f"[warn] simple track {item_id} cmd #{i} attempt {attempt} "
+                    f"failed; retrying ({attempt+1}/{attempts_remaining}): "
+                    f"{err_i}",
+                    file=sys.stderr)
+        if not ok_i:
+            # Per-command failure policy.
+            policy = per_cmd["on_failure"]
+            if is_simple_track and policy == "continue":
+                print(
+                    f"[warn] simple track {item_id} cmd #{i} failed but "
+                    f"on_failure=continue; advancing: {err_i}",
+                    file=sys.stderr)
+                continue
+            # Else: 'fail' or 'retry' (after retries exhausted) — abort.
+            ok = False
+            last_err = err_i or f"Command #{i} failed"
+            break
+
+    summary = f"{label}: {'OK' if ok else 'FAILED'}"
+    pg_context_chain.phase_end(change, item_id, summary)
+
+    # Build phase_result for env hooks — return to LLM instead of recursing cmd_next.
+    # The LLM reads the result and calls `record completed` to advance.
+    phase_status = "completed" if ok else "failed"
+    terminate = (is_env_hook and bare == "prepare_env" and not ok)
+    is_cleanup = (is_env_hook and bare == "clean_env" and not ok)
+
+    if ok:
+        pipeline_mark(change, item_id)
+        state["current"]["waiting"] = True
+        save_state(state)
+    else:
+        state["current"] = None
+        if terminate:
+            state["failed"] = True
+            state["fail_reason"] = f"Phase {item_id} failed: {last_err}"
+        elif is_cleanup:
+            print(f"[warn] {item_id} failed but is cleanup; advancing: {last_err}",
+                  file=sys.stderr)
+            state["completed_items"] = state.get("completed_items", []) + [item_id]
+            # clean_env failure: non-blocking, mark as done and let LLM record
+            return cmd_next(change)
+        elif is_simple_track and track_on_failure == "continue_all":
+            print(f"[warn] simple track {item_id} failed but on_failure="
+                  f"continue_all; advancing: {last_err}", file=sys.stderr)
+            state["completed_items"] = state.get("completed_items", []) + [item_id]
+            # Mark as completed for downstream and continue pipeline.
+            return cmd_next(change)
+        else:
+            return {"action": "workflow_failed", "fatal": True, "reason": f"Phase {item_id} failed: {last_err}"}
+        save_state(state)
+
+    # Build environment struct
+    env_struct = None
+    if is_env_hook:
+        env_struct = {
+            "name": env_name,
+            "prepare_env_log_path": log_path if is_env_hook and bare == "prepare_env" else None,
+            "prepare_env_status": phase_status if bare == "prepare_env" else None,
+            "config": env_cfg,
+        }
+
+    return {
+        "action": "phase_result",
+        "phase_item": item_id,
+        "terminate": terminate,
+        "environment": env_struct,
+    }
+
+
+def _enter_final_gate(config, change, state):
+    """Enter the final-gate phase."""
+    state["current"] = {"item": "final-gate", "sub": None, "waiting": True}
+    save_state(state)
+    # Build final-gate context (paths to proposal/tasks/designs/reports).
+    fg_ctx = _build_final_gate_context(change)
+    template_str = _build_prompt_template("final-gate", "gate")
+    rendered = _render_prompt_template(template_str, fg_ctx)
+    return {
+        "action": "dispatch_final_gate",
+        "agent": FINAL_GATE_AGENT,
+        "item": "final-gate",
+        "prompt_template": rendered,
+    }
+
+
+# ============================================================
+# Core logic — record
+# ============================================================
+
+def cmd_record(change, status, report_path="", summary="", outputs="", issues=""):
+    config = load_config()
+    state = load_state(change)
+    cur = state.get("current")
+
+    if not cur:
+        return _inject_commit(
+            {"action": "workflow_failed", "fatal": True, "reason": "No active item to record"},
+            change, "<none>", "<none>", status,
+        )
+
+    item_id = cur["item"]
+    sub = cur.get("sub")
+    attempt = cur.get("attempt", 1)
+
+    if status == "completed":
+        in_fix_cycle = cur.get("in_fix_cycle", False)
+
+        # Fix cycle completed — re-dispatch verify (don't mark tasks)
+        if in_fix_cycle:
+            cur["in_fix_cycle"] = False
+            cur["attempt"] = cur.get("attempt", 1) + 1
+            cur["waiting"] = False
+            save_state(state)
+
+            # Cycle number: gate_cycles for gate-fix path, fix_cycles for verify-fix path
+            fix_cycle = cur.get("gate_cycles") or cur.get("fix_cycles", 0)
+            sub_label = cur.get("sub", "fix")
+            pg_context_chain.sub_end(change, item_id, sub_label, "COMPLETED",
+                                     summary=summary, outputs=outputs, issues=issues,
+                                     fix_cycle=fix_cycle)
+            pg_context_chain.sub_start(change, item_id, "verify", fix_cycle=fix_cycle)
+            cur["waiting"] = True
+            save_state(state)
+
+            ctx = filter_track_context(config, item_id, "verify", change=change)
+            _enrich_context_with_tasks(ctx, change, item_id, "verify")
+            return _inject_commit(
+                dispatch_action(
+                    agent=SUB_AGENTS["verify"], item=item_id, sub="verify",
+                    context=ctx, attempt=cur["attempt"],
+                ),
+                change, item_id, sub, status,
+            )
+
+        # Normal sub-agent completed
+        pipeline_mark(change, item_id, sub)
+        pg_context_chain.sub_end(change, item_id, sub, "COMPLETED", summary, outputs, issues)
+
+        if sub in ("test", "dev"):
+            return _inject_commit(
+                _advance_to_next_sub(config, change, state, item_id, sub),
+                change, item_id, sub, status,
+            )
+        elif sub == "verify":
+            return _inject_commit(
+                _advance_from_verify(config, change, state, item_id, report_path),
+                change, item_id, sub, status,
+            )
+        elif sub == "gate":
+            return _inject_commit(
+                _advance_from_gate(config, change, state, item_id, "pass"),
+                change, item_id, sub, status,
+            )
+        else:
+            return _inject_commit(
+                _advance_track_done(config, change, state, item_id),
+                change, item_id, sub, status,
+            )
+
+    elif status == "failed":
+        pg_context_chain.sub_end(change, item_id, sub, "FAILED", "", "", issues)
+
+        # Fix: when in fix cycle, re-dispatch fix agent (don't retry
+        # the pre-fix sub-phase agent which cur["sub"] still points to)
+        if cur.get("in_fix_cycle"):
+            cur["attempt"] = attempt + 1
+            cur["waiting"] = False
+            save_state(state)
+            pg_context_chain.sub_start(change, item_id, "fix")
+            cur["waiting"] = True
+            save_state(state)
+            fix_cycle = cur.get("fix_cycles", 1)
+            ctx = filter_track_context(config, item_id, "fix", change=change)
+            return _inject_commit(
+                dispatch_fix_action(item_id, fix_cycle, ctx),
+                change, item_id, sub, status,
+            )
+
+        track_cfg = get_track_config(config, item_id)
+        max_retries = track_cfg.get("max_fail_retries", DEFAULT_FAIL_RETRIES)
+        if attempt >= max_retries:
+            state["failed"] = True
+            state["fail_reason"] = f"{item_id}:{sub} failed after {max_retries} attempts"
+            save_state(state)
+            return _inject_commit(
+                {"action": "workflow_failed", "fatal": True, "reason": state["fail_reason"]},
+                change, item_id, sub, status,
+            )
+
+        cur["attempt"] = attempt + 1
+        cur["waiting"] = False
+        save_state(state)
+        pg_context_chain.sub_start(change, item_id, sub)
+        cur["waiting"] = True
+        save_state(state)
+
+        ctx = filter_track_context(config, item_id, sub, change=change)
+        _enrich_context_with_tasks(ctx, change, item_id, sub)
+        return _inject_commit(
+            dispatch_action(
+                agent=SUB_AGENTS[sub], item=item_id, sub=sub,
+                context=ctx, attempt=attempt + 1,
+            ),
+            change, item_id, sub, status,
+        )
+
+    elif status == "escalate":
+        # verify requests fix
+        fix_cycles = cur.get("fix_cycles", 0)
+        if fix_cycles >= MAX_FIX_CYCLES:
+            # Force gate with last report
+            cur["waiting"] = False
+            cur["sub"] = "gate"
+            save_state(state)
+            pg_context_chain.sub_start(change, item_id, "gate")
+            cur["waiting"] = True
+            save_state(state)
+
+            ctx = filter_track_context(config, item_id, "gate", change=change)
+            _enrich_context_with_tasks(ctx, change, item_id, "gate")
+            return _inject_commit(
+                dispatch_action(
+                    agent=SUB_AGENTS["gate"], item=item_id, sub="gate",
+                    context=ctx, attempt=1,
+                ),
+                change, item_id, sub, status,
+            )
+
+        cur["in_fix_cycle"] = True
+        cur["fix_cycles"] = fix_cycles + 1
+        cur["waiting"] = False
+        save_state(state)
+        pg_context_chain.sub_start(change, item_id, "fix")
+        cur["waiting"] = True
+        save_state(state)
+
+        ctx = filter_track_context(config, item_id, "fix", change=change)
+        return _inject_commit(
+            dispatch_fix_action(item_id, fix_cycles + 1, ctx),
+            change, item_id, sub, status,
+        )
+
+    elif status == "pass":
+        if item_id == "final-gate":
+            pipeline_mark(change, "final-gate")
+            pg_context_chain.sub_end(change, "final-gate", "gate", "PASS", summary)
+
+            # Persist final state BEFORE archive: the state file at
+            # `.pg/changes/<change>/2-build/.pipeline-state.json`
+            # must be written into the change dir *before* archive moves it,
+            # otherwise `save_state` would silently recreate the source dir
+            # and `_auto_commit_on_record` would stage a second commit that
+            # re-introduces the orphan `.pipeline-state.json` at the old path.
+            state["current"] = None
+            state["completed"] = True
+            save_state(state)
+
+            # Auto-archive: move change dir to archive/ + commit on feature branch.
+            # Failures are non-fatal — done still returns, but archive_failed is
+            # surfaced so the LLM/manager can decide whether to retry manually.
+            archive_result = _auto_archive(change)
+            commit_result = _git_commit_archive(archive_result)
+            archive_status = {
+                "ok": archive_result.get("ok", False),
+                "target_name": archive_result.get("target_name"),
+                "src": archive_result.get("src"),
+                "target": archive_result.get("target"),
+                "reason": archive_result.get("reason"),
+                "commit": commit_result,
+            }
+
+            done_result = {
+                "action": "done",
+                "status": "completed",
+                "archive": archive_status,
+            }
+            return _inject_commit(done_result, change, item_id, sub, status)
+        return _inject_commit(
+            _advance_from_gate(config, change, state, item_id, "pass"),
+            change, item_id, sub, status,
+        )
+
+    elif status == "fail":
+        if item_id == "final-gate":
+            state["failed"] = True
+            state["fail_reason"] = "Final gate assessment failed"
+            save_state(state)
+            return _inject_commit(
+                {"action": "workflow_failed", "fatal": True, "reason": "Final gate assessment failed"},
+                change, item_id, sub, status,
+            )
+        return _inject_commit(
+            _advance_from_gate(config, change, state, item_id, "fail"),
+            change, item_id, sub, status,
+        )
+
+    return _inject_commit(
+        {"action": "workflow_failed", "fatal": True, "reason": f"Unknown status: {status}"},
+        change, item_id, sub, status,
+    )
+
+
+def _advance_to_next_sub(config, change, state, item_id, current_sub):
+    """After test or dev completes, determine next sub-phase for this track."""
+    cur_idx = SUB_PHASES.index(current_sub)
+    if cur_idx + 1 >= len(SUB_PHASES):
+        return _advance_track_done(config, change, state, item_id)
+
+    next_sub = SUB_PHASES[cur_idx + 1]
+    # Check if next sub-phase section exists and has tasks
+    check_result = run_script(PIPELINE_STATE_PY, "check", change, item_id, change=change, track_id=item_id)
+    # Filter to just the next sub
+    next_section = None
+    if not check_result.get("error"):
+        for sec in check_result.get("sections", []):
+            if sec.get("sub") == next_sub:
+                next_section = sec
+                break
+
+    if next_section:
+        if next_section.get("noop"):
+            # All `- 无` — skip
+            return _advance_to_next_sub(config, change, state, item_id, next_sub)
+        if next_section.get("unchecked", 0) == 0 and next_section.get("checked", 0) > 0:
+            # Already completed — skip
+            return _advance_to_next_sub(config, change, state, item_id, next_sub)
+
+    # Reset attempt for new sub-phase
+    state["current"] = {
+        "item": item_id,
+        "sub": next_sub,
+        "attempt": 1,
+        "fix_cycles": 0,
+        "waiting": False,
+        "has_rollback": False,
+    }
+    save_state(state)
+
+    pg_context_chain.sub_start(change, item_id, next_sub)
+    state["current"]["waiting"] = True
+    save_state(state)
+
+    ctx = filter_track_context(config, item_id, next_sub, change=change)
+    _enrich_context_with_tasks(ctx, change, item_id, next_sub)
+    return dispatch_action(
+        agent=SUB_AGENTS[next_sub],
+        item=item_id,
+        sub=next_sub,
+        context=ctx,
+        attempt=1,
+    )
+
+
+def _advance_from_verify(config, change, state, item_id, report_path):
+    """After verify PROCEED, move to gate."""
+    cur = state["current"]
+    cur["waiting"] = False
+    cur["sub"] = "gate"
+    cur["attempt"] = 1
+    cur["gate_cycles"] = 0
+    save_state(state)
+
+    pg_context_chain.sub_start(change, item_id, "gate")
+    cur["waiting"] = True
+    save_state(state)
+
+    ctx = filter_track_context(config, item_id, "gate", change=change)
+    if report_path:
+        ctx["report_path"] = report_path
+    _enrich_context_with_tasks(ctx, change, item_id, "gate")
+
+    return dispatch_action(
+        agent=SUB_AGENTS["gate"],
+        item=item_id,
+        sub="gate",
+        context=ctx,
+        attempt=1,
+    )
+
+
+def _advance_from_gate(config, change, state, item_id, verdict):
+    """Handle gate PASS or FAIL."""
+    cur = state["current"]
+
+    if verdict == "pass":
+        pipeline_mark(change, item_id, "gate")
+        pg_context_chain.sub_end(change, item_id, "gate", "PASS", f"Gate pass for {item_id}")
+        cur["waiting"] = False
+        state["current"] = None
+        state["completed_items"] = state.get("completed_items", []) + [item_id]
+        save_state(state)
+        # Advance to next pipeline item
+        return cmd_next(change)
+
+    else:
+        # gate FAIL — enter gate-fix loop
+        track_cfg = get_track_config(config, item_id)
+        max_gate_fix = track_cfg.get("max_gate_fix_retries", DEFAULT_GATE_FIX_RETRIES)
+        gate_cycles = cur.get("gate_cycles", 0) + 1
+        cur["gate_cycles"] = gate_cycles
+
+        # Locate the just-written gate report for rollback (latest {track}-{N}-gate-assessment.md)
+        gate_report_path = track_latest_report_path(change, item_id, "gate-assessment")
+        if gate_report_path is None:
+            gate_report_path = gate_report_path_for(change, item_id)
+        pipeline_gate_rollback(change, item_id, gate_report_path)
+
+        # Record context chain
+        pg_context_chain.sub_end(
+            change, item_id, "gate", "FAIL",
+            summary=f"Gate FAIL cycle {gate_cycles}/{max_gate_fix}",
+        )
+        pg_context_chain.rollback_set(
+            change, item_id,
+            f"Gate assessment failed for {item_id} (cycle {gate_cycles}/{max_gate_fix})",
+            os.path.basename(gate_report_path),
+            level="gate-cycle",
+        )
+
+        if gate_cycles >= max_gate_fix:
+            # Exhausted: record accepted gaps, continue pipeline
+            _record_accepted_gaps(change, item_id, gate_report_path, max_gate_fix)
+            pg_context_chain.sub_start(change, item_id, "gate", fix_cycle=gate_cycles)
+            cur["waiting"] = False
+            state["current"] = None
+            state["completed_items"] = state.get("completed_items", []) + [item_id]
+            save_state(state)
+            return cmd_next(change)
+
+        # Not exhausted: dispatch fix-gate agent
+        cur["in_fix_cycle"] = True
+        cur["waiting"] = False
+        save_state(state)
+
+        pg_context_chain.sub_start(change, item_id, "fix", fix_cycle=gate_cycles)
+        cur["waiting"] = True
+        save_state(state)
+
+        ctx = filter_track_context(config, item_id, "fix", change=change)
+        ctx["gate_cycles"] = gate_cycles
+        ctx["cycles_remaining"] = max_gate_fix - gate_cycles
+        ctx["gate_report_path"] = gate_report_path
+
+        return {
+            "action": "dispatch",
+            "item": item_id,
+            "sub": "fix-gate",
+            "agent": "pg-build/fix-gate",
+            "context": ctx,
+            "prompt_injection": ctx.get("prompt_injection", {
+                "target_agent": "pg-build/fix-gate",
+                "prepend": "",
+                "append": "",
+                "rules_applied": [],
+            }),
+        }
+
+
+def _advance_track_done(config, change, state, item_id):
+    """Mark track as complete, advance to next item."""
+    state["current"] = None
+    state["completed_items"] = state.get("completed_items", []) + [item_id]
+    save_state(state)
+    return cmd_next(change)
+
+
+def _last_fail_reason(state):
+    return state.get("fail_reason", "Unknown failure")
+
+
+def cmd_check(change, item):
+    result = run_script(PIPELINE_STATE_PY, "check", change, item, change=change, track_id=item)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+def cmd_progress(change):
+    result = run_script(PIPELINE_STATE_PY, "progress", change, change=change)
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+# ============================================================
+# invoke-hook (LLM-facing CLI)
+# ============================================================
+
+def _build_env_level_hook_spec(change, env, stage, action, act_cfg):
+    """Build pg-run-hook.py spec for environment-level hooks (prepare_env / clean_env).
+
+    Environment-level hooks live directly under environments.<env>.<action>
+    (NOT under roles.<role>.actions). They have no role/instance. We render
+    a spec shape that pg-run-hook.py can consume: role/instance_host are
+    empty strings; log_path is namespaced under env-level hooks subdir so
+    it doesn't collide with role.* action logs.
+    """
+    rendered_args = []
+    for raw in (act_cfg.get("args") or []):
+        rendered_args.append(str(raw))
+
+    inner_cmd = "bash " + shlex.quote(act_cfg["script"])
+    if rendered_args:
+        inner_cmd += " " + " ".join(shlex.quote(a) for a in rendered_args)
+
+    log_path = os.path.join(
+        PROJECT_ROOT,
+        f".pg/changes/{change}/2-build/{env}/logs",
+        f"env.{action}.log",
+    )
+
+    return {
+        "cmd": inner_cmd,
+        "change": change,
+        "stage": stage,
+        "env": env,
+        "role": "",
+        "instance_name": "",
+        "instance_host": "",
+        "hook_type": action,
+        "timeout_seconds": act_cfg.get("timeout_seconds"),
+        "log_path": log_path,
+    }
+
+
+def cmd_invoke_hook(argv):
+    """LLM-facing entry point for triggering role actions (start/stop/logs/tail).
+
+    Usage:
+      python3 pg-pipeline-runner.py invoke-hook \
+        --change <C> --env <ENV> --role <ROLE> \
+        --instance <INSTANCE> --action <ACTION> \
+        [--stage <STAGE>] [--tail-lines <N>]
+
+    Resolves the action in project.yaml, renders args (with
+    {role}/{instance.name}/{instance.host} placeholders), appends
+    --tail-lines <N> if action is logs|tail and the flag was given,
+    builds the pg-run-hook.py spec, and spawns the hook executor.
+
+    timeout_seconds is read from project.yaml (NOT a CLI flag) and
+    passed through to pg-run-hook.py.
+
+    --action prepare_env|clean_env trigger environment-level hooks
+    (defined directly under environments.<env>.prepare_env /
+    clean_env, NOT under roles.<role>.actions). When these actions
+    are used, --role / --instance are ignored.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        prog="pg-pipeline-runner.py invoke-hook",
+        description=(
+            "Trigger a role action (start/stop/logs/tail) via "
+            "pg-run-hook.py. Used by sub-agents; not part of the "
+            "pipeline state machine."
+        ),
+    )
+    parser.add_argument("--change", required=True,
+                        help="change name (used for log_path routing)")
+    parser.add_argument("--env", required=True,
+                        help="environment name (must be in project.yaml environments)")
+    parser.add_argument("--stage", default="manual",
+                        help="stage name (default: manual)")
+    parser.add_argument("--role", required=False,
+                        help=(
+                            "role name (backend/frontend/agent). Required "
+                            "for per-role actions (start/stop/logs/tail); "
+                            "ignored for environment-level actions "
+                            "(prepare_env/clean_env)."
+                        ))
+    parser.add_argument("--instance", required=False,
+                        help=(
+                            "instance name. Must exist in "
+                            "environments.<env>.roles.<role>.instances. "
+                            "Required for per-role actions; ignored for "
+                            "environment-level actions."
+                        ))
+    parser.add_argument("--action", required=True,
+                        choices=["start", "stop", "logs", "tail",
+                                 "prepare_env", "clean_env"],
+                        help=(
+                            "action to trigger. start/stop/logs/tail are "
+                            "per-role lifecycle actions (require --role and "
+                            "--instance); prepare_env/clean_env are "
+                            "environment-level lifecycle hooks (ignore "
+                            "--role/--instance)."
+                        ))
+    parser.add_argument("--tail-lines", type=int, default=None,
+                        help="(logs/tail only) append --tail-lines N to hook args")
+
+    # argv is the full sys.argv (including program name) — main() passes
+    # sys.argv[1:], tests pass sys.argv. Slice [1:] here.
+    # argv is sys.argv (including program name AND the "invoke-hook"
+    # subcommand token at index 1). main() passes sys.argv directly;
+    # tests set sys.argv = ["runner.py", "invoke-hook", ...] and pass it.
+    # Slice off both the program name and the subcommand.
+    args = parser.parse_args(argv[2:])
+
+    # Per-role actions require --role and --instance at the CLI level.
+    # argparse can't express "required only when --action is X", so we
+    # validate manually here.
+    ENV_LEVEL_ACTIONS = ("prepare_env", "clean_env")
+    if args.action not in ENV_LEVEL_ACTIONS:
+        if not args.role:
+            sys.stderr.write(
+                f"Error: --action {args.action} requires --role\n"
+            )
+            sys.exit(1)
+        if not args.instance:
+            sys.stderr.write(
+                f"Error: --action {args.action} requires --instance\n"
+            )
+            sys.exit(1)
+
+    config = load_config()
+    env_cfg = (config.get("environments") or {}).get(args.env) or {}
+
+    # Environment-level lifecycle hooks (prepare_env / clean_env) are
+    # NOT role-scoped: they live directly under environments.<env>.
+    # Skip role/instance validation entirely for these.
+    ENV_LEVEL_ACTIONS = ("prepare_env", "clean_env")
+    if args.action in ENV_LEVEL_ACTIONS:
+        env_hook_cfg = env_cfg.get(args.action)
+        if not env_hook_cfg:
+            sys.stderr.write(
+                f"Error: action '{args.action}' not defined in "
+                f"environments.{args.env}\n"
+            )
+            sys.exit(1)
+        act_cfg = env_hook_cfg
+        # No role/instance for env-level hooks; keep spec well-formed for
+        # pg-run-hook.py (which reads role/instance_host but tolerates empty).
+        spec = _build_env_level_hook_spec(
+            change=args.change,
+            env=args.env,
+            stage=args.stage,
+            action=args.action,
+            act_cfg=act_cfg,
+        )
+    else:
+        # Per-role lifecycle action (start / stop / logs / tail).
+        if args.role not in (env_cfg.get("roles") or {}):
+            sys.stderr.write(
+                f"Error: role '{args.role}' not defined in environments.{args.env}.roles\n"
+            )
+            sys.exit(1)
+        role_cfg = env_cfg["roles"][args.role]
+        if args.action not in (role_cfg.get("actions") or {}):
+            sys.stderr.write(
+                f"Error: action '{args.action}' not defined in "
+                f"environments.{args.env}.roles.{args.role}.actions\n"
+            )
+            sys.exit(1)
+        act_cfg = role_cfg["actions"][args.action]
+
+        instance = next(
+            (i for i in (role_cfg.get("instances") or [])
+             if i.get("name") == args.instance),
+            None,
+        )
+        if not instance:
+            sys.stderr.write(
+                f"Error: instance '{args.instance}' not found in "
+                f"environments.{args.env}.roles.{args.role}.instances\n"
+            )
+            sys.exit(1)
+        instance_host = instance.get("host", "")
+
+        rendered_args = []
+        for raw in (act_cfg.get("args") or []):
+            a = str(raw)
+            a = a.replace("{role}", args.role)
+            a = a.replace("{instance.name}", args.instance)
+            a = a.replace("{instance.host}", instance_host)
+            rendered_args.append(a)
+
+        # Option Y: --tail-lines is appended to hook args list (logs/tail only).
+        if args.action in ("logs", "tail") and args.tail_lines is not None:
+            rendered_args.extend(["--tail-lines", str(args.tail_lines)])
+
+        inner_cmd = "bash " + shlex.quote(act_cfg["script"])
+        if rendered_args:
+            inner_cmd += " " + " ".join(shlex.quote(a) for a in rendered_args)
+
+        log_path = os.path.join(
+            PROJECT_ROOT,
+            f".pg/changes/{args.change}/2-build/{args.env}/logs",
+            f"role.{args.role}.{args.action}@{args.instance}.log",
+        )
+
+        spec = {
+            "cmd": inner_cmd,
+            "change": args.change,
+            "stage": args.stage,
+            "env": args.env,
+            "role": args.role,
+            "instance_name": args.instance,
+            "instance_host": instance_host,
+            "hook_type": args.action,
+            "timeout_seconds": act_cfg.get("timeout_seconds"),
+            "log_path": log_path,
+        }
+
+    proc = subprocess.run(
+        ["python3", PG_HOOK_RUNNER],
+        input=json.dumps(spec, indent=2),
+        text=True,
+        cwd=PROJECT_ROOT,
+    )
+    # When called from main(), exit with the hook's return code so the
+    # shell sees the same status. When called from tests / programmatically,
+    # sys.exit is wrapped in SystemExit which tests can catch.
+    sys.exit(proc.returncode)
+
+
+# ============================================================
+# Main
+# ============================================================
+
+def cmd_prepare_env_status(change, stage_name=None):
+    """Print JSON array of prepare_env status for required stages.
+
+    Usage:
+      python3 pg-pipeline-runner.py prepare-env-status <change>
+      python3 pg-pipeline-runner.py prepare-env-status <change> <stage_name>
+
+    Output: JSON array (always array, even for single stage query).
+    Each element: {"stage": "<name>", "prepare": {"status", "log_path", "message"}}
+    """
+    config = load_config()
+    out = []
+    for stage_cfg in (config.get("stages") or []):
+        s_name = stage_cfg.get("name")
+        if stage_name and s_name != stage_name:
+            continue
+        if not bool((stage_cfg.get("environment") or {}).get("required", False)):
+            continue
+        out.append({"stage": s_name, "prepare": _build_prepare_status(change, s_name)})
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+
+
+def main():
+    if len(sys.argv) < 2:
+        print("错误: 缺少参数", file=sys.stderr)
+        print("用法:", file=sys.stderr)
+        print("  python3 pg-pipeline-runner.py next <change>", file=sys.stderr)
+        print("  python3 pg-pipeline-runner.py record <change> <status> [report_path]", file=sys.stderr)
+        print("  python3 pg-pipeline-runner.py check <change> <item>", file=sys.stderr)
+        print("  python3 pg-pipeline-runner.py progress <change>", file=sys.stderr)
+        print("  python3 pg-pipeline-runner.py prepare-env-status <change> [stage_name]", file=sys.stderr)
+        print("  python3 pg-pipeline-runner.py invoke-hook --change <C> --env <ENV> --role <ROLE> --instance <I> --action <A> [--stage <S>] [--tail-lines <N>]", file=sys.stderr)
+        sys.exit(1)
+
+    command = sys.argv[1]
+
+    # invoke-hook is the LLM-facing entry; its own argv parsing is done
+    # by argparse inside cmd_invoke_hook (it doesn't need a <change> arg
+    # at position 2 the way next/record/check do).
+    if command == "invoke-hook":
+        cmd_invoke_hook(sys.argv)
+        return
+
+    if len(sys.argv) < 3:
+        print("错误: 缺少 <change> 参数", file=sys.stderr)
+        print("用法: python3 pg-pipeline-runner.py <command> <change> ...", file=sys.stderr)
+        sys.exit(1)
+
+    change = sys.argv[2]
+
+    VALID_COMMANDS = {"next", "record", "check", "progress", "prepare-env-status"}
+    if command not in VALID_COMMANDS:
+        print(f"错误: 未知命令 '{command}'", file=sys.stderr)
+        print(f"有效命令: {', '.join(sorted(VALID_COMMANDS | {'invoke-hook'}))}", file=sys.stderr)
+        print("用法: python3 pg-pipeline-runner.py next <change>", file=sys.stderr)
+        sys.exit(1)
+
+    if command == "next":
+        result = cmd_next(change)
+    elif command == "record":
+        if len(sys.argv) < 4:
+            print("错误: record 命令缺少 <status> 参数", file=sys.stderr)
+            print("用法: python3 pg-pipeline-runner.py record <change> <status> [report_path] [summary] [outputs] [issues]", file=sys.stderr)
+            print("status: completed | failed | escalate | pass | fail", file=sys.stderr)
+            sys.exit(1)
+        status = sys.argv[3]
+        VALID_STATUSES = {"completed", "failed", "escalate", "pass", "fail"}
+        if status not in VALID_STATUSES:
+            print(f"错误: 无效 status '{status}'", file=sys.stderr)
+            print(f"有效值: {', '.join(sorted(VALID_STATUSES))}", file=sys.stderr)
+            sys.exit(1)
+        report_path = sys.argv[4] if len(sys.argv) > 4 else ""
+        summary = sys.argv[5] if len(sys.argv) > 5 else ""
+        outputs = sys.argv[6] if len(sys.argv) > 6 else ""
+        issues = sys.argv[7] if len(sys.argv) > 7 else ""
+        result = cmd_record(change, status, report_path, summary, outputs, issues)
+    elif command == "check":
+        item = sys.argv[3] if len(sys.argv) > 3 else None
+        cmd_check(change, item)
+        return
+    elif command == "progress":
+        cmd_progress(change)
+        return
+    elif command == "prepare-env-status":
+        stage_name = sys.argv[3] if len(sys.argv) > 3 else None
+        cmd_prepare_env_status(change, stage_name)
+        return
+    else:
+        sys.exit(1)  # unreachable
+
+    if command in ("next", "record") and isinstance(result, dict):
+        config = load_config()
+        result = _inject_next_call_timeout(result, config)
+
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main()

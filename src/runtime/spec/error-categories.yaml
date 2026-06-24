@@ -1,0 +1,117 @@
+# pg-skills Error Categories — SSOT
+# Phase 2 错误传播契约的 SSOT.
+# 任何 hook / runtime 代码引用 category, 必须从此文件取值.
+
+version: "1.0"
+description: |
+  Standardized error categories for pg-skills hook protocol.
+  Hooks report failures via `pg-fail --category=<name>`.
+  L1 runner reads this file to determine default retry behavior.
+
+categories:
+  # ---- 前置 / 资源 / 网络 / 配置 / 权限 ----
+  prereq_missing:
+    default_severity: blocked
+    default_agent_recoverable: false
+    default_retry_strategy: none
+    default_max_retries: 0
+    description: "Required command / library not installed."
+
+  port_in_use:
+    default_severity: recoverable
+    default_agent_recoverable: true
+    default_retry_strategy: after_fix
+    default_max_retries: 3
+    description: "Network port occupied by another process."
+
+  timeout:
+    default_severity: recoverable
+    default_agent_recoverable: true
+    default_retry_strategy: exponential_backoff
+    default_max_retries: 3
+    description: "Operation exceeded its timeout budget."
+
+  health_check_fail:
+    default_severity: recoverable
+    default_agent_recoverable: true
+    default_retry_strategy: wait_and_retry
+    default_max_retries: 2
+    description: "Service started but health endpoint not responding."
+
+  dependency_not_ready:
+    default_severity: recoverable
+    default_agent_recoverable: true
+    default_retry_strategy: wait_and_retry
+    default_max_retries: 3
+    description: "Downstream dependency (DB / cache / API) not ready."
+
+  network:
+    default_severity: recoverable
+    default_agent_recoverable: true
+    default_retry_strategy: exponential_backoff
+    default_max_retries: 3
+    description: "SSH / HTTP / DNS failure."
+
+  permission_denied:
+    default_severity: blocked
+    default_agent_recoverable: false
+    default_retry_strategy: none
+    default_max_retries: 0
+    description: "Insufficient permissions for operation."
+
+  config_invalid:
+    default_severity: blocked
+    default_agent_recoverable: false
+    default_retry_strategy: none
+    default_max_retries: 0
+    description: "Configuration value invalid or missing."
+
+  resource_exhausted:
+    default_severity: blocked
+    default_agent_recoverable: false
+    default_retry_strategy: none
+    default_max_retries: 0
+    description: "Disk / memory / file descriptor exhausted."
+
+  # ---- 测试 / 构建 / 数据 ----
+  test_failure:
+    default_severity: recoverable
+    default_agent_recoverable: true
+    default_retry_strategy: none
+    default_max_retries: 2
+    description: "Test assertion failed."
+
+  build_failure:
+    default_severity: recoverable
+    default_agent_recoverable: true
+    default_retry_strategy: none
+    default_max_retries: 2
+    description: "Compilation / build step failed."
+
+  db_migration_fail:
+    default_severity: blocked
+    default_agent_recoverable: true
+    default_retry_strategy: none
+    default_max_retries: 1
+    description: "Database migration failed (e.g. Flyway / Liquibase)."
+
+  invariant_violation:
+    default_severity: blocked
+    default_agent_recoverable: true
+    default_retry_strategy: none
+    default_max_retries: 1
+    description: "Cross-module invariant check failed."
+
+  # ---- 兜底 ----
+  unknown:
+    default_severity: recoverable
+    default_agent_recoverable: false
+    default_retry_strategy: none
+    default_max_retries: 0
+    description: "Unclassified failure (hook did not provide a category)."
+
+# retry_strategy 取值说明:
+#   none: 不重试, 直接 escalate
+#   wait_and_retry: 等 retry_after_seconds 后重试
+#   exponential_backoff: 1s -> 3s -> 10s 递增
+#   after_fix: 调用 fix-hook 修复后再重试

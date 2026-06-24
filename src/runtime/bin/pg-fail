@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# pg-fail — 显式报告 hook 失败
+#
+# 用法 (在 hook 内部):
+#   pg-fail --category=port_in_use \
+#           --code=PG-E-0105 \
+#           --message="Port 9080 in use by PID 1234" \
+#           --hint="kill -9 1234" \
+#           --agent-recoverable=true \
+#           --retry-after-seconds=3
+#
+# 也可 source hook-helpers.sh 直接调 pg_fail (下划线版)
+
+set -euo pipefail
+SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# shellcheck source=../lib/hook-helpers.sh
+source "$SELF_DIR/../lib/hook-helpers.sh"
+pg_fail "$@"

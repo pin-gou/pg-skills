@@ -1,0 +1,265 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pg-build 流程图</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f6fa; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+#toolbar { background: #2c3e50; color: #fff; padding: 10px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; user-select: none; }
+#toolbar h1 { font-size: 16px; font-weight: 600; margin-right: auto; }
+#toolbar .btn { background: #34495e; border: none; color: #fff; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: background .15s; }
+#toolbar .btn:hover { background: #4a6a8a; }
+#toolbar .btn:active { background: #1a252f; }
+#toolbar .sep { width: 1px; height: 24px; background: #4a6a8a; }
+#toolbar .zoom-info { font-size: 12px; color: #bdc3c7; min-width: 50px; text-align: center; }
+#container { flex: 1; overflow: hidden; position: relative; background: #f5f6fa; }
+#container svg { display: block; margin: 0 auto; }
+#loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #7f8c8d; background: #f5f6fa; z-index: 10; transition: opacity .4s; }
+#loading.hidden { opacity: 0; pointer-events: none; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>pg-build 流程图</h1>
+  <button class="btn" onclick="zoomIn()">+ 放大</button>
+  <span class="zoom-info" id="zoomLevel">100%</span>
+  <button class="btn" onclick="zoomOut()">− 缩小</button>
+  <span class="sep"></span>
+  <button class="btn" onclick="fit()">适应窗口</button>
+  <button class="btn" onclick="reset()">重置</button>
+  <span class="sep"></span>
+  <button class="btn" onclick="toggleDark()">🌙 暗色</button>
+</div>
+
+<div id="container">
+  <div id="loading">渲染中…</div>
+  <pre id="mermaidSrc" style="display:none;">
+flowchart TB
+    classDef stage fill:#e8f4f8,stroke:#2980b9,stroke-width:2px
+    classDef dispatch fill:#d5f5e3,stroke:#27ae60,stroke-width:1px
+    classDef deploy fill:#fef9e7,stroke:#f39c12,stroke-width:1px
+    classDef gate fill:#fdedec,stroke:#e74c3c,stroke-width:1px
+    classDef loop fill:#f4ecf7,stroke:#8e44ad,stroke-width:1px
+    classDef done fill:#d5f5e3,stroke:#1e8449,stroke-width:3px
+    classDef fail fill:#fadbd8,stroke:#c0392b,stroke-width:3px
+
+    START([Start]) --> INIT[Feature Branch + Init Commit]
+    INIT --> DETECT{any active change?}
+    DETECT -->|no| EXIT([Exit])
+    DETECT -->|yes| NEXT($RUNNER next)
+
+    NEXT --> STAGE1_B
+
+    subgraph STAGE1[Stage 1: dev-isolated - 顺序执行]
+        STAGE1_H[requires_deployment: false]:::stage
+
+        STAGE1_B[Track: backend]:::dispatch --> S1_B_TD[test -> dev]:::dispatch
+        S1_B_TD --> S1_B_V{verify}:::dispatch
+        S1_B_V -->|PROCEED| S1_B_G[gate]:::gate
+        S1_B_V -->|ESCALATE| S1_B_F[fix]:::dispatch
+        S1_B_F --> S1_B_TD
+        S1_B_G -->|PASS| STAGE1_A
+        S1_B_G -->|FAIL| S1_B_GF[gate-fix]:::loop
+        S1_B_GF --> S1_B_TD
+        S1_B_F -.->|over max_fix_retries| S1_B_G
+
+        STAGE1_A[Track: agent]:::dispatch --> S1_A_TD[test -> dev]:::dispatch
+        S1_A_TD --> S1_A_V{verify}:::dispatch
+        S1_A_V -->|PROCEED| S1_A_G[gate]:::gate
+        S1_A_V -->|ESCALATE| S1_A_F[fix]:::dispatch
+        S1_A_F --> S1_A_TD
+        S1_A_G -->|PASS| STAGE1_F
+        S1_A_G -->|FAIL| S1_A_GF[gate-fix]:::loop
+        S1_A_GF --> S1_A_TD
+        S1_A_F -.->|over max_fix_retries| S1_A_G
+
+        STAGE1_F[Track: frontend]:::dispatch --> S1_F_TD[test -> dev]:::dispatch
+        S1_F_TD --> S1_F_V{verify}:::dispatch
+        S1_F_V -->|PROCEED| S1_F_G[gate]:::gate
+        S1_F_V -->|ESCALATE| S1_F_F[fix]:::dispatch
+        S1_F_F --> S1_F_TD
+        S1_F_G -->|PASS| S1_ALL{all PASS?}
+        S1_F_G -->|FAIL| S1_F_GF[gate-fix]:::loop
+        S1_F_GF --> S1_F_TD
+        S1_F_F -.->|over max_fix_retries| S1_F_G
+
+        S1_ALL -->|yes| S1_NEXT[to Stage 2]
+    end
+
+    S1_NEXT --> STAGE2
+
+    subgraph STAGE2[Stage 2: dev-mock-integration - 顺序执行]
+        STAGE2_H[requires_deployment: true]:::stage
+
+        S2_D[deploy backend role<br/>backend.start + health]:::deploy
+
+        S2_B[Track: backend]:::dispatch --> S2_B_TD[test -> dev<br/>+ mock test]:::dispatch
+        S2_B_TD --> S2_B_V{verify}:::dispatch
+        S2_B_V -->|PROCEED| S2_B_G[gate]:::gate
+        S2_B_V -->|ESCALATE| S2_B_F[fix]:::dispatch
+        S2_B_F --> S2_B_TD
+        S2_B_G -->|PASS| S2_D2
+        S2_B_G -->|FAIL| S2_B_GF[gate-fix]:::loop
+        S2_B_GF --> S2_B_TD
+        S2_B_F -.->|over max_fix_retries| S2_B_G
+
+        S2_D2[deploy agent role<br/>agent.start + health]:::deploy
+
+        S2_A[Track: agent]:::dispatch --> S2_A_TD[test -> dev<br/>+ mock test]:::dispatch
+        S2_A_TD --> S2_A_V{verify}:::dispatch
+        S2_A_V -->|PROCEED| S2_A_G[gate]:::gate
+        S2_A_V -->|ESCALATE| S2_A_F[fix]:::dispatch
+        S2_A_F --> S2_A_TD
+        S2_A_G -->|PASS| S2_D3
+        S2_A_G -->|FAIL| S2_A_GF[gate-fix]:::loop
+        S2_A_GF --> S2_A_TD
+        S2_A_F -.->|over max_fix_retries| S2_A_G
+
+        S2_D3[deploy frontend role<br/>frontend.start + health]:::deploy
+
+        S2_F[Track: frontend]:::dispatch --> S2_F_TD[test -> dev<br/>+ mock test]:::dispatch
+        S2_F_TD --> S2_F_V{verify}:::dispatch
+        S2_F_V -->|PROCEED| S2_F_G[gate]:::gate
+        S2_F_V -->|ESCALATE| S2_F_F[fix]:::dispatch
+        S2_F_F --> S2_F_TD
+        S2_F_G -->|PASS| S2_ALL{all PASS?}
+        S2_F_G -->|FAIL| S2_F_GF[gate-fix]:::loop
+        S2_F_GF --> S2_F_TD
+        S2_F_F -.->|over max_fix_retries| S2_F_G
+
+        S2_ALL -->|yes| S2_STOP[stop roles]:::deploy
+    end
+
+    S2_STOP --> S3_NEXT[to Stage 3]
+
+    subgraph STAGE3[Stage 3: real-integration]
+        STAGE3_H[requires_deployment: true<br/>environment: dev-3tier]:::stage
+
+        S3_D[deploy all roles<br/>backend.start frontend.start agent.start]:::deploy
+
+        S3_V{verify<br/>E2E test}:::dispatch
+
+        S3_D --> S3_V
+        S3_V -->|PROCEED| S3_G[gate]:::gate
+        S3_V -->|ESCALATE| S3_F[fix]:::dispatch
+        S3_F --> S3_V
+        S3_G -->|PASS| S3_OK(( ))
+        S3_G -->|FAIL| S3_GF[gate-fix]:::loop
+        S3_GF --> S3_V
+        S3_F -.->|over max_fix_retries| S3_G
+    end
+
+    S3_OK --> S3_STOP[stop all roles + cleanup]:::deploy
+
+    S3_STOP --> FG[final-gate<br/>cross-track review]:::gate
+    FG -->|PASS| ARC[auto archive<br/>changes -> archive/]:::done
+    FG -->|FAIL| KI[known-issues.md<br/>manual intervention]:::fail
+    ARC --> DONE([DONE]):::done
+    KI --> WFF([workflow_failed]):::fail
+
+    subgraph LEGEND[图例]
+        L1[stage box]:::stage
+        L2[agent dispatch]:::dispatch
+        L3[deploy action]:::deploy
+        L4[gate review]:::gate
+        L5[fix loop]:::loop
+        L6[success]:::done
+        L7[failure]:::fail
+    end
+  </pre>
+</div>
+
+<script>
+let panZoomInstance = null;
+let dark = false;
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'default',
+  flowchart: { useMaxWidth: false, htmlLabels: true, padding: 20 }
+});
+
+async function render() {
+  const src = document.getElementById('mermaidSrc').textContent.trim();
+  const container = document.getElementById('container');
+  const loading = document.getElementById('loading');
+
+  const { svg: svgText } = await mermaid.render('mermaidChart', src);
+  container.insertAdjacentHTML('beforeend', svgText);
+
+  loading.classList.add('hidden');
+
+  const svg = document.querySelector('#container svg');
+  svg.style.width = '100%';
+  svg.style.height = '100%';
+  svg.style.minWidth = '1400px';
+  svg.style.minHeight = '900px';
+
+  panZoomInstance = svgPanZoom(svg, {
+    zoomEnabled: true,
+    controlIconsEnabled: false,
+    fit: true,
+    center: true,
+    minZoom: 0.3,
+    maxZoom: 5,
+    customEventsHandler: {
+      haltEventListeners: [],
+      init: function (options) {
+        const {svgElement} = options;
+        svgElement.addEventListener('wheel', options.onZoom);
+        svgElement.addEventListener('mousedown', options.onPanStart);
+        svgElement.addEventListener('mousemove', options.onPan);
+        svgElement.addEventListener('mouseup', options.onPanEnd);
+        svgElement.addEventListener('mouseleave', options.onPanEnd);
+      },
+      destroy: function (options) {
+        const {svgElement} = options;
+        svgElement.removeEventListener('wheel', options.onZoom);
+        svgElement.removeEventListener('mousedown', options.onPanStart);
+        svgElement.removeEventListener('mousemove', options.onPan);
+        svgElement.removeEventListener('mouseup', options.onPanEnd);
+        svgElement.removeEventListener('mouseleave', options.onPanEnd);
+      }
+    }
+  });
+
+  updateZoomInfo();
+  panZoomInstance.setOnZoom(updateZoomInfo);
+}
+
+function zoomIn() { if (panZoomInstance) panZoomInstance.zoomIn(); }
+function zoomOut() { if (panZoomInstance) panZoomInstance.zoomOut(); }
+function fit() { if (panZoomInstance) panZoomInstance.fit(); panZoomInstance.center(); }
+function reset() { if (panZoomInstance) { panZoomInstance.reset(); panZoomInstance.center(); } }
+function updateZoomInfo() {
+  if (!panZoomInstance) return;
+  const pct = Math.round(panZoomInstance.getZoom() * 100);
+  document.getElementById('zoomLevel').textContent = pct + '%';
+}
+
+function toggleDark() {
+  dark = !dark;
+  const c = document.getElementById('container');
+  const tb = document.getElementById('toolbar');
+  if (dark) {
+    document.body.style.background = '#1a1a2e';
+    c.style.background = '#1a1a2e';
+    tb.style.background = '#0f0f23';
+    document.querySelectorAll('#container svg').forEach(s => s.style.filter = 'invert(0.85) hue-rotate(180deg)');
+  } else {
+    document.body.style.background = '#f5f6fa';
+    c.style.background = '#f5f6fa';
+    tb.style.background = '#2c3e50';
+    document.querySelectorAll('#container svg').forEach(s => s.style.filter = '');
+  }
+}
+
+render();
+</script>
+</body>
+</html>
