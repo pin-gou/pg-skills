@@ -1,49 +1,39 @@
-# Changelog
+# 变更日志
 
-All notable changes to pg-skills are documented in this file.
+所有对 pg-skills 的重要变更均记录在此文件中。
 
-The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
+版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
+## [0.2.0] - 2026-06-24
 
-### Added
-- **Unified hook command executor**: `src/runtime/lib/pg-run-hook.py` — single
-  entry point for env hooks (prepare_env / clean_env) and role actions
-  (start / stop / logs / tail). Reads JSON spec from stdin, injects PG_*
-  protocol env vars (PG_PROJECT_ROOT / PG_SKILLS_PATH / PG_CHANGE_NAME /
-  PG_STAGE / PG_ENV / PG_ROLE / PG_INSTANCE_NAME / PG_INSTANCE_HOST /
-  PG_HOOK_TYPE), runs the command with timeout, returns JSON result.
-  Module hooks (build / lint / test.<key>) stay as raw `timeout N bash -c
-  '<cmd>'` strings so agents keep flexibility to run individual tests.
+### 新增
+- `pg upgrade [version]` 命令：替代 `pg sync`，支持指定版本号（如 `pg upgrade 0.2.0`），自动补 `v` 前缀作为 git tag 拉取
+- `pg upgrade --list`：fetch 远程 tags，列出所有可用版本并标记当前版本
+- `pg upgrade --interactive`：fetch 目标 ref，列出差异文件，检测本地冲突
 
-### Changed
-- **Breaking**: `pg-regression/scripts/pg-run-command.py` merged into
-  `pg-run-hook.py` and deleted. All references updated. The new
-  `timeout_seconds` field replaces the legacy `timeout` field.
-- **Breaking**: `stage.environment.actions` keys are now flattened to
-  `role.<role>.<action>@<instance_name>` (e.g. `role.backend.start@backend-1`).
-  Each value has a pre-rendered `cmd` field (full `pg-run-hook.py` invocation);
-  sub-agents must `bash {cmd}` instead of `bash {script} {args}`.
-  Instances with no declared name still get the un-suffixed key for
-  backward-compat.
-- pg-build runner's `_execute_phase` now wraps env hooks in
-  `pg-run-hook.py` instead of executing them with `bash` directly.
-- `start-services.sh` (pg-regression) now invokes the new
-  `pg-run-hook.py` and uses `timeout_seconds` in its JSON spec.
+### 变更
+- **破坏性**：`pg sync` 命令重命名为 `pg upgrade`
+- **破坏性**：`--check` 标志重命名为 `--list`
+- **破坏性**：移除 `.pg-version` 文件。改用 `.pg/skills/VERSION` 作为版本唯一来源
+- `pg doctor` 改为检查 `.pg/skills/VERSION` 而非 `.pg-version`
+- `pg init` 不再写入 `.pg-version` 文件
+
+### 修复
+- `_normalize_ref` 逻辑：纯数字版本号（如 `0.2.0`）自动补 v 前缀，分支名（`master`、`feature/x`）保持原样
 
 ## [0.1.0] - 2026-06-22
 
-### Added
-- Initial extraction of pg-* skills, commands, and agents from webvirt project
-- 13 skills: pg-propose, pg-build, pg-quick-build, pg-fix-issue, pg-regression, pg-archive, pg-verify-and-merge, pg-propose-refine, pg-browser-testing-with-devtools, pg-systematic-diagnosing, git-workflow-and-versioning, security-and-hardening, using-agent-skills
-- 8 slash commands: /1-pg-define, /2-pg-propose, /2b-pg-quick-build, /2.1-pg-propose-refine, /3-pg-build, /4-pg-regression, /5-pg-fix-issue, /6-pg-archive
-- 5 sub-agents: explore, pg-manager, pg-build/{dev,test,verify,fix,fix-gate,gate}, pg-fix-issue/{executor,fix-and-pr}, pg-regression/fix-test, pg-quick-build/worker
-- L1 runtime skeleton: src/runtime/{bin,lib,spec} (structure only, content in Phase 2)
-- 3 language example templates: java-maven, go, typescript (structure only)
+### 新增
+- 从 webvirt 项目提取 pg-* skills、commands 和 agents
+- 13 个技能：pg-propose, pg-build, pg-quick-build, pg-fix-issue, pg-regression, pg-archive, pg-verify-and-merge, pg-propose-refine, pg-browser-testing-with-devtools, pg-systematic-diagnosing, git-workflow-and-versioning, security-and-hardening, using-agent-skills
+- 8 个斜杠命令：/1-pg-define, /2-pg-propose, /2b-pg-quick-build, /2.1-pg-propose-refine, /3-pg-build, /4-pg-regression, /5-pg-fix-issue, /6-pg-archive
+- 5 个子代理：explore, pg-manager, pg-build/{dev,test,verify,fix,fix-gate,gate}, pg-fix-issue/{executor,fix-and-pr}, pg-regression/fix-test, pg-quick-build/worker
+- L1 runtime 骨架：src/runtime/{bin,lib,spec}
+- 3 种语言示例模板：java-maven, go, typescript
 
-### Notes
-- This is a "skeleton + de-webvirtified" release
-- Python test fixtures have been generalized with `<module-name>` placeholders
-- Full hook protocol implementation arrives in 0.2.0
-- Full `pg` CLI implementation arrives in 0.2.0
+### 备注
+- 初始"骨架 + 去 webvirt"版本
+- Python 测试夹具已泛化，使用 `<module-name>` 占位符
+- 完整 hook 协议在 0.2.0 实现
+- 完整 `pg` CLI 在 0.2.0 实现

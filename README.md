@@ -44,7 +44,7 @@ pg-skills/
 
 ## Quick Start (新项目接入)
 
-**0.1.x 当前状态**: `pg sync` 仅 `--check` 可用; 完整 sync (`pg sync` / `pg sync --interactive`) 在 0.2.x。
+**0.1.x 当前状态**: `pg upgrade` 仅 `--list` 可用; 完整 upgrade (`pg upgrade` / `pg upgrade --interactive`) 在 0.2.x。
 
 ### 4 步接入流程
 
@@ -62,7 +62,6 @@ git subtree add --prefix=.pg/skills pg-skills master --squash
 # 2. 跑 pg init 创建 .pg/ 骨架 + .opencode/ symlink
 python3 .pg/skills/src/runtime/bin/pg init
 #   - 生成 .pg/{hooks,context,scripts,changes,runs}/ 目录
-#   - 写 .pg-version
 #   - 首次跑时生成 .pg/project.yaml (placeholder 状态); 已存在则不动
 #   - 在 .opencode/agents/ / .opencode/commands/ / .opencode/skills/ 下
 #     为 pg-skills 的每项创建逐项 symlink (scripts/ 不创建, 已存在 symlink 跳过)
@@ -98,7 +97,7 @@ python3 .pg/skills/src/runtime/bin/pg init
 
 - **自定义 hook（仅 environments 维度）**：如果默认模板不满足，把 `.pg/hooks/<role>-<action>.sh` 或 `.pg/hooks/{prepare_env,clean_env}.sh` 复制一份修改。`pg-run-hook.py` 优先看项目里的 `.pg/hooks/`，找不到对应脚本时回退到 `project.yaml` 里 `environments.<env>.roles.<r>.actions.<action>.script` 字段直接执行。**module 维度的命令不进 hook**——直接编辑 `.pg/project.yaml` 的 `modules.<m>.{build,lint,test.<key>}` 字段。
 - **添加项目专属 agent / command / skill**：直接在 `.opencode/<dir>/` 下**真实**放文件，和 symlink 项并存。`pg init` 不会触碰真实文件。
-- **再次同步 pg-skills**：`pg sync`（0.2.x 之后，等价于 `git subtree pull --prefix=.pg/skills pg-skills master --squash`）。
+- **再次同步 pg-skills**：`pg upgrade`（0.2.x 之后，等价于 `git subtree pull --prefix=.pg/skills pg-skills master --squash`）。
 - **跳过 symlink 创建**：`pg init --no-symlinks`（已有 `.opencode/` 的项目）。
 
 ### 一次性命令一览
@@ -108,7 +107,7 @@ git remote add pg-skills git@gitee.com:shao_hq/pg-skills.git
 git fetch pg-skills
 git subtree add --prefix=.pg/skills pg-skills master --squash
 python3 .pg/skills/src/runtime/bin/pg init
-git add .pg/ .pg-version
+git add .pg/
 git commit -m "feat: 接入 pg-skills $(cat .pg/skills/VERSION)"
 ```
 
@@ -221,11 +220,11 @@ git fetch pg-skills
 git subtree add --prefix=.pg/skills pg-skills master --squash
 
 # 升级
-pg sync           # = git subtree pull --prefix=.pg/skills pg-skills master --squash
+pg upgrade           # = git subtree pull --prefix=.pg/skills pg-skills master --squash
 pg doctor         # 校验
 
 # 交互式升级 (冲突多时)
-pg sync --interactive
+pg upgrade --interactive
 ```
 
 注意: 0.1.x 阶段, hook 脚本里的 `source $PG_SKILLS_PATH/...` **手动写死绝对路径**。0.2.x 之后 subtree 嵌入, 自动用相对路径 `.pg/skills/...`。

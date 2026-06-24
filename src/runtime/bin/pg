@@ -4,7 +4,8 @@
 Subcommands:
     pg init              Ensure .pg/ structure + .opencode/ symlinks (idempotent, requires .pg/skills present)
     pg doctor            Validate .pg/ structure and project.yaml
-    pg sync --check      Compare .pg-version against pg-skills VERSION
+    pg upgrade [version] Upgrade pg-skills (指定版本 tag 或默认 master)
+    pg upgrade --list     Fetch remote tags, list available versions
 
 Usage:
     python3 pg <subcommand> [options]
@@ -14,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -49,10 +51,9 @@ def cmd_init(args) -> int:
 
     前提: .pg/skills/ 已被 git subtree 或手动方式同步进项目 (不是本命令的职责).
 
-    本命令只做三件事, **全部幂等**, 可重复运行:
+    本命令只做两件事, **全部幂等**, 可重复运行:
       1. 创建 .pg/{hooks,context,scripts,changes,runs}/ 目录结构
-      2. 写入 .pg-version
-      3. 在 .opencode/agents/ / .opencode/commands/ / .opencode/skills/ 下
+      2. 在 .opencode/agents/ / .opencode/commands/ / .opencode/skills/ 下
          为 .pg/skills/src/opencode/ 对应项创建 symlink
 
     业务配置 (.pg/project.yaml 真实内容 / .pg/hooks/ shell 脚本) 由
@@ -74,22 +75,17 @@ def cmd_init(args) -> int:
     for sub in ['hooks', 'context', 'scripts', 'changes', 'runs']:
         (pg_dir / sub).mkdir(exist_ok=True)
 
-    # 2. 写入 .pg-version (始终覆盖, 幂等)
-    version_file = project_root / '.pg-version'
-    version_file.write_text(f'{version}\n')
-
-    # 3. 生成 placeholder project.yaml (仅在不存在时, 避免覆盖 SKILL 已生成的)
+    # 2. 生成 placeholder project.yaml (仅在不存在时, 避免覆盖 SKILL 已生成的)
     project_yaml = pg_dir / 'project.yaml'
     if not project_yaml.exists():
         project_yaml.write_text(generate_project_yaml(project_root))
 
-    # 4. 创建 .opencode/ → .pg/skills/src/opencode/ 下的逐项 symlink
+    # 3. 创建 .opencode/ → .pg/skills/src/opencode/ 下的逐项 symlink
     if not args.no_symlinks:
         create_opencode_symlinks(project_root, pg_skills_root)
 
     print(f'✓ pg-skills init in {project_root}')
     print(f'  - pg-skills version: {version}')
-    print(f'  - .pg-version written')
     if not args.no_symlinks:
         print(f'  - .opencode/ symlinks ensured')
     print()
@@ -212,14 +208,15 @@ def cmd_doctor(args) -> int:
         except Exception as e:
             errors.append(f'.pg/project.yaml schema invalid: {e}')
 
-    # 3. .pg-version 存在?
-    version_file = project_root / '.pg-version'
+    # 3. .pg/skills/VERSION 存在?
+    pg_skills_root = find_pg_skills_root()
+    version_file = pg_skills_root / 'VERSION'
     if not version_file.exists():
-        errors.append('.pg-version not found')
+        errors.append('.pg/skills/VERSION not found')
     else:
         ok_count += 1
         current = version_file.read_text().strip()
-        print(f'✓ .pg-version: {current}')
+        print(f'✓ pg-skills version: {current}')
 
     # 4. .pg/hooks/ 下文件可执行?
     hooks_dir = pg_dir / 'hooks'
@@ -269,61 +266,89 @@ def validate_project_yaml(project_yaml: Path, schema_path: Path) -> None:
     jsonschema.validate(instance=data, schema=schema)
 
 
-# ----- subcommand: sync (--check / --interactive / 默认 upgrade) -----
+# ----- subcommand: upgrade (--list / --interactive / [version] 默认 master) -----
 
-def cmd_sync(args) -> int:
-    """Sync with pg-skills upstream via git subtree.
+def cmd_upgrade(args) -> int:
+    """Upgrade pg-skills via git subtree.
 
     Modes:
-        --check:     只检查是否有新版本, 不修改项目
-        --interactive: 列出冲突文件, 让用户逐文件决策 (overwrite / keep-mine / abort)
-        (默认):      执行 git subtree pull, 更新 .pg-version
+        --list:         Fetch remote tags, list available versions
+        --interactive:  列出冲突文件, 让用户逐文件决策 (overwrite / keep-mine / abort)
+        (默认):         执行 git subtree pull, 版本号自动补 v 前缀
     """
     project_root = find_project_root()
-    version_file = project_root / '.pg-version'
-
-    if not version_file.exists():
-        print('ERROR: .pg-version not found. Run: pg init')
-        return 1
-
-    pinned = version_file.read_text().strip()
     pg_skills_root = find_pg_skills_root()
-    latest = (pg_skills_root / 'VERSION').read_text().strip()
+    current = (pg_skills_root / 'VERSION').read_text().strip()
+    ref = _normalize_ref(args.version)
 
-    if pinned == latest:
-        print(f'✓ pg-skills {pinned} (up to date)')
-        return 0
-
-    # 计算变更文件数 (供 --check 使用)
-    try:
-        result = subprocess.run(
-            ['git', '-C', str(pg_skills_root), 'diff', '--name-only', f'v{pinned}', 'HEAD'],
-            capture_output=True, text=True, check=False,
-        )
-        changed_files = [f for f in result.stdout.strip().split('\n') if f]
-        n = len(changed_files)
-    except Exception:
-        n = '?'
-        changed_files = []
-
-    if args.check:
-        print(f'pg-skills {pinned} → {latest}: {n} files pending')
-        print(f'  Run: pg sync    (to upgrade)')
-        return 0
+    if args.list:
+        return _upgrade_check(project_root, current)
 
     if args.interactive:
-        return _sync_interactive(project_root, pg_skills_root, pinned, latest, changed_files)
+        changed_files = _compute_changed_files(project_root, ref)
+        return _upgrade_interactive(project_root, pg_skills_root, current, ref, changed_files)
 
-    # 默认: 执行 git subtree pull
-    return _sync_pull(project_root, pinned, latest)
+    return _upgrade_pull(project_root, current, ref)
 
 
-def _sync_pull(project_root: Path, pinned: str, latest: str) -> int:
+def _normalize_ref(version: str | None) -> str:
+    if version is None:
+        return 'master'
+    if re.fullmatch(r'\d+(\.\d+)*', version):
+        return f'v{version}'
+    return version
+
+
+def _upgrade_check(project_root: Path, current: str) -> int:
+    """Fetch remote tags, 列出可用版本."""
+    remote = 'pg-skills'
+    check = subprocess.run(
+        ['git', '-C', str(project_root), 'remote', 'get-url', remote],
+        capture_output=True, text=True,
+    )
+    if check.returncode != 0:
+        print(f'ERROR: remote "{remote}" not configured.')
+        print(f'  Run: git remote add {remote} git@gitee.com:shao_hq/pg-skills.git')
+        return 1
+
+    subprocess.run(
+        ['git', '-C', str(project_root), 'fetch', remote, '--tags'],
+        capture_output=True, text=True,
+    )
+
+    result = subprocess.run(
+        ['git', '-C', str(project_root), 'tag', '-l', 'v*'],
+        capture_output=True, text=True,
+    )
+    tags = [t for t in result.stdout.strip().split('\n') if t]
+
+    current_tag = f'v{current}' if not current.startswith('v') else current
+    print(f'Current: {current_tag}')
+    for t in sorted(tags):
+        marker = '  ← current' if t == current_tag else ''
+        print(f'  {t}{marker}')
+    return 0
+
+
+def _compute_changed_files(project_root: Path, ref: str) -> list:
+    """Fetch remote ref 并计算 .pg/skills/ 差异."""
+    remote = 'pg-skills'
+    subprocess.run(
+        ['git', '-C', str(project_root), 'fetch', remote, ref],
+        capture_output=True, text=True,
+    )
+    result = subprocess.run(
+        ['git', '-C', str(project_root), 'diff', '--name-only', 'FETCH_HEAD', '--', '.pg/skills/'],
+        capture_output=True, text=True,
+    )
+    return [f for f in result.stdout.strip().split('\n') if f]
+
+
+def _upgrade_pull(project_root: Path, current: str, ref: str) -> int:
     """执行 git subtree pull."""
     remote = 'pg-skills'
     prefix = '.pg/skills'
 
-    # 检查 remote 是否存在
     check = subprocess.run(
         ['git', '-C', str(project_root), 'remote', 'get-url', remote],
         capture_output=True, text=True,
@@ -334,33 +359,32 @@ def _sync_pull(project_root: Path, pinned: str, latest: str) -> int:
         print(f'  Run: git fetch {remote}')
         return 1
 
-    # 检查 .pg/skills/ 是否存在
     if not (project_root / prefix).exists():
         print(f'INFO: {prefix}/ not found, performing initial subtree add')
-        cmd = ['git', 'subtree', 'add', f'--prefix={prefix}', remote, 'master', '--squash']
+        cmd = ['git', 'subtree', 'add', f'--prefix={prefix}', remote, ref, '--squash']
     else:
-        cmd = ['git', 'subtree', 'pull', f'--prefix={prefix}', remote, 'master', '--squash']
+        cmd = ['git', 'subtree', 'pull', f'--prefix={prefix}', remote, ref, '--squash']
 
     print(f'Running: {" ".join(cmd)}')
     result = subprocess.run(cmd, cwd=str(project_root), text=True)
     if result.returncode != 0:
         print(f'ERROR: git subtree failed (exit {result.returncode})')
-        print(f'  Try: pg sync --interactive')
+        print(f'  Try: pg upgrade --interactive')
         return 1
 
-    # 更新 .pg-version
-    (project_root / '.pg-version').write_text(f'{latest}\n')
-    print(f'✓ pg-skills {pinned} → {latest}: {n_changed(project_root)} files updated')
+    pg_skills_root = find_pg_skills_root()
+    new_version = (pg_skills_root / 'VERSION').read_text().strip()
+    print(f'✓ pg-skills {current} → {new_version}: {n_changed(project_root)} files updated')
     return 0
 
 
-def _sync_interactive(project_root: Path, pg_skills_root: Path, pinned: str, latest: str, changed_files: list) -> int:
+def _upgrade_interactive(project_root: Path, pg_skills_root: Path, current: str, ref: str, changed_files: list) -> int:
     """dry-run diff, 列出冲突文件, 让用户逐文件决策."""
     if not changed_files:
-        print(f'No file changes detected between {pinned} and {latest}')
+        print(f'No file changes detected between current and {ref}')
         return 0
 
-    print(f'pg-skills {pinned} → {latest}')
+    print(f'pg-skills {current} → {ref}')
     print(f'  Files that would change ({len(changed_files)}):')
     for f in changed_files[:20]:
         print(f'    - {f}')
@@ -383,9 +407,9 @@ def _sync_interactive(project_root: Path, pg_skills_root: Path, pinned: str, lat
     if has_local:
         print('\n⚠ WARNING: Local changes detected in .pg/skills/ that conflict with upstream.')
         print('  Recommend: keep-mine for files you have customized, overwrite for the rest.')
-        print('  Run: pg sync    (with default keep-mine strategy)')
+        print('  Run: pg upgrade    (with default keep-mine strategy)')
 
-    print(f'\nTo upgrade: pg sync')
+    print(f'\nTo upgrade: pg upgrade')
     return 0
 
 
@@ -414,11 +438,13 @@ def main():
     p_doctor = subparsers.add_parser('doctor', help='Validate .pg/ structure')
     p_doctor.set_defaults(func=cmd_doctor)
 
-    # sync (--check / --interactive / 默认 upgrade)
-    p_sync = subparsers.add_parser('sync', help='Sync with latest pg-skills')
-    p_sync.add_argument('--check', action='store_true', help='Just check, do not sync')
-    p_sync.add_argument('--interactive', action='store_true', help='Show conflict files before sync')
-    p_sync.set_defaults(func=cmd_sync)
+    # upgrade (--list / --interactive / [version] 默认 master)
+    p_upgrade = subparsers.add_parser('upgrade', help='Upgrade pg-skills via git subtree')
+    p_upgrade.add_argument('version', nargs='?', default=None,
+                           help='Version tag to upgrade to (e.g., 0.2.0). Default: master')
+    p_upgrade.add_argument('--list', action='store_true', help='Fetch remote tags, list available versions')
+    p_upgrade.add_argument('--interactive', action='store_true', help='Show conflict files before upgrade')
+    p_upgrade.set_defaults(func=cmd_upgrade)
 
     args = parser.parse_args()
     sys.exit(args.func(args))
