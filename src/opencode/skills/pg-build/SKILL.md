@@ -161,7 +161,7 @@ while true; do
   CALL_TIMEOUT=$(echo "$ACTION_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('next_call_timeout_seconds', $CALL_TIMEOUT))")
   ACTION=$(echo "$ACTION_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('action', ''))")
   case $ACTION in
-    "dispatch")         → prompt = action.prompt_template + pi.prepend/append → 派送 sub-agent → record（见「派送 sub-agent」节）
+    "dispatch")         → prompt = action.prompt_template + pi.prepend/append → ⭐ 执行编排器自检（见下节）→ 派送 sub-agent → record（见「派送 sub-agent」节）
     "dispatch_fix")     → 同上（prompt_template 已包含 FIX ISSUE REQUEST 块）
     "dispatch_final_gate") → 同上（prompt_template 已包含 final-gate 审计上下文）
     "phase_result")
@@ -384,6 +384,17 @@ if pi.get("append"):
 
 # 直接派送 sub-agent，不要修改 prompt 内容
 ```
+
+**⭐ 编排器自检**：dispatch 前必须执行以下验证，确保 prompt 未经修改：
+
+```bash
+# 用 prompt_template 的前 80 字符做前缀匹配，确认未 rephrase
+PREFIX=$(echo "$ACTION_JSON" | python3 -c "import json,sys; d=json.load(sys.stdin); t=d.get('prompt_template',''); print(t[:80])")
+echo "$PROMPT" | python3 -c "import sys; text=sys.stdin.read(); prefix='$PREFIX'; assert text.lstrip().startswith(prefix.lstrip()), f'DISPATCH_VIOLATION: prompt 不以 prompt_template 开头\n期望前缀: {prefix[:60]}...\n实际开头: {text[:60]}...'"
+echo "✅ DISPATCH_PROMPT_VERIFIED"
+```
+
+若该检查失败，编排器**必须停止**，不得继续 dispatch（说明 prompt 被修改过）。
 
 `prompt_injection` 字段（orchestrator 仅做字符串首尾拼接，不解析内容）：
 
