@@ -595,7 +595,7 @@ regression:
 | `pg-parse-config.py` 报 top-level environment 残留 | config.yaml 顶层有 `regression.environment` | 删除该行, env 必须在 suite 内声明 |
 | `pg-invoke-hook.py` 报 role/instance not defined | config.yaml `environments.<env>.roles.<role>` 或 instances[] 缺失 | 检查对应 env/role 段, 确认 required_roles 名字拼写正确 |
 | `pg-invoke-hook.py` 报"not in project.yaml environments" | env 名拼写错 | 检查 `regression.suite.<s>.environment.name` ∈ project.yaml `environments` 列表 |
-| 启动服务时 pg-invoke-hook.py 卡住 (bash 调用未返回) | LLM 未用 `next_call_timeout_seconds` 设 bash tool timeout | 按 prompt_template 返回的 `next_call_timeout_seconds` 设超时 (典型如 backend start = 300s) |
+| 启动服务时 pg-invoke-hook.py 卡住 (bash 调用未返回) | LLM 未用 `next_call_timeout_seconds` 设 bash tool timeout | 按 prompt_final_no_modify 返回的 `next_call_timeout_seconds` 设超时 (典型如 backend start = 300s) |
 | Maven 增量编译未检测到变化 | Java 源文件未修改 | 手动 `touch` 源文件 |
 | 测试数据库容器未运行 | docker-compose 未启动 | 执行 docker compose up -d |
 | agent suite 跑 dev-3tier 失败 | 本地无 box-1/box-2 | 改用 dev-local 或配置 SSH 免密到测试机 |

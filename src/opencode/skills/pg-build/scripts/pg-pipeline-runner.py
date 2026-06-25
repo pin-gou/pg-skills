@@ -655,7 +655,7 @@ def _render_prompt_template(template, ctx):
 # like. SKILL.md keeps a human-readable copy for reference but the runner
 # does the actual rendering — so LLM orchestrators can simply do:
 #
-#   prompt = action["prompt_template"]
+#   prompt = action["prompt_final_no_modify"]
 #
 # instead of hand-assembling the prompt from ctx fields.
 
@@ -1678,7 +1678,7 @@ def dispatch_action(agent, item, sub, context, attempt, init_commit=None):
     if "sub" not in context:
         context["sub"] = sub
     # Render the prompt template here so the LLM orchestrator doesn't need
-    # to know how templates work — it just reads `prompt_template`.
+    # to know how templates work — it just reads `prompt_final_no_modify`.
     template_str = _build_prompt_template(item, sub)
     rendered = _render_prompt_template(template_str, context)
     result = {
@@ -1687,7 +1687,7 @@ def dispatch_action(agent, item, sub, context, attempt, init_commit=None):
         "sub": sub,
         "agent": agent,
         "attempt": attempt,
-        "prompt_template": rendered,
+        "prompt_final_no_modify": rendered,
         "prompt_injection": context.get("prompt_injection", {
             "target_agent": f"pg-build/{sub}",
             "prepend": "",
@@ -1723,7 +1723,7 @@ def dispatch_fix_action(item, cycle, context, config=None):
         "item": item,
         "agent": FIX_AGENT,
         "fix_cycle": cycle,
-        "prompt_template": rendered,
+        "prompt_final_no_modify": rendered,
         "prompt_injection": context.get("prompt_injection", {
             "target_agent": "pg-build/fix",
             "prepend": "",
@@ -2713,7 +2713,7 @@ def _enter_final_gate(config, change, state):
         "action": "dispatch_final_gate",
         "agent": FINAL_GATE_AGENT,
         "item": "final-gate",
-        "prompt_template": rendered,
+        "prompt_final_no_modify": rendered,
     }
 
 
