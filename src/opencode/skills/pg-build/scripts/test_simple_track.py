@@ -241,6 +241,150 @@ class TestNoopifySimpleTrackSections(unittest.TestCase):
 
 
 # ============================================================
+# cmd_detect — simple tracks must be surfaced as type=phase
+# (regression test for the openapi-gen-silently-skipped bug)
+# ============================================================
+
+def _load_state():
+    """Load pg-pipeline-state.py as an importable module (mirrors _load_common/_load_runner)."""
+    if SCRIPTS_DIR not in sys.path:
+        sys.path.insert(0, SCRIPTS_DIR)
+    if "pg_pipeline_state" in sys.modules:
+        del sys.modules["pg_pipeline_state"]
+    state_py = os.path.join(SCRIPTS_DIR, "pg-pipeline-state.py")
+    spec = importlib.util.spec_from_file_location("pg_pipeline_state", state_py)
+    assert spec is not None and spec.loader is not None
+    mod = importlib.util.module_from_spec(spec)
+    sys.modules["pg_pipeline_state"] = mod
+    spec.loader.exec_module(mod)
+    return mod
+
+
+class TestCmdDetectSimpleTrack(unittest.TestCase):
+    """Regression tests: cmd_detect must NOT silently skip simple tracks.
+
+    Bug: _noopify_simple_track_sections rewrites a simple track's tasks.md
+    section body to "- 无", which made count_tasks() return all_noop=True.
+    cmd_detect then short-circuited via `if all_noop: completed += 1; continue`
+    and the runner never called _execute_phase → commands were never run.
+
+    Fix: cmd_detect now checks get_track_type(config, item) and surfaces
+    simple tracks as type=phase BEFORE the all_noop short-circuit.
+    """
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="test-cmd-detect-simple-")
+        self.pg_spec = os.path.join(self.tmpdir, "pg-spec")
+        self.changes_dir = os.path.join(self.pg_spec, "changes")
+        self.change = "detect-change"
+        self.change_dir = os.path.join(self.changes_dir, self.change)
+        self.apply_dir = os.path.join(self.change_dir, "2-build")
+        os.makedirs(self.apply_dir)
+
+        with open(os.path.join(self.pg_spec, "config.yaml"), "w") as f:
+            f.write(
+                "schema: spec-driven\n"
+                "modules:\n"
+                "  frontend: {root: <module-name>, language: typescript}\n"
+                "tracks:\n"
+                "  simple-foo:\n"
+                "    type: simple\n"
+                "    commands: [\"echo hi\"]\n"
+                "  standard-bar:\n"
+                "    modules: [frontend]\n"
+                "environments: {}\n"
+                "stages:\n"
+                "  - name: dev\n"
+                "    tracks: [simple-foo, standard-bar]\n"
+            )
+
+        with open(os.path.join(self.change_dir, "tasks.md"), "w") as f:
+            f.write(
+                "# Tasks\n\n"
+                "## 1. simple-foo:dev - simple section\n\n"
+                "- [ ] 1.1 dummy\n"
+                "## 2. standard-bar:dev - standard section\n\n"
+                "- [ ] 2.1 real task\n"
+            )
+
+        self.state = _load_state()
+        setattr(self.state, "PROJECT_ROOT", self.tmpdir)
+        setattr(self.state, "CHANGES_DIR", self.changes_dir)
+        setattr(self.state, "CONFIG_PATH", os.path.join(self.pg_spec, "config.yaml"))
+
+        # Also re-point pg_pipeline_common (imported by state) at the tmp
+        # project — cmd_detect's get_tasks_path() and load_config() read
+        # CHANGES_DIR/CONFIG_PATH from common, not from state.
+        import pg_pipeline_common as common_mod
+        setattr(common_mod, "PROJECT_ROOT", self.tmpdir)
+        setattr(common_mod, "CHANGES_DIR", self.changes_dir)
+        setattr(common_mod, "CONFIG_PATH", os.path.join(self.pg_spec, "config.yaml"))
+
+        self.runner = _load_runner()
+        setattr(self.runner, "PROJECT_ROOT", self.tmpdir)
+        setattr(self.runner, "CHANGES_DIR", self.changes_dir)
+        setattr(self.runner, "CONFIG_PATH", os.path.join(self.pg_spec, "config.yaml"))
+        # Re-point runner's view of common too.
+        self.runner.pg_pipeline_common = common_mod
+        self.runner._noopify_simple_track_sections(self.change)
+
+    def tearDown(self):
+        for k in ("pg_pipeline_state", "pg_pipeline_runner", "pg_pipeline_common"):
+            if k in sys.modules:
+                del sys.modules[k]
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _capture_detect(self):
+        """Run cmd_detect and capture the JSON it prints.
+
+        cmd_detect's `_print_json(obj)` writes to stdout via print(json.dumps(...)).
+        We replace it with a capturing function and silence stdout.
+        """
+        captured = {}
+        original = self.state._print_json
+        def capture(obj):
+            captured["obj"] = obj
+        self.state._print_json = capture
+        try:
+            self.state.cmd_detect(self.change)
+        finally:
+            self.state._print_json = original
+        return captured.get("obj")
+
+    def test_simple_track_dispatched_as_phase(self):
+        """When tasks.md has been noopified, cmd_detect must still surface
+        the simple track as type=phase (so runner calls _execute_phase)."""
+        result = self._capture_detect()
+        self.assertIsNotNone(result, "cmd_detect must print a result")
+        # cmd_detect returns the qualified form (dev.simple-foo) for phase
+        # items, mirroring the env-hook return shape.
+        self.assertEqual(result["item"], "dev.simple-foo",
+                         "dev.simple-foo is the first item in pipeline order")
+        self.assertEqual(result["type"], "phase",
+                         "simple track MUST be dispatched as phase, "
+                         "not silently skipped via all_noop")
+        self.assertNotEqual(result.get("message", ""), "ALL_COMPLETED")
+
+    def test_completed_simple_track_skipped(self):
+        """Once a simple track lands in completed_items, cmd_detect must
+        skip it (idempotency on resume)."""
+        with open(os.path.join(self.apply_dir, ".pipeline-state.json"), "w") as f:
+            json.dump({
+                "version": 1,
+                "change": self.change,
+                "current": None,
+                "completed_items": ["dev.simple-foo"],
+                "failed": False,
+            }, f)
+        result = self._capture_detect()
+        self.assertIsNotNone(result, "cmd_detect must print a result")
+        # The first NOT-completed item should be standard-bar (next in order).
+        self.assertEqual(result["item"], "dev.standard-bar")
+        self.assertEqual(result["type"], "track")
+        self.assertEqual(result["subPhase"], "dev")
+
+
+# ============================================================
 # _execute_phase simple-track branch tests
 # ============================================================
 

@@ -118,12 +118,31 @@ def cmd_detect(change):
             # here we just count it as a "to-be-checked" item in total.
             continue
 
-        # Environment lifecycle hooks (prepare_env / clean_env) are phase
-        # items, not tracks. They have no tasks.md sections; report them
-        # directly as `type: "phase"` so the runner's _execute_phase path
-        # handles them.
+        # Environment lifecycle hooks (prepare_env / clean_env) and simple
+        # tracks (tracks.<id>.type == "simple") are phase items, not tracks.
+        # They have no TDVG sub-phase; the runner's _execute_phase path
+        # handles them. Report them directly as `type: "phase"` so the
+        # runner dispatches _execute_phase instead of skipping or
+        # dispatching a sub-agent.
+        #
+        # NOTE: simple tracks must be surfaced as phase items BEFORE the
+        # `_item_sections_with_status` all_noop short-circuit below, because
+        # `_noopify_simple_track_sections` rewrites their section body to
+        # "- 无" so cmd_detect would otherwise mark them as completed and
+        # the runner would never call _execute_phase (BUG: see
+        # test_simple_track.test_simple_track_dispatched_as_phase).
+        #
+        # get_track_type expects the BARE track id (no stage prefix like
+        # "dev."), so we strip the prefix before lookup. We keep `item` in
+        # the result as the qualified form ("dev.simple-foo") to match the
+        # env-hook return shape — _execute_phase re-strips the prefix
+        # internally via _bare_track.
+        #
+        # _is_phase_completed takes the qualified form (matching how
+        # runner writes `completed_items` from state["current"]["item"],
+        # which is also qualified).
         bare = _bare_track(item)
-        if bare in ("prepare_env", "clean_env"):
+        if bare in ("prepare_env", "clean_env") or get_track_type(config, bare) == "phase":
             if _is_phase_completed(change, item):
                 completed += 1
                 continue
