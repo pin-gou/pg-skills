@@ -4,9 +4,12 @@
 Covers:
 - get_track_type() classifies simple tracks as 'phase'.
 - get_track_type() preserves 'track' for standard tracks.
-- _noopify_simple_track_sections() rewrites simple-track sections to noop.
-- _noopify_simple_track_sections() is idempotent on second invocation.
-- _noopify_simple_track_sections() leaves standard tracks untouched.
+- v3.2+: _noopify_simple_track_sections was REMOVED. Simple-track
+  sections in tasks.md are NOT rewritten to "- 无" anymore; the runner
+  preserves the placeholder task line ("执行 tracks.<id>.commands").
+  cmd_detect's get_track_type() branch routes simple tracks to
+  _execute_phase BEFORE the all_noop short-circuit, so the placeholder
+  task content does not matter for routing.
 - _execute_phase() dispatches simple tracks to pg-build/simple agent.
 - _execute_phase() returns workflow_failed when a simple track has no commands.
 - _build_simple_dispatch() returns a dispatch action with agent=pg-build/simple.
@@ -141,138 +144,14 @@ class TestGetTrackType(unittest.TestCase):
 
 
 # ============================================================
-# _noopify_simple_track_sections tests (need isolated tmp project root)
-# ============================================================
-
-class TestNoopifySimpleTrackSections(unittest.TestCase):
-    def setUp(self):
-        self.tmpdir = tempfile.mkdtemp(prefix="test-simple-track-noopify-")
-        self.pg_spec = os.path.join(self.tmpdir, "pg-spec")
-        self.changes_dir = os.path.join(self.pg_spec, "changes")
-        self.change = "test-change"
-        self.change_dir = os.path.join(self.changes_dir, self.change)
-        os.makedirs(self.change_dir)
-
-        # Minimal config.yaml declaring both a simple and a standard track.
-        with open(os.path.join(self.pg_spec, "config.yaml"), "w") as f:
-            f.write(
-                "schema: spec-driven\n"
-                "modules:\n"
-                "  frontend: {root: <module-name>, language: typescript}\n"
-                "tracks:\n"
-                "  simple-foo:\n"
-                "    type: simple\n"
-                "    commands: [\"echo hi\"]\n"
-                "  standard-bar:\n"
-                "    modules: [frontend]\n"
-                "environments: {}\n"
-                "stages: []\n"
-            )
-
-        # Tasks.md with sections for both tracks, simple section has real tasks.
-        with open(os.path.join(self.change_dir, "tasks.md"), "w") as f:
-            f.write(
-                "# Tasks\n\n"
-                "## 1. simple-foo:dev - simple track 文档化\n\n"
-                "- [ ] 1.1 应该由 runner 自动执行\n"
-                "- [ ] 1.2 不应该需要 LLM 干预\n\n"
-                "## 2. standard-bar:dev - 标准 track\n\n"
-                "- [ ] 2.1 这个必须保留\n"
-                "- [ ] 2.2 这个也得保留\n"
-            )
-
-        # Load runner and point at the isolated tmp project.
-        self.runner = _load_runner()
-        setattr(self.runner, "PROJECT_ROOT", self.tmpdir)
-        setattr(self.runner, "CHANGES_DIR", self.changes_dir)
-        setattr(self.runner, "CONFIG_PATH", os.path.join(self.pg_spec, "config.yaml"))
-        # Re-import common with the new PROJECT_ROOT so its module-level
-        # constants are also overridden.
-        self.common = _load_common()
-        setattr(self.common, "PROJECT_ROOT", self.tmpdir)
-        setattr(self.common, "CHANGES_DIR", self.changes_dir)
-        setattr(self.common, "CONFIG_PATH", os.path.join(self.pg_spec, "config.yaml"))
-
-    def tearDown(self):
-        for k in ("pg_pipeline_runner", "pg_pipeline_common"):
-            if k in sys.modules:
-                del sys.modules[k]
-        shutil.rmtree(self.tmpdir, ignore_errors=True)
-
-    def _read_tasks(self):
-        with open(os.path.join(self.change_dir, "tasks.md"), encoding="utf-8") as f:
-            return f.read()
-
-    def test_rewrites_simple_section_to_noop(self):
-        result = self.runner._noopify_simple_track_sections(self.change)
-        self.assertEqual(result, 1)
-        content = self._read_tasks()
-        # Standard section preserved.
-        self.assertIn("- [ ] 2.1 这个必须保留", content)
-        self.assertIn("- [ ] 2.2 这个也得保留", content)
-        # Simple section body replaced with - 无 line.
-        self.assertIn("- 无\n", content)
-        # Original simple-track task lines gone.
-        self.assertNotIn("应该由 runner 自动执行", content)
-        self.assertNotIn("不应该需要 LLM 干预", content)
-        # Heading suffix added for documentation.
-        self.assertIn("(simple track", content)
-
-    def test_idempotent_on_second_call(self):
-        self.runner._noopify_simple_track_sections(self.change)
-        content_first = self._read_tasks()
-        result_second = self.runner._noopify_simple_track_sections(self.change)
-        content_second = self._read_tasks()
-        self.assertEqual(result_second, 0)
-        self.assertEqual(content_first, content_second)
-
-    def test_no_simple_tracks_returns_zero(self):
-        # Replace config to remove simple track.
-        with open(os.path.join(self.pg_spec, "config.yaml"), "w") as f:
-            f.write(
-                "schema: spec-driven\n"
-                "modules:\n"
-                "  frontend: {root: <module-name>, language: typescript}\n"
-                "tracks:\n"
-                "  standard-bar: {modules: [frontend]}\n"
-                "environments: {}\n"
-                "stages: []\n"
-            )
-        result = self.runner._noopify_simple_track_sections(self.change)
-        self.assertEqual(result, 0)
-        # Content untouched.
-        content = self._read_tasks()
-        self.assertIn("- [ ] 1.1 应该由 runner 自动执行", content)
-
-    def test_missing_tasks_md_returns_zero(self):
-        os.remove(os.path.join(self.change_dir, "tasks.md"))
-        result = self.runner._noopify_simple_track_sections(self.change)
-        self.assertEqual(result, 0)
-
-    def test_section_with_only_noop_is_already_done(self):
-        """A section already in canonical form (heading suffix + body noop)
-        is left alone with rewrite_count=0."""
-        with open(os.path.join(self.change_dir, "tasks.md"), "w") as f:
-            f.write(
-                "# Tasks\n\n"
-                "## 1. simple-foo:dev - simple track  (simple track: runner 直接执行 commands)\n\n"
-                "- 无\n"
-            )
-        result = self.runner._noopify_simple_track_sections(self.change)
-        self.assertEqual(result, 0)
-        # Content unchanged.
-        content = self._read_tasks()
-        self.assertIn("- 无\n", content)
-        self.assertIn("(simple track", content)
-
-
-# ============================================================
-# cmd_detect — simple tracks must be surfaced as type=phase
-# (regression test for the openapi-gen-silently-skipped bug)
+# v3.2+: simple-track sections are NOT rewritten by the runner.
+# These tests guard against accidental reintroduction of the
+# _noopify_simple_track_sections helper and verify that cmd_detect
+# still routes simple tracks to the phase branch via get_track_type().
 # ============================================================
 
 def _load_state():
-    """Load pg-pipeline-state.py as an importable module (mirrors _load_common/_load_runner)."""
+    """Load pg-pipeline-state.py as an importable module."""
     if SCRIPTS_DIR not in sys.path:
         sys.path.insert(0, SCRIPTS_DIR)
     if "pg_pipeline_state" in sys.modules:
@@ -286,16 +165,160 @@ def _load_state():
     return mod
 
 
+class TestSimpleTrackNotRewritten(unittest.TestCase):
+    """v3.2+: _noopify_simple_track_sections was removed. Simple-track
+    sections are not rewritten by the runner anymore; cmd_detect routes
+    them via get_track_type() to the phase branch. This test class
+    guards against accidental reintroduction of the rewrite path.
+    """
+
+    def setUp(self):
+        # Other test classes (TestCmdDetectSimpleTrack) load
+        # pg_pipeline_state without cleaning it up in tearDown, which
+        # would leave a stale module pointing at the real project root.
+        # Force a clean slate before each test in this class.
+        for k in ("pg_pipeline_state", "pg_pipeline_runner", "pg_pipeline_common"):
+            if k in sys.modules:
+                del sys.modules[k]
+
+    def tearDown(self):
+        for k in ("pg_pipeline_state", "pg_pipeline_runner", "pg_pipeline_common"):
+            if k in sys.modules:
+                del sys.modules[k]
+
+    def test_noopify_helper_removed(self):
+        """The runner must no longer expose _noopify_simple_track_sections."""
+        # Import runner lazily to keep the import order consistent with
+        # the other test classes.
+        runner_mod = _load_runner()
+        self.assertFalse(
+            hasattr(runner_mod, "_noopify_simple_track_sections"),
+            "_noopify_simple_track_sections was removed in v3.2; "
+            "re-introducing it requires also restoring cmd_detect's "
+            "all_noop short-circuit workaround (see design notes).",
+        )
+
+    def test_simple_track_section_preserved_verbatim(self):
+        """A simple-track section in tasks.md must keep its placeholder
+        task line untouched — the runner does not rewrite it.
+
+        We verify (a) tasks.md body is preserved byte-for-byte after
+        cmd_next/cmd_detect runs against a tmp project, and (b) the
+        simple track is still routed to the phase branch by cmd_detect
+        via get_track_type() (regression guard for the v3.1 bug that
+        motivated noopify in the first place).
+        """
+        tmpdir = tempfile.mkdtemp(prefix="test-simple-track-preserve-")
+        try:
+            # find_project_root() requires a .pg/project.yaml at the root
+            # it returns. Set up a minimal project layout so PG_PROJECT_ROOT
+            # resolves cleanly.
+            project_root = tmpdir
+            pg_dir = os.path.join(project_root, ".pg")
+            os.makedirs(pg_dir)
+            changes_dir = os.path.join(pg_dir, "changes")
+            change = "preserve-change"
+            change_dir = os.path.join(changes_dir, change)
+            apply_dir = os.path.join(change_dir, "2-build")
+            os.makedirs(change_dir)
+            os.makedirs(apply_dir)
+
+            with open(os.path.join(pg_dir, "project.yaml"), "w") as f:
+                f.write(
+                    "schema: spec-driven\n"
+                    "modules:\n"
+                    "  frontend: {root: <module-name>, language: typescript}\n"
+                    "tracks:\n"
+                    "  simple-foo:\n"
+                    "    type: simple\n"
+                    "    commands: [\"echo hi\"]\n"
+                    "environments: {}\n"
+                    "stages:\n"
+                    "  - name: dev\n"
+                    "    tracks: [simple-foo]\n"
+                )
+
+            placeholder_line = (
+                "- [ ] 1.1 执行 tracks.simple-foo.commands（runner 派遣 "
+                "pg-build/simple agent 按序执行）"
+            )
+            with open(os.path.join(change_dir, "tasks.md"), "w", encoding="utf-8") as f:
+                f.write(
+                    "# Tasks\n\n"
+                    "## 1. dev.simple-foo - dev simple-foo\n\n"
+                    f"{placeholder_line}\n"
+                )
+
+            # Use PG_PROJECT_ROOT env so find_project_root() resolves to
+            # our tmp project. _load_state() must be called AFTER setting
+            # the env so module-level constants bind to the right paths.
+            old_env = os.environ.get("PG_PROJECT_ROOT")
+            os.environ["PG_PROJECT_ROOT"] = project_root
+            try:
+                state_mod = _load_state()
+
+                # (a) Run cmd_detect and capture the output.
+                captured = []
+                original_print = state_mod._print_json
+                def capture(obj):
+                    captured.append(obj)
+                state_mod._print_json = capture
+                try:
+                    state_mod.cmd_detect(change)
+                except SystemExit:
+                    pass
+                finally:
+                    state_mod._print_json = original_print
+            finally:
+                if old_env is None:
+                    os.environ.pop("PG_PROJECT_ROOT", None)
+                else:
+                    os.environ["PG_PROJECT_ROOT"] = old_env
+
+            # (a) Verify tasks.md body was NOT rewritten to "- 无".
+            with open(os.path.join(change_dir, "tasks.md"), encoding="utf-8") as f:
+                content_after = f.read()
+            self.assertIn(placeholder_line, content_after,
+                          "simple-track placeholder task must be preserved verbatim")
+            self.assertNotIn("- 无\n", content_after,
+                             "simple-track section must NOT be rewritten to '- 无'")
+
+            # (b) Verify cmd_detect routed the simple track to the
+            # phase branch (regression guard).
+            self.assertEqual(len(captured), 1,
+                             "cmd_detect should print exactly one item (the simple track)")
+            first = captured[0]
+            self.assertEqual(first.get("item"), "dev.simple-foo")
+            self.assertEqual(first.get("type"), "phase",
+                             "simple track must be dispatched as phase, "
+                             "not silently skipped via all_noop")
+        finally:
+            for k in ("pg_pipeline_state", "pg_pipeline_runner", "pg_pipeline_common"):
+                if k in sys.modules:
+                    del sys.modules[k]
+            shutil.rmtree(tmpdir, ignore_errors=True)
+
+
+# ============================================================
+# cmd_detect — simple tracks must be surfaced as type=phase
+# (regression test for the openapi-gen-silently-skipped bug)
+# ============================================================
+
 class TestCmdDetectSimpleTrack(unittest.TestCase):
     """Regression tests: cmd_detect must NOT silently skip simple tracks.
 
-    Bug: _noopify_simple_track_sections rewrites a simple track's tasks.md
-    section body to "- 无", which made count_tasks() return all_noop=True.
-    cmd_detect then short-circuited via `if all_noop: completed += 1; continue`
-    and the runner never called _execute_phase → commands were never run.
+    Bug (v3.1 and earlier): _noopify_simple_track_sections rewrote a
+    simple track's tasks.md section body to "- 无", which made
+    count_tasks() return all_noop=True. cmd_detect then short-circuited
+    via `if all_noop: completed += 1; continue` and the runner never
+    called _execute_phase → commands were never run.
 
-    Fix: cmd_detect now checks get_track_type(config, item) and surfaces
-    simple tracks as type=phase BEFORE the all_noop short-circuit.
+    Fix (v3.2): _noopify_simple_track_sections was removed. cmd_detect
+    now checks get_track_type(config, item) and surfaces simple tracks
+    as type=phase BEFORE the all_noop short-circuit. Simple-track
+    sections in tasks.md use the new placeholder form
+    (`- [ ] N.1 执行 tracks.<id>.commands`), but cmd_detect's
+    phase-branch routing still applies regardless of body content.
     """
 
     def setUp(self):
@@ -324,12 +347,15 @@ class TestCmdDetectSimpleTrack(unittest.TestCase):
                 "    tracks: [simple-foo, standard-bar]\n"
             )
 
+        # v3.2 tasks.md format: simple-track sections keep a single
+        # placeholder task line, NOT the legacy `- 无` body.
         with open(os.path.join(self.change_dir, "tasks.md"), "w") as f:
             f.write(
                 "# Tasks\n\n"
-                "## 1. simple-foo:dev - simple section\n\n"
-                "- [ ] 1.1 dummy\n"
-                "## 2. standard-bar:dev - standard section\n\n"
+                "## 1. dev.simple-foo - dev simple-foo\n\n"
+                "- [ ] 1.1 执行 tracks.simple-foo.commands（runner 派遣 "
+                "pg-build/simple agent 按序执行）\n"
+                "## 2. dev.standard-bar - dev standard-bar\n\n"
                 "- [ ] 2.1 real task\n"
             )
 
@@ -352,7 +378,9 @@ class TestCmdDetectSimpleTrack(unittest.TestCase):
         setattr(self.runner, "CONFIG_PATH", os.path.join(self.pg_spec, "config.yaml"))
         # Re-point runner's view of common too.
         self.runner.pg_pipeline_common = common_mod
-        self.runner._noopify_simple_track_sections(self.change)
+        # v3.2: noopify call removed — simple-track sections are NOT
+        # rewritten to "- 无" anymore. cmd_detect must still route them
+        # to the phase branch via get_track_type().
 
     def tearDown(self):
         for k in ("pg_pipeline_state", "pg_pipeline_runner", "pg_pipeline_common"):
@@ -378,8 +406,11 @@ class TestCmdDetectSimpleTrack(unittest.TestCase):
         return captured.get("obj")
 
     def test_simple_track_dispatched_as_phase(self):
-        """When tasks.md has been noopified, cmd_detect must still surface
-        the simple track as type=phase (so runner calls _execute_phase)."""
+        """v3.2: simple track section in tasks.md contains a placeholder
+        task line (NOT "- 无"). cmd_detect must still surface it as
+        type=phase via the get_track_type() branch — even though
+        count_tasks() now reports all_noop=False, the phase branch is
+        evaluated BEFORE the all_noop short-circuit."""
         result = self._capture_detect()
         self.assertIsNotNone(result, "cmd_detect must print a result")
         # cmd_detect returns the qualified form (dev.simple-foo) for phase
@@ -840,7 +871,7 @@ class TestValidateSkipsSimpleTracks(unittest.TestCase):
 class TestParseHeading(unittest.TestCase):
     """Regression tests for _parse_heading — the simple track heading has
     a stage prefix + no :sub, which previously fell through both regexes
-    and broke _noopify_simple_track_sections (the heading got dumped
+    and broke cmd_detect's section matching (the heading got dumped
     into sec['item'] as the entire tail string)."""
 
     def setUp(self):

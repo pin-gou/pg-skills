@@ -127,10 +127,13 @@ def cmd_detect(change):
         #
         # NOTE: simple tracks must be surfaced as phase items BEFORE the
         # `_item_sections_with_status` all_noop short-circuit below, because
-        # `_noopify_simple_track_sections` rewrites their section body to
-        # "- 无" so cmd_detect would otherwise mark them as completed and
-        # the runner would never call _execute_phase (BUG: see
-        # test_simple_track.test_simple_track_dispatched_as_phase).
+        # if a simple track section contains `- [ ]` task lines, all_noop
+        # would be False and cmd_detect would attempt to drive TDVG
+        # sub-phase dispatch. v3.2+: tasks.md simple-track sections
+        # contain a single `- [ ] N.1 执行 tracks.<id>.commands` placeholder
+        # task (per pg-propose template), which still produces
+        # all_noop=False — so the phase-branch routing below is REQUIRED
+        # to keep simple tracks out of the TDVG sub-phase machinery.
         #
         # get_track_type expects the BARE track id (no stage prefix like
         # "dev."), so we strip the prefix before lookup. We keep `item` in

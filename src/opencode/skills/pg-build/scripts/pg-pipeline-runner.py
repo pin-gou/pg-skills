@@ -2528,90 +2528,6 @@ def _maybe_bootstrap_init_commit(change, state):
 # Simple track section normalization
 # ============================================================
 
-# Body line used to mark a simple-track section as noop. count_tasks
-# (pg_pipeline_common.py) treats a literal "- 无" line as a noop marker,
-# which causes cmd_detect and _advance_to_next_sub to skip the TDVG
-# sub-phase entirely.
-SIMPLE_TRACK_NOOP_LINE = "- 无"
-
-
-def _noopify_simple_track_sections(change):
-    """Rewrite tasks.md sections for simple tracks to a single noop line.
-
-    Simple tracks (tracks.<id>.type == "simple") are dispatched to the
-    pg-build/simple sub-agent by the runner; they should NOT trigger TDVG
-    sub-phase dispatch. However, pg-propose currently still emits a section
-    for every pipeline item, including simple tracks.
-
-    To keep the runner's cmd_detect / _advance_to_next_sub logic unchanged
-    (which keys off the "all_noop" flag emitted by count_tasks), we rewrite
-    every section whose item matches a simple track to a single "- 无" line.
-    After rewriting, cmd_detect treats those sections as "all_noop" and
-    skips the TDVG sub-phase entirely.
-
-    A descriptive suffix is appended to the heading label so that humans
-    (and downstream LLM agents) reading tasks.md can still understand the
-    intent: e.g. "## 1. simple-openapi-gen:dev - simple track (派遣 pg-build/simple agent 执行 commands)".
-
-    The rewrite is idempotent: a section is detected as already-rewritten
-    when its body is exactly one "- 无" line.
-
-    Args:
-        change: change name.
-
-    Returns:
-        int: number of sections rewritten (0 if tasks.md missing or no
-        simple-track sections present).
-    """
-    tasks_path = os.path.join(CHANGES_DIR, change, "tasks.md")
-    if not os.path.isfile(tasks_path):
-        return 0
-
-    config = load_config()
-    tracks = config.get("tracks") or {}
-    simple_track_ids = {
-        tid for tid, tcfg in tracks.items()
-        if (tcfg or {}).get("type") == "simple"
-    }
-    if not simple_track_ids:
-        return 0
-
-    sections, all_lines = parse_tasks(tasks_path)
-    rewrite_count = 0
-
-    for sec in sections:
-        bare = sec["item"]
-        if bare not in simple_track_ids:
-            continue
-        body = sec["lines"]
-        heading_line = all_lines[sec["start_line"]]
-        heading_already_annotated = "(simple track" in heading_line
-        # Body may contain trailing blank lines. Filter to non-blank content.
-        body_non_blank = [ln for ln in body if ln.strip()]
-        body_already_noop = (
-            len(body_non_blank) == 1
-            and body_non_blank[0].strip() == SIMPLE_TRACK_NOOP_LINE
-        )
-        # Skip sections already in the canonical rewritten form.
-        if heading_already_annotated and body_already_noop:
-            continue
-        # Append a "(simple track: ...)" suffix to the heading so the
-        # intent is documented inline without breaking the heading parser.
-        if not heading_already_annotated:
-            heading_line = heading_line.rstrip("\n").rstrip() + "  (simple track: 派遣 pg-build/simple agent 执行 commands)\n"
-            all_lines[sec["start_line"]] = heading_line
-        # Replace section body with a single noop line.
-        all_lines[sec["start_line"] + 1: sec["end_line"]] = [SIMPLE_TRACK_NOOP_LINE + "\n"]
-        rewrite_count += 1
-
-    if rewrite_count > 0:
-        with open(tasks_path, "w", encoding="utf-8") as f:
-            f.writelines(all_lines)
-
-    return rewrite_count
-
-
-# ============================================================
 # Simple track dispatch — pg-build/simple sub-agent
 # ============================================================
 # Simple tracks (`type: simple`) are dispatched to a sub-agent rather than
@@ -2814,12 +2730,11 @@ def cmd_next(change):
     # persists the marker.
     init_commit = _maybe_bootstrap_init_commit(change, state)
 
-    # Normalize simple-track sections in tasks.md to noop markers so that
-    # cmd_detect treats them as "all_noop" and skips TDVG sub-phase
-    # dispatch. Must run BEFORE pipeline_detect (called below) so the
-    # detected sections reflect the noop rewrite. Idempotent — safe to
-    # call on every cmd_next invocation.
-    _noopify_simple_track_sections(change)
+    # Simple-track routing is handled by cmd_detect via get_track_type() —
+    # no need to rewrite tasks.md sections to noop markers anymore.
+    # (Removed in v3.2: _noopify_simple_track_sections was redundant
+    # because cmd_detect routes simple tracks to _execute_phase BEFORE the
+    # all_noop short-circuit.)
 
     # If we have a current item in waiting state, return the same action (idempotent)
     cur = state.get("current")
