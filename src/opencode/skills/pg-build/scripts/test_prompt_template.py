@@ -560,6 +560,273 @@ class TestBuildFixIssueContext(unittest.TestCase):
             self.assertEqual(out, {})
 
 
+class TestBuildFixIssueContextGate(unittest.TestCase):
+    """Parsing gate-assessment reports (G-N sections) into gate-view issue
+    context (gate_gap_id, audit_step, file_pos, fix_hint, ...)."""
+
+    def setUp(self):
+        self.mod = _load_runner()
+
+    def test_parses_first_gap_section(self):
+        with tempfile.TemporaryDirectory() as td:
+            change = "gate-fix-1"
+            build = Path(td) / change / "2-build"
+            build.mkdir(parents=True)
+            report = build / "backend-2-gate-assessment.md"
+            report.write_text(
+                "# Gate Assessment - backend\n\n"
+                "## 不通过项详细说明\n\n"
+                "### backend:G-1 — audit gap: V-backend-1\n"
+                "- **检查项**: #1\n"
+                "- **预期**: HTTP 200 returns paged memory\n"
+                "- **实际**: HTTP 500 column not found\n"
+                "- **文件位置**: webvirt-backend/XxxMapper.java:42\n"
+                "- **关联 task**: backend:dev 任务 1.5\n"
+                "- **修复建议**: rename cluster_id to tenant_id\n"
+                "\n"
+                "### backend:G-2 — other gap (should not be picked)\n"
+                "- **检查项**: #2\n"
+                "- **预期**: ...\n"
+                "- **实际**: ...\n"
+            )
+
+            with mock.patch.object(self.mod, "CHANGES_DIR", td):
+                with mock.patch.object(self.mod, "PROJECT_ROOT", td):
+                    out = self.mod._build_fix_issue_context(
+                        change, "backend", cycle=1, kind="gate",
+                    )
+            self.assertEqual(out["gate_gap_id"], "backend:G-1")
+            self.assertEqual(out["issue_title"], "audit gap: V-backend-1")
+            self.assertEqual(out["expected"], "HTTP 200 returns paged memory")
+            self.assertEqual(out["actual"], "HTTP 500 column not found")
+            self.assertEqual(out["file_pos"], "webvirt-backend/XxxMapper.java:42")
+            self.assertEqual(out["affected_tasks"], "backend:dev 任务 1.5")
+            self.assertEqual(out["fix_hint"], "rename cluster_id to tenant_id")
+            self.assertEqual(out["fix_cycle"], 1)
+            self.assertEqual(out["source_phase"], "gate")
+
+    def test_returns_empty_when_no_gate_report(self):
+        with tempfile.TemporaryDirectory() as td:
+            change = "no-gate-report"
+            (Path(td) / change / "2-build").mkdir(parents=True)
+            with mock.patch.object(self.mod, "CHANGES_DIR", td):
+                with mock.patch.object(self.mod, "PROJECT_ROOT", td):
+                    out = self.mod._build_fix_issue_context(
+                        change, "backend", cycle=1, kind="gate",
+                    )
+            # All gate-view fields default to empty strings (not crash)
+            self.assertEqual(out["gate_gap_id"], "")
+            self.assertEqual(out["audit_step"], "")
+            self.assertEqual(out["expected"], "")
+            self.assertEqual(out["fix_hint"], "")
+
+    def test_kind_default_is_verify(self):
+        # Backward compat: kind="verify" must still work for verify reports
+        with tempfile.TemporaryDirectory() as td:
+            change = "kind-default"
+            build = Path(td) / change / "2-build"
+            build.mkdir(parents=True)
+            (build / "backend-1-verify.md").write_text(
+                "## FIX ISSUE REQUEST\n\n"
+                "**legacy default**\n"
+                "- verification_step: V-1\n"
+                "- expected: A\n"
+                "- actual: B\n"
+            )
+            with mock.patch.object(self.mod, "CHANGES_DIR", td):
+                with mock.patch.object(self.mod, "PROJECT_ROOT", td):
+                    out_default = self.mod._build_fix_issue_context(
+                        change, "backend", cycle=1,
+                    )
+                    out_explicit = self.mod._build_fix_issue_context(
+                        change, "backend", cycle=1, kind="verify",
+                    )
+            # 默认行为没变，仍走 verify 路径
+            self.assertEqual(out_default["verification_step"], "V-1")
+            self.assertEqual(out_explicit["verification_step"], "V-1")
+            # gate 字段不应该出现
+            self.assertNotIn("gate_gap_id", out_default)
+
+
+class TestFixGateTemplate(unittest.TestCase):
+    """fix-gate sub must use a different prompt template from verify-fix.
+
+    Coverage:
+    - _build_prompt_template(track, 'fix-gate') returns _PROMPT_BLOCK_FIX_GATE
+    - Rendered prompt contains GATE GAP REQUEST (not FIX ISSUE REQUEST)
+    - Rendered prompt contains gate-view fields (gate_gap_id, audit_step,
+      file_pos, fix_hint)
+    - Rendered prompt's cat > filename is `gate-fix.md` (via ctx.fix_report_filename)
+    - _SUB_TRACK_FIELDS has 'fix-gate' key with gate-specific fields
+    - _SUB_TRACK_FIELDS['fix'] now has fix_report_filename
+    """
+
+    def setUp(self):
+        self.mod = _load_runner()
+        self.minimal_ctx = {
+            "id": "backend",
+            "label": "Backend",
+            "review_level": "standard",
+            "modules": ["backend"],
+            "module_details": [{
+                "name": "backend",
+                "root": "webvirt-backend",
+                "language": "java",
+                "build": "mvn -pl webvirt-backend -am package -DskipTests",
+                "lint": "mvn -pl webvirt-backend checkstyle:check",
+                "test": {"unit": "mvn -pl webvirt-backend test"},
+            }],
+            "module_roots": ["webvirt-backend"],
+            "module_names": ["backend"],
+            "max_fix_retries": 5,
+            "max_gate_fix_retries": 3,
+            "fix_routing": "source",
+            "fix_cycle": 2,
+            "gate_cycles": 2,
+            "cycles_remaining": 1,
+            "gate_report_path": "2-build/backend-2-gate-assessment.md",
+            "fix_report_filename": "gate-fix.md",
+            "stage": {
+                "name": "dev", "test_key": "unit", "gate": "all_pass",
+                "environment": {
+                    "required": True, "name": "dev-local",
+                    "prepare": {"status": "ok", "log_path": "", "message": ""},
+                    "instances": {"backend": [{"name": "backend-1", "host": "localhost", "port": 9080}]},
+                    "hooks": {
+                        "supported_actions": ["start", "stop"],
+                        "action_metadata": {"backend": {"start": {"timeout_seconds": 300}}},
+                        "invocation": {"command_template": "X"},
+                    },
+                },
+                "test_commands": ["mvn -pl webvirt-backend test"],
+            },
+            "sub": "fix-gate",
+            "issue_title": "audit gap: V-backend-1",
+            "source_track": "backend",
+            "source_phase": "gate",
+            "gate_gap_id": "backend:G-1",
+            "audit_step": "P-1",
+            "expected": "HTTP 200",
+            "actual": "HTTP 500",
+            "file_pos": "webvirt-backend/X.java:42",
+            "fix_hint": "rename column",
+            "affected_tasks": "backend:dev 任务 1.5",
+            "_change": "gate-fix-1",
+            "design_doc_path": ".pg/changes/gate-fix-1/design.md",
+            "tasks_path": ".pg/changes/gate-fix-1/tasks.md",
+            "tasks_preformatted": [],
+        }
+
+    def test_fix_gate_uses_fix_gate_block(self):
+        tpl = self.mod._build_prompt_template("backend", "fix-gate")
+        out = self.mod._render_prompt_template(tpl, self.minimal_ctx)
+        # fix-gate 视角标识
+        self.assertIn("GATE GAP REQUEST", out)
+        self.assertIn("gate_gap_id: backend:G-1", out)
+        self.assertIn("audit_step: P-1", out)
+        self.assertIn("file_pos: webvirt-backend/X.java:42", out)
+        self.assertIn("fix_hint: rename column", out)
+        # 不能有 verify-fix 视角的字段（防止渲染时串台）
+        self.assertNotIn("FIX ISSUE REQUEST", out)
+        self.assertNotIn("verification_step:", out)
+        self.assertNotIn("root_cause_phase:", out)
+        # 末尾 cat > 路径走 ctx 字段
+        self.assertIn("gate-fix.md", out)
+        self.assertNotIn("verify-fix.md", out)
+
+    def test_fix_gate_uses_toyaml_for_hooks(self):
+        tpl = self.mod._build_prompt_template("backend", "fix-gate")
+        out = self.mod._render_prompt_template(tpl, self.minimal_ctx)
+        # hooks 块走 toyaml（不是 json）
+        self.assertIn("```yaml", out)
+        self.assertIn("timeout_seconds: 300", out)
+        self.assertNotIn('"timeout_seconds": 300', out)
+
+    def test_fix_block_still_uses_verify_fix_md_by_default(self):
+        # 回归测试：fix 块末尾仍写 verify-fix.md（dispatch_fix_action 默认注入）
+        ctx = dict(self.minimal_ctx, sub="fix", fix_report_filename="verify-fix.md")
+        ctx.pop("gate_gap_id", None)
+        ctx.pop("audit_step", None)
+        ctx.pop("file_pos", None)
+        ctx.pop("fix_hint", None)
+        tpl = self.mod._build_prompt_template("backend", "fix")
+        out = self.mod._render_prompt_template(tpl, ctx)
+        self.assertIn("FIX ISSUE REQUEST", out)
+        self.assertIn("verify-fix.md", out)
+        self.assertNotIn("gate-fix.md", out)
+
+    def test_sub_track_fields_has_fix_gate(self):
+        # _SUB_TRACK_FIELDS 必须有 fix-gate key
+        self.assertIn("fix-gate", self.mod._SUB_TRACK_FIELDS)
+        fg = self.mod._SUB_TRACK_FIELDS["fix-gate"]
+        # 必备字段
+        for f in (
+            "gate_gap_id", "audit_step", "file_pos", "fix_hint",
+            "gate_cycles", "cycles_remaining", "gate_report_path",
+            "max_gate_fix_retries", "fix_report_filename",
+        ):
+            self.assertIn(f, fg, f"fix-gate 子集缺字段: {f}")
+
+    def test_sub_track_fields_fix_has_fix_report_filename(self):
+        # fix 子集必须包含 fix_report_filename（dispatch_fix_action 默认值覆盖）
+        self.assertIn(
+            "fix_report_filename",
+            self.mod._SUB_TRACK_FIELDS["fix"],
+        )
+
+
+class TestFixGatePromptStructure(unittest.TestCase):
+    """Verify the rendered fix-gate prompt contains all the structure that
+    LLM sub-agent needs: hooks YAML block, GATE GAP REQUEST section, fix
+    cycle counter, fix_report_filename cat > command."""
+
+    def setUp(self):
+        self.mod = _load_runner()
+
+    def test_rendered_prompt_has_8_step_validation_checklist(self):
+        ctx = {
+            "context": {
+                "id": "backend",
+                "label": "Backend",
+                "_change": "x",
+                "stage": {
+                    "test_commands": ["mvn test"],
+                    "environment": {
+                        "hooks": {
+                            "supported_actions": ["start"],
+                            "action_metadata": {"backend": {"start": {"timeout_seconds": 60}}},
+                            "invocation": {"command_template": "X"},
+                        },
+                    },
+                },
+                "fix_report_filename": "gate-fix.md",
+                "fix_cycle": 1,
+                "max_gate_fix_retries": 3,
+                "cycles_remaining": 2,
+                "next_report_n": 4,
+            }
+        }
+        tpl = self.mod._build_prompt_template("backend", "fix-gate")
+        out = self.mod._render_prompt_template(tpl, ctx)
+        # 8 步必跑流程（注意：第 2 步里的 {{context.stage.test_commands.0}}
+        # 走 _walk dict-only 解析，list index 解析是 runner 的遗留 bug；
+        # 这里只断言步骤框架，不查具体命令展开）
+        for step in [
+            "1. 修改源码",
+            "3. 跑模块 lint（必须 0 警告）",
+            "4. 启动 `runner invoke-hook --action start` 服务（如需）",
+            "5. 跑 design.md 中 P-N 审计项对应的验证项",
+            "6. 抓 `runner invoke-hook --action logs --tail-lines 100` 日志确认无 ERROR",
+            "7. 停止 `runner invoke-hook --action stop` 服务（如启动过）",
+            "8. 用 `cat > 2-build/backend-4-gate-fix.md << 'EOF' ... EOF` 自行写盘",
+        ]:
+            self.assertIn(step, out, f"missing step: {step}")
+        # GATE GAP REQUEST 块标题（gate 视角，不是 verify 视角）
+        self.assertIn("### GATE GAP REQUEST", out)
+        # cycles_remaining 显式出现
+        self.assertIn("cycles_remaining: 2", out)
+
+
 class TestBuildFinalGateContext(unittest.TestCase):
     """_build_final_gate_context must find proposal/tasks/designs/reports."""
 

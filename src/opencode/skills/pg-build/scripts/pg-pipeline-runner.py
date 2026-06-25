@@ -463,6 +463,7 @@ SUB_AGENTS = {
     "gate": "pg-build/gate",
 }
 FIX_AGENT = "pg-build/fix"
+FIX_GATE_AGENT = "pg-build/fix-gate"
 FINAL_GATE_AGENT = "pg-build/gate"
 
 
@@ -497,6 +498,16 @@ _SUB_TRACK_FIELDS = {
                "verification_step", "expected", "actual",
                "root_cause_phase", "affected_tasks",
                "design_doc_path", "tasks_path", "fix_cycle",
+               "fix_report_filename", "tasks_preformatted"],
+    "fix-gate": ["id", "review_level", "modules", "module_details", "stage",
+               "module_roots", "module_names",
+               "max_gate_fix_retries", "fix_routing",
+               "issue_title", "source_track", "source_phase",
+               "gate_gap_id", "audit_step", "expected", "actual",
+               "file_pos", "fix_hint", "affected_tasks",
+               "design_doc_path", "tasks_path",
+               "fix_cycle", "gate_cycles", "cycles_remaining",
+               "gate_report_path", "fix_report_filename",
                "tasks_preformatted"],
     "gate":   ["id", "review_level", "modules", "module_details", "stage",
                "module_roots", "module_names",
@@ -879,7 +890,70 @@ fix_cycle: {{context.fix_cycle}} / {{context.max_fix_retries}}
 5. 跑 tasks.md verify 章节的所有 V-* 验证项（curl 等）
 6. 抓 `runner invoke-hook --action logs --tail-lines 100` 日志确认无 ERROR
 7. 停止 `runner invoke-hook --action stop` 服务（如启动过）
-8. 用 `cat > 2-build/{{context.id}}-{{context.next_report_n}}-verify-fix.md << 'EOF' ... EOF` 自行写盘
+8. 用 `cat > 2-build/{{context.id}}-{{context.next_report_n}}-{{context.fix_report_filename}} << 'EOF' ... EOF` 自行写盘
+
+返回格式同 base dispatch（summary / outputs / tasks_updated / status）。
+"""
+
+
+_PROMPT_BLOCK_FIX_GATE = """\
+### Hooks 调用约定 (LLM 触发 role action 的唯一入口)
+runner **不**预渲染 cmd 字典；LLM 通过 `runner invoke-hook` CLI 触发 hook，
+runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-hook.py。
+
+**必填参数**：`--change` `--env` `--role` `--instance` `--action`
+**可选参数**：`--stage` (默认 manual) `--tail-lines` (仅 logs/tail 生效)
+
+```yaml
+{{context.stage.environment.hooks | toyaml}}
+```
+
+调用示例：
+```bash
+# 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start
+
+# 看 100 行日志
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
+  --tail-lines 100
+```
+
+**重要不变量**：
+- `timeout_seconds` 是 INFORMATION（来自 project.yaml）。
+  LLM **不**传 `--timeout` flag（不存在）；runner 内部读取并通过 `pg-run-hook.py` 强制执行。
+- `--host` / `--port` 也不是 CLI flag；runner 从 `environment.instances[role][].host` 自动反查。
+
+### GATE GAP REQUEST
+
+**{{context.issue_title}}**
+- source_track: {{context.source_track}}
+- source_phase: {{context.source_phase}}
+- gate_gap_id: {{context.gate_gap_id}}              # 形如 {track}:G-N
+- audit_step: {{context.audit_step}}                # 对应 design.md 的 P-N 审计项
+- expected: {{context.expected}}
+- actual: {{context.actual}}
+- file_pos: {{context.file_pos}}                    # 来自 gate report 的 **文件位置**
+- fix_hint: {{context.fix_hint}}                    # 来自 gate report 的 **修复建议**
+- affected_tasks: {{context.affected_tasks}}        # 来自 gate report 的 **关联 task**
+- change_name: {{context._change}}
+- design_doc_path: {{context.design_doc_path}}
+- tasks_path: {{context.tasks_path}}
+
+fix_cycle: {{context.fix_cycle}} / {{context.max_gate_fix_retries}}
+cycles_remaining: {{context.cycles_remaining}}
+
+**修复后必跑流程**（fix-gate agent 必须自检通过才能返回 SUCCESS）：
+
+1. 修改源码
+2. 跑 `{{context.stage.test_commands.0}}` 单元测试（必须通过）
+3. 跑模块 lint（必须 0 警告）
+4. 启动 `runner invoke-hook --action start` 服务（如需）
+5. 跑 design.md 中 P-N 审计项对应的验证项（curl 等）—— 对齐 `audit_step` 字段
+6. 抓 `runner invoke-hook --action logs --tail-lines 100` 日志确认无 ERROR
+7. 停止 `runner invoke-hook --action stop` 服务（如启动过）
+8. 用 `cat > 2-build/{{context.id}}-{{context.next_report_n}}-{{context.fix_report_filename}} << 'EOF' ... EOF` 自行写盘
 
 返回格式同 base dispatch（summary / outputs / tasks_updated / status）。
 """
@@ -948,6 +1022,7 @@ def _build_prompt_template(item_id, sub):
         "verify": _PROMPT_BLOCK_VERIFY,
         "gate": _PROMPT_BLOCK_GATE,
         "fix": _PROMPT_BLOCK_FIX,
+        "fix-gate": _PROMPT_BLOCK_FIX_GATE,
     }
     block = sub_blocks.get(sub, "")
     return _PROMPT_TEMPLATE_BASE.replace(
@@ -1452,14 +1527,24 @@ def _enrich_context_with_rollback(ctx, rb):
     }
 
 
-def _build_fix_issue_context(change, item_id, cycle):
-    """Read the most recent verify report and extract FIX ISSUE REQUEST fields.
+def _build_fix_issue_context(change, item_id, cycle, kind="verify"):
+    """Read the most recent report and extract issue fields for the fix agent.
 
-    Verify agents must write a `## FIX ISSUE REQUEST` block in their report.
-    This parser is forgiving: missing fields default to empty strings so the
+    Two kinds supported:
+      - kind="verify"  → parse most recent verify report's
+        `## FIX ISSUE REQUEST` block. Returns verify-view fields
+        (verification_step, root_cause_phase, ...).
+      - kind="gate"    → parse most recent gate-assessment report's
+        `### {track}:G-N` sections. Returns gate-view fields
+        (gate_gap_id, audit_step, file_pos, fix_hint, ...).
+
+    The parser is forgiving: missing fields default to empty strings so the
     prompt template still renders (rather than crashing).
     """
     from pathlib import Path
+    if kind == "gate":
+        return _build_fix_issue_context_gate(change, item_id, cycle)
+    # kind="verify" (default)
     base = Path(CHANGES_DIR) / change / APPLY_DIR
     # Find the highest-N verify report for this track
     pattern = f"{item_id.replace('dev.', '').replace('.', '-')}-*-verify.md"
@@ -1534,6 +1619,98 @@ def _parse_verify_issues_legacy(text, item_id, cycle):
         key = m.group(1)
         val = m.group(2).strip()
         if key in out and not out[key]:
+            out[key] = val
+    return out
+
+
+def _build_fix_issue_context_gate(change, item_id, cycle):
+    """Parse the most recent gate-assessment report for {track}:G-N sections.
+
+    Each G-N section contributes a dict of gate-view issue fields. To keep
+    the prompt template shape simple, we return a single issue set (the
+    first G-N), matching the verify path's "first issue" behavior. If
+    multiple G-N gaps exist, the prompt still renders the first; the
+    fix-gate agent is expected to address all G-N sections in the report
+    (which is referenced by context.gate_report_path).
+
+    Gate report bullet format (per G-N section, see test_gate_rollback.py
+    for fixture format):
+      ### {track}:G-N — {gap title}
+      - **检查项**: #P  (corresponds to design.md P-N audit item)
+      - **预期**: ...
+      - **实际**: ...
+      - **文件位置**: path:line
+      - **关联 task**: {item}:{sub} 任务 X.Y
+      - **修复建议**: ...
+    """
+    from pathlib import Path
+    base = Path(CHANGES_DIR) / change / APPLY_DIR
+    # Gate reports live next to verify reports: {track}-{N}-gate-assessment.md
+    pattern = f"{item_id.replace('dev.', '').replace('.', '-')}-*-gate-assessment.md"
+    candidates = sorted(base.glob(pattern), reverse=True)
+    out = {
+        "issue_title": "",
+        "source_track": item_id,
+        "source_phase": "gate",
+        "gate_gap_id": "",            # 形如 "backend:G-1"
+        "audit_step": "",             # design.md 的 P-N 审计项
+        "expected": "",
+        "actual": "",
+        "file_pos": "",               # **文件位置**
+        "fix_hint": "",               # **修复建议**
+        "affected_tasks": "",         # **关联 task**
+        "fix_cycle": cycle,
+        "design_doc_path": f".pg/changes/{change}/design.md",
+        "tasks_path": f".pg/changes/{change}/tasks.md",
+    }
+    if not candidates:
+        return out
+    text = candidates[0].read_text(encoding="utf-8")
+
+    # Locate the first G-N section for this track.
+    gap_pattern = re.compile(
+        r"###\s+" + re.escape(item_id) + r":G-\d+[^\n]*\n"
+        r"((?:[ \t]*-[^\n]*\n?)+)",
+    )
+    gap_m = gap_pattern.search(text)
+    if not gap_m:
+        return out
+    gap_block = gap_m.group(0)
+
+    # Pull the gap id and title from the heading: "### {track}:G-N — {title}"
+    heading_m = re.match(
+        r"###\s+" + re.escape(item_id) + r":(G-\d+)\s*[—\-:]\s*(.+)",
+        gap_block,
+    )
+    if heading_m:
+        out["gate_gap_id"] = f"{item_id}:{heading_m.group(1)}"
+        out["issue_title"] = heading_m.group(2).strip()
+
+    # Bullet-style mapping. Keys are normalized: the gate report uses bold
+    # Chinese labels ("**检查项**", "**预期**", ...) while verify reports
+    # use plain English ("- expected: ..."). Normalize to one parser that
+    # accepts both "- **label**: val" and "- label: val".
+    label_to_key = {
+        "检查项": "audit_step",
+        "预期": "expected",
+        "实际": "actual",
+        "文件位置": "file_pos",
+        "关联 task": "affected_tasks",
+        "修复建议": "fix_hint",
+        # also accept verify-style keys for defensive parsing
+        "expected": "expected",
+        "actual": "actual",
+        "affected_tasks": "affected_tasks",
+    }
+    for line in gap_block.splitlines():
+        # Match "- **label**: value" OR "- label: value"
+        m = re.match(r"^\s*-\s*(?:\*\*([^*]+)\*\*|([\w_]+))\s*:\s*(.+?)\s*$", line)
+        if not m:
+            continue
+        label = (m.group(1) or m.group(2) or "").strip()
+        val = m.group(3).strip()
+        key = label_to_key.get(label)
+        if key and not out.get(key):
             out[key] = val
     return out
 
@@ -1723,11 +1900,13 @@ def dispatch_fix_action(item, cycle, context, config=None):
         _enrich_context_with_prompt_injection(context, config, item, "fix")
     context["sub"] = "fix"
     context["fix_cycle"] = cycle
+    # 报告文件名走 ctx 字段，让 BLOCK 末尾 cat > 命令与 sub 解耦
+    context.setdefault("fix_report_filename", "verify-fix.md")
     # Populate fix-issue fields from the most recent verify report so the
     # template's FIX ISSUE REQUEST block has real values (not empty strings).
     change = context.get("_change", "")
     if change:
-        issue_ctx = _build_fix_issue_context(change, item, cycle)
+        issue_ctx = _build_fix_issue_context(change, item, cycle, kind="verify")
         # Don't overwrite fields already set by callers (e.g. rollback_reason).
         for k, v in issue_ctx.items():
             context.setdefault(k, v)
@@ -1736,11 +1915,49 @@ def dispatch_fix_action(item, cycle, context, config=None):
     return {
         "action": "dispatch_fix",
         "item": item,
+        "sub": "fix",
         "agent": FIX_AGENT,
         "fix_cycle": cycle,
         "prompt_final_no_modify": rendered,
         "prompt_injection": context.get("prompt_injection", {
             "target_agent": "pg-build/fix",
+            "prepend": "",
+            "append": "",
+            "rules_applied": [],
+        }),
+    }
+
+
+def dispatch_fix_gate_action(item, gate_cycle, context, config=None):
+    """Dispatch a fix-gate agent with a gate-view prompt.
+
+    Mirrors dispatch_fix_action but reads from a gate-assessment report
+    (G-N sections) instead of a verify report (FIX ISSUE REQUEST block).
+    """
+    if config is not None:
+        _enrich_context_with_prompt_injection(context, config, item, "fix-gate")
+    context["sub"] = "fix-gate"
+    context["fix_cycle"] = gate_cycle          # 用 gate_cycle 当 fix_cycle 喂 prompt
+    context.setdefault("fix_report_filename", "gate-fix.md")
+    # max_gate_fix_retries 在 track_cfg 中，下游需要从 context 取
+    # （filter_track_context 已把 track-level 元数据放进来，但 max_gate_fix_retries
+    # 只在 _SUB_TRACK_FIELDS["fix-gate"] 白名单里，runner 还需要从 config 反查）
+    change = context.get("_change", "")
+    if change:
+        issue_ctx = _build_fix_issue_context(change, item, gate_cycle, kind="gate")
+        for k, v in issue_ctx.items():
+            context.setdefault(k, v)
+    template_str = _build_prompt_template(item, "fix-gate")
+    rendered = _render_prompt_template(template_str, context)
+    return {
+        "action": "dispatch_fix_gate",
+        "item": item,
+        "sub": "fix-gate",
+        "agent": FIX_GATE_AGENT,
+        "gate_cycle": gate_cycle,
+        "prompt_final_no_modify": rendered,
+        "prompt_injection": context.get("prompt_injection", {
+            "target_agent": "pg-build/fix-gate",
             "prepend": "",
             "append": "",
             "rules_applied": [],
@@ -2457,10 +2674,22 @@ def _resume_waiting(config, change, state, cur, init_commit=None):
     attempt = cur.get("attempt", 1)
     has_rollback = cur.get("has_rollback", False)
 
-    # Fix: when in fix cycle, dispatch fix agent regardless of cur["sub"]
-    # (cur["sub"] stays at the pre-fix value like "verify" - it is not
-    #  changed to "fix" by the escalate handler in cmd_record)
+    # Fix: when in fix cycle, dispatch fix agent. cur["sub"] now distinguishes
+    # verify-fix ("fix") from gate-fix ("fix-gate") so we route accordingly.
     if cur.get("in_fix_cycle"):
+        fix_sub = cur.get("sub", "fix")
+        if fix_sub == "fix-gate":
+            ctx = filter_track_context(config, item_id, "fix-gate", change=change)
+            ctx["_change"] = change
+            ctx["max_gate_fix_retries"] = (
+                get_track_config(config, item_id).get(
+                    "max_gate_fix_retries", DEFAULT_GATE_FIX_RETRIES
+                )
+            )
+            gate_cycles = cur.get("gate_cycles", 1)
+            ctx["gate_cycles"] = gate_cycles
+            ctx["cycles_remaining"] = ctx["max_gate_fix_retries"] - gate_cycles
+            return dispatch_fix_gate_action(item_id, gate_cycles, ctx, config=config)
         ctx = filter_track_context(config, item_id, "fix", change=change)
         return dispatch_fix_action(item_id, cur.get("fix_cycles", 1), ctx)
 
@@ -2809,12 +3038,36 @@ def cmd_record(change, status, report_path="", summary="", outputs="", issues=""
     elif status == "failed":
         pg_context_chain.sub_end(change, item_id, sub, "FAILED", "", "", issues)
 
-        # Fix: when in fix cycle, re-dispatch fix agent (don't retry
-        # the pre-fix sub-phase agent which cur["sub"] still points to)
+        # Fix: when in fix cycle, re-dispatch fix agent. cur["sub"] now
+        # distinguishes verify-fix ("fix") from gate-fix ("fix-gate").
         if cur.get("in_fix_cycle"):
             cur["attempt"] = attempt + 1
             cur["waiting"] = False
             save_state(state)
+            fix_sub = cur.get("sub", "fix")
+            if fix_sub == "fix-gate":
+                gate_cycle = cur.get("gate_cycles", 1)
+                pg_context_chain.sub_start(change, item_id, "fix-gate", fix_cycle=gate_cycle)
+                cur["waiting"] = True
+                save_state(state)
+                ctx = filter_track_context(config, item_id, "fix-gate", change=change)
+                ctx["_change"] = change
+                ctx["gate_cycles"] = gate_cycle
+                max_gate_fix = (
+                    get_track_config(config, item_id).get(
+                        "max_gate_fix_retries", DEFAULT_GATE_FIX_RETRIES
+                    )
+                )
+                ctx["max_gate_fix_retries"] = max_gate_fix
+                ctx["cycles_remaining"] = max_gate_fix - gate_cycle
+                ctx["gate_report_path"] = (
+                    track_latest_report_path(change, item_id, "gate-assessment")
+                    or gate_report_path_for(change, item_id)
+                )
+                return _inject_commit(
+                    dispatch_fix_gate_action(item_id, gate_cycle, ctx, config=config),
+                    change, item_id, "fix-gate", status,
+                )
             pg_context_chain.sub_start(change, item_id, "fix")
             cur["waiting"] = True
             save_state(state)
@@ -2877,6 +3130,7 @@ def cmd_record(change, status, report_path="", summary="", outputs="", issues=""
 
         cur["in_fix_cycle"] = True
         cur["fix_cycles"] = fix_cycles + 1
+        cur["sub"] = "fix"                      # 区分 verify-fix (sub="fix") / gate-fix (sub="fix-gate")
         cur["waiting"] = False
         save_state(state)
         pg_context_chain.sub_start(change, item_id, "fix")
@@ -3078,31 +3332,23 @@ def _advance_from_gate(config, change, state, item_id, verdict):
 
         # Not exhausted: dispatch fix-gate agent
         cur["in_fix_cycle"] = True
+        cur["sub"] = "fix-gate"                 # ← 区分 verify-fix / gate-fix
         cur["waiting"] = False
         save_state(state)
 
-        pg_context_chain.sub_start(change, item_id, "fix", fix_cycle=gate_cycles)
+        pg_context_chain.sub_start(change, item_id, "fix-gate", fix_cycle=gate_cycles)
         cur["waiting"] = True
         save_state(state)
 
-        ctx = filter_track_context(config, item_id, "fix", change=change)
+        ctx = filter_track_context(config, item_id, "fix-gate", change=change)
         ctx["gate_cycles"] = gate_cycles
         ctx["cycles_remaining"] = max_gate_fix - gate_cycles
         ctx["gate_report_path"] = gate_report_path
+        ctx["max_gate_fix_retries"] = max_gate_fix
+        ctx["_change"] = change                 # 喂给 prompt 模板的 _change
 
-        return {
-            "action": "dispatch",
-            "item": item_id,
-            "sub": "fix-gate",
-            "agent": "pg-build/fix-gate",
-            "context": ctx,
-            "prompt_injection": ctx.get("prompt_injection", {
-                "target_agent": "pg-build/fix-gate",
-                "prepend": "",
-                "append": "",
-                "rules_applied": [],
-            }),
-        }
+        result = dispatch_fix_gate_action(item_id, gate_cycles, ctx, config=config)
+        return _inject_commit(result, change, item_id, "fix-gate", "fail")
 
 
 def _advance_track_done(config, change, state, item_id):
