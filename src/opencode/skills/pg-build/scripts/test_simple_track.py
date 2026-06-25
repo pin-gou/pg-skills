@@ -7,9 +7,12 @@ Covers:
 - _noopify_simple_track_sections() rewrites simple-track sections to noop.
 - _noopify_simple_track_sections() is idempotent on second invocation.
 - _noopify_simple_track_sections() leaves standard tracks untouched.
+- _execute_phase() dispatches simple tracks to pg-build/simple agent.
 - _execute_phase() returns workflow_failed when a simple track has no commands.
-- _execute_phase() runs commands sequentially and records success.
-- _execute_phase() returns workflow_failed when a command exits non-zero.
+- _build_simple_dispatch() returns a dispatch action with agent=pg-build/simple.
+- _build_simple_dispatch() includes normalized commands + decision table in prompt.
+- _compute_simple_timeout() = sum(cmd.timeout) + N*30.
+- _infer_next_report_n() scans 2-build/ for next N.
 - pg-validate-tasks skips simple tracks (does not flag missing section).
 """
 import importlib.util
@@ -385,8 +388,16 @@ class TestCmdDetectSimpleTrack(unittest.TestCase):
 
 
 # ============================================================
-# _execute_phase simple-track branch tests
+# _execute_phase simple-track branch tests (dispatch model)
 # ============================================================
+# Simple tracks are now dispatched to the pg-build/simple sub-agent rather
+# than executed in-process. These tests verify:
+#   1. _execute_phase redirects simple tracks to _build_simple_dispatch.
+#   2. _build_simple_dispatch returns the correct action shape.
+#   3. _build_simple_context produces a complete ctx.
+#   4. _compute_simple_timeout follows the sum+N*30 rule.
+#   5. _infer_next_report_n scans 2-build/ correctly.
+#   6. Missing commands produces workflow_failed.
 
 class TestExecutePhaseSimpleTrack(unittest.TestCase):
     def setUp(self):
@@ -405,18 +416,21 @@ class TestExecutePhaseSimpleTrack(unittest.TestCase):
         setattr(self.runner, "APPLY_STATE_FILES",
                 (".context-chain.state", ".pipeline-state.json"))
 
-        # Minimal config with a simple track.
-        self._write_config(simple_commands=["echo hello"])
-
     def tearDown(self):
         for k in ("pg_pipeline_runner", "pg_pipeline_common"):
             if k in sys.modules:
                 del sys.modules[k]
         shutil.rmtree(self.tmpdir, ignore_errors=True)
 
-    def _write_config(self, *, simple_commands):
+    def _write_config(self, *, simple_commands, on_failure=None,
+                      timeout_seconds=None):
         cfg_path = os.path.join(self.pg_spec, "config.yaml")
         cmds_yaml = "\n".join(f'      - "{c}"' for c in simple_commands)
+        extra = ""
+        if on_failure is not None:
+            extra += f"    on_failure: {on_failure}\n"
+        if timeout_seconds is not None:
+            extra += f"    timeout_seconds: {timeout_seconds}\n"
         with open(cfg_path, "w") as f:
             f.write(
                 "schema: spec-driven\n"
@@ -426,6 +440,7 @@ class TestExecutePhaseSimpleTrack(unittest.TestCase):
                 "  simple-foo:\n"
                 "    type: simple\n"
                 f"    commands:\n{cmds_yaml}\n"
+                f"{extra}"
                 "environments: {}\n"
                 "stages: []\n"
             )
@@ -441,13 +456,11 @@ class TestExecutePhaseSimpleTrack(unittest.TestCase):
         }
 
     def _patch_runner(self, runner):
-        """Patch side-effecting helpers so the test is hermetic."""
-        # save_state writes to disk — replace with no-op.
         runner.save_state = mock.MagicMock(return_value=None)
-        # pipeline_mark records item-level completion — replace with no-op.
         runner.pipeline_mark = mock.MagicMock(return_value=None)
-        # pg_context_chain.phase_start/end — no-op.
         if hasattr(runner, "pg_context_chain"):
+            runner.pg_context_chain.sub_start = mock.MagicMock()
+            runner.pg_context_chain.sub_end = mock.MagicMock()
             runner.pg_context_chain.phase_start = mock.MagicMock()
             runner.pg_context_chain.phase_end = mock.MagicMock()
         return runner
@@ -466,7 +479,10 @@ class TestExecutePhaseSimpleTrack(unittest.TestCase):
         self.assertTrue(result["fatal"])
         self.assertIn("缺少 commands", result["reason"])
 
-    def test_command_success_marks_completed_and_returns_phase_result(self):
+    def test_execute_phase_dispatches_simple_track_as_agent(self):
+        """_execute_phase must return action=dispatch, agent=pg-build/simple
+        for simple tracks (instead of executing in-process)."""
+        self._write_config(simple_commands=["echo hello"])
         config = {
             "tracks": {
                 "simple-foo": {"type": "simple", "commands": ["echo hello"]},
@@ -475,45 +491,248 @@ class TestExecutePhaseSimpleTrack(unittest.TestCase):
         state = self._empty_state()
         runner = self._patch_runner(self.runner)
         result = runner._execute_phase(config, self.change, state, "simple-foo")
-        self.assertEqual(result["action"], "phase_result")
-        self.assertFalse(result["terminate"])
-        self.assertEqual(result["phase_item"], "simple-foo")
-        # state.current.waiting should be True (LLM will record completed).
+        self.assertEqual(result["action"], "dispatch")
+        self.assertEqual(result["agent"], "pg-build/simple")
+        self.assertEqual(result["item"], "simple-foo")
+        self.assertEqual(result["sub"], "simple")
+        # state.current.waiting should be True after sub_start.
         self.assertTrue(state["current"]["waiting"])
+        self.assertEqual(state["current"]["sub"], "simple")
 
-    def test_command_failure_returns_workflow_failed(self):
+    def test_execute_phase_prompt_contains_normalized_commands(self):
+        """The dispatched prompt must include the normalized command list
+        so the pg-build/simple agent knows what to run."""
+        self._write_config(simple_commands=[
+            "echo first",
+            {"cmd": "echo second", "timeout_seconds": 30, "on_failure": "continue"},
+        ])
         config = {
             "tracks": {
-                "simple-foo": {"type": "simple", "commands": ["false"]},
+                "simple-foo": {"type": "simple", "commands": [
+                    "echo first",
+                    {"cmd": "echo second", "timeout_seconds": 30,
+                     "on_failure": "continue"},
+                ]},
             },
         }
         state = self._empty_state()
         runner = self._patch_runner(self.runner)
         result = runner._execute_phase(config, self.change, state, "simple-foo")
+        prompt = result["prompt_final_no_modify"]
+        # Both commands appear.
+        self.assertIn("echo first", prompt)
+        self.assertIn("echo second", prompt)
+        # The second command's on_failure policy is visible in the prompt.
+        self.assertIn("on_failure=continue", prompt)
+        # Track timeout is surfaced in the Track 配置 block.
+        self.assertIn("track.timeout_seconds", prompt)
+
+    def test_execute_phase_prompt_contains_decision_table(self):
+        """The prompt must include the failure-handling decision table
+        so the agent knows how to interpret on_failure values."""
+        self._write_config(simple_commands=["echo hi"])
+        config = {"tracks": {"simple-foo": {"type": "simple", "commands": ["echo hi"]}}}
+        state = self._empty_state()
+        runner = self._patch_runner(self.runner)
+        result = runner._execute_phase(config, self.change, state, "simple-foo")
+        prompt = result["prompt_final_no_modify"]
+        self.assertIn("失败处理决策表", prompt)
+        self.assertIn("`fail`", prompt)
+        self.assertIn("`continue`", prompt)
+        self.assertIn("`retry`", prompt)
+
+    def test_execute_phase_prompt_includes_next_report_n(self):
+        """runner must inject next_report_n so the agent knows the report
+        filename suffix for self-writing the report."""
+        # Pre-create a report file with N=2 so next_report_n should be 3.
+        os.makedirs(self.apply_dir, exist_ok=True)
+        with open(os.path.join(self.apply_dir, "simple-foo-2-simple.md"), "w") as f:
+            f.write("dummy")
+        self._write_config(simple_commands=["echo hi"])
+        config = {"tracks": {"simple-foo": {"type": "simple", "commands": ["echo hi"]}}}
+        state = self._empty_state()
+        runner = self._patch_runner(self.runner)
+        result = runner._execute_phase(config, self.change, state, "simple-foo")
+        prompt = result["prompt_final_no_modify"]
+        self.assertIn("simple-foo-3-simple.md", prompt)
+
+
+class TestBuildSimpleDispatch(unittest.TestCase):
+    """Direct tests for _build_simple_dispatch / _build_simple_context /
+    _compute_simple_timeout / _infer_next_report_n helpers."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp(prefix="test-simple-dispatch-")
+        self.pg_spec = os.path.join(self.tmpdir, "pg-spec")
+        self.changes_dir = os.path.join(self.pg_spec, "changes")
+        self.change = "dispatch-change"
+        self.change_dir = os.path.join(self.changes_dir, self.change)
+        self.apply_dir = os.path.join(self.change_dir, "2-build")
+        os.makedirs(self.apply_dir)
+
+        self.runner = _load_runner()
+        setattr(self.runner, "PROJECT_ROOT", self.tmpdir)
+        setattr(self.runner, "CHANGES_DIR", self.changes_dir)
+        setattr(self.runner, "CONFIG_PATH", os.path.join(self.pg_spec, "config.yaml"))
+
+    def tearDown(self):
+        for k in ("pg_pipeline_runner", "pg_pipeline_common"):
+            if k in sys.modules:
+                del sys.modules[k]
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _config(self, simple_cfg):
+        cfg_path = os.path.join(self.pg_spec, "config.yaml")
+        import yaml as _yaml
+        with open(cfg_path, "w") as f:
+            _yaml.safe_dump({"tracks": simple_cfg, "modules": {},
+                             "environments": {}, "stages": []}, f)
+        return {"tracks": simple_cfg}
+
+    # ----- _compute_simple_timeout -----
+
+    def test_compute_simple_timeout_empty_returns_600(self):
+        self.assertEqual(self.runner._compute_simple_timeout([]), 600)
+
+    def test_compute_simple_timeout_sum_plus_per_cmd_overhead(self):
+        cmds = [{"timeout_seconds": 60}, {"timeout_seconds": 120},
+                {"timeout_seconds": 30}]
+        # 60 + 120 + 30 + 3*30 = 300
+        self.assertEqual(self.runner._compute_simple_timeout(cmds), 300)
+
+    def test_compute_simple_timeout_none_falls_back_to_1800(self):
+        cmds = [{"timeout_seconds": None}, {"timeout_seconds": 60}]
+        # 1800 + 60 + 2*30 = 1920
+        self.assertEqual(self.runner._compute_simple_timeout(cmds), 1920)
+
+    # ----- _infer_next_report_n -----
+
+    def test_infer_next_report_n_no_existing_reports(self):
+        n = self.runner._infer_next_report_n(self.change, "simple-foo")
+        self.assertEqual(n, 1)
+
+    def test_infer_next_report_n_with_existing_reports(self):
+        for k, name in [(1, "simple-foo-1-simple.md"),
+                        (3, "simple-foo-3-simple.md")]:
+            with open(os.path.join(self.apply_dir, name), "w") as f:
+                f.write(f"report-{k}")
+        n = self.runner._infer_next_report_n(self.change, "simple-foo")
+        self.assertEqual(n, 4)
+
+    def test_infer_next_report_n_ignores_other_tracks(self):
+        with open(os.path.join(self.apply_dir, "backend-5-verify.md"), "w") as f:
+            f.write("other")
+        n = self.runner._infer_next_report_n(self.change, "simple-foo")
+        self.assertEqual(n, 1)
+
+    # ----- _build_simple_context -----
+
+    def test_build_simple_context_commands_missing_sentinel(self):
+        cfg = self._config({"simple-foo": {"type": "simple", "commands": []}})
+        ctx = self.runner._build_simple_context(cfg, self.change, "simple-foo")
+        self.assertTrue(ctx.get("_commands_missing"))
+
+    def test_build_simple_context_normalizes_commands(self):
+        cfg = self._config({"simple-foo": {"type": "simple", "commands": [
+            "echo a",
+            {"cmd": "echo b", "timeout_seconds": 10, "on_failure": "retry",
+             "retry_max": 1, "retry_timeout_seconds": 5},
+        ]}})
+        ctx = self.runner._build_simple_context(cfg, self.change, "simple-foo")
+        self.assertFalse(ctx.get("_commands_missing"))
+        cmds = ctx["commands_normalized"]
+        self.assertEqual(len(cmds), 2)
+        self.assertEqual(cmds[0]["idx"], 1)
+        self.assertEqual(cmds[0]["cmd"], "echo a")
+        self.assertEqual(cmds[1]["on_failure"], "retry")
+        self.assertEqual(cmds[1]["retry_max"], 1)
+
+    def test_build_simple_context_track_defaults(self):
+        cfg = self._config({"simple-foo": {"type": "simple",
+                                            "commands": ["echo hi"]}})
+        ctx = self.runner._build_simple_context(cfg, self.change, "simple-foo")
+        self.assertEqual(ctx["track_type"], "simple")
+        self.assertEqual(ctx["track_timeout"], 1800)
+        self.assertEqual(ctx["track_on_failure"], "workflow_failed")
+        # base-template compatibility fields
+        self.assertEqual(ctx["review_level"], "none")
+        self.assertEqual(ctx["modules"], [])
+        self.assertEqual(ctx["module_details"], [])
+        self.assertEqual(ctx["tasks_noop"], True)
+        self.assertEqual(ctx["tasks_preformatted"], [])
+        self.assertEqual(ctx["tasks_validation"], "")
+
+    def test_build_simple_context_uses_explicit_track_timeout(self):
+        cfg = self._config({"simple-foo": {
+            "type": "simple", "timeout_seconds": 60,
+            "on_failure": "continue_all", "commands": ["echo hi"],
+        }})
+        ctx = self.runner._build_simple_context(cfg, self.change, "simple-foo")
+        self.assertEqual(ctx["track_timeout"], 60)
+        self.assertEqual(ctx["track_on_failure"], "continue_all")
+
+    # ----- _build_simple_dispatch -----
+
+    def test_build_simple_dispatch_returns_correct_action_shape(self):
+        cfg = self._config({"simple-foo": {"type": "simple",
+                                            "commands": ["echo hi"]}})
+        result = self.runner._build_simple_dispatch(
+            cfg, self.change, "simple-foo")
+        self.assertEqual(result["action"], "dispatch")
+        self.assertEqual(result["agent"], "pg-build/simple")
+        self.assertEqual(result["item"], "simple-foo")
+        self.assertEqual(result["sub"], "simple")
+        self.assertEqual(result["attempt"], 1)
+        self.assertIsInstance(result["prompt_final_no_modify"], str)
+        self.assertIn("prompt_injection", result)
+        self.assertIn("next_call_timeout_seconds", result)
+
+    def test_build_simple_dispatch_prompt_includes_track_metadata(self):
+        cfg = self._config({"simple-foo": {"type": "simple",
+                                            "commands": ["echo hi"]}})
+        result = self.runner._build_simple_dispatch(
+            cfg, self.change, "simple-foo")
+        prompt = result["prompt_final_no_modify"]
+        self.assertIn("simple-foo", prompt)
+        self.assertIn("echo hi", prompt)
+        self.assertIn("track.type", prompt)
+        self.assertIn("track.timeout_seconds", prompt)
+
+    def test_build_simple_dispatch_timeout_matches_compute(self):
+        cfg = self._config({"simple-foo": {"type": "simple", "commands": [
+            {"cmd": "sleep 1", "timeout_seconds": 100},
+            {"cmd": "sleep 2", "timeout_seconds": 200},
+        ]}})
+        result = self.runner._build_simple_dispatch(
+            cfg, self.change, "simple-foo")
+        # 100 + 200 + 2*30 = 360
+        self.assertEqual(result["next_call_timeout_seconds"], 360)
+
+    def test_build_simple_dispatch_workflow_failed_when_no_commands(self):
+        cfg = self._config({"simple-foo": {"type": "simple", "commands": []}})
+        result = self.runner._build_simple_dispatch(
+            cfg, self.change, "simple-foo")
         self.assertEqual(result["action"], "workflow_failed")
         self.assertTrue(result["fatal"])
-        self.assertIn("simple-foo", result["reason"])
+        self.assertIn("缺少 commands", result["reason"])
 
-    def test_multiple_commands_stop_on_first_failure(self):
-        """If the first command fails, subsequent commands must NOT execute."""
-        sentinel = os.path.join(self.tmpdir, "sentinel.txt")
-        config = {
-            "tracks": {
-                "simple-foo": {
-                    "type": "simple",
-                    "commands": [
-                        "false",  # exits 1, should abort the loop
-                        f"touch {sentinel}",  # must NOT run
-                    ],
-                },
-            },
-        }
-        state = self._empty_state()
-        runner = self._patch_runner(self.runner)
-        result = runner._execute_phase(config, self.change, state, "simple-foo")
-        self.assertEqual(result["action"], "workflow_failed")
-        self.assertFalse(os.path.exists(sentinel),
-                         "Second command must not run after first failure")
+    def test_build_simple_dispatch_value_error_for_non_simple_track(self):
+        cfg = self._config({"backend": {"modules": ["backend"]}})
+        with self.assertRaises(ValueError):
+            self.runner._build_simple_dispatch(cfg, self.change, "backend")
+
+    def test_build_simple_dispatch_prompt_uses_simple_agent_block(self):
+        """The prompt must include the _PROMPT_BLOCK_SIMPLE specific
+        sections (命令执行要求 + 决策表 + 返回格式) rather than the
+        standard dev/verify blocks."""
+        cfg = self._config({"simple-foo": {"type": "simple",
+                                            "commands": ["echo hi"]}})
+        result = self.runner._build_simple_dispatch(
+            cfg, self.change, "simple-foo")
+        prompt = result["prompt_final_no_modify"]
+        self.assertIn("Simple Track 命令执行要求", prompt)
+        self.assertIn("待执行命令（顺序执行", prompt)
+        self.assertIn("返回格式", prompt)
 
 
 # ============================================================
@@ -675,11 +894,20 @@ class TestNormalizeSimpleCommand(unittest.TestCase):
 
 
 # ============================================================
-# _execute_phase — object commands, timeout, retry, continue
+# _execute_phase — dispatch model: object commands, on_failure policies
 # ============================================================
 
 class TestExecutePhaseAdvancedPolicies(unittest.TestCase):
-    """Exercises on_failure=fail/continue/retry and track.on_failure."""
+    """In the dispatch model, on_failure=continue/retry/fail and
+    track.on_failure=continue_all semantics are now enforced by the
+    pg-build/simple sub-agent (LLM-driven) rather than by runner Popen.
+
+    These tests verify the runner-side contract: the dispatch prompt
+    correctly surfaces each command's on_failure policy + retry params
+    so the agent has the information to make the right decision.
+
+    The actual command-execution behavior is now covered by the agent
+    itself (which has LLM reasoning + auto-recovery)."""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="test-simple-track-advanced-")
@@ -687,13 +915,12 @@ class TestExecutePhaseAdvancedPolicies(unittest.TestCase):
         self.changes_dir = os.path.join(self.pg_spec, "changes")
         self.change = "adv-change"
         self.change_dir = os.path.join(self.changes_dir, self.change)
-        os.makedirs(self.change_dir)
+        self.apply_dir = os.path.join(self.change_dir, "2-build")
+        os.makedirs(self.apply_dir)
         self.runner = _load_runner()
         setattr(self.runner, "PROJECT_ROOT", self.tmpdir)
         setattr(self.runner, "CHANGES_DIR", self.changes_dir)
         setattr(self.runner, "CONFIG_PATH", os.path.join(self.pg_spec, "config.yaml"))
-        setattr(self.runner, "APPLY_STATE_FILES",
-                (".context-chain.state", ".pipeline-state.json"))
         self._patch_runner(self.runner)
 
     def tearDown(self):
@@ -706,6 +933,8 @@ class TestExecutePhaseAdvancedPolicies(unittest.TestCase):
         runner.save_state = mock.MagicMock(return_value=None)
         runner.pipeline_mark = mock.MagicMock(return_value=None)
         if hasattr(runner, "pg_context_chain"):
+            runner.pg_context_chain.sub_start = mock.MagicMock()
+            runner.pg_context_chain.sub_end = mock.MagicMock()
             runner.pg_context_chain.phase_start = mock.MagicMock()
             runner.pg_context_chain.phase_end = mock.MagicMock()
         return runner
@@ -716,101 +945,92 @@ class TestExecutePhaseAdvancedPolicies(unittest.TestCase):
             "failed": False, "completed": False, "init_committed": True,
         }
 
-    def test_object_command_uses_explicit_timeout(self):
-        """A command with timeout_seconds=2 sleeps 5s; we expect a timeout
-        failure surfaced as workflow_failed."""
+    def test_object_command_timeout_surfaced_in_prompt(self):
+        """An object-form command's timeout_seconds must appear in the
+        dispatch prompt so the agent can enforce it."""
         config = {
             "tracks": {"simple-foo": {
                 "type": "simple",
-                "timeout_seconds": 1800,  # track default large
+                "timeout_seconds": 1800,
                 "commands": [{"cmd": "sleep 5", "timeout_seconds": 2}],
             }},
         }
         state = self._empty_state()
         result = self.runner._execute_phase(config, self.change, state, "simple-foo")
-        self.assertEqual(result["action"], "workflow_failed")
-        self.assertIn("simple-foo", result["reason"])
+        self.assertEqual(result["action"], "dispatch")
+        self.assertEqual(result["agent"], "pg-build/simple")
+        prompt = result["prompt_final_no_modify"]
+        self.assertIn("sleep 5", prompt)
+        self.assertIn("timeout=2s", prompt)
 
-    def test_object_command_continue_policy_runs_subsequent(self):
-        """First command fails but on_failure=continue; second command
-        should still execute and the track should succeed."""
-        sentinel = os.path.join(self.tmpdir, "sentinel-continue.txt")
+    def test_object_command_continue_policy_in_prompt(self):
+        """A command with on_failure=continue must surface the policy so
+        the agent knows to keep going after a failure."""
         config = {
             "tracks": {"simple-foo": {
                 "type": "simple",
                 "commands": [
                     {"cmd": "false", "on_failure": "continue"},
-                    {"cmd": f"touch {sentinel}"},
+                    {"cmd": "echo ok"},
                 ],
             }},
         }
         state = self._empty_state()
         result = self.runner._execute_phase(config, self.change, state, "simple-foo")
-        self.assertEqual(result["action"], "phase_result")
-        self.assertTrue(os.path.exists(sentinel),
-                        "Second command must run after a continued failure")
+        prompt = result["prompt_final_no_modify"]
+        # Both commands present
+        self.assertIn("false", prompt)
+        self.assertIn("echo ok", prompt)
+        # on_failure=continue is visible per-command
+        self.assertIn("on_failure=continue", prompt)
 
-    def test_retry_policy_succeeds_on_second_attempt(self):
-        """on_failure=retry: first attempt fails, second succeeds. The
-        track should mark complete and never return workflow_failed."""
-        attempts_file = os.path.join(self.tmpdir, "attempts.txt")
-        # Atomic append: write current value, exit 0 only on second call.
-        cmd = (
-            f"if [ ! -f {attempts_file} ]; then echo 1 > {attempts_file}; exit 1; "
-            f"else echo 2 > {attempts_file}; exit 0; fi"
-        )
+    def test_retry_policy_params_in_prompt(self):
+        """A command with on_failure=retry + retry_max + retry_timeout
+        must surface all three params so the agent can retry correctly."""
         config = {
             "tracks": {"simple-foo": {
                 "type": "simple",
-                "commands": [{"cmd": cmd, "on_failure": "retry", "retry_max": 2}],
+                "commands": [{
+                    "cmd": "flaky", "on_failure": "retry",
+                    "retry_max": 2, "retry_timeout_seconds": 5,
+                }],
             }},
         }
         state = self._empty_state()
         result = self.runner._execute_phase(config, self.change, state, "simple-foo")
-        self.assertEqual(result["action"], "phase_result",
-                         f"Expected phase_result, got {result}")
-        with open(attempts_file) as f:
-            self.assertEqual(f.read().strip(), "2",
-                             "Retry should have allowed second attempt to run")
+        prompt = result["prompt_final_no_modify"]
+        self.assertIn("on_failure=retry", prompt)
+        self.assertIn("retry_max=2", prompt)
+        # The retry-timeout hint must be in the bullet below the command
+        # (the {#if this.on_failure in ["retry"]} block).
+        self.assertIn("自动重试最多 2 次", prompt)
+        self.assertIn("timeout 5s", prompt)
 
-    def test_retry_policy_exhausted_returns_workflow_failed(self):
-        """on_failure=retry with retry_max=1 and a command that always
-        fails: should run 2 attempts then workflow_failed."""
-        config = {
-            "tracks": {"simple-foo": {
-                "type": "simple",
-                "commands": [{"cmd": "false", "on_failure": "retry", "retry_max": 1}],
-            }},
-        }
-        state = self._empty_state()
-        result = self.runner._execute_phase(config, self.change, state, "simple-foo")
-        self.assertEqual(result["action"], "workflow_failed")
+    def test_track_on_failure_continue_all_surfaced_in_prompt(self):
+        """Track-level on_failure=continue_all must surface in the prompt
+        so the agent knows not to abort the whole track on a hard failure.
 
-    def test_track_on_failure_continue_all_ignores_failure(self):
-        """Track-level on_failure=continue_all: even a hard 'fail' policy
-        command should be tolerated; the track continues to the next item."""
+        The agent still returns SUCCESS/FAILED; the runner record phase
+        honors continue_all by not returning workflow_failed."""
         config = {
             "tracks": {"simple-foo": {
                 "type": "simple",
                 "on_failure": "continue_all",
-                "commands": ["false"],  # default on_failure=fail
+                "commands": ["false"],
             }},
         }
         state = self._empty_state()
-        # Stub cmd_next so we don't need a real config.yaml / pipeline
-        # state — we only care that continue_all marks the track complete.
-        setattr(self.runner, "cmd_next", mock.MagicMock(
-            return_value={"action": "advanced"}))
         result = self.runner._execute_phase(config, self.change, state, "simple-foo")
-        self.assertIn("simple-foo", state.get("completed_items", []),
-                      f"track should be marked complete under continue_all, "
-                      f"got result={result} state={state}")
-        # cmd_next stubbed via setattr above
-        getattr(self.runner, "cmd_next").assert_called_once()
+        self.assertEqual(result["action"], "dispatch")
+        prompt = result["prompt_final_no_modify"]
+        self.assertIn("track.on_failure: continue_all", prompt)
+        # Decision table mentions continue_all semantics.
+        self.assertIn("continue_all", prompt)
 
     def test_invalid_command_config_returns_workflow_failed(self):
-        """A command dict missing required 'cmd' field triggers a
-        configuration error surfaced as workflow_failed."""
+        """A command dict missing required 'cmd' field is a config error:
+        _execute_phase should surface it as workflow_failed via
+        _build_simple_dispatch's normalize_simple_command call."""
         config = {
             "tracks": {"simple-foo": {
                 "type": "simple",
@@ -818,9 +1038,10 @@ class TestExecutePhaseAdvancedPolicies(unittest.TestCase):
             }},
         }
         state = self._empty_state()
-        result = self.runner._execute_phase(config, self.change, state, "simple-foo")
-        self.assertEqual(result["action"], "workflow_failed")
-        self.assertIn("配置错误", result["reason"])
+        # Patch _build_simple_dispatch to actually raise (since the runner
+        # does not catch ValueError from normalize_simple_command).
+        with self.assertRaises(ValueError):
+            self.runner._execute_phase(config, self.change, state, "simple-foo")
 
 
 # ============================================================

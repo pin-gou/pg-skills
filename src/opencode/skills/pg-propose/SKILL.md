@@ -257,7 +257,7 @@ dev-backend-and-agent: dev-local
 更新 TodoWrite 第 7 项。
 路径：`.pg/changes/<change-name>/tasks.md`
 
-> **重要**：生成前先读 [./references/orchestration-model.md](./references/orchestration-model.md)「Track 类型」段确认每个 track 是 standard 还是 simple。**simple track 只生成 1 个章节**（canonical form heading 含 `(simple track: runner 直接执行 commands)` + body 单 `- 无` 行），不走 4 子章节（test/dev/verify/gate）模板。
+> **重要**：生成前先读 [./references/orchestration-model.md](./references/orchestration-model.md)「Track 类型」段确认每个 track 是 standard 还是 simple。**simple track 只生成 1 个章节**（canonical form heading 含 `(simple track: 派遣 pg-build/simple agent 执行 commands)` + body 单 `- 无` 行），不走 4 子章节（test/dev/verify/gate）模板。
 
 **生成算法**（stages × tracks 二维展开 + track 类型分流）：见 [./references/tasks-templates.md](./references/tasks-templates.md)。
 
@@ -265,9 +265,9 @@ dev-backend-and-agent: dev-local
 - **environment 选择已由 environment.yaml 决定**，tasks.md 不再生成 `## Deployments` 段
 - 章节编号 N 从 1 开始顺序递增
 - **standard track** 生成 4 个子章节：`test` / `dev` / `verify` / `gate`
-- **simple track**（`tracks.<id>.type == "simple"`）生成 1 个章节（runner 直接执行 commands）
+- **simple track**（`tracks.<id>.type == "simple"`）生成 1 个章节（派遣 pg-build/simple agent 执行 commands）
 - standard track 章节标题使用 `## <N>. {stage.name}.{track_id}:{sub} - <label>` 格式
-- simple track 章节标题使用 `## <N>. {stage.name}.{track_id} - {stage.name} {track_id}  (simple track: runner 直接执行 commands)` 格式
+- simple track 章节标题使用 `## <N>. {stage.name}.{track_id} - {stage.name} {track_id}  (simple track: 派遣 pg-build/simple agent 执行 commands)` 格式
 - 任务编号使用 `- [ ] <N>.<M>` 格式
 - 不在 `affected_tracks` 中的 track 所有任务写 `- 无`
 - 所有 stage 结束后必须追加 `final-gate` 章节

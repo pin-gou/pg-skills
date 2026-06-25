@@ -455,16 +455,18 @@ def save_state(state):
 # Track config helpers
 # ============================================================
 
-SUB_PHASES = ["test", "dev", "verify", "gate"]
+SUB_PHASES = ["test", "dev", "verify", "gate", "simple"]
 SUB_AGENTS = {
     "test": "pg-build/test",
     "dev": "pg-build/dev",
     "verify": "pg-build/verify",
     "gate": "pg-build/gate",
+    "simple": "pg-build/simple",
 }
 FIX_AGENT = "pg-build/fix"
 FIX_GATE_AGENT = "pg-build/fix-gate"
 FINAL_GATE_AGENT = "pg-build/gate"
+SIMPLE_AGENT = "pg-build/simple"
 
 
 def _bare_track(qualified):
@@ -513,6 +515,13 @@ _SUB_TRACK_FIELDS = {
                "module_roots", "module_names",
                "max_fix_retries", "fix_routing",
                "tasks_preformatted", "next_report_n"],
+    "simple": ["id", "review_level", "label", "modules", "module_details",
+               "module_roots", "module_names",
+               "max_fix_retries", "fix_routing",
+               "tasks_preformatted", "tasks_validation", "tasks_noop",
+               "stage", "rollback_context",
+               "track_type", "track_timeout", "track_on_failure",
+               "commands_normalized", "next_report_n"],
     "final-gate": [
                "_change", "proposal_path", "tasks_path",
                "design_doc_path", "design_doc_paths", "report_paths",
@@ -958,6 +967,90 @@ cycles_remaining: {{context.cycles_remaining}}
 返回格式同 base dispatch（summary / outputs / tasks_updated / status）。
 """
 
+_PROMPT_BLOCK_SIMPLE = """\
+### Simple Track 命令执行要求
+
+你是 simple track 命令执行 agent。SSOT 是 `tracks.{{context.id}}.commands` 列表（已标准化为 `commands_normalized`），**不要**读 tasks.md（其章节已被 runner 改写为 noop form，无信息量）。
+
+#### Track 配置
+- track.id: {{context.id}}
+- track.type: {{context.track_type}}
+- track.label: {{context.label}}
+- track.timeout_seconds: {{context.track_timeout}}        # 全局默认
+- track.on_failure: {{context.track_on_failure}}          # fail / continue_all
+
+#### 待执行命令（顺序执行，逐条决策）
+
+{#each context.commands_normalized}
+**Command #{{this.idx}}**  (timeout={{this.timeout_seconds}}s, on_failure={{this.on_failure}}, retry_max={{this.retry_max}})
+```bash
+{{this.cmd}}
+```
+{#if this.is_retry}- 失败后自动重试最多 {{this.retry_max}} 次，每次 timeout {{this.retry_timeout_seconds}}s；仍失败按 track.on_failure 处理{/if}
+{#if this.is_continue}- 失败时记 warning 继续下一条{/if}
+{#if this.is_fail}- 失败时立即返回 status=FAILED 终止 track{/if}
+{/each}
+
+#### 失败处理决策表
+
+| per-cmd on_failure | 单条行为 | track.on_failure=fail 时 | track.on_failure=continue_all 时 |
+|---|---|---|---|
+| `fail` (默认) | 失败即终止 | workflow_failed | warning + 继续 |
+| `continue` | 失败 warning 后继续 | 继续下一条 | 继续下一条 |
+| `retry` | 重试 retry_max 次再判定 | workflow_failed | warning + 继续 |
+
+**重要**：track.on_failure=continue_all **仅在 runner record 阶段**生效——你本人直接返回
+status=SUCCESS 或 status=FAILED，由 runner 根据 track.on_failure 决定后续动作。
+
+{#if context.stage.environment}
+#### 环境与 Hooks 调用约定
+
+LLM 自行判断是否需要启动服务；runner 不替你启停。
+
+- env.name: {{context.stage.environment.name}}
+- env.hooks:
+
+```yaml
+{{context.stage.environment.hooks | toyaml}}
+```
+
+```bash
+# 启动 backend (runner 自动从 action_metadata 读 timeout_seconds)
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start
+
+# 看 100 行日志
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
+  --tail-lines 100
+```
+{/if}
+
+#### 必跑流程
+
+1. 依次执行上面 **Command #1..#N** 列表
+2. 对每条命令：
+   a. （可选）环境准备：缺依赖时 `apt install` / `pip install` / `npm install -g` 等
+   b. 用 `bash -c '<cmd>'` 执行（runner 在编排器侧用 `timeout N` 包裹时遵守）
+   c. 失败时按决策表处理
+3. 全部完成或按决策表终止后：用 `cat > 2-build/{{context.id}}-{{context.next_report_n}}-simple.md <<'EOF' ... EOF` 写执行报告
+   （包含每条命令的摘要：cmd / 退出码 / stdout 末尾 ~50 行 / stderr 末尾 ~50 行 / 耗时）
+4. 返回结果
+
+#### 返回格式
+
+- summary: 一句话总结（如 "执行 3/3 条命令成功" 或 "Command #2 失败: <err>，按 on_failure=fail 终止"）
+- outputs: 产物文件列表（如 `2-build/{{context.id}}-1-simple.md`）
+- tasks_updated: false（simple track 不更新 tasks.md 复选框）
+- status: SUCCESS / FAILED
+
+**红线**：
+1. 禁止加载 pg-build / pg-propose 等 SKILL
+2. 禁止修改 tasks.md / proposal.md / design.md
+3. 禁止修改源码（simple track 不属于任何 module；如命令产生文件输出，那是 commands 自己的事）
+4. 失败时**必须**先尝试自动修复（缺依赖、命令拼写错误等）再返回 FAILED
+"""
+
 _PROMPT_TEMPLATE_FINAL_GATE = """\
 ## 任务：Final Gate — 跨 track 依赖审查
 
@@ -1023,6 +1116,7 @@ def _build_prompt_template(item_id, sub):
         "gate": _PROMPT_BLOCK_GATE,
         "fix": _PROMPT_BLOCK_FIX,
         "fix-gate": _PROMPT_BLOCK_FIX_GATE,
+        "simple": _PROMPT_BLOCK_SIMPLE,
     }
     block = sub_blocks.get(sub, "")
     return _PROMPT_TEMPLATE_BASE.replace(
@@ -2444,10 +2538,10 @@ SIMPLE_TRACK_NOOP_LINE = "- 无"
 def _noopify_simple_track_sections(change):
     """Rewrite tasks.md sections for simple tracks to a single noop line.
 
-    Simple tracks (tracks.<id>.type == "simple") are executed by the runner
-    directly via _execute_phase; they should NOT trigger TDVG sub-phase
-    dispatch. However, pg-propose currently still emits a section for every
-    pipeline item, including simple tracks.
+    Simple tracks (tracks.<id>.type == "simple") are dispatched to the
+    pg-build/simple sub-agent by the runner; they should NOT trigger TDVG
+    sub-phase dispatch. However, pg-propose currently still emits a section
+    for every pipeline item, including simple tracks.
 
     To keep the runner's cmd_detect / _advance_to_next_sub logic unchanged
     (which keys off the "all_noop" flag emitted by count_tasks), we rewrite
@@ -2457,7 +2551,7 @@ def _noopify_simple_track_sections(change):
 
     A descriptive suffix is appended to the heading label so that humans
     (and downstream LLM agents) reading tasks.md can still understand the
-    intent: e.g. "## 1. simple-openapi-gen:dev - simple track (runner 直接执行 commands)".
+    intent: e.g. "## 1. simple-openapi-gen:dev - simple track (派遣 pg-build/simple agent 执行 commands)".
 
     The rewrite is idempotent: a section is detected as already-rewritten
     when its body is exactly one "- 无" line.
@@ -2504,7 +2598,7 @@ def _noopify_simple_track_sections(change):
         # Append a "(simple track: ...)" suffix to the heading so the
         # intent is documented inline without breaking the heading parser.
         if not heading_already_annotated:
-            heading_line = heading_line.rstrip("\n").rstrip() + "  (simple track: runner 直接执行 commands)\n"
+            heading_line = heading_line.rstrip("\n").rstrip() + "  (simple track: 派遣 pg-build/simple agent 执行 commands)\n"
             all_lines[sec["start_line"]] = heading_line
         # Replace section body with a single noop line.
         all_lines[sec["start_line"] + 1: sec["end_line"]] = [SIMPLE_TRACK_NOOP_LINE + "\n"]
@@ -2515,6 +2609,165 @@ def _noopify_simple_track_sections(change):
             f.writelines(all_lines)
 
     return rewrite_count
+
+
+# ============================================================
+# Simple track dispatch — pg-build/simple sub-agent
+# ============================================================
+# Simple tracks (`type: simple`) are dispatched to a sub-agent rather than
+# executed by the runner in-process. The sub-agent receives the normalized
+# command list in its prompt and reports back SUCCESS / FAILED, allowing
+# LLM-driven auto-recovery (e.g. apt install missing deps) before failing.
+
+def _infer_next_report_n(change, item_id):
+    """Scan 2-build/ for existing `{item_id}-N-*.md` files; return max+1.
+
+    Mirrors the per-track N inference algorithm documented in SKILL.md
+    (each track starts at 1 and increments per report cycle).
+    """
+    apply_dir = os.path.join(CHANGES_DIR, change, "2-build")
+    if not os.path.isdir(apply_dir):
+        return 1
+    pattern = re.compile(rf"^{re.escape(item_id)}-(\d+)-.*\.md$")
+    max_n = 0
+    for fname in os.listdir(apply_dir):
+        m = pattern.match(fname)
+        if m:
+            try:
+                max_n = max(max_n, int(m.group(1)))
+            except ValueError:
+                continue
+    return max_n + 1
+
+
+def _compute_simple_timeout(commands_normalized):
+    """next_call_timeout_seconds = sum(cmd.timeout_seconds) + N*30 余量.
+
+    Per user decision: sum of all command timeouts plus a 30s overhead per
+    command to cover shell start/exit + simple-track LLM agent reasoning
+    time. Falls back to 600s when the list is empty.
+    """
+    if not commands_normalized:
+        return 600
+    total = sum((c.get("timeout_seconds") or 1800) for c in commands_normalized)
+    n = len(commands_normalized)
+    return total + n * 30
+
+
+def _build_simple_context(config, change, item_id):
+    """Build the ctx dict used to render the pg-build/simple prompt.
+
+    Mirrors the field shape produced by filter_track_context (so that the
+    base _PROMPT_TEMPLATE_BASE can render without if/else noise), but fills
+    the TDVG-specific fields with zero-values since simple tracks do not
+    participate in test/dev/verify/gate.
+
+    Returns ctx dict. If the track is misconfigured (no commands), returns
+    a ctx with the sentinel `_commands_missing=True`; callers should map
+    that to workflow_failed.
+    """
+    tc = get_track_config(config, item_id)
+    if not tc or tc.get("type") != "simple":
+        raise ValueError(f"{item_id} is not a simple track")
+
+    track_default_timeout = tc.get("timeout_seconds", 1800)
+    track_on_failure = tc.get("on_failure", "workflow_failed")
+    raw_cmds = tc.get("commands") or []
+
+    if not raw_cmds:
+        return {"_commands_missing": True, "_change": change, "id": item_id}
+
+    commands_normalized = []
+    for idx, entry in enumerate(raw_cmds, 1):
+        per_cmd = normalize_simple_command(
+            entry, track_default_timeout=track_default_timeout)
+        of = per_cmd["on_failure"]
+        commands_normalized.append({
+            "idx": idx,
+            "cmd": per_cmd["cmd"],
+            "timeout_seconds": per_cmd["timeout_seconds"],
+            "on_failure": of,
+            "retry_max": per_cmd["retry_max"],
+            "retry_timeout_seconds": per_cmd["retry_timeout_seconds"],
+            # Pre-computed booleans for the Jinja-style {#if this.X}
+            # template renderer (which doesn't support `==`).
+            "is_retry": of == "retry",
+            "is_continue": of == "continue",
+            "is_fail": of == "fail",
+        })
+
+    ctx = {
+        # ---- base template compatible fields ----
+        "id": item_id,
+        "label": tc.get("label", item_id),
+        "review_level": "none",
+        "modules": [],
+        "module_details": [],
+        "module_roots": [],
+        "module_names": [],
+        "max_fix_retries": 0,
+        "fix_routing": "none",
+        "tasks_preformatted": [],
+        "tasks_validation": "",
+        "tasks_noop": True,
+        # ---- change & rollback ----
+        "_change": change,
+        "rollback_context": None,
+        # ---- simple track specific ----
+        "track_type": "simple",
+        "track_timeout": track_default_timeout,
+        "track_on_failure": track_on_failure,
+        "commands_normalized": commands_normalized,
+        "next_report_n": _infer_next_report_n(change, item_id),
+        # ---- stage (optional; only when simple track is bound to an env) ----
+        "stage": {},
+    }
+    # Attach stage if the simple track is associated with a stage (env-aware).
+    try:
+        stage = _build_stage_context(config, item_id, change=change)
+        if stage:
+            ctx["stage"] = stage
+    except Exception:
+        # If stage resolution fails (no environment.yaml, etc.), leave empty.
+        pass
+
+    return ctx
+
+
+def _build_simple_dispatch(config, change, item_id):
+    """Build the dispatch action for a simple track.
+
+    Returns a dict with the same shape as dispatch_action (action=dispatch,
+    agent=pg-build/simple, prompt_final_no_modify, prompt_injection,
+    next_call_timeout_seconds) so the LLM orchestrator can treat it
+    uniformly with the TDVG dispatch path.
+    """
+    ctx = _build_simple_context(config, change, item_id)
+    if ctx.get("_commands_missing"):
+        return {
+            "action": "workflow_failed",
+            "fatal": True,
+            "reason": f"Simple track {item_id} 缺少 commands 配置",
+        }
+
+    template_str = _build_prompt_template(item_id, "simple")
+    rendered = _render_prompt_template(template_str, ctx)
+    return {
+        "action": "dispatch",
+        "agent": SIMPLE_AGENT,
+        "item": item_id,
+        "sub": "simple",
+        "attempt": 1,
+        "prompt_final_no_modify": rendered,
+        "prompt_injection": {
+            "target_agent": SIMPLE_AGENT,
+            "prepend": "",
+            "append": "",
+            "rules_applied": [],
+        },
+        "next_call_timeout_seconds": _compute_simple_timeout(
+            ctx["commands_normalized"]),
+    }
 
 
 # ============================================================
@@ -2710,22 +2963,37 @@ def _resume_waiting(config, change, state, cur, init_commit=None):
 
 
 def _execute_phase(config, change, state, item_id):
-    """Execute a phase directly (no sub-agent).
+    """Execute a phase directly, or dispatch it to a sub-agent.
 
     Three kinds of phase items are supported:
       1. prepare_env / clean_env — environment lifecycle hooks. The runner
          resolves the environment from the stage's first track's deployment
          override (tasks.md ## Deployments) and runs the corresponding
          `script` from config.yaml's environment definition.
-      2. Simple tracks (type=simple) — runner reads `commands` from the
-         track config and runs them sequentially. Any command failure
-         returns workflow_failed (entire pipeline terminates).
+      2. Simple tracks (type=simple) — **dispatched to the pg-build/simple
+         sub-agent** via _build_simple_dispatch. The agent executes the
+         command list, with LLM-driven auto-recovery for missing deps etc.
       3. Legacy track-level phases — read `commands` from the track config
          and run them sequentially. Kept for backward compatibility.
     """
     bare = _bare_track(item_id)
     is_env_hook = bare in ("prepare_env", "clean_env")
     is_simple_track = (not is_env_hook) and get_track_type(config, item_id) == "phase"
+
+    # Simple track path: dispatch to pg-build/simple agent. The agent is
+    # responsible for executing commands and reporting SUCCESS / FAILED;
+    # runner does NOT execute commands in-process anymore.
+    if is_simple_track:
+        # Initialize state for the simple sub (mirrors cmd_next track path).
+        state["current"] = {
+            "item": item_id, "sub": "simple", "attempt": 1,
+            "fix_cycles": 0, "waiting": False,
+        }
+        save_state(state)
+        pg_context_chain.sub_start(change, item_id, "simple")
+        state["current"]["waiting"] = True
+        save_state(state)
+        return _build_simple_dispatch(config, change, item_id)
 
     if is_env_hook:
         # Resolve the stage's environment from the first track's deployment override.
@@ -2798,10 +3066,8 @@ def _execute_phase(config, change, state, item_id):
         tc = get_track_config(config, item_id)
         commands = tc.get("commands") or []
         label = tc.get("label", item_id)
-        # Simple tracks MUST declare commands; empty list is a config error.
-        if is_simple_track and not commands:
-            return {"action": "workflow_failed", "fatal": True,
-                    "reason": f"Simple track {item_id} 缺少 commands 配置"}
+        # Simple tracks are dispatched to pg-build/simple agent above; the
+        # empty-commands check is performed inside _build_simple_context.
 
     state["current"] = {"item": item_id, "sub": None, "waiting": False}
     save_state(state)

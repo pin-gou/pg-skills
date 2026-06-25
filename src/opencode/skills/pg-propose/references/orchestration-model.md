@@ -29,7 +29,7 @@ stages ── 一组阶段（dev-isolated → dev-mock-integration → real-inte
 | 类型 | 判定字段 | runner 行为 | tasks.md 章节形态 |
 |------|---------|-------------|-----------------|
 | **standard** | `tracks.<id>.type` 不存在或 != `"simple"` | TDVG 四阶段（test → dev → verify → gate），由编排器派遣 sub-agent | 4 个子章节 |
-| **simple** | `tracks.<id>.type == "simple"` | `runner._execute_phase` 直接执行 `tracks.<id>.commands`，无 TDVG | **1 个章节**（runner 直接执行 commands） |
+| **simple** | `tracks.<id>.type == "simple"` | runner 派遣 `pg-build/simple` sub-agent 执行 `tracks.<id>.commands`，无 TDVG | **1 个章节**（派遣 pg-build/simple agent 执行 commands） |
 
 **判定时机**：pg-propose 阶段二 2e 生成 tasks.md 之前，按 `config.tracks[track_id].type` 判定；与 `affected_tracks` 无关。
 
@@ -37,12 +37,12 @@ stages ── 一组阶段（dev-isolated → dev-mock-integration → real-inte
 - 即使 track 不在 `affected_tracks` 中（本次变更未触发），只要它出现在某 `enabled_stage.tracks` 列表里，pg-propose **必须**为它生成对应章节——standard track 生成 4 个 `- 无` 占位章节；simple track 生成 1 个 simple track 章节；保持 tasks.md 与 pipeline order 完整对齐
 - 这与 validator 的 `_is_simple_track()` 行为一致：simple track 章节被列入 `skipped_items` 但仍要求存在
 
-**simple track 与 runner 的契约**（来自 `pg-build/scripts/pg_pipeline_common.py:146-167` 和 `pg-pipeline-runner.py:1478-1551`）：
-- runner 看到 simple type → `get_track_type()` 归类为 `"phase"`，不派遣 sub-agent
-- runner 在 `cmd_next` 时调用 `_noopify_simple_track_sections()`，把 simple track 对应章节自动改写为 canonical form（heading 后追加 `(simple track: runner 直接执行 commands)` + body 单 `- 无` 行）
+**simple track 与 runner 的契约**（来自 `pg-build/scripts/pg_pipeline_common.py:146-167` 和 `pg-pipeline-runner.py:_build_simple_dispatch`）：
+- runner 看到 simple type → `get_track_type()` 归类为 `"phase"`，作为 dispatch 类型处理
+- runner 在 `cmd_next` 时调用 `_noopify_simple_track_sections()`，把 simple track 对应章节自动改写为 canonical form（heading 后追加 `(simple track: 派遣 pg-build/simple agent 执行 commands)` + body 单 `- 无` 行）
 - 改写 idempotent：已是 canonical form 的章节保持原样
-- 改写后 `cmd_detect` 把这些章节视为 `all_noop`，跳过 TDVG 直接进入 `_execute_phase`
-- `_execute_phase` 按顺序执行 `tracks.<id>.commands`，按命令的 `on_failure` 处理结果（`fail` / `continue` / `retry`）
+- 改写后 `cmd_detect` 把这些章节视为 `all_noop`，跳过 TDVG 直接进入 `_execute_phase` → 内部 redirect 到 `_build_simple_dispatch`
+- `_build_simple_dispatch` 构造 `commands_normalized` + decision table 渲染到 prompt，派遣 `pg-build/simple` sub-agent 执行 `tracks.<id>.commands`，按命令的 `on_failure` 处理结果（`fail` / `continue` / `retry`）；失败时尝试自动修复（缺依赖等）
 
 **典型 simple track 例子**：`openapi-gen`（执行 `pnpm openapi` 重生成前端 API 客户端，幂等且可重跑的代码生成）
 

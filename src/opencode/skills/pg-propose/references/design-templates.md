@@ -137,7 +137,7 @@
 
 > **注意**：
 > - `agent-proto` 模块归入 agent track 的 modules list
-> - `openapi-gen` 在 `.pg/project.yaml` 中是 `type: simple` 的**独立 track**（**不属于** frontend track 的 modules list）。pg-propose 生成 tasks.md 时为它生成 1 个 simple track 章节（canonical form heading 含 `(simple track: runner 直接执行 commands)` + body 单 `- 无` 行），runner 直接执行其 `commands`，不走 TDVG
+> - `openapi-gen` 在 `.pg/project.yaml` 中是 `type: simple` 的**独立 track**（**不属于** frontend track 的 modules list）。pg-propose 生成 tasks.md 时为它生成 1 个 simple track 章节（canonical form heading 含 `(simple track: 派遣 pg-build/simple agent 执行 commands)` + body 单 `- 无` 行），runner 派遣 `pg-build/simple` sub-agent 执行其 `commands`，不走 TDVG
 > - 详细编排模型见 [./orchestration-model.md](./orchestration-model.md)「Track 类型」段
 
 ---

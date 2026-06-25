@@ -641,6 +641,50 @@ final-gate agent 必须读取以下 4 类文件才能做完整审计：
 
 ---
 
+## Simple Track 派遣契约
+
+`tracks.<id>.type == "simple"` 的 track 不走 TDVG 四阶段，而是被 runner **派遣给 `pg-build/simple` sub-agent** 执行。这样可以利用 LLM 能力做错误自动修复（缺依赖等）。
+
+### 触发条件
+
+- config.yaml 中 `tracks.<id>.type: simple`
+- runner 检测到后：
+  1. `_noopify_simple_track_sections(change)` 幂等地把 tasks.md 对应章节改写为 canonical noop form（heading 注释追加 `(simple track: 派遣 pg-build/simple agent 执行 commands)` + body 单行 `- 无`）
+  2. `cmd_next` 在 `is_simple_track` 分支调用 `_build_simple_dispatch` 返回 `action=dispatch, agent=pg-build/simple, sub=simple`
+  3. LLM 主循环收到 dispatch 后用 Task tool 派遣 `pg-build/simple` agent
+
+### ctx 注入
+
+runner 通过 `_build_simple_context` 构造 ctx，包含：
+
+- `_change`, `id`, `label` — 基础标识
+- `track_type`, `track_timeout`, `track_on_failure` — simple track 配置
+- `commands_normalized` — 命令 SSOT，每条含 `idx / cmd / timeout_seconds / on_failure / retry_max / retry_timeout_seconds / is_retry / is_continue / is_fail`
+- `next_report_n` — agent 写盘报告的序号
+- `stage` — 仅 simple track 关联 environment 时填充
+
+模板用 `_PROMPT_TEMPLATE_BASE` + `_PROMPT_BLOCK_SIMPLE`（位于 `pg-pipeline-runner.py`），与 dev/verify 风格保持一致。
+
+### 返回契约
+
+| agent 返回 status | runner 行为 |
+|---|---|
+| SUCCESS | 标记 simple track 为 completed，推进 pipeline |
+| FAILED + track.on_failure=continue_all | warning 继续推进 pipeline |
+| FAILED + track.on_failure=fail | workflow_failed，终止 pipeline |
+
+`track.on_failure=continue_all` 由 runner 在 record 阶段判定（不在 agent 内部决策），与原 runner 自执行模式保持一致。
+
+### 报告落盘
+
+simple agent 必须用 `cat > 2-build/{track.id}-{N}-simple.md <<'EOF' ... EOF` 自行写盘（N 由 runner 在 ctx.next_report_n 注入）。报告内容：每条 command 的 cmd / 退出码 / stdout 末尾 ~50 行 / stderr 末尾 ~50 行 / 耗时 / 最终判定。
+
+### next_call_timeout_seconds
+
+`sum(cmd.timeout_seconds) + N*30` 余量（N = 命令数）。runner 在 dispatch 返回中挂载此值，LLM 主循环用作下一次 bash 调用的 timeout。
+
+---
+
 ## 重试与恢复
 
 - **编译/构建失败**: 检查错误并修复后重新执行 `next`（runner 继续当前子阶段）
