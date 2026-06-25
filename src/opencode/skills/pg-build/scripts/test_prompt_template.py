@@ -5,6 +5,8 @@ Covers:
 - _render_prompt_template: 8 syntax cases ({{var}}, {{var|filter}}, {#if},
   {#if with truthy path}, {#if with sub in []}, {#each with this.X},
   nested {#if in {#each}, missing-key → empty string).
+- _render_prompt_template filters: tojson(indent=N) (legacy) + toyaml
+  (default for prompt rendering; preserves unicode, compacts hooks payload).
 - _build_prompt_template: 6 sub types return valid templates (test, dev,
   verify, gate, fix, final-gate).
 - _SUB_TRACK_FIELDS: no longer contains dead "deployment_actions"; contains
@@ -88,6 +90,69 @@ class TestRendererSyntax(unittest.TestCase):
     def test_tojson_filter_no_value_renders_null(self):
         out = self.render("{{missing | tojson(indent=2)}}", {})
         self.assertEqual(out, "null")
+
+    def test_toyaml_filter(self):
+        # toyaml: keys inline (no quotes), nested dicts, unicode preserved
+        ctx = {"data": {"a": 1, "b": [2, 3], "desc": "中文说明"}}
+        out = self.render("{{data | toyaml}}", ctx)
+        self.assertIn("a: 1", out)
+        self.assertIn("b:", out)
+        self.assertIn("中文说明", out)  # allow_unicode=True → no \uXXXX escape
+        self.assertNotIn('"a":', out)  # not JSON
+
+    def test_toyaml_filter_no_value_renders_null(self):
+        # None 仍走 "null"（与 tojson 一致），避免下游解析歧义
+        out = self.render("{{missing | toyaml}}", {})
+        self.assertEqual(out, "null")
+
+    def test_toyaml_compacts_hooks_payload(self):
+        # 集成断言：toyaml 渲染的 hooks 块显著短于 tojson 块
+        hooks = {
+            "supported_actions": ["start", "stop"],
+            "action_metadata": {
+                "backend": {
+                    "start": {
+                        "timeout_seconds": 300,
+                        "description": "启动 backend 服务的完整流程：构建、部署、启动。",
+                    },
+                    "stop": {"timeout_seconds": 30},
+                },
+                "frontend": {
+                    "start": {
+                        "timeout_seconds": 60,
+                        "description": "启动 frontend 服务的完整流程。",
+                    },
+                    "stop": {"timeout_seconds": 30},
+                },
+            },
+            "invocation": {
+                "command_template": "python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py",
+                "required_args": ["--change", "--env", "--role", "--instance", "--action"],
+                "optional_args": ["--stage", "--tail-lines"],
+                "notes": [
+                    "timeout_seconds is INFORMATION.",
+                    "--tail-lines only for logs|tail.",
+                    "host/port resolved from instances[].",
+                ],
+            },
+        }
+        ctx = {"hooks": hooks}
+        y_out = self.render("{{hooks | toyaml}}", ctx)
+        j_out = self.render("{{hooks | tojson(indent=2)}}", ctx)
+        self.assertGreater(len(j_out), len(y_out),
+                           f"toyaml 应比 tojson 短: json={len(j_out)} yaml={len(y_out)}")
+        # 关键字段以 YAML 形态出现
+        self.assertIn("timeout_seconds: 300", y_out)
+        self.assertIn("启动 backend 服务的完整流程", y_out)
+        # PyYAML 3.13 默认按 key 字母序 dump，校验此行为以防版本升级
+        # 静默改变 prompt 文本（diff 噪声）
+        self.assertLess(
+            y_out.find("description"),
+            y_out.find("timeout_seconds"),
+            "字母序下 description 必须在 timeout_seconds 之前",
+        )
+        # 不要把数字渲染成字符串
+        self.assertNotIn("'300'", y_out)
 
     def test_if_truthy_path(self):
         tpl = "{#if context.x}yes{/if}"

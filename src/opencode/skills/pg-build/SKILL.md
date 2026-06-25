@@ -427,7 +427,7 @@ if pi.get("append"):
 > 以下语法仅供开发调试参考。orchestrator 不需要手动使用；runner 已在 `prompt_final_no_modify` 中渲染好。
 
 - `{{var}}` / `{{context.field.sub}}` — 取值；`context.` 前缀会回退到 ctx 顶层 key
-- `{{var \| filter(arg=N)}}` — 过滤器（仅 `tojson(indent=N)` 支持）
+- `{{var \| filter(arg=N)}}` — 过滤器（`tojson(indent=N)` / `toyaml` 支持；新模板默认用 `toyaml` 压缩 prompt 篇幅）
 - `{#if cond}...{/if}` — 条件块（cond 支持 `var in [...]` / `this.X` / 真值）
 - `{#each list}...{/each}` — 循环块（循环体内 `this` 绑定当前项）
 - 缺失字段渲染为空字符串（不暴露模板占位符）

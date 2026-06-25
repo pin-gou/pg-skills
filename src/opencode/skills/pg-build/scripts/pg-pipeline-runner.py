@@ -540,7 +540,7 @@ def _track_meta(config, track_id):
 #                                  to top-level ctx key (LLM templates historically
 #                                  prefix everything with "context." but the
 #                                  flat ctx dict stores them at top level)
-#   {{var | filter(arg=N)}}        — filter; only "tojson(indent=N)" supported
+#   {{var | filter(arg=N)}}        — filter; "tojson(indent=N)" / "toyaml" supported
 #   {#if cond}...{/if}            — conditional block (cond: truthy expr,
 #                                  "X in [...]" membership, "this.X" loop var)
 #   {#each list}...{/each}        — loop block; binds 'this' to each item
@@ -552,6 +552,7 @@ def _track_meta(config, track_id):
 
 import re as _re_prompt
 import json as _json_prompt
+import yaml as _yaml_prompt
 
 _VAR_RE = _re_prompt.compile(r"\{\{([^{}]+?)\}\}")
 _BLOCK_RE = _re_prompt.compile(
@@ -607,6 +608,18 @@ def _sub_vars(text, ctx):
                 if value is None:
                     return "null"
                 return _json_prompt.dumps(value, indent=indent, ensure_ascii=False)
+            elif filt == "toyaml":
+                if value is None:
+                    return "null"
+                # PyYAML 3.13 不支持 sort_keys=False 关键字（该参数在
+                # 5.1+ 才加入）；此版本默认按 key 字母序 dump，对
+                # LLM 阅读无影响（层级结构才是关键，字段顺序无关）。
+                return _yaml_prompt.safe_dump(
+                    value,
+                    allow_unicode=True,
+                    default_flow_style=False,
+                    width=200,
+                )
         else:
             value = _resolve_dotted(ctx, expr)
             if value is None:
@@ -695,8 +708,8 @@ _PROMPT_TEMPLATE_BASE = """\
 - stage.environment.name: {{context.stage.environment.name}}
 {#if context.stage.environment.instances}
 - stage.environment.instances:
-```json
-{{context.stage.environment.instances | tojson(indent=2)}}
+```yaml
+{{context.stage.environment.instances | toyaml}}
 ```
   每个 instance 是 project.yaml 原样 dict，包含 name/host/port/(可选)libvirt_uri。
 {/if}
@@ -722,7 +735,7 @@ python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py prepare-env-stat
 ### 模块路径约束（硬约束）
 
 本 track 只允许修改以下模块根目录：
-{{context.module_roots | tojson(indent=2)}}
+{{context.module_roots | toyaml}}
 track 名称 `{{context.id}}` 拥有模块：{{context.module_names}}，各模块根目录已去重合并。
 
 硬规则：
@@ -778,8 +791,8 @@ runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-ho
 **必填参数**：`--change` `--env` `--role` `--instance` `--action`
 **可选参数**：`--stage` (默认 manual) `--tail-lines` (仅 logs/tail 生效)
 
-```json
-{{context.stage.environment.hooks | tojson(indent=2)}}
+```yaml
+{{context.stage.environment.hooks | toyaml}}
 ```
 
 调用示例：
@@ -820,8 +833,8 @@ runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-ho
 **必填参数**：`--change` `--env` `--role` `--instance` `--action`
 **可选参数**：`--stage` (默认 manual) `--tail-lines` (仅 logs/tail 生效)
 
-```json
-{{context.stage.environment.hooks | tojson(indent=2)}}
+```yaml
+{{context.stage.environment.hooks | toyaml}}
 ```
 
 调用示例：
@@ -885,8 +898,10 @@ _PROMPT_TEMPLATE_FINAL_GATE = """\
 - proposal: {{context.proposal_path}}
 - tasks: {{context.tasks_path}}
 - design_doc_path（首个）: {{context.design_doc_path}}
-- design_doc_paths: {{context.design_doc_paths | tojson(indent=2)}}
-- report_paths: {{context.report_paths | tojson(indent=2)}}
+- design_doc_paths:
+{{context.design_doc_paths | toyaml}}
+- report_paths:
+{{context.report_paths | toyaml}}
 
 ### 必读上下文清单
 
