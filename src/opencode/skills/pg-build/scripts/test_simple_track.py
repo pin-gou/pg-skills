@@ -116,6 +116,29 @@ class TestGetTrackType(unittest.TestCase):
         }}
         self.assertEqual(self.common.get_track_type(config, "x"), "phase")
 
+    def test_simple_qualified_form_returns_phase(self):
+        """Regression: cmd_detect passes qualified item ids like
+        'dev.openapi-gen', but `tracks` keys are bare ('openapi-gen').
+        get_track_type must strip the stage prefix before lookup so the
+        simple track is correctly classified as 'phase' (which routes to
+        _build_simple_dispatch instead of TDVG sub-agent dispatch)."""
+        config = {"tracks": {
+            "openapi-gen": {"type": "simple", "commands": ["echo hi"]},
+        }}
+        self.assertEqual(
+            self.common.get_track_type(config, "dev.openapi-gen"), "phase")
+        self.assertEqual(
+            self.common.get_track_type(config, "real-integration.openapi-gen"),
+            "phase")
+
+    def test_standard_qualified_form_returns_track(self):
+        """Standard tracks must remain 'track' even with qualified form."""
+        config = {"tracks": {
+            "backend": {"modules": ["backend"]},
+        }}
+        self.assertEqual(
+            self.common.get_track_type(config, "dev.backend"), "track")
+
 
 # ============================================================
 # _noopify_simple_track_sections tests (need isolated tmp project root)
@@ -810,6 +833,51 @@ class TestValidateSkipsSimpleTracks(unittest.TestCase):
 
 
 # ============================================================
+# ============================================================
+# _parse_heading tests (heading parser for simple track sections)
+# ============================================================
+
+class TestParseHeading(unittest.TestCase):
+    """Regression tests for _parse_heading — the simple track heading has
+    a stage prefix + no :sub, which previously fell through both regexes
+    and broke _noopify_simple_track_sections (the heading got dumped
+    into sec['item'] as the entire tail string)."""
+
+    def setUp(self):
+        self.common = _load_common()
+
+    def test_standard_track_heading(self):
+        item, sub, label = self.common._parse_heading(
+            "dev.backend:dev - backend dev")
+        self.assertEqual(item, "dev.backend")
+        self.assertEqual(sub, "dev")
+        self.assertEqual(label, "backend dev")
+
+    def test_simple_track_heading_returns_bare_item(self):
+        """Simple track heading 'dev.openapi-gen - dev openapi-gen  (...)'
+        must parse to bare item 'openapi-gen' (no stage prefix), no sub.
+        The '. ' suffix '(simple track: ...)' goes into label."""
+        item, sub, label = self.common._parse_heading(
+            "dev.openapi-gen - dev openapi-gen  (simple track: 派遣 ...)")
+        self.assertEqual(item, "openapi-gen")
+        self.assertIsNone(sub)
+        self.assertEqual(label, "dev openapi-gen  (simple track: 派遣 ...)")
+
+    def test_phase_heading_no_stage_prefix(self):
+        item, sub, label = self.common._parse_heading(
+            "proto-compile - Proto编译")
+        self.assertEqual(item, "proto-compile")
+        self.assertIsNone(sub)
+        self.assertEqual(label, "Proto编译")
+
+    def test_standard_track_heading_no_stage_prefix(self):
+        item, sub, label = self.common._parse_heading(
+            "backend:dev - backend dev")
+        self.assertEqual(item, "backend")
+        self.assertEqual(sub, "dev")
+        self.assertEqual(label, "backend dev")
+
+
 # normalize_simple_command tests
 # ============================================================
 

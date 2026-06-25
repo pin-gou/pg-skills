@@ -149,21 +149,28 @@ def get_pipeline_order(config, change=None):
 def get_track_type(config, item):
     """Classify an order item as 'track' (TDVG sequence) or 'phase' (direct execution).
 
-    'phase' is reserved for items whose commands the runner executes directly
-    without dispatching sub-agents. Two kinds:
+    'phase' is reserved for items whose commands the runner dispatches
+    without going through the TDVG sub-agent sequence. Two kinds:
 
       1. Environment lifecycle hooks: prepare_env / clean_env (handled by
          environments.<env>.prepare_env / clean_env scripts).
-      2. Simple tracks: tracks.<id>.type == "simple" — runner executes
-         tracks.<id>.commands sequentially; any command failure aborts the
-         pipeline via workflow_failed.
+      2. Simple tracks: tracks.<id>.type == "simple" — runner dispatches
+         the pg-build/simple sub-agent to execute tracks.<id>.commands.
 
     Standard tracks always go through the TDVG sequence (test → dev →
     verify → gate).
+
+    The `item` argument may be either a bare track id (e.g. "openapi-gen")
+    or a qualified item id (e.g. "dev.openapi-gen", as used by
+    cmd_detect and pipeline_detect). Both forms must classify correctly.
     """
     tracks = config.get("tracks") or {}
-    if item in tracks:
-        track_cfg = tracks[item] or {}
+    # Try the literal key first (bare form), then strip any stage prefix
+    # to look up the bare track id (qualified form).
+    bare = item.rsplit(".", 1)[-1] if "." in item else item
+    track_id = item if item in tracks else bare
+    if track_id in tracks:
+        track_cfg = tracks[track_id] or {}
         if track_cfg.get("type") == "simple":
             return "phase"
         return "track"
@@ -399,7 +406,10 @@ def parse_tasks(tasks_path):
 # Match "backend:test - 后端测试先行"  →  (item, sub, label)
 _TRACK_HEADING_RE = re.compile(r"^([a-zA-Z0-9_.-]+):([a-zA-Z0-9_-]+)\s*-\s*(.+)$")
 # Match "proto-compile - Proto编译"     →  (item, None, label)
-_PHASE_HEADING_RE = re.compile(r"^([a-zA-Z0-9_-]+)\s*-\s*(.+)$")
+# Also match "stage.track - ... ..." (e.g. simple-track heading without :sub).
+# Simple tracks have no TDVG sub-phase, so their heading is "stage.track - label"
+# rather than "stage.track:sub - label". We must allow '.' in the item part.
+_PHASE_HEADING_RE = re.compile(r"^([a-zA-Z0-9_.-]+)\s*-\s*(.+)$")
 
 
 def _parse_heading(tail):
@@ -408,7 +418,12 @@ def _parse_heading(tail):
         return m.group(1), m.group(2), m.group(3).strip()
     m = _PHASE_HEADING_RE.match(tail)
     if m:
-        return m.group(1), None, m.group(2).strip()
+        item = m.group(1)
+        # Strip any stage prefix to keep `sec["item"]` as the bare track id.
+        # The qualified form (e.g. "dev.openapi-gen") is reconstructed by
+        # callers via `get_pipeline_order` when needed.
+        bare = item.rsplit(".", 1)[-1] if "." in item else item
+        return bare, None, m.group(2).strip()
     return tail, None, None
 
 
