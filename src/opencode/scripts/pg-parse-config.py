@@ -68,7 +68,9 @@ WORKFLOW_KEYS = {
     "pg-propose": ["modules", "tracks", "stages", "rules", "test_strategy",
                     "coding_standards", "proposal_rules"],
     # pg-fix-issue v3.0: resolved_actions removed — service 启停统一由
-    # pg-pipeline-runner.py invoke-hook 渲染, parser 不再预渲染.
+    # pg-invoke-hook.py invoke-hook 渲染, parser 不再预渲染.
+    # v3.2: 渲染从 pg-pipeline-runner.py invoke-hook 抽到 runtime 层独立 CLI
+    # pg-invoke-hook.py (pg-pipeline-runner.py 保留 thin wrapper 兼容).
     "pg-fix-issue": ["modules", "environments", "tracks", "stages", "fix_issue"],
     "pg-quick-build": ["modules", "environments", "tracks", "stages", "git"],
     "pg-regression": ["modules", "environments", "regression"],

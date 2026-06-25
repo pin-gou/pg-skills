@@ -159,10 +159,13 @@ fi
 
 **LLM ↔ Runner 通信约定**（environments 维度 LLM 触发 hook 的唯一入口）：
 
-LLM **不**直接调 hook 脚本，也不解析 spec；它调用 `pg-pipeline-runner.py invoke-hook` CLI，runner 内部反查 project.yaml、拼 spec、调 pg-run-hook.py。
+LLM **不**直接调 hook 脚本，也不解析 spec；它调用 runtime 层独立 CLI
+`pg-invoke-hook.py`，内部反查 project.yaml、拼 spec、调 pg-run-hook.py。
+旧路径 `pg-pipeline-runner.py invoke-hook` 仍可用（thin wrapper 转发到
+`pg-invoke-hook.py`），但新代码统一写新路径。
 
 ```bash
-python3 .pg/skills/src/opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
   --change <C> --env <ENV> --role <ROLE> \
   --instance <INSTANCE> --action <ACTION> \
   [--stage <STAGE>] [--tail-lines <N>]
@@ -172,11 +175,13 @@ python3 .pg/skills/src/opencode/skills/pg-build/scripts/pg-pipeline-runner.py in
 |------|------|------|
 | `--change` | ✅ | 当前 change 名（用于 spec.change + log_path 路由） |
 | `--env` | ✅ | 必须在 project.yaml `environments` 列表中 |
-| `--role` | ✅ | backend / frontend / agent |
-| `--instance` | ✅ | 必须在 `environments.<env>.roles.<role>.instances[]` 中 |
-| `--action` | ✅ | 仅 start / stop / logs / tail |
+| `--role` | ✅¹ | backend / frontend / agent。`start/stop/logs/tail` 必填；`prepare_env/clean_env` 忽略 |
+| `--instance` | ✅¹ | 必须在 `environments.<env>.roles.<role>.instances[]` 中。`start/stop/logs/tail` 必填；`prepare_env/clean_env` 忽略 |
+| `--action` | ✅ | per-role: `start / stop / logs / tail`；env-level: `prepare_env / clean_env` |
 | `--stage` | ❌ | 默认 `manual`；用于 spec.stage 标记 |
 | `--tail-lines` | ❌ | 仅 `--action logs\|tail` 生效；runner 把它作为 hook args 末尾追加 |
+
+¹ `--role` / `--instance` 对 env-level actions (`prepare_env` / `clean_env`) 是 no-op（CLI parser 不强制、runtime 也忽略）；仅 per-role actions 必填。
 
 **`--timeout` / `--host` / `--port` 不是 CLI flag**：
 
@@ -189,6 +194,34 @@ python3 .pg/skills/src/opencode/skills/pg-build/scripts/pg-pipeline-runner.py in
 - 传了：runner 把 `--tail-lines <N>` 作为 hook args 数组的最后 2 个元素追加，**不**修改 project.yaml 配置。
 
 hook 脚本作者须知：如果 hook 脚本需要读取日志行数，从 `$@` 取 `--tail-lines N`（runner 已经追加到 args 末尾）。
+
+### `status` subcommand — prepare_env 状态查询
+
+`pg-invoke-hook.py` 还提供 `status` 顶级 subcommand，作为 LLM-facing 状态查询入口，**与 `invoke-hook` 平级**：
+
+```bash
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py status \
+  --change <C> [--stage <S>]
+```
+
+行为：薄透传到 `pg-pipeline-runner.py prepare-env-status <C> [stage]`；stdout 输出的 JSON 数组 + exit code 原样透传。
+
+| 标志 | 必填 | 说明 |
+|------|------|------|
+| `--change` | ✅ | 当前 change 名（作为位置参数透传给 runner） |
+| `--stage` | ❌ | 可选 stage 名过滤（作为位置参数透传给 runner，**不**作 `--stage` flag） |
+
+**典型用法**：在 verify agent 中查询 prepare_env 是否已成功执行，避免硬编码 log_path：
+
+```bash
+# 查询整个 change 的所有 required stage 的 prepare 状态
+pg-invoke-hook.py status --change e2e-check
+
+# 仅查询单个 stage
+pg-invoke-hook.py status --change e2e-check --stage dev-backend
+```
+
+历史兼容：`pg-pipeline-runner.py prepare-env-status <C> [stage]` 仍可用，`pg-invoke-hook.py status` 是统一 runtime 层入口的别名。
 
 **错误 category 枚举** (`src/runtime/spec/error-categories.yaml`):
 
@@ -248,8 +281,8 @@ cd pg-skills
 # Run runtime tests (Phase 2+)
 pytest tests/
 
-# Validate all commands/skills parse as expected
-python3 src/runtime/bin/pg validate
+# Validate pg-skills installation (doctor checks version, project.yaml schema, etc.)
+python3 src/runtime/bin/pg doctor
 ```
 
 ## Contributing

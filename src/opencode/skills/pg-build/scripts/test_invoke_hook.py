@@ -1,22 +1,29 @@
 #!/usr/bin/env python3
-"""Tests for pg-pipeline-runner.py invoke-hook subcommand.
+"""Tests for pg-invoke-hook.py (runtime-layer unified hook executor).
+
+历史:
+  v3.1 之前, invoke-hook 逻辑直接内联在 pg-pipeline-runner.py:cmd_invoke_hook,
+  tests 直接 import 该函数. v3.2 抽出后, 测试目标改为:
+    1. .pg/skills/src/runtime/bin/pg-invoke-hook.py  (canonical, 新代码用)
+    2. .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook
+       (thin wrapper, 旧代码兼容)
 
 Covers:
 - argparse: required/optional flag handling (missing required -> exit 2)
-- argparse: --action choices enforcement (start/stop/logs/tail only)
+- argparse: --action choices enforcement
 - argparse: --timeout / --host are NOT accepted (LLM must not pass them)
 - env/role/instance/action validation: clear error messages + exit 1
 - args rendering: {role}/{instance.name}/{instance.host} placeholders
 - Option Y: --tail-lines appended as last 2 args (logs/tail only)
 - No --tail-lines: project.yaml args used verbatim
 - log_path format: role.<role>.<action>@<instance>.log under 2-build/<env>/logs
-- hook_type equals --action value (fixes pre-existing bug where
-  _render_role_action wrote act_cfg.get("name", "") = "")
-- End-to-end: real invoke-hook spawns pg-run-hook.py and exits 0
+- env-level prepare_env / clean_env: log_path is env.<action>.log
+- hook_type equals --action value
+- Thin wrapper (pg-pipeline-runner.py invoke-hook) preserves all above behavior
+  by forwarding to pg-invoke-hook.py.
 
 Does NOT cover:
 - jsonschema validation (not activated in this refactor)
-- env-level prepare_env / clean_env hooks (unchanged code path)
 """
 import importlib.util
 import io
@@ -28,67 +35,115 @@ import unittest
 
 
 THIS_DIR = os.path.dirname(os.path.abspath(__file__))
-# This file lives at
-#   <project>/.pg/skills/src/opencode/skills/pg-build/scripts/test_invoke_hook.py
-# so the project root is 7 levels up.
-PROJECT_ROOT = os.path.normpath(
-    os.path.join(THIS_DIR, "..", "..", "..", "..", "..", "..", ".."))
+# This file may be reachable via different paths due to hardlinks:
+#   - <project>/.opencode/skills/pg-build/scripts/test_invoke_hook.py (5 segments up to root)
+#   - <project>/.pg/skills/src/opencode/skills/pg-build/scripts/test_invoke_hook.py (7 segments)
+#   - /home/ubuntu/workspace/pg-skills/src/opencode/skills/pg-build/scripts/test_invoke_hook.py
+#     (hardlinked, but that path has NO .pg/project.yaml — it's the upstream pg-skills
+#     git checkout, not the project root)
+# Walk up from THIS_DIR (and fallback to cwd) until we find .pg/project.yaml
+# instead of trusting fixed relative paths.
+def _find_project_root():
+    env_root = os.environ.get("PG_PROJECT_ROOT")
+    if env_root and os.path.isfile(os.path.join(env_root, ".pg", "project.yaml")):
+        return env_root
+    candidates = [THIS_DIR, os.getcwd()]
+    seen = set()
+    for start in candidates:
+        p = start
+        for _ in range(15):
+            if p in seen:
+                break
+            seen.add(p)
+            if os.path.isfile(os.path.join(p, ".pg", "project.yaml")):
+                return p
+            parent = os.path.dirname(p)
+            if parent == p:
+                break
+            p = parent
+    raise RuntimeError(
+        f"Cannot find .pg/project.yaml. THIS_DIR={THIS_DIR!r}, cwd={os.getcwd()!r}. "
+        f"Set PG_PROJECT_ROOT env var to the oc2-web-virt directory."
+    )
+
+
+PROJECT_ROOT = _find_project_root()
+
+# Canonical executor (v3.2+, the only place where spec rendering lives).
+PG_INVOKE_HOOK_PY = os.path.join(
+    PROJECT_ROOT, ".pg", "skills", "src", "runtime", "bin", "pg-invoke-hook.py")
+
+# Thin wrapper (preserved for backward compat with old prompts/tests).
 RUNNER_PY = os.path.join(
     PROJECT_ROOT, ".pg", "skills", "src", "opencode", "skills",
     "pg-build", "scripts", "pg-pipeline-runner.py")
+
 PG_RUN_HOOK_PY = os.path.join(
     PROJECT_ROOT, ".pg", "skills", "src", "runtime", "lib",
     "pg-run-hook.py")
 CONFIG_PATH = os.path.join(PROJECT_ROOT, ".pg", "project.yaml")
 
 
-def _load_runner():
-    """Load pg-pipeline-runner.py as a module.
-
-    We invoke cmd_invoke_hook() directly to test the helper without going
-    through the CLI. The CLI itself is exercised by the subprocess-based
-    tests below. Patches sys.argv before each call so the module's main()
-    logic doesn't auto-run.
-    """
-    if "pg_pipeline_runner" in sys.modules:
-        del sys.modules["pg_pipeline_runner"]
-    spec = importlib.util.spec_from_file_location(
-        "pg_pipeline_runner", RUNNER_PY)
+def _load_module(path, module_name):
+    """Load a .py file as a module, caching it under module_name."""
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    spec = importlib.util.spec_from_file_location(module_name, path)
     assert spec is not None and spec.loader is not None
     mod = importlib.util.module_from_spec(spec)
-    sys.modules["pg_pipeline_runner"] = mod
+    sys.modules[module_name] = mod
     spec.loader.exec_module(mod)
     return mod
 
 
-def _run_cli(*args, expect_failure=False):
-    """Invoke runner via subprocess as a real CLI would."""
+def _load_invoke_hook():
+    """Load pg-invoke-hook.py (the canonical executor)."""
+    return _load_module(PG_INVOKE_HOOK_PY, "pg_invoke_hook")
+
+
+def _load_runner():
+    """Load pg-pipeline-runner.py (the thin wrapper)."""
+    return _load_module(RUNNER_PY, "pg_pipeline_runner")
+
+
+def _run_cli_via(runner_path, *args, timeout=30):
+    """Invoke the given runner via subprocess as a real CLI would."""
     r = subprocess.run(
-        ["python3", RUNNER_PY, *args],
-        capture_output=True, text=True, timeout=30,
+        ["python3", runner_path, *args],
+        capture_output=True, text=True, timeout=timeout,
         cwd=PROJECT_ROOT,
     )
     return r
 
 
+def _run_canonical(*args, timeout=30):
+    return _run_cli_via(PG_INVOKE_HOOK_PY, *args, timeout=timeout)
+
+
+def _run_wrapper(*args, timeout=30):
+    return _run_cli_via(RUNNER_PY, "invoke-hook", *args, timeout=timeout)
+
+
+# ============================================================
+# 1. Argparse basics — canonical pg-invoke-hook.py
+# ============================================================
+
 class TestArgparseBasics(unittest.TestCase):
-    """Direct tests of cmd_invoke_hook() argparse layer."""
+    """Direct tests of pg-invoke-hook.py argparse layer."""
 
     def setUp(self):
-        self.mod = _load_runner()
+        self.mod = _load_invoke_hook()
 
-    def _invoke(self, argv, monkey_change="my-change", expect_exit=None):
-        """Run cmd_invoke_hook with patched sys.argv; capture output."""
+    def _invoke(self, argv, expect_exit=None):
         backup_argv = sys.argv[:]
         backup_stderr = sys.stderr
         sys.stderr = io.StringIO()
         try:
-            sys.argv = ["runner.py"] + argv
+            sys.argv = ["pg-invoke-hook.py", "invoke-hook"] + argv
             try:
-                self.mod.cmd_invoke_hook(sys.argv)
+                self.mod.invoke_hook_main(sys.argv)
             except SystemExit as e:
                 code = e.code if isinstance(e.code, int) else 1
-                self.stderr_output = sys.stderr.getvalue()
                 if expect_exit is not None:
                     self.assertEqual(code, expect_exit)
                 return ("exit", code, sys.stderr.getvalue())
@@ -99,18 +154,15 @@ class TestArgparseBasics(unittest.TestCase):
             sys.stderr = backup_stderr
 
     def test_missing_required_change_exits_nonzero(self):
-        # argparse exits with code 2 on missing required; argparse writes
-        # to its own stderr stream, not the one we patched, so we just
-        # assert SystemExit was raised with code 2.
         backup_stderr = sys.stderr
         sys.stderr = io.StringIO()
         backup_argv = sys.argv[:]
-        sys.argv = ["runner.py", "invoke-hook",
+        sys.argv = ["pg-invoke-hook.py", "invoke-hook",
                     "--env", "dev-local", "--role", "backend",
                     "--instance", "backend-1", "--action", "start"]
         try:
             with self.assertRaises(SystemExit) as ctx:
-                self.mod.cmd_invoke_hook(sys.argv)
+                self.mod.invoke_hook_main(sys.argv)
             self.assertEqual(ctx.exception.code, 2)
         finally:
             sys.argv = backup_argv
@@ -120,31 +172,29 @@ class TestArgparseBasics(unittest.TestCase):
         backup_stderr = sys.stderr
         sys.stderr = io.StringIO()
         backup_argv = sys.argv[:]
-        sys.argv = ["runner.py", "invoke-hook",
+        sys.argv = ["pg-invoke-hook.py", "invoke-hook",
                     "--change", "x", "--env", "dev-local",
                     "--role", "backend", "--instance", "backend-1",
                     "--action", "reboot"]
         try:
             with self.assertRaises(SystemExit) as ctx:
-                self.mod.cmd_invoke_hook(sys.argv)
+                self.mod.invoke_hook_main(sys.argv)
             self.assertEqual(ctx.exception.code, 2)
         finally:
             sys.argv = backup_argv
             sys.stderr = backup_stderr
 
     def test_timeout_flag_is_rejected(self):
-        # LLMs must NOT pass --timeout (timeout is SSOT from project.yaml).
-        # argparse should reject with "unrecognized arguments".
         backup_stderr = sys.stderr
         sys.stderr = io.StringIO()
         backup_argv = sys.argv[:]
-        sys.argv = ["runner.py", "invoke-hook",
+        sys.argv = ["pg-invoke-hook.py", "invoke-hook",
                     "--change", "x", "--env", "dev-local",
                     "--role", "backend", "--instance", "backend-1",
                     "--action", "start", "--timeout", "60"]
         try:
             with self.assertRaises(SystemExit) as ctx:
-                self.mod.cmd_invoke_hook(sys.argv)
+                self.mod.invoke_hook_main(sys.argv)
             self.assertEqual(ctx.exception.code, 2)
         finally:
             sys.argv = backup_argv
@@ -154,38 +204,40 @@ class TestArgparseBasics(unittest.TestCase):
         backup_stderr = sys.stderr
         sys.stderr = io.StringIO()
         backup_argv = sys.argv[:]
-        sys.argv = ["runner.py", "invoke-hook",
+        sys.argv = ["pg-invoke-hook.py", "invoke-hook",
                     "--change", "x", "--env", "dev-local",
                     "--role", "backend", "--instance", "backend-1",
                     "--action", "start", "--host", "remote"]
         try:
             with self.assertRaises(SystemExit) as ctx:
-                self.mod.cmd_invoke_hook(sys.argv)
+                self.mod.invoke_hook_main(sys.argv)
             self.assertEqual(ctx.exception.code, 2)
         finally:
             sys.argv = backup_argv
             sys.stderr = backup_stderr
 
 
+# ============================================================
+# 2. Spec rendering — canonical pg-invoke-hook.py
+# ============================================================
+
 class TestSpecRendering(unittest.TestCase):
     """Verify the spec passed to pg-run-hook.py matches expectations.
 
-    Strategy: monkey-patch subprocess.run inside the runner module so we
+    Strategy: monkey-patch subprocess.run inside the module so we
     can capture the spec without actually executing the hook.
     """
 
     from typing import Any  # noqa: F401
-    # Class-level annotations for type checker.
     captured_spec: "dict[str, Any]"
     captured_cmd: "list[Any]"
     _orig_run: "Any"
     mod: "Any"
 
     def setUp(self):
-        self.mod = _load_runner()
+        self.mod = _load_invoke_hook()
         self.captured_spec = {}
         self.captured_cmd = []
-        # Save original subprocess.run on the runner module
         self._orig_run = self.mod.subprocess.run
 
         def fake_run(cmd, **kwargs):
@@ -195,7 +247,7 @@ class TestSpecRendering(unittest.TestCase):
                 self.captured_spec = json.loads(inp)
             else:
                 self.captured_spec = {}
-            # Return a fake CompletedProcess with exit 0
+
             class _R:
                 returncode = 0
             return _R()
@@ -206,16 +258,14 @@ class TestSpecRendering(unittest.TestCase):
 
     def _invoke_ok(self, *args):
         backup_argv = sys.argv[:]
-        # cmd_invoke_hook expects argv as it appears in sys.argv (i.e.
-        # starts with program name). It calls sys.exit(proc.returncode)
-        # at the end, so we catch SystemExit and verify code == 0.
-        sys.argv = ["runner.py", "invoke-hook", *args]
+        sys.argv = ["pg-invoke-hook.py", "invoke-hook", *args]
         try:
             try:
-                self.mod.cmd_invoke_hook(sys.argv)
+                rc = self.mod.invoke_hook_main(sys.argv)
+                self.assertEqual(rc, 0, msg=f"invoke_hook_main returned {rc}")
             except SystemExit as e:
-                self.assertEqual(e.code, 0,
-                                 msg=f"cmd_invoke_hook exited {e.code}")
+                code = e.code if isinstance(e.code, int) else 1
+                self.assertEqual(code, 0, msg=f"invoke_hook_main exited {code}")
         finally:
             sys.argv = backup_argv
 
@@ -227,7 +277,6 @@ class TestSpecRendering(unittest.TestCase):
             "--action", "start",
         )
         spec = self.captured_spec
-        # 10 spec fields per pg-run-hook.py contract
         for k in ("cmd", "change", "stage", "env", "role",
                   "instance_name", "instance_host", "hook_type",
                   "timeout_seconds", "log_path"):
@@ -236,11 +285,8 @@ class TestSpecRendering(unittest.TestCase):
         self.assertEqual(spec["env"], "dev-local")
         self.assertEqual(spec["role"], "backend")
         self.assertEqual(spec["instance_name"], "backend-1")
-        # hook_type must equal the --action value (fixes pre-existing bug).
         self.assertEqual(spec["hook_type"], "start")
-        # default stage
         self.assertEqual(spec["stage"], "manual")
-        # instance_host resolved from project.yaml instances[]
         self.assertEqual(spec["instance_host"], "localhost")
 
     def test_log_path_format(self):
@@ -258,9 +304,8 @@ class TestSpecRendering(unittest.TestCase):
         self.assertEqual(self.captured_spec["log_path"], expected)
 
     def test_instance_host_replaced_in_args(self):
-        # project.yaml has: actions.logs.args = ["{lines:100}"] for backend
-        # (no instance.host placeholder); use start instead which has args
-        # ["{role}", "{instance.name}", "--grpc"].
+        # project.yaml has: actions.start.args = ["{role}", "{instance.name}", "--grpc"]
+        # for backend (no instance.host placeholder in this action's args).
         self._invoke_ok(
             "--change", "add-host-memory-overview",
             "--env", "dev-local",
@@ -268,11 +313,9 @@ class TestSpecRendering(unittest.TestCase):
             "--action", "start",
         )
         cmd = self.captured_spec["cmd"]
-        # After rendering: bash .pg/hooks/role-backend-start.sh backend backend-1 --grpc
         self.assertIn("backend", cmd)
         self.assertIn("backend-1", cmd)
         self.assertIn("--grpc", cmd)
-        # No unresolved {role}/{instance.*} placeholder
         for ph in ("{role}", "{instance.name}", "{instance.host}"):
             self.assertNotIn(ph, cmd, f"unrendered placeholder {ph} in cmd")
 
@@ -303,8 +346,6 @@ class TestSpecRendering(unittest.TestCase):
         self.assertIn("200", cmd_with_flag)
 
     def test_tail_lines_ignored_for_start(self):
-        # --action start with --tail-lines should NOT append the flag
-        # (start does not need a tail count).
         self._invoke_ok(
             "--change", "add-host-memory-overview",
             "--env", "dev-local",
@@ -315,8 +356,6 @@ class TestSpecRendering(unittest.TestCase):
         self.assertNotIn("--tail-lines", self.captured_spec["cmd"])
 
     def test_hook_type_equals_action_for_all_actions(self):
-        # Regression test: previous bug — _render_role_action wrote
-        # act_cfg.get("name", "") which was always empty.
         for action in ("start", "stop", "logs", "tail"):
             self._invoke_ok(
                 "--change", "add-host-memory-overview",
@@ -327,27 +366,49 @@ class TestSpecRendering(unittest.TestCase):
             self.assertEqual(self.captured_spec["hook_type"], action,
                              f"hook_type mismatch for action={action}")
 
+    def test_prepare_env_spec_shape(self):
+        # Environment-level hook: no role/instance, hook_type=prepare_env,
+        # log_path is env.prepare_env.log under 2-build/<env>/logs.
+        self._invoke_ok(
+            "--change", "add-host-memory-overview",
+            "--env", "dev-local",
+            "--action", "prepare_env",
+        )
+        spec = self.captured_spec
+        self.assertEqual(spec["role"], "")
+        self.assertEqual(spec["instance_name"], "")
+        self.assertEqual(spec["instance_host"], "")
+        self.assertEqual(spec["hook_type"], "prepare_env")
+        expected_log = os.path.join(
+            PROJECT_ROOT,
+            ".pg/changes/add-host-memory-overview/2-build/dev-local/logs",
+            "env.prepare_env.log",
+        )
+        self.assertEqual(spec["log_path"], expected_log)
+        self.assertTrue(spec["cmd"].startswith("bash "),
+                        f"env-level cmd should start with 'bash ', got: {spec['cmd']!r}")
+
+
+# ============================================================
+# 3. Validation errors — canonical pg-invoke-hook.py
+# ============================================================
 
 class TestValidationErrors(unittest.TestCase):
-    """Error paths: unknown env/role/instance/action."""
+    """Error paths: missing --role, missing --instance, unknown env/role/instance/action."""
 
     from typing import Any  # noqa: F401
     mod: "Any"
-    _orig_run: "Any"
 
     def setUp(self):
-        self.mod = _load_runner()
-        self._orig_run = self.mod.subprocess.run
+        self.mod = _load_invoke_hook()
         # stub to prevent accidental real invocation
+        self._orig_run = self.mod.subprocess.run
         self.mod.subprocess.run = lambda *a, **kw: type("R", (), {"returncode": 0})()
 
     def tearDown(self):
         self.mod.subprocess.run = self._orig_run
 
     def _expect_exit1(self, *flags):
-        """flags is a sequence like ('--env', 'ghost-env') that REPLACES
-        the default flag of that name (instead of duplicating it)."""
-        # Default flags. Caller-supplied flags replace defaults.
         defaults = {
             "--change": "x",
             "--env": "dev-local",
@@ -360,7 +421,7 @@ class TestValidationErrors(unittest.TestCase):
             defaults[flags[i]] = flags[i + 1]
             i += 2
 
-        argv = ["runner.py", "invoke-hook"]
+        argv = ["pg-invoke-hook.py", "invoke-hook"]
         for k, v in defaults.items():
             argv.extend([k, v])
 
@@ -369,11 +430,41 @@ class TestValidationErrors(unittest.TestCase):
         backup_stderr = sys.stderr
         sys.stderr = io.StringIO()
         try:
-            with self.assertRaises(SystemExit) as ctx:
-                self.mod.cmd_invoke_hook(sys.argv)
-            self.assertEqual(ctx.exception.code, 1)
+            rc = self.mod.invoke_hook_main(sys.argv)
+            self.assertEqual(rc, 1, msg=f"expected exit 1, got {rc}")
             err = sys.stderr.getvalue()
             return err
+        finally:
+            sys.argv = backup_argv
+            sys.stderr = backup_stderr
+
+    def test_per_role_action_missing_role(self):
+        # start is per-role, --role must be present.
+        backup_argv = sys.argv[:]
+        sys.argv = ["pg-invoke-hook.py", "invoke-hook",
+                    "--change", "x", "--env", "dev-local",
+                    "--instance", "backend-1", "--action", "start"]
+        backup_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            rc = self.mod.invoke_hook_main(sys.argv)
+            self.assertEqual(rc, 1)
+            self.assertIn("requires --role", sys.stderr.getvalue())
+        finally:
+            sys.argv = backup_argv
+            sys.stderr = backup_stderr
+
+    def test_per_role_action_missing_instance(self):
+        backup_argv = sys.argv[:]
+        sys.argv = ["pg-invoke-hook.py", "invoke-hook",
+                    "--change", "x", "--env", "dev-local",
+                    "--role", "backend", "--action", "start"]
+        backup_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        try:
+            rc = self.mod.invoke_hook_main(sys.argv)
+            self.assertEqual(rc, 1)
+            self.assertIn("requires --instance", sys.stderr.getvalue())
         finally:
             sys.argv = backup_argv
             sys.stderr = backup_stderr
@@ -390,97 +481,80 @@ class TestValidationErrors(unittest.TestCase):
         err = self._expect_exit1("--instance", "ghost-instance")
         self.assertIn("ghost-instance", err)
 
-    # Note: cannot test "unknown action" because project.yaml defines the
-    # same 4 actions (start/stop/logs/tail) for every role in this project,
-    # and argparse's choices list mirrors that — there's no valid way to
-    # exercise runner-level action-not-found with current config.
 
+# ============================================================
+# 4. Thin wrapper behavior — pg-pipeline-runner.py invoke-hook
+# ============================================================
 
-class TestBuildStageContextShape(unittest.TestCase):
-    """The new shape of environment.hooks payload in stage context."""
+class TestThinWrapperBehavior(unittest.TestCase):
+    """Verify pg-pipeline-runner.py invoke-hook forwards to pg-invoke-hook.py.
 
-    from typing import Any  # noqa: F401
-    mod: "Any"
-    config: "Any"
+    The thin wrapper must:
+    - Accept the same CLI flags as the canonical executor
+    - Exit code == pg-invoke-hook.py exit code
+    - Stderr messages come from the canonical executor
+    """
 
-    def setUp(self):
-        self.mod = _load_runner()
-        self.config = self.mod.load_config()
+    def test_wrapper_argparse_rejects_invalid_action(self):
+        # Old wrapper must still raise SystemExit(2) for invalid action.
+        backup_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        backup_argv = sys.argv[:]
+        sys.argv = ["runner.py", "invoke-hook",
+                    "--change", "x", "--env", "dev-local",
+                    "--role", "backend", "--instance", "backend-1",
+                    "--action", "reboot"]
+        try:
+            mod = _load_runner()
+            with self.assertRaises(SystemExit) as ctx:
+                mod.cmd_invoke_hook(sys.argv)
+            self.assertEqual(ctx.exception.code, 2)
+        finally:
+            sys.argv = backup_argv
+            sys.stderr = backup_stderr
 
-    def test_stage_context_exposes_hooks(self):
-        ctx = self.mod._build_stage_context(
-            self.config, "dev.backend", change="add-host-memory-overview")
-        env = ctx["environment"]
-        self.assertIn("hooks", env, "environment.hooks missing")
-        self.assertNotIn("actions", env,
-                         "environment.actions should be removed (replaced by hooks)")
-        hooks = env["hooks"]
-        # supported_actions: union of all actions across roles
-        self.assertIn("supported_actions", hooks)
-        self.assertIn("start", hooks["supported_actions"])
-        self.assertIn("stop", hooks["supported_actions"])
-        self.assertIn("logs", hooks["supported_actions"])
-        # action_metadata: role -> action -> {timeout_seconds, description?}
-        self.assertIn("backend", hooks["action_metadata"])
-        self.assertIn("start", hooks["action_metadata"]["backend"])
-        self.assertEqual(
-            hooks["action_metadata"]["backend"]["start"]["timeout_seconds"],
-            300,
+    def test_wrapper_forwards_validation_error(self):
+        # Unknown role should produce the same error path as canonical.
+        r = _run_wrapper(
+            "--change", "x", "--env", "dev-local",
+            "--role", "ghost-role",
+            "--instance", "ghost",
+            "--action", "start",
         )
-        # invocation: command_template + flag tables
-        self.assertIn("invocation", hooks)
-        self.assertIn("command_template", hooks["invocation"])
-        self.assertIn("--change", hooks["invocation"]["required_args"])
-        self.assertIn("--tail-lines", hooks["invocation"]["optional_args"])
-        # notes contain the key invariant: timeout is SSOT, not a CLI flag.
-        notes_text = " ".join(hooks["invocation"]["notes"])
-        self.assertIn("timeout_seconds", notes_text)
-        self.assertIn("project.yaml", notes_text)
+        self.assertEqual(r.returncode, 1, msg=r.stderr)
+        self.assertIn("ghost-role", r.stderr)
 
-    def test_stage_context_exposes_instances_passthrough(self):
-        ctx = self.mod._build_stage_context(
-            self.config, "dev.backend", change="add-host-memory-overview")
-        instances = ctx["environment"]["instances"]
-        self.assertIn("backend", instances)
-        # Each instance dict must carry schema-allowed fields verbatim.
-        be = instances["backend"][0]
-        self.assertEqual(be["name"], "backend-1")
-        self.assertEqual(be["host"], "localhost")
-        self.assertEqual(be["port"], 9080)
-        # agent in dev-local has libvirt_uri? — in this project no,
-        # but if any instance had it, it must be passed through.
-        # Frontend + agent exist:
-        self.assertIn("frontend", instances)
-        self.assertIn("agent", instances)
+    def test_wrapper_help(self):
+        # The thin wrapper should NOT have its own --help (it forwards to
+        # canonical, which prints help). Both wrappers are now CLI tools;
+        # the canonical executor prints argparse help, and `python3 runner.py
+        # invoke-hook --help` returns exit 0 with usage info.
+        r = _run_wrapper("--help", timeout=10)
+        self.assertEqual(r.returncode, 0, msg=r.stderr)
+        self.assertIn("usage:", r.stdout + r.stderr)
 
+
+# ============================================================
+# 5. End-to-end smoke — canonical CLI via subprocess
+# ============================================================
 
 class TestEndToEndInvokeHook(unittest.TestCase):
-    """Real CLI invocation. Mocks pg-run-hook.py with a stand-in echo
-    script to verify the full subprocess + spec pipe works."""
+    """Real CLI invocation. Uses --action prepare_env which is idempotent
+    enough to safely exercise the full subprocess + spec pipe path.
+    """
 
-    def test_invoke_hook_runs_and_exits_zero(self):
-        # Build a minimal spec via the runner, then echo back the cmd
-        # field through bash -c. This validates the full path:
-        #   runner.cmd_invoke_hook -> pg-run-hook.py -> bash <cmd>
-        # We replace the runner's PG_HOOK_RUNNER path with a tiny wrapper
-        # that just prints the spec.cmd and exits 0.
-        wrapper = os.path.join(PROJECT_ROOT, ".pg", "skills", "src",
-                               "runtime", "lib", "pg-run-hook.py")
-        # Use the real pg-run-hook.py — it accepts the spec our runner
-        # produces and will execute `bash .pg/hooks/role-...sh ...`.
-        # We can't actually run a backend hook here without bringing up
-        # the stack, so test with --action logs which echoes to stdout.
-        # backend.logs script (role-backend-logs.sh) ends with `exit 0`
-        # after `tail -n "$lines"`. With "{lines:100}" placeholder
-        # unresolved, the hook will fail — but pg-run-hook.py still
-        # returns. So instead, exercise the runner's subprocess.run
-        # behavior using a fake echo script via a tiny mock.
-        # Simpler: test the runner subprocess exit-code path by giving
-        # a nonsense action that argparse rejects (already covered).
-        # So just verify that the CLI parser produces clean error for
-        # the success path args (no actual backend bring-up).
-        r = _run_cli(
-            "invoke-hook",
+    def test_canonical_cli_unknown_role_exits_1(self):
+        r = _run_canonical(
+            "--change", "x", "--env", "dev-local",
+            "--role", "ghost-role",
+            "--instance", "ghost",
+            "--action", "start",
+        )
+        self.assertEqual(r.returncode, 1, msg=r.stderr)
+        self.assertIn("ghost-role", r.stderr)
+
+    def test_wrapper_cli_unknown_role_exits_1(self):
+        r = _run_wrapper(
             "--change", "x", "--env", "dev-local",
             "--role", "ghost-role",
             "--instance", "ghost",

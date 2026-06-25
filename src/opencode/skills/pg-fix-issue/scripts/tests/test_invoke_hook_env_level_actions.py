@@ -1,27 +1,32 @@
 """Tests for invoke-hook CLI supporting environment-level actions.
 
-Validates the v3.0 expansion of `pg-pipeline-runner.py invoke-hook`:
+历史:
+  v3.1 之前, 这个文件直接 import pg-pipeline-runner.py:cmd_invoke_hook 并 mock
+  subprocess.run, 验证 env-level prepare_env / clean_env 的 spec 渲染.
+  v3.2 抽到 runtime 层独立 CLI pg-invoke-hook.py 后, 测试目标改为:
+    - 加载 .pg/skills/src/runtime/bin/pg-invoke-hook.py (canonical)
+    - 加载 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py (thin wrapper)
+
+Validates the env-level expansion of invoke-hook:
 - `--action prepare_env` / `--action clean_env` are accepted
 - These actions skip role/instance validation
 - The spec built for env-level actions has empty role/instance_host
   but well-formed cmd/log_path/hook_type
 - Args from `environments.<env>.prepare_env.args` are rendered into cmd
+- Per-role actions still work (regression check)
+- Thin wrapper (pg-pipeline-runner.py invoke-hook) forwards correctly
 
-Strategy: drive cmd_invoke_hook directly with patched sys.argv + load_config,
+Strategy: drive invoke_hook_main directly with patched sys.argv + load_config,
 capturing the spec passed to pg-run-hook.py (we mock subprocess.run so no
 real hook execution happens).
 """
-
+import importlib.util
 import json
 import os
+import pathlib
 import sys
 import unittest
 from unittest import mock
-
-# Locate the runner module. The runner lives at:
-#   .opencode/skills/pg-build/scripts/pg-pipeline-runner.py
-# (a real file, not symlinked).
-HERE = os.path.realpath(os.path.abspath(__file__))
 
 
 def _find_project_root(here):
@@ -38,31 +43,47 @@ def _find_project_root(here):
         f"Cannot find .pg/project.yaml walking up from {here}")
 
 
+HERE = os.path.abspath(__file__)
 PROJECT_ROOT = _find_project_root(HERE)
+
+# Canonical executor (v3.2+, 唯一渲染 spec 的地方)
+PG_INVOKE_HOOK_PY = os.path.join(
+    PROJECT_ROOT, ".pg", "skills", "src", "runtime", "bin", "pg-invoke-hook.py",
+)
+# Thin wrapper (向后兼容, 转发到 canonical)
 RUNNER_PATH = os.path.join(
-    PROJECT_ROOT,
-    ".opencode", "skills", "pg-build", "scripts", "pg-pipeline-runner.py",
+    PROJECT_ROOT, ".opencode", "skills", "pg-build", "scripts", "pg-pipeline-runner.py",
 )
 
 
-def _load_runner():
-    """Import the runner module from absolute path.
+def _load_module(path, module_name):
+    """Import a Python file as a module from absolute path."""
+    if module_name in sys.modules:
+        del sys.modules[module_name]
+    spec = importlib.util.spec_from_file_location(module_name, path)
+    assert spec is not None, f"Cannot load spec for {path}"
+    assert spec.loader is not None, "loader is None"
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    return mod
+
+
+def _load_canonical():
+    """Load the canonical pg-invoke-hook.py module."""
+    return _load_module(PG_INVOKE_HOOK_PY, "pg_invoke_hook")
+
+
+def _load_wrapper():
+    """Load the thin wrapper (pg-pipeline-runner.py) module.
 
     runner.py imports sibling helpers (pg_context_chain, pg_pipeline_common,
     pg_pipeline_state) at module top level. We must add the scripts dir
     to sys.path before importing.
     """
-    import importlib.util
-    import sys
     scripts_dir = os.path.dirname(RUNNER_PATH)
     if scripts_dir not in sys.path:
         sys.path.insert(0, scripts_dir)
-    spec = importlib.util.spec_from_file_location("pg_pipeline_runner", RUNNER_PATH)
-    assert spec is not None, f"Cannot load spec for {RUNNER_PATH}"
-    assert spec.loader is not None, "loader is None"
-    mod = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(mod)
-    return mod
+    return _load_module(RUNNER_PATH, "pg_pipeline_runner")
 
 
 # Sample config used by the tests
@@ -99,21 +120,26 @@ SAMPLE_CONFIG = {
 
 
 class TestInvokeHookEnvLevelActions(unittest.TestCase):
-    """invoke-hook must accept prepare_env / clean_env as actions."""
+    """invoke-hook must accept prepare_env / clean_env as actions.
+
+    Drives the canonical pg-invoke-hook.py module.
+    """
 
     def setUp(self):
-        self.runner = _load_runner()
+        self.mod = _load_canonical()
         self.captured_spec = None
+        # find_project_root returns Path; the module uses Path operations.
+        self.project_root_path = pathlib.Path(PROJECT_ROOT)
 
     def _patched_run(self, returncode=0):
         """Return a side_effect for subprocess.run that captures the spec.
 
-        runner.cmd_invoke_hook pipes the spec as JSON to subprocess.run's
-        stdin. We patch subprocess.run inside the runner module so we can
+        pg-invoke-hook.py pipes the spec as JSON to subprocess.run's
+        stdin. We patch subprocess.run inside the module so we can
         inspect the spec without invoking pg-run-hook.py.
 
         The returned object MUST have a real `.returncode` attribute (an int),
-        because cmd_invoke_hook does sys.exit(proc.returncode).
+        because invoke_hook_main does return proc.returncode.
         """
         def fake_run(argv, input=None, **kwargs):
             self.captured_spec = json.loads(input)
@@ -122,21 +148,21 @@ class TestInvokeHookEnvLevelActions(unittest.TestCase):
         return fake_run
 
     def _call(self, *args):
-        """Invoke cmd_invoke_hook with sys.argv = ["runner.py", "invoke-hook", *args].
+        """Invoke invoke_hook_main with sys.argv = ["pg-invoke-hook.py", "invoke-hook", *args].
 
-        Returns the SystemExit raised by cmd_invoke_hook (so tests can
-        assert exit codes).
+        Returns the int returned by invoke_hook_main. Uses SAMPLE_CONFIG to
+        isolate tests from the real project.yaml.
         """
-        sys.argv = ["pg-pipeline-runner.py", "invoke-hook", *args]
-        with mock.patch.object(self.runner, "load_config",
-                               return_value=SAMPLE_CONFIG), \
-             mock.patch.object(self.runner, "subprocess") as mock_sub:
+        sys.argv = ["pg-invoke-hook.py", "invoke-hook", *args]
+        with mock.patch.object(self.mod, "find_project_root",
+                               return_value=self.project_root_path), \
+             mock.patch.object(self.mod, "_load_yaml") as mock_yaml, \
+             mock.patch("builtins.open", mock.mock_open(
+                 read_data=json.dumps(SAMPLE_CONFIG))), \
+             mock.patch.object(self.mod, "subprocess") as mock_sub:
+            mock_yaml.return_value.safe_load.return_value = SAMPLE_CONFIG
             mock_sub.run.side_effect = self._patched_run()
-            try:
-                self.runner.cmd_invoke_hook(sys.argv)
-            except SystemExit as e:
-                return e.code
-        return 0
+            return self.mod.invoke_hook_main(sys.argv)
 
     def test_prepare_env_accepted_without_role_or_instance(self):
         """`--action prepare_env` should be accepted without --role/--instance."""
@@ -176,21 +202,25 @@ class TestInvokeHookEnvLevelActions(unittest.TestCase):
 
     def test_prepare_env_missing_in_env_fails(self):
         """If env has no prepare_env, invoke-hook should exit 1."""
+        # We need to mock the config loading inside the module.
+        sys.argv = ["pg-invoke-hook.py", "invoke-hook",
+                    "--change", "x", "--env", "no-prepare",
+                    "--action", "prepare_env"]
         config_without_prepare = {
             "environments": {
                 "no-prepare": {
-                    "roles": {},  # no prepare_env either
+                    "roles": {},
                 },
             },
         }
-        sys.argv = ["pg-pipeline-runner.py", "invoke-hook",
-                    "--change", "x", "--env", "no-prepare",
-                    "--action", "prepare_env"]
-        with mock.patch.object(self.runner, "load_config",
-                               return_value=config_without_prepare):
-            with self.assertRaises(SystemExit) as cm:
-                self.runner.cmd_invoke_hook(sys.argv)
-            self.assertEqual(cm.exception.code, 1)
+        with mock.patch.object(self.mod, "find_project_root",
+                               return_value=self.project_root_path), \
+             mock.patch.object(self.mod, "_load_yaml") as mock_yaml, \
+             mock.patch("builtins.open", mock.mock_open(
+                 read_data=json.dumps(config_without_prepare))):
+            mock_yaml.return_value.safe_load.return_value = config_without_prepare
+            rc = self.mod.invoke_hook_main(sys.argv)
+            self.assertEqual(rc, 1)
 
     def test_role_action_still_works(self):
         """Per-role start action must still work after the env-level branch
@@ -210,6 +240,55 @@ class TestInvokeHookEnvLevelActions(unittest.TestCase):
         # cmd contains role/instance substitutions
         self.assertIn("backend", spec["cmd"])
         self.assertIn("backend-1", spec["cmd"])
+
+
+class TestInvokeHookThinWrapper(unittest.TestCase):
+    """Verify pg-pipeline-runner.py invoke-hook forwards to canonical executor.
+
+    The thin wrapper must:
+    - Accept the same CLI flags as the canonical executor
+    - Exit code == pg-invoke-hook.py exit code
+    - Subprocess call targets pg-invoke-hook.py
+    """
+
+    def setUp(self):
+        self.wrapper = _load_wrapper()
+
+    def test_wrapper_forwards_argv_to_canonical(self):
+        """cmd_invoke_hook should subprocess.run(['python3', pg_invoke_hook_py, *argv[1:]])."""
+        sys.argv = ["runner.py", "invoke-hook",
+                    "--change", "x", "--env", "dev-local",
+                    "--role", "backend", "--instance", "backend-1",
+                    "--action", "start"]
+        with mock.patch.object(self.wrapper, "subprocess") as mock_sub:
+            mock_sub.run.return_value = mock.Mock(returncode=0)
+            try:
+                self.wrapper.cmd_invoke_hook(sys.argv)
+            except SystemExit as e:
+                self.assertEqual(e.code, 0)
+            # Verify the subprocess.run was called with pg-invoke-hook.py
+            call_args = mock_sub.run.call_args
+            self.assertIsNotNone(call_args, "subprocess.run was not called")
+            cmd = call_args.args[0] if call_args.args else call_args.kwargs.get("args")
+            self.assertIsNotNone(cmd, "no args passed to subprocess.run")
+            # cmd[0] = "python3", cmd[1] = pg-invoke-hook.py path
+            self.assertEqual(cmd[0], "python3")
+            self.assertTrue(cmd[1].endswith("pg-invoke-hook.py"),
+                            f"cmd[1] should be pg-invoke-hook.py path, got {cmd[1]!r}")
+            # argv[1:] (excluding program name) should be passed through
+            # i.e., "invoke-hook" + flags
+            self.assertIn("invoke-hook", cmd[2:])
+
+    def test_wrapper_returns_subprocess_exit_code(self):
+        """cmd_invoke_hook should sys.exit(proc.returncode)."""
+        sys.argv = ["runner.py", "invoke-hook",
+                    "--change", "x", "--env", "dev-local",
+                    "--action", "prepare_env"]
+        with mock.patch.object(self.wrapper, "subprocess") as mock_sub:
+            mock_sub.run.return_value = mock.Mock(returncode=42)
+            with self.assertRaises(SystemExit) as cm:
+                self.wrapper.cmd_invoke_hook(sys.argv)
+            self.assertEqual(cm.exception.code, 42)
 
 
 if __name__ == "__main__":

@@ -21,21 +21,35 @@ _HERE = os.path.realpath(os.path.abspath(__file__))
 
 
 def _find_project_root(here):
-    """Walk up from `here` until we find a directory containing .pg/project.yaml.
+    """Walk up from `here` (and fallback to cwd) until we find
+    .pg/project.yaml.
 
-    Handles both the symlinked path (.opencode/skills/...) and the real path
-    (.pg/skills/src/opencode/skills/...).
+    Handles symlinks (.opencode/skills/... vs .pg/skills/...) AND hardlinks
+    (e.g. /home/ubuntu/workspace/pg-skills/... which is the upstream
+    pg-skills git checkout and has NO .pg/project.yaml). Falls back to
+    cwd and honors PG_PROJECT_ROOT env var.
     """
-    p = os.path.dirname(here)
-    for _ in range(10):
-        if os.path.isfile(os.path.join(p, ".pg", "project.yaml")):
-            return p
-        parent = os.path.dirname(p)
-        if parent == p:
-            break
-        p = parent
+    env_root = os.environ.get("PG_PROJECT_ROOT")
+    if env_root and os.path.isfile(os.path.join(env_root, ".pg", "project.yaml")):
+        return env_root
+    candidates = [os.path.dirname(here), os.getcwd()]
+    seen = set()
+    for start in candidates:
+        p = start
+        for _ in range(15):
+            if p in seen:
+                break
+            seen.add(p)
+            if os.path.isfile(os.path.join(p, ".pg", "project.yaml")):
+                return p
+            parent = os.path.dirname(p)
+            if parent == p:
+                break
+            p = parent
     raise RuntimeError(
-        f"Cannot find .pg/project.yaml walking up from {here}")
+        f"Cannot find .pg/project.yaml. here={here!r}, cwd={os.getcwd()!r}. "
+        f"Set PG_PROJECT_ROOT env var to the oc2-web-virt directory."
+    )
 
 
 PROJECT_ROOT = _find_project_root(_HERE)

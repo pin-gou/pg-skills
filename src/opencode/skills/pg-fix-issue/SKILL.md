@@ -2,7 +2,7 @@
 name: pg-fix-issue
 description: 复现问题、收集错误信息、进行系统化诊断、对根因进行修复。触发词："修复问题"、"fix issue"
 license: MIT
-compatibility: 项目根目录需要 `.pg/project.yaml` (v3.0 4-段结构: modules/environments/tracks/stages + fix_issue). service 启停走 `pg-pipeline-runner.py invoke-hook` (与 pg-build 共享入口, hooks 协议).
+compatibility: 项目根目录需要 `.pg/project.yaml` (v3.0 4-段结构: modules/environments/tracks/stages + fix_issue). service 启停走 `pg-invoke-hook.py` (runtime 层独立 CLI, 与 pg-build 共享入口, hooks 协议; 旧路径 `pg-pipeline-runner.py invoke-hook` 仍作为 thin wrapper 可用).
 metadata:
   author: pg-spec
   version: "3.0"
@@ -10,8 +10,8 @@ metadata:
 
 > **v3.0 Breaking Change**：本 SKILL 的 service 启停入口从"编排器在 SKILL 端预渲染
 > `resolved_actions` 字符串 → 塞进 executor 的 `type: shell`"模式，改为"编排器 LLM
-> 显式调用 `pg-pipeline-runner.py invoke-hook` CLI"模式。executor agent
-> (`pg-fix-issue/executor`) 的 `type: rebuild_and_restart` operation 已删除，executor
+> 显式调用 `pg-invoke-hook.py invoke-hook` CLI"模式（runtime 层独立 CLI, 与 pg-build 共享）。
+> executor agent (`pg-fix-issue/executor`) 的 `type: rebuild_and_restart` operation 已删除，executor
 > 职责收窄到模块命令（build/lint/test）+ 辅助验证（shell/api_call/log_filter/git_diff_check）。
 >
 > **Migration Note**：
@@ -39,7 +39,7 @@ metadata:
 | `modules.<id>.build` / `.lint` / `.test.<test_key>` | 验证/编译/lint 命令 | Phase 5 | 该类操作跳过 |
 | `environments.<env>.description` | Phase 3 列出可用环境给用户选 | Phase 3 | 不列出该 env |
 | `environments.<env>.prepare_env` / `.clean_env` | 准备/清理环境脚本 | Phase 3/6 | 不询问 prepare/clean |
-| `environments.<env>.roles.<role>.actions.{start,stop,logs,tail}` | 精细化启停（替代整栈重启） | Phase 5 | 由 LLM 调 `pg-pipeline-runner.py invoke-hook` 触发（不进 executor operations）；字段缺失时回退到让编排器用 `type: shell` 调 `pg-run-hook.py`（不推荐） |
+| `environments.<env>.roles.<role>.actions.{start,stop,logs,tail}` | 精细化启停（替代整栈重启） | Phase 5 | 由 LLM 调 `pg-invoke-hook.py` 触发（不进 executor operations）；字段缺失时回退到让编排器用 `type: shell` 调 `pg-run-hook.py`（不推荐） |
 | `tracks.<id>.modules` | file path → track 反查 | Phase 0.1 | 该 track 不可识别 |
 | `tracks.<id>.max_fix_retries` | subagent 重试上限（**仅 subagent 层**，不影响 iteration） | Phase 5 | 跳过 |
 | `fix_issue.max_iteration_count` | **主 agent 整体迭代上限**（区别于 `tracks.max_fix_retries`）| Phase 6 | 默认 5 |
@@ -137,8 +137,8 @@ fix_issue_context:
 | `modules.<m>.build` | `pg-parse-config.py --resolve-module-build <m>` → `{cmd, timeout_seconds}` |
 | `modules.<m>.test.<test_key>` | `pg-parse-config.py --resolve-module-test <m> <test_key>` → `{cmd, timeout_seconds}`（test_key 由 `stages[*].test_key` 决定） |
 | `modules.<m>.lint` | `pg-parse-config.py --resolve-module-lint <m>` → `{cmd, timeout_seconds}` |
-| `environments.<env>.roles.<role>.actions.{start,stop,logs,tail}` | **v3.0 变更**：不再由 parser 预渲染。LLM 调 `pg-pipeline-runner.py invoke-hook --change <C> --env <ENV> --role <ROLE> --instance <INSTANCE> --action <ACTION> [--tail-lines N]` 触发；runner 内部从 project.yaml 反查 spec |
-| `environments.<env>.prepare_env` / `.clean_env` | LLM 调 `pg-pipeline-runner.py invoke-hook --change <C> --env <ENV> --action prepare_env\|clean_env`（v3.0 新增，无需 `--role`/`--instance`） |
+| `environments.<env>.roles.<role>.actions.{start,stop,logs,tail}` | **v3.0 变更**：不再由 parser 预渲染。LLM 调 `pg-invoke-hook.py invoke-hook --change <C> --env <ENV> --role <ROLE> --instance <INSTANCE> --action <ACTION> [--tail-lines N]` 触发；runner 内部从 project.yaml 反查 spec |
+| `environments.<env>.prepare_env` / `.clean_env` | LLM 调 `pg-invoke-hook.py invoke-hook --change <C> --env <ENV> --action prepare_env\|clean_env`（v3.0 新增，无需 `--role`/`--instance`） |
 | `tracks.<t>.modules` | `pg-parse-config.py pg-fix-issue` 输出 `tracks.<t>.modules` |
 | `tracks.<t>.max_fix_retries` | 5（**subagent 重试上限，仅 Phase 5 用**） |
 | `fix_issue.max_iteration_count` | 5（**主 agent 整体迭代上限，Phase 6 用**） |
@@ -489,7 +489,7 @@ question 工具调用:
                \n
                v3.0 改动：\n
                - 选中“是”后, 编排器会在 Phase 4 修复前, 主动调:\n
-                 python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \\\n
+                 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\\n
                    --change <C> --env dev-local --action prepare_env\n
                - runner 走 hooks 协议, 自动注入 PG_CHANGE_NAME / PG_ENV / timeout_seconds\n
                - 失败 → 立即 ESCALATE, 不进入 Phase 4",
@@ -511,7 +511,7 @@ question 工具调用:
                \n
                v3.0 改动：\n
                - 选中“是”后, 编排器在 Phase 5 验证成功之后, 主动调:\n
-                 python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \\\n
+                 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\\n
                    --change <C> --env dev-local --action clean_env\n
                - runner 走 hooks 协议, 自动注入 timeout_seconds",
     header: "clean_env 时机",
@@ -633,14 +633,14 @@ question 工具调用:
 
 | 操作 | 应替换为 |
 |------|---------|
-| `go build` / `mvn compile` | `pg-pipeline-runner.py invoke-hook --action start`（由编排器 LLM 调, 触发 backend/frontend/agent 构建+启动一体化脚本） |
+| `go build` / `mvn compile` | `pg-invoke-hook.py invoke-hook --action start`（由编排器 LLM 调, 触发 backend/frontend/agent 构建+启动一体化脚本） |
 | `systemctl restart` | 同上 |
 | `curl http://localhost:...` | `api_call` operation |
 | `journalctl` / `grep 日志` | `log_filter` operation |
 | `git diff --stat` | `git_diff_check` operation |
 | `pgrep` / `systemctl status` | `shell` operation |
-| `bash .pg/hooks/<role>-start.sh` 直接调 | `pg-pipeline-runner.py invoke-hook`（**v3.0 强制**：所有 service 启停走 hooks 协议，不绕过 runner） |
-| `python3 pg-pipeline-runner.py invoke-hook` 在 `operations[].cmd` 里执行 | **禁止**：executor 不接触 service 启停；编排器在 Phase 5 显式调 invoke-hook（不进 operations 列表） |
+| `bash .pg/hooks/<role>-start.sh` 直接调 | `pg-invoke-hook.py invoke-hook`（**v3.0 强制**：所有 service 启停走 hooks 协议，不绕过 runner） |
+| `python3 pg-invoke-hook.py invoke-hook` 在 `operations[].cmd` 里执行 | **禁止**：executor 不接触 service 启停；编排器在 Phase 5 显式调 invoke-hook（不进 operations 列表） |
 
 ### 5.1.3 调试特殊说明
 
@@ -650,7 +650,7 @@ question 工具调用:
 
 ### 5.1.4 operations 列表构造原则
 
-**v3.0 breaking change**：operations 列表**不再包含** service 启停（`type: shell` 调 `.pg/hooks/<role>-*.sh` 或 `rebuild_and_restart`）。service 启停一律由编排器在 Phase 5 显式调 `pg-pipeline-runner.py invoke-hook`（见下方"Deployment 工具调用约定"）。
+**v3.0 breaking change**：operations 列表**不再包含** service 启停（`type: shell` 调 `.pg/hooks/<role>-*.sh` 或 `rebuild_and_restart`）。service 启停一律由编排器在 Phase 5 显式调 `pg-invoke-hook.py invoke-hook`（见下方"Deployment 工具调用约定"）。
 
 **operations 只包含**：模块命令（`type: test` / `type: lint`）+ 辅助验证（`type: shell` / `type: api_call` / `type: log_filter` / `type: git_diff_check`）。
 
@@ -710,10 +710,10 @@ operations:
 
 ### 5.1.4.1 Deployment 工具调用约定（v3.0 新增）
 
-service 启停（backend / frontend / agent start|stop|logs|tail）以及 environment-level prepare_env / clean_env，**统一由编排器 LLM 调用** `pg-pipeline-runner.py invoke-hook` 触发：
+service 启停（backend / frontend / agent start|stop|logs|tail）以及 environment-level prepare_env / clean_env，**统一由编排器 LLM 调用** `pg-invoke-hook.py invoke-hook` 触发：
 
 ```bash
-python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
   --change <C> --env <ENV> --role <ROLE> --instance <INSTANCE> --action <ACTION> \
   [--stage <STAGE>] [--tail-lines <N>]
 ```

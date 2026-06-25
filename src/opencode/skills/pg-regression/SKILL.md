@@ -113,15 +113,14 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-regression --suite
 
 从输出取 `regression.suite.<s>.environment.name` 作为目标 env。
 
-若 `environments.<env>.prepare_env` 存在，通过 `pg-run-hook.py` 统一执行：
+若 `environments.<env>.prepare_env` 存在，通过 `pg-invoke-hook.py` 统一执行（v3.2 起, runtime 层独立 CLI, 与 pg-build / pg-fix-issue 共享入口）：
 
 ```bash
-python3 .pg/skills/src/runtime/lib/pg-run-hook.py <<'EOF'
-{"cmd": "bash <environments.<env>.prepare_env.script>", "env": "<env-name>", "suite": "<suite>", "timeout_seconds": <timeout>}
-EOF
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --change regression-<suite> --env <env-name> --action prepare_env
 ```
 
-超时时间 = `environments.<env>.prepare_env.timeout_seconds`，通过 JSON 的 `timeout` 字段传递。
+`timeout_seconds` 由 `pg-invoke-hook.py` 从 `environments.<env>.prepare_env.timeout_seconds` 自动反查并写入 spec, LLM 不传。`--change` 用于 spec.change + log_path 路由（统一使用 `regression-<suite>` 命名, 便于 `ls .pg/changes/regression-*/2-build/<env>/logs/` 定位历史日志）。
 
 若 `prepare_env` 不存在 → 跳过。
 
@@ -129,16 +128,38 @@ EOF
 
 #### 0.3 启动服务
 
-从 `regression.suite.<s>.environment.required_roles` 读取本 suite 需要的 roles（**不**做跨 stage 累积推导，**不**用 tracks）：
+从 `regression.suite.<s>.environment.required_roles` 读取本 suite 需要的 roles（**不**做跨 stage 累积推导，**不**用 tracks）。
+
+> required_roles 为空 list（如 unit test）→ 跳过本步骤，不调任何 hook。
+
+**v3.2 改动**: 不再通过 `start-services.sh` 批量启停 (该脚本会手写 yaml 解析 + spec 渲染, 绕过 hooks 协议). 编排器 LLM 在 SKILL 指引下, 对每个 role 的每个 instance 显式循环调 `pg-invoke-hook.py invoke-hook --action start`. 任一 instance 启动失败 → exit 1, 不继续, 不重试, 不探测端口——**端口冲突由 actions.start 内部处理**。
 
 ```bash
-bash .opencode/skills/pg-regression/scripts/start-services.sh \
-  <suite.environment.name> <role1> [<role2> ...]
+# 通用模板: 编排器按 suite.environment.required_roles 展开.
+# 编排器 LLM 收到 SKILL 后, 按以下规则构造 bash 循环:
+#
+#   1. ROLES = suite.environment.required_roles (从 pg-parse-config 输出读)
+#   2. 对每个 role, 从 .pg/project.yaml 读 instances[] (或由 SKILL 提示 LLM 调
+#      python3 -c "import yaml; print([i['name'] for i in yaml.safe_load(open('.pg/project.yaml'))['environments']['<env>']['roles']['<role>']['instances']])")
+#   3. 串行循环调 pg-invoke-hook.py
+#
+# 示例: backend suite 跑 dev-local, required_roles=[backend]:
+CHANGE=regression-<suite>
+ENV=<env-name>
+for ROLE in ${ROLES[@]}; do
+  for INSTANCE in $(python3 -c "
+import yaml
+for i in yaml.safe_load(open('.pg/project.yaml'))['environments']['${ENV}']['roles']['${ROLE}']['instances']:
+    print(i['name'])
+"); do
+    python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+      --change ${CHANGE} --env ${ENV} --role ${ROLE} --instance ${INSTANCE} --action start
+    # 任一 instance 失败 → exit 1, 后续 role/instance 不再继续
+  done
+done
 ```
 
-> required_roles 为空 list（如 unit test）→ 跳过本步骤，不调脚本。
-
-脚本行为：读 `config.yaml`，对每个 role 的每个 instance 将 `actions.start` 委托给 `pg-run-hook.py` 执行，自动注入 `PG_ROLE`、`PG_INSTANCE_NAME`、`PG_INSTANCE_HOST` 等环境变量。串行执行，任一失败 exit 1，不重试、不探测端口、不绕过——**端口冲突由 actions.start 内部处理**。
+> **日志路径**: `pg-invoke-hook.py` 自动写入 `.pg/changes/${CHANGE}/2-build/${ENV}/logs/role.<role>.start@<instance>.log`, 与 pg-build 完全一致. 编排器可直接 `tail -100 .pg/changes/regression-*/2-build/<env>/logs/role.*.start@*.log` 排错。
 
 #### 0.4 清理临时目录
 
@@ -168,7 +189,7 @@ fi
 
 `test_keys` 是 list，Phase 1 对每个 key 跑一轮（串行），每轮结果分别写入 `temp/{suite}-{test_key}-test-output.log`。
 
-通过 `pg-run-hook.py` 统一执行，自动注入 `PG_SUITE`、`PG_ENV`、`PG_MODULE`、`PG_SKILL_NAME` 等环境变量，`log_path` 流式写入日志。
+> **为何不通过 `pg-invoke-hook.py` 走 hook 协议**: 测试命令属于 module 维度, 按 `.pg/skills/README.md` §Hook 协议边界, **不**走 `pg-invoke-hook.py`, 直接走 `pg-run-hook.py`（裸 JSON spec 形式）。`pg-invoke-hook.py` 只服务于 environments 维度 (env-level prepare_env/clean_env + per-role start/stop/logs/tail). module 维度的 `modules.<m>.test.<key>` 直接以 `executable_command` 形式渲染为 `timeout N bash -c '<cmd>'`, 仍由 `pg-run-hook.py` 统一执行 + 注入 `PG_SUITE` / `PG_ENV` / `PG_MODULE` / `PG_SKILL_NAME` / `log_path`.
 
 **runAllCommand 推导规则**（per test_key）：
 
@@ -572,7 +593,9 @@ regression:
 | envSetup 中段失败后流程继续 | 编排器未用 `set -e`/`&&` 包裹命令 | 用 `set -e` 包裹整个 envSetup 序列，确保任何步骤失败立即终止 |
 | `pg-parse-config.py` 报 regression.suite 缺失 | config.yaml 未配 `regression.suite` 段 | 追加 `regression:\n  suite:\n    <name>:\n      environment: {name: ..., required_roles: [...]}\n      module: ...\n      test_keys: [...]` |
 | `pg-parse-config.py` 报 top-level environment 残留 | config.yaml 顶层有 `regression.environment` | 删除该行, env 必须在 suite 内声明 |
-| `start-services.sh` 找不到 config | 不在项目根目录运行 | 切换到项目根目录（含 `.git/` 的目录）后重跑 |
+| `pg-invoke-hook.py` 报 role/instance not defined | config.yaml `environments.<env>.roles.<role>` 或 instances[] 缺失 | 检查对应 env/role 段, 确认 required_roles 名字拼写正确 |
+| `pg-invoke-hook.py` 报"not in project.yaml environments" | env 名拼写错 | 检查 `regression.suite.<s>.environment.name` ∈ project.yaml `environments` 列表 |
+| 启动服务时 pg-invoke-hook.py 卡住 (bash 调用未返回) | LLM 未用 `next_call_timeout_seconds` 设 bash tool timeout | 按 prompt_template 返回的 `next_call_timeout_seconds` 设超时 (典型如 backend start = 300s) |
 | Maven 增量编译未检测到变化 | Java 源文件未修改 | 手动 `touch` 源文件 |
 | 测试数据库容器未运行 | docker-compose 未启动 | 执行 docker compose up -d |
 | agent suite 跑 dev-3tier 失败 | 本地无 box-1/box-2 | 改用 dev-local 或配置 SSH 免密到测试机 |

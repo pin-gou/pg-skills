@@ -15,10 +15,12 @@ Usage:
   python3 pg-pipeline-runner.py invoke-hook \
       --change <C> --env <ENV> --role <ROLE> --instance <I> --action <A> \
       [--stage <S>] [--tail-lines <N>]
-    LLM-facing entry to trigger a role action (start/stop/logs/tail).
-    Runner resolves the action from project.yaml, builds the pg-run-hook.py
-    spec, and spawns it. timeout_seconds is read from project.yaml (not a
-    CLI flag). --tail-lines (logs/tail only) is appended to the hook args.
+    历史兼容入口 (thin wrapper, 转发到 .pg/skills/src/runtime/bin/pg-invoke-hook.py).
+    新代码统一写新路径:
+      python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook ...
+    Resolves the action in project.yaml, builds the pg-run-hook.py spec,
+    and spawns it. timeout_seconds is read from project.yaml (not a CLI
+    flag). --tail-lines (logs/tail only) is appended to the hook args.
 
 Status values for record:
   completed  — test/dev agent succeeded
@@ -783,11 +785,11 @@ runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-ho
 调用示例：
 ```bash
 # 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
-python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \\
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
   --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start
 
 # 看 100 行日志 (runner 把 --tail-lines 100 追加到 hook args 末尾)
-python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \\
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
   --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
   --tail-lines 100
 ```
@@ -825,11 +827,11 @@ runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-ho
 调用示例：
 ```bash
 # 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
-python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \\
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
   --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start
 
 # 看 100 行日志
-python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py invoke-hook \\
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
   --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
   --tail-lines 100
 ```
@@ -1148,8 +1150,13 @@ def _build_stage_context(config, item, change=None):
         # invoke-hook CLI template — the only LLM-facing entry for triggering
         # role actions. timeout_seconds is NOT exposed as a flag; LLM only
         # learns it via action_metadata above.
+        #
+        # 历史: v3.1 之前, 该模板指向 pg-pipeline-runner.py invoke-hook 子命令.
+        # v3.2 抽出到 runtime 层独立 CLI pg-invoke-hook.py 后, 这里改为新路径.
+        # pg-pipeline-runner.py 仍保留同名子命令 (thin wrapper) 保持向后兼容,
+        # 但所有 LLM 面向的 prompt template / SKILL.md 都用新路径.
         command_template = (
-            "python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py "
+            "python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py "
             "invoke-hook "
             "--change <CHANGE> --env <ENV> --role <ROLE> "
             "--instance <INSTANCE> --action <ACTION> "
@@ -3106,233 +3113,54 @@ def cmd_progress(change):
 
 
 # ============================================================
-# invoke-hook (LLM-facing CLI)
+# invoke-hook (LLM-facing CLI) — thin wrapper, body lives in pg-invoke-hook.py
 # ============================================================
-
-def _build_env_level_hook_spec(change, env, stage, action, act_cfg):
-    """Build pg-run-hook.py spec for environment-level hooks (prepare_env / clean_env).
-
-    Environment-level hooks live directly under environments.<env>.<action>
-    (NOT under roles.<role>.actions). They have no role/instance. We render
-    a spec shape that pg-run-hook.py can consume: role/instance_host are
-    empty strings; log_path is namespaced under env-level hooks subdir so
-    it doesn't collide with role.* action logs.
-    """
-    rendered_args = []
-    for raw in (act_cfg.get("args") or []):
-        rendered_args.append(str(raw))
-
-    inner_cmd = "bash " + shlex.quote(act_cfg["script"])
-    if rendered_args:
-        inner_cmd += " " + " ".join(shlex.quote(a) for a in rendered_args)
-
-    log_path = os.path.join(
-        PROJECT_ROOT,
-        f".pg/changes/{change}/2-build/{env}/logs",
-        f"env.{action}.log",
-    )
-
-    return {
-        "cmd": inner_cmd,
-        "change": change,
-        "stage": stage,
-        "env": env,
-        "role": "",
-        "instance_name": "",
-        "instance_host": "",
-        "hook_type": action,
-        "timeout_seconds": act_cfg.get("timeout_seconds"),
-        "log_path": log_path,
-    }
+#
+# 历史: 该子命令原本直接内联在 pg-pipeline-runner.py (v3.1 之前), 但
+#   - pg-pipeline-runner.py 同时承担"编排状态机"(next/record) 与
+#     "hook executor"(invoke-hook) 两类职责, 关注点混杂.
+#   - pg-fix-issue / pg-regression 想复用同一入口, 但只能 import 或路径硬编码
+#     pg-pipeline-runner.py, 导致 SKILL 之间互相依赖.
+#
+# 重构 (v3.2): 把 executor 主体抽出到 runtime 层独立 CLI
+#   .pg/skills/src/runtime/bin/pg-invoke-hook.py
+#   pg-build / pg-fix-issue / pg-regression 三个 SKILL 统一调用该 CLI.
+#   本文件保留同名子命令 (thin wrapper), 转发到 pg-invoke-hook.py, 保证:
+#     - 旧 SKILL prompt / 旧 agent prompt / 旧测试脚本中
+#       `pg-pipeline-runner.py invoke-hook ...` 调用形式 100% 兼容.
+#     - 新代码统一写 `pg-invoke-hook.py invoke-hook ...`.
+#     - 当 main() 收到 "invoke-hook" 子命令时, 通过 subprocess 转发,
+#       不再做任何 yaml 解析 / spec 渲染.
+# ============================================================
 
 
 def cmd_invoke_hook(argv):
-    """LLM-facing entry point for triggering role actions (start/stop/logs/tail).
+    """Thin wrapper — delegate to runtime-layer pg-invoke-hook.py.
 
-    Usage:
-      python3 pg-pipeline-runner.py invoke-hook \
-        --change <C> --env <ENV> --role <ROLE> \
-        --instance <INSTANCE> --action <ACTION> \
-        [--stage <STAGE>] [--tail-lines <N>]
+    历史: v3.1 之前, 此函数直接解析 yaml + 渲染 spec + spawn pg-run-hook.py.
+    现已迁出到 .pg/skills/src/runtime/bin/pg-invoke-hook.py, 详见该文件顶部
+    docstring. 本函数仅负责 subprocess 转发 + 透传 exit code, 行为与 v3.1
+    完全等价.
 
-    Resolves the action in project.yaml, renders args (with
-    {role}/{instance.name}/{instance.host} placeholders), appends
-    --tail-lines <N> if action is logs|tail and the flag was given,
-    builds the pg-run-hook.py spec, and spawns the hook executor.
-
-    timeout_seconds is read from project.yaml (NOT a CLI flag) and
-    passed through to pg-run-hook.py.
-
-    --action prepare_env|clean_env trigger environment-level hooks
-    (defined directly under environments.<env>.prepare_env /
-    clean_env, NOT under roles.<role>.actions). When these actions
-    are used, --role / --instance are ignored.
+    Args:
+        argv: 完整 sys.argv (含程序名 + "invoke-hook" 子命令). main() 传入
+              sys.argv; tests 传入 mock 的 sys.argv.
     """
-    import argparse
-
-    parser = argparse.ArgumentParser(
-        prog="pg-pipeline-runner.py invoke-hook",
-        description=(
-            "Trigger a role action (start/stop/logs/tail) via "
-            "pg-run-hook.py. Used by sub-agents; not part of the "
-            "pipeline state machine."
-        ),
+    pg_invoke_hook = os.path.join(
+        PROJECT_ROOT, ".pg", "skills", "src", "runtime", "bin", "pg-invoke-hook.py"
     )
-    parser.add_argument("--change", required=True,
-                        help="change name (used for log_path routing)")
-    parser.add_argument("--env", required=True,
-                        help="environment name (must be in project.yaml environments)")
-    parser.add_argument("--stage", default="manual",
-                        help="stage name (default: manual)")
-    parser.add_argument("--role", required=False,
-                        help=(
-                            "role name (backend/frontend/agent). Required "
-                            "for per-role actions (start/stop/logs/tail); "
-                            "ignored for environment-level actions "
-                            "(prepare_env/clean_env)."
-                        ))
-    parser.add_argument("--instance", required=False,
-                        help=(
-                            "instance name. Must exist in "
-                            "environments.<env>.roles.<role>.instances. "
-                            "Required for per-role actions; ignored for "
-                            "environment-level actions."
-                        ))
-    parser.add_argument("--action", required=True,
-                        choices=["start", "stop", "logs", "tail",
-                                 "prepare_env", "clean_env"],
-                        help=(
-                            "action to trigger. start/stop/logs/tail are "
-                            "per-role lifecycle actions (require --role and "
-                            "--instance); prepare_env/clean_env are "
-                            "environment-level lifecycle hooks (ignore "
-                            "--role/--instance)."
-                        ))
-    parser.add_argument("--tail-lines", type=int, default=None,
-                        help="(logs/tail only) append --tail-lines N to hook args")
-
-    # argv is the full sys.argv (including program name) — main() passes
-    # sys.argv[1:], tests pass sys.argv. Slice [1:] here.
-    # argv is sys.argv (including program name AND the "invoke-hook"
-    # subcommand token at index 1). main() passes sys.argv directly;
-    # tests set sys.argv = ["runner.py", "invoke-hook", ...] and pass it.
-    # Slice off both the program name and the subcommand.
-    args = parser.parse_args(argv[2:])
-
-    # Per-role actions require --role and --instance at the CLI level.
-    # argparse can't express "required only when --action is X", so we
-    # validate manually here.
-    ENV_LEVEL_ACTIONS = ("prepare_env", "clean_env")
-    if args.action not in ENV_LEVEL_ACTIONS:
-        if not args.role:
-            sys.stderr.write(
-                f"Error: --action {args.action} requires --role\n"
-            )
-            sys.exit(1)
-        if not args.instance:
-            sys.stderr.write(
-                f"Error: --action {args.action} requires --instance\n"
-            )
-            sys.exit(1)
-
-    config = load_config()
-    env_cfg = (config.get("environments") or {}).get(args.env) or {}
-
-    # Environment-level lifecycle hooks (prepare_env / clean_env) are
-    # NOT role-scoped: they live directly under environments.<env>.
-    # Skip role/instance validation entirely for these.
-    ENV_LEVEL_ACTIONS = ("prepare_env", "clean_env")
-    if args.action in ENV_LEVEL_ACTIONS:
-        env_hook_cfg = env_cfg.get(args.action)
-        if not env_hook_cfg:
-            sys.stderr.write(
-                f"Error: action '{args.action}' not defined in "
-                f"environments.{args.env}\n"
-            )
-            sys.exit(1)
-        act_cfg = env_hook_cfg
-        # No role/instance for env-level hooks; keep spec well-formed for
-        # pg-run-hook.py (which reads role/instance_host but tolerates empty).
-        spec = _build_env_level_hook_spec(
-            change=args.change,
-            env=args.env,
-            stage=args.stage,
-            action=args.action,
-            act_cfg=act_cfg,
+    if not os.path.isfile(pg_invoke_hook):
+        sys.stderr.write(
+            f"Error: pg-invoke-hook.py not found at {pg_invoke_hook}\n"
+            f"  (expect: pg-skills subtree synced via `pg upgrade`)\n"
         )
-    else:
-        # Per-role lifecycle action (start / stop / logs / tail).
-        if args.role not in (env_cfg.get("roles") or {}):
-            sys.stderr.write(
-                f"Error: role '{args.role}' not defined in environments.{args.env}.roles\n"
-            )
-            sys.exit(1)
-        role_cfg = env_cfg["roles"][args.role]
-        if args.action not in (role_cfg.get("actions") or {}):
-            sys.stderr.write(
-                f"Error: action '{args.action}' not defined in "
-                f"environments.{args.env}.roles.{args.role}.actions\n"
-            )
-            sys.exit(1)
-        act_cfg = role_cfg["actions"][args.action]
-
-        instance = next(
-            (i for i in (role_cfg.get("instances") or [])
-             if i.get("name") == args.instance),
-            None,
-        )
-        if not instance:
-            sys.stderr.write(
-                f"Error: instance '{args.instance}' not found in "
-                f"environments.{args.env}.roles.{args.role}.instances\n"
-            )
-            sys.exit(1)
-        instance_host = instance.get("host", "")
-
-        rendered_args = []
-        for raw in (act_cfg.get("args") or []):
-            a = str(raw)
-            a = a.replace("{role}", args.role)
-            a = a.replace("{instance.name}", args.instance)
-            a = a.replace("{instance.host}", instance_host)
-            rendered_args.append(a)
-
-        # Option Y: --tail-lines is appended to hook args list (logs/tail only).
-        if args.action in ("logs", "tail") and args.tail_lines is not None:
-            rendered_args.extend(["--tail-lines", str(args.tail_lines)])
-
-        inner_cmd = "bash " + shlex.quote(act_cfg["script"])
-        if rendered_args:
-            inner_cmd += " " + " ".join(shlex.quote(a) for a in rendered_args)
-
-        log_path = os.path.join(
-            PROJECT_ROOT,
-            f".pg/changes/{args.change}/2-build/{args.env}/logs",
-            f"role.{args.role}.{args.action}@{args.instance}.log",
-        )
-
-        spec = {
-            "cmd": inner_cmd,
-            "change": args.change,
-            "stage": args.stage,
-            "env": args.env,
-            "role": args.role,
-            "instance_name": args.instance,
-            "instance_host": instance_host,
-            "hook_type": args.action,
-            "timeout_seconds": act_cfg.get("timeout_seconds"),
-            "log_path": log_path,
-        }
+        sys.exit(2)
 
     proc = subprocess.run(
-        ["python3", PG_HOOK_RUNNER],
-        input=json.dumps(spec, indent=2),
-        text=True,
+        ["python3", pg_invoke_hook, *argv[1:]],  # 透传 "invoke-hook" + 后续 flags
         cwd=PROJECT_ROOT,
     )
-    # When called from main(), exit with the hook's return code so the
-    # shell sees the same status. When called from tests / programmatically,
-    # sys.exit is wrapped in SystemExit which tests can catch.
+    # 透传 exit code, 与 v3.1 行为一致.
     sys.exit(proc.returncode)
 
 
@@ -3371,7 +3199,10 @@ def main():
         print("  python3 pg-pipeline-runner.py check <change> <item>", file=sys.stderr)
         print("  python3 pg-pipeline-runner.py progress <change>", file=sys.stderr)
         print("  python3 pg-pipeline-runner.py prepare-env-status <change> [stage_name]", file=sys.stderr)
-        print("  python3 pg-pipeline-runner.py invoke-hook --change <C> --env <ENV> --role <ROLE> --instance <I> --action <A> [--stage <S>] [--tail-lines <N>]", file=sys.stderr)
+        # 历史兼容: invoke-hook 仍作为 pg-pipeline-runner.py 子命令可用 (thin wrapper
+        # 转发到 .pg/skills/src/runtime/bin/pg-invoke-hook.py). 新代码统一用新路径.
+        print("  python3 pg-pipeline-runner.py invoke-hook --change <C> --env <ENV> --role <ROLE> --instance <I> --action <A> [--stage <S>] [--tail-lines <N>]   (legacy, forwards to pg-invoke-hook.py)", file=sys.stderr)
+        print("  python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook ...   (canonical)", file=sys.stderr)
         sys.exit(1)
 
     command = sys.argv[1]

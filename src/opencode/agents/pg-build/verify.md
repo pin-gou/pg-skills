@@ -95,10 +95,11 @@ permission:
 ### 运行时环境查询
 
 - `stage.environment.prepare.status == "ok"` 表示 runner 已成功执行 prepare_env（数据清理、测试数据预埋、依赖初始化），可直接进入 verification
-- 如需查询 prepare_env 状态或日志路径（避免硬编码路径），用 runner 子命令：
+- 如需查询 prepare_env 状态或日志路径（避免硬编码路径），用 runtime 层统一 CLI：
   ```bash
-  python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py prepare-env-status {change_name} [stage_name]
+  python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py status --change {change_name} [--stage {stage_name}]
   ```
+  > 历史兼容：`python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py prepare-env-status {change_name} [stage_name]` 仍可用，新代码统一写新路径。
 - 实际运行中的服务实例信息见 `stage.environment.instances`
 
 ### 可选上下文
