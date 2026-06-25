@@ -192,7 +192,7 @@ done
 
 runner 在**第一次派遣 sub-agent 之前**会同步执行一次 `git add -A` + `git commit`，**不 push**。这样：
 
-- `pg-propose` 阶段产出的提案原产物（`proposal.md` / `design.md` / `tasks.md` 等）作为"apply-change 启动基线"落 git，与后续 sub 阶段的代码改动在 git 历史中清晰分层。
+- `pg-propose` 阶段产出的提案原产物（`proposal.md` / `design.md` / `tasks.md` 等）作为"pg-build 启动基线"落 git，与后续 sub 阶段的代码改动在 git 历史中清晰分层。
 - feature branch 切换是 runner 启动期的副作用，init commit 自然落在 `feat/pg/<change>` 分支上。
 - 失败不会阻塞 dispatch；runner 把 init commit 的执行结果暴露给 LLM，便于补做或人工补救。
 
@@ -204,7 +204,7 @@ runner 在**第一次派遣 sub-agent 之前**会同步执行一次 `git add -A`
    3. **`_ensure_feature_branch`** ← 切到 `feat/pg/<change>` 分支
    4. **`_maybe_bootstrap_init_commit`** ← 先 `save_state({init_committed: True})` 标记 + 写 `2-build/.pipeline-state.json`，再 `_auto_commit_on_init` 提交
    5. 派遣第一个 sub-agent
-2. **commit message**：固定格式 `chore(<change>): bootstrap apply-change`。
+2. **commit message**：固定格式 `chore(<change>): bootstrap pg-build`。
 3. **commit 内容**：`git add -A` 全量提交，覆盖——
    - 提案原产物（`proposal.md` / `design.md` / `tasks.md` 等）
    - 干净的 `2-build/.pipeline-state.json`（仅含 `init_committed: True` 与 change name）
@@ -236,7 +236,7 @@ runner 在**第一次派遣 sub-agent 之前**会同步执行一次 `git add -A`
     "committed": true,
     "branch": "feat/pg/my-change",
     "sha": "abc1234",
-    "message": "chore(my-change): bootstrap apply-change",
+    "message": "chore(my-change): bootstrap pg-build",
     "reason": null
   }
 }
@@ -276,7 +276,7 @@ runner 在每次 `record` 同步执行一次 `git add -A` + `git commit`，**不
 3. **跳过条件**：若 `git status --porcelain` 为空（工作区干净），跳过提交并把 `reason` 写进 record 返回的 `commit.reason`，不会产生空 commit。
 4. **粒度**：`git add -A` 全量提交，跟随 runner 当前 LLM 累积的所有改动（不仅是上一个 sub 阶段的产出）。
 5. **冲突**：自动 commit 与 final-gate pass 路径里的 `_git_commit_archive`（提交 `archive change <target-name>`）并存。**顺序：先 `save_state(completed=True)` 把最终 state 落盘到 change 目录，再 archive + 提交**——archive 移动整个目录时一次性带走 `.pipeline-state.json`，避免 archive 之后 `save_state` 在原路径重建目录、`_auto_commit_on_record` 误回写孤立 state 文件。
-6. **与 init commit 的关系**：init commit（见上一节「启动时的初始化提交」）在 runner 启动早期发生一次，与 record commit 互不重叠——init commit 落"apply-change 启动基线"，record commit 落"sub 阶段代码改动"，archive commit 落"归档目录移动"。三条 commit 的 message 前缀分别为 `chore(<change>): bootstrap apply-change` / `chore(<change>): auto-record <item>:<sub> <status>` / `archive change <target-name>`，git log 里可清晰区分。
+6. **与 init commit 的关系**：init commit（见上一节「启动时的初始化提交」）在 runner 启动早期发生一次，与 record commit 互不重叠——init commit 落"pg-build 启动基线"，record commit 落"sub 阶段代码改动"，archive commit 落"归档目录移动"。三条 commit 的 message 前缀分别为 `chore(<change>): bootstrap pg-build` / `chore(<change>): auto-record <item>:<sub> <status>` / `archive change <target-name>`，git log 里可清晰区分。
 7. **不 push**：推送仍由 `pg-verify-and-merge` 的 Phase 3 统一完成。
 
 **record 返回 JSON 新增 `commit` 字段**：
