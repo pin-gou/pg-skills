@@ -54,12 +54,14 @@ metadata:
 
 **Hook 协议边界（schema/runtime SSOT）**：hook 只服务于 **environments 维度**，不服务于 modules 维度。具体：
 
-- **走 hook 协议**（生成 `.pg/hooks/<name>.sh`）：`environments.<env>.{prepare_env, clean_env}`、`environments.<env>.roles.<r>.{start, stop, restart, logs, tail, ...}`。runner 通过 `pg-run-hook.py` 调用，注入 `PG_*` env vars（`PG_ROLE` / `PG_INSTANCE_NAME` / `PG_INSTANCE_HOST` / `PG_HOOK_TYPE` / `PG_LOG_FILE` ...）。
+- **走 hook 协议**（生成 `.pg/hooks/<name>.sh`）：`environments.<env>.{prepare_env, clean_env}`、`environments.<env>.roles.<r>.{start, stop, restart, logs, tail, ...}`。runner 通过 `pg-run-hook.py` 调用，注入 `PG_*` env vars（`PG_ROLE` / `PG_INSTANCE_NAME` / `PG_INSTANCE_HOST` / `PG_HOOK_TYPE` / `PG_LOG_FILE` / `PG_SKILL_NAME` ...）。
 - **不走 hook 协议**（直接写在 `project.yaml` 里）：`modules.<m>.{build, lint, test.<key>}` 字段。这些字段是 `executable_command` 形态（`string` 或 `{cmd, timeout_seconds}`），runner 渲染为 `timeout N bash -c '<cmd>'` 直接执行，**不**经过 `.pg/hooks/<m>-<action>.sh`。原因：单测/单条命令经常需要 ad-hoc 跑（`mvn -Dtest=FooTest`、`pnpm test:e2e --grep "..."`），把每条命令固化成 hook 反而牺牲 agent 灵活性。
 
 因此 `pg-init-project` 的 Phase 3 只为 **environments 节点**生成 hook 脚本。`examples/<language>/hooks/module-<action>.sh` 是 **历史示例模板**，**不再复制到项目里**（项目模块命令直接写在 `project.yaml` 里）。
 
 如果仓库里残留了 `<module>-{build,test,lint}.sh` 之类的旧 hook，提示用户删除（`rm .pg/hooks/<m>-*.sh`）；`pg doctor` 不会把它们当 schema 错误，但它们是死代码。
+
+**SSOT 公共库**：除模板外，pg-init-project 还要把 `.pg/skills/examples/shell/hooks/lib/common.sh` 复制到项目的 `.pg/hooks/lib/common.sh`。该文件是 hook 协议 SSOT，包含 `pg_resolve_paths`（按 `PG_SKILL_NAME` 把 LOG_DIR/PID_DIR 路由到 `.pg/changes/<C>/2-build/<env>/logs` / `.pg/regression/<suite>/<env>/logs` / `.pg/fix-issue/<change>/<env>/logs`）。无此文件时，模板 fallback 到 caller 控制的 `$PG_LOG_FILE`（所有 skill 共用一条日志，pg-regression / pg-fix-issue 不再走隔离目录）。
 
 **environments 维度的 hook 生成规则**：
 
@@ -145,7 +147,12 @@ metadata:
 
 1. 遍历 `environments.<env>.roles`，对每个 role 的 `actions.start` / `actions.stop` / `actions.restart`（含其它 lifecycle action），生成 `.pg/hooks/<role>-<action>.sh`。
 2. 遍历 `environments.<env>.prepare_env` / `clean_env`，生成 `.pg/hooks/prepare_env.sh` / `.pg/hooks/clean_env.sh`（如声明）。
-3. 模板来源：从 `.pg/skills/examples/shell/hooks/role-<action>.sh` 复制并替换 `CMD_PLACEHOLDER`；env 级模板从 `env-prepare.sh` / `env-clean.sh` 复制。模板依赖 `pg-run-hook.py` 注入的 `PG_ROLE` / `PG_INSTANCE_NAME` / `PG_INSTANCE_HOST` / `PG_HOOK_TYPE` / `PG_LOG_FILE` / `PG_RESULT_FILE` 等 env vars，**不**依赖 `PG_MODULE_ROOT`（module 维度不进 hook 协议）。
+2.5. 复制 SSOT 公共库（与模板同源）：
+   - 源：`.pg/skills/examples/shell/hooks/lib/common.sh`
+   - 目标：`.pg/hooks/lib/common.sh`
+   - 作用：模板头部条件 `source lib/common.sh` + `pg_resolve_paths` 才能找到目标
+   - 跳过此步：生成的 hook 仍能工作（走 `$PG_LOG_FILE`），但 pg-regression / pg-fix-issue 日志会回落到 `scripts/logs`，不写到预期的 `.pg/regression/` / `.pg/fix-issue/` 目录
+3. 模板来源：从 `.pg/skills/examples/shell/hooks/role-<action>.sh` 复制并替换 `CMD_PLACEHOLDER`；env 级模板从 `env-prepare.sh` / `env-clean.sh` 复制。模板依赖 `pg-run-hook.py` 注入的 `PG_ROLE` / `PG_INSTANCE_NAME` / `PG_INSTANCE_HOST` / `PG_HOOK_TYPE` / `PG_LOG_FILE` / `PG_SKILL_NAME` / `PG_RESULT_FILE` 等 env vars，**不**依赖 `PG_MODULE_ROOT`（module 维度不进 hook 协议）。
 4. chmod 755。
 5. **不**改 trap / `pg_fail` / `pg_exit` 调用——hook 协议是 SSOT。
 
@@ -268,6 +275,7 @@ Next steps:
 4. **跳过 `pg doctor`** —— 写完文件直接返回成功。**反例**：用户跑 `pg-propose` 时报 schema 错，回头找问题浪费半小时。
 5. **把 placeholder 留着** —— 在 `project.yaml` 顶部保留 `placeholder` module 不删。**反例**：schema 允许 `minProperties: 1` 但实际项目有 4 个 module，placeholder 残留污染 tracks/stages。
 6. **混淆 module hook 与 environment hook 的边界** —— 把 `modules.<m>.build` 写成 `bash .pg/hooks/kuboard-server-build.sh`，期望它走 hook 协议。**错**：`modules.<m>.build` 是 `executable_command` 字段，runner 直接渲染为 `timeout N bash -c '<cmd>'` 执行，**不**调用 `.pg/hooks/<m>-<action>.sh`。`pg-run-hook.py` 只服务于 `environments.<env>.{prepare_env,clean_env}` 与 `environments.<env>.roles.<r>.{start,stop,...}`。项目里如果残留 `<module>-{build,test,lint}.sh`，是历史模板的产物，删除即可。
+7. **忘记复制 `lib/common.sh`** —— 只复制 5 个 role/env 模板但漏掉 `lib/common.sh`。**反例**：新项目跑 `pg-regression` 时日志写到 `scripts/logs` 而非 `.pg/regression/<suite>/<env>/logs`，排错时找不到日志。`pg doctor` 会有 `hooks_lib_common_present` warning 提示。
 
 ---
 
@@ -277,6 +285,7 @@ Next steps:
 - **MUST**：每个 module 的 `root` 路径相对项目根，且与仓库里实际存在的路径一一对应。
 - **MUST**：所有 `TBD:` 项集中在 `description` 字段，**不**污染 `root` / `language` / `cmd` 等结构化字段。
 - **MUST**：跑 `pg doctor` 且输出 0 错误才视为完成。
+- **MUST**：复制 `.pg/skills/examples/shell/hooks/lib/common.sh` 到 `.pg/hooks/lib/common.sh`，让生成的 role-* / env-* hook 能调 `pg_resolve_paths` 做 per-skill 路径路由。
 - **MUST NOT**：引入 `additionalProperties: false` 之外的 schema 字段。
 - **MUST NOT**：从 `examples/<lang>/hooks/module-*.sh` 之外的地方抄 module hook——module 命令应在 `project.yaml` 里以 `executable_command` 形态声明，**不进 hook 协议**。
 - **MUST NOT**：把 `modules.<m>.build` 写成 `bash .pg/hooks/<m>-build.sh`——那是双重封装 + 双重 timeout，runner 不识别。

@@ -52,6 +52,12 @@ python3 .pg/skills/src/runtime/bin/pg init
 
 # 4. 在 opencode 中输入提示词： 加载并执行 pg-init-project skill
 #    （opencode 自动扫描仓库结构，生成 .pg/context/repo-scan.md + 实打实的 .pg/project.yaml）
+
+# 5. (可选) 同步 hook 公共库: 上游 SSOT 改动后, 用 cp 覆盖
+#    cp .pg/skills/examples/shell/hooks/lib/common.sh .pg/hooks/lib/common.sh
+#    默认是 .pg/skills/examples/shell/hooks/lib/common.sh 的副本 (顶部含 SSOT 同步标记).
+#    项目特有工具 (port 探测 / 自定义 health check) 可加在 SSOT 标记之后, 不会被同步覆盖.
+#    pg doctor 会在 .pg/hooks/lib/common.sh 缺失或不含 pg_resolve_paths 时 WARN.
 ```
 
 ### 预期 .opencode/ symlink 布局

@@ -230,6 +230,35 @@ def cmd_doctor(args) -> int:
     if not summary.exists():
         warnings.append('.pg/context/summary.yaml not found (optional but recommended)')
 
+    # 6. .pg/hooks/lib/common.sh 存在? (pg_resolve_paths per-skill 路径路由)
+    # 若 .pg/hooks/ 下有 hook 但缺 lib/common.sh, hook 走 $PG_LOG_FILE 单一日志,
+    # pg-regression / pg-fix-issue 日志会回落到 scripts/logs 而非预期的
+    # .pg/regression/<suite>/<env>/logs / .pg/fix-issue/<change>/<env>/logs
+    if hooks_dir.exists():
+        hook_files = list(hooks_dir.glob('*.sh'))
+        lib_common = hooks_dir / 'lib' / 'common.sh'
+        if hook_files and not lib_common.is_file():
+            warnings.append(
+                '.pg/hooks/lib/common.sh 不存在. role-* / env-* hook 无法调 '
+                'pg_resolve_paths, pg-regression / pg-fix-issue 日志会回落到 '
+                'scripts/logs. 修复: cp .pg/skills/examples/shell/hooks/lib/common.sh '
+                '.pg/hooks/lib/common.sh'
+            )
+        elif lib_common.is_file():
+            try:
+                content = lib_common.read_text(encoding='utf-8')
+                if 'pg_resolve_paths()' not in content:
+                    warnings.append(
+                        '.pg/hooks/lib/common.sh 存在但不含 pg_resolve_paths 函数. '
+                        'SSOT 可能落后, 请同步: cp .pg/skills/examples/shell/hooks/lib/common.sh '
+                        '.pg/hooks/lib/common.sh'
+                    )
+                else:
+                    ok_count += 1
+                    print('✓ .pg/hooks/lib/common.sh 含 pg_resolve_paths (per-skill 路径路由已启用)')
+            except Exception as e:
+                warnings.append(f'.pg/hooks/lib/common.sh 读失败: {e}')
+
     # 输出
     print()
     if errors:
