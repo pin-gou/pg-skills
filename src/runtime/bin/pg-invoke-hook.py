@@ -48,9 +48,12 @@ Args:
 Spec 渲染 (与原 cmd_invoke_hook 100% 等价):
   cmd             = "bash " + shlex.quote(act_cfg["script"]) + (args if any)
   env vars 注入    = PG_CHANGE_NAME / PG_STAGE / PG_ENV / PG_ROLE / PG_INSTANCE_NAME /
-                    PG_INSTANCE_HOST / PG_HOOK_TYPE
+                    PG_INSTANCE_HOST / PG_HOOK_TYPE / PG_SKILL_NAME
   timeout_seconds  = act_cfg["timeout_seconds"] (LLM 不传, runner 反查)
-  log_path        = .pg/changes/<change>/2-build/<env>/logs/{role.<role>.<action>@<instance>|env.<action>}.log
+  log_path        = per-skill routing (see pg_log_dir_for_skill):
+                    pg-build       -> .pg/changes/<change>/2-build/<env>/logs/...
+                    pg-regression  -> .pg/regression/<suite>/<env>/logs/...
+                    pg-fix-issue   -> .pg/fix-issue/<change>/<env>/logs/...
 """
 from __future__ import annotations
 
@@ -105,6 +108,24 @@ def find_pg_skills_root(project_root: Path) -> Path:
 ENV_LEVEL_ACTIONS = ("prepare_env", "clean_env")
 
 
+def pg_log_dir_for_skill(skill: str, change: str, env: str, project_root: Path) -> Path:
+    """Return the per-skill log directory for hook logs.
+
+    Routing rules (must stay in sync with .pg/hooks/lib/common.sh:pg_resolve_paths):
+      pg-build       -> .pg/changes/<change>/2-build/<env>/logs
+      pg-regression  -> .pg/regression/<suite>/<env>/logs   (strips leading "regression-")
+      pg-fix-issue   -> .pg/fix-issue/<change>/<env>/logs
+      兜底/empty     -> .pg/changes/<change>/2-build/<env>/logs (back-compat)
+    """
+    if skill == "pg-regression" and change.startswith("regression-"):
+        suite = change[len("regression-"):]
+        return project_root / ".pg" / "regression" / suite / env / "logs"
+    if skill == "pg-fix-issue":
+        return project_root / ".pg" / "fix-issue" / change / env / "logs"
+    # pg-build + 兜底 (skill=="" / unknown) 全部走原 changes/<change>/2-build/<env>/logs
+    return project_root / ".pg" / "changes" / change / "2-build" / env / "logs"
+
+
 def build_env_level_hook_spec(
     change: str,
     env: str,
@@ -133,8 +154,7 @@ def build_env_level_hook_spec(
         inner_cmd += " " + " ".join(shlex.quote(a) for a in rendered_args)
 
     log_path = str(
-        project_root
-        / ".pg" / "changes" / change / "2-build" / env / "logs"
+        pg_log_dir_for_skill(skill, change, env, project_root)
         / f"env.{action}.log"
     )
 
@@ -186,8 +206,7 @@ def build_role_hook_spec(
         inner_cmd += " " + " ".join(shlex.quote(a) for a in rendered_args)
 
     log_path = str(
-        project_root
-        / ".pg" / "changes" / change / "2-build" / env / "logs"
+        pg_log_dir_for_skill(skill, change, env, project_root)
         / f"role.{role}.{action}@{instance}.log"
     )
 

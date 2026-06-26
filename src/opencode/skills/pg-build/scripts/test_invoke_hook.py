@@ -303,6 +303,56 @@ class TestSpecRendering(unittest.TestCase):
         )
         self.assertEqual(self.captured_spec["log_path"], expected)
 
+    def test_log_path_pg_regression_skill(self):
+        # pg-regression → .pg/regression/<suite>/<env>/logs/...
+        # (hook 内部 pg_resolve_paths 从 regression-<suite> 截 suite 段)
+        self._invoke_ok(
+            "--change", "regression-backend",
+            "--env", "dev-local",
+            "--role", "backend", "--instance", "backend-1",
+            "--action", "start",
+            "--skill", "pg-regression",
+        )
+        expected = os.path.join(
+            PROJECT_ROOT,
+            ".pg/regression/backend/dev-local/logs",
+            "role.backend.start@backend-1.log",
+        )
+        self.assertEqual(self.captured_spec["log_path"], expected)
+        self.assertEqual(self.captured_spec["skill"], "pg-regression")
+
+    def test_log_path_pg_fix_issue_skill(self):
+        # pg-fix-issue → .pg/fix-issue/<change>/<env>/logs/...
+        self._invoke_ok(
+            "--change", "fix-2026-06-26-vm-failure",
+            "--env", "dev-local",
+            "--role", "backend", "--instance", "backend-1",
+            "--action", "start",
+            "--skill", "pg-fix-issue",
+        )
+        expected = os.path.join(
+            PROJECT_ROOT,
+            ".pg/fix-issue/fix-2026-06-26-vm-failure/dev-local/logs",
+            "role.backend.start@backend-1.log",
+        )
+        self.assertEqual(self.captured_spec["log_path"], expected)
+        self.assertEqual(self.captured_spec["skill"], "pg-fix-issue")
+
+    def test_log_path_env_level_pg_regression(self):
+        # env-level + pg-regression → .pg/regression/<suite>/<env>/logs/env.<action>.log
+        self._invoke_ok(
+            "--change", "regression-frontend",
+            "--env", "dev-local",
+            "--action", "prepare_env",
+            "--skill", "pg-regression",
+        )
+        expected = os.path.join(
+            PROJECT_ROOT,
+            ".pg/regression/frontend/dev-local/logs",
+            "env.prepare_env.log",
+        )
+        self.assertEqual(self.captured_spec["log_path"], expected)
+
     def test_instance_host_replaced_in_args(self):
         # project.yaml has: actions.start.args = ["{role}", "{instance.name}", "--grpc"]
         # for backend (no instance.host placeholder in this action's args).

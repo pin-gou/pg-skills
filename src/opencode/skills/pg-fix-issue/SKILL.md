@@ -118,7 +118,8 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 
 ```yaml
 fix_issue_context:
-  change_name: "<C>"                              # 用于 invoke-hook --change; 通常复用 pg-build 的 change 名
+  change_name: "fix-<YYYY-MM-DD>-<bug-slug>"     # 编排器 Phase 0 自动生成, 用于 invoke-hook --change
+                                                 # (独立于 pg-build 的 change, 避免污染 .pg/changes/)
   selected_env: "<env-name>"                      # Phase 3 用户选的环境
   affected_modules: [...]                          # Phase 0.1 反向匹配得到
   affected_tracks: [...]                            # 同上
@@ -996,7 +997,7 @@ loop:
 |---------|------|----------|
 | 编译错误（新引入） | 编排器修复 | ✅ |
 | 测试失败（actual ≠ expected） | 编排器判断改代码还是改测试 | ✅ |
-| verify 失败（运行版本不对） | 检查上一次 `runner invoke-hook --action start` 是否成功（log_path 在 `.pg/changes/<change>/2-build/<env>/logs/role.*.start@*.log`） | ✅ |
+| verify 失败（运行版本不对） | 检查上一次 `runner invoke-hook --action start` 是否成功（log_path 在 `.pg/fix-issue/<fix-change>/<env>/logs/role.*.start@*.log`） | ✅ |
 | 端到端 API 失败 | 看 response body | ✅ |
 | 日志 PANIC | 看 panic stack | ✅ |
 | **success_criteria 未满足** | **重新诊断**（按 criteria 实际值推断根因） | ✅ |

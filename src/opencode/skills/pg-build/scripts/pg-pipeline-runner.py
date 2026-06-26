@@ -103,6 +103,18 @@ PROJECT_ROOT = find_project_root()
 CONFIG_PATH = os.path.join(PROJECT_ROOT, ".pg/project.yaml")
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, ".opencode", "skills", "pg-build", "scripts")
 PIPELINE_STATE_PY = os.path.join(SCRIPTS_DIR, "pg-pipeline-state.py")
+
+
+def _pg_log_dir_for_skill(skill, change, env):
+    """Return absolute log dir for a given skill. Mirrors pg-invoke-hook.py:pg_log_dir_for_skill
+    and .pg/hooks/lib/common.sh:pg_resolve_paths. Keep all three in sync.
+    """
+    if skill == "pg-regression" and change and change.startswith("regression-"):
+        suite = change[len("regression-"):]
+        return os.path.join(PROJECT_ROOT, ".pg", "regression", suite, env, "logs")
+    if skill == "pg-fix-issue":
+        return os.path.join(PROJECT_ROOT, ".pg", "fix-issue", change, env, "logs")
+    return os.path.join(PROJECT_ROOT, ".pg", "changes", change, "2-build", env, "logs")
 CHANGES_DIR = os.path.join(PROJECT_ROOT, ".pg", "changes")
 PG_ARCHIVE_PY = os.path.join(
     PROJECT_ROOT, ".opencode", "skills", "pg-archive", "scripts", "pg-archive.py"
@@ -1229,9 +1241,10 @@ def _render_role_action(act_cfg, *, role, instance_name, instance_host,
     # log_path: prefer runner-side path; hook scripts read it from $LOG_DIR
     # (parent dir of $BACKEND_LOG / $FRONTEND_LOG / etc.). Use
     # 2-build/<env>/logs for log aggregation, matching the env hooks.
-    log_dir_rel = f".pg/changes/{change}/2-build/{env_name}/logs"
+    # pg-build keeps legacy .pg/changes/<change>/2-build/<env>/logs path.
+    log_dir_abs = _pg_log_dir_for_skill("pg-build", change, env_name)
     log_name = f"role.{role}.{act_cfg.get('name', 'action')}@{instance_name}.log"
-    log_path = os.path.join(PROJECT_ROOT, log_dir_rel, log_name)
+    log_path = os.path.join(log_dir_abs, log_name)
 
     spec = {
         "cmd": inner_cmd,

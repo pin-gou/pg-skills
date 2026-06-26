@@ -120,7 +120,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
   --change regression-<suite> --env <env-name> --action prepare_env --skill pg-regression
 ```
 
-`timeout_seconds` 由 `pg-invoke-hook.py` 从 `environments.<env>.prepare_env.timeout_seconds` 自动反查并写入 spec, LLM 不传。`--change` 用于 spec.change + log_path 路由（统一使用 `regression-<suite>` 命名, 便于 `ls .pg/changes/regression-*/2-build/<env>/logs/` 定位历史日志）。
+`timeout_seconds` 由 `pg-invoke-hook.py` 从 `environments.<env>.prepare_env.timeout_seconds` 自动反查并写入 spec, LLM 不传。`--change` 用于 spec.change + log_path 路由（统一使用 `regression-<suite>` 命名, 便于 `ls .pg/regression/<suite>/<env>/logs/` 定位历史日志；hook 内部 `pg_resolve_paths` 会从 `regression-<suite>` 自动截 `<suite>` 段，落到 `.pg/regression/<suite>/<env>/logs/`）。
 
 若 `prepare_env` 不存在 → 跳过。
 
@@ -160,7 +160,7 @@ for i in yaml.safe_load(open('.pg/project.yaml'))['environments']['${ENV}']['rol
 done
 ```
 
-> **日志路径**: `pg-invoke-hook.py` 自动写入 `.pg/changes/${CHANGE}/2-build/${ENV}/logs/role.<role>.start@<instance>.log`, 与 pg-build 完全一致. 编排器可直接 `tail -100 .pg/changes/regression-*/2-build/<env>/logs/role.*.start@*.log` 排错。
+> **日志路径**: `pg-invoke-hook.py` 自动写入 `.pg/regression/<suite>/${ENV}/logs/role.<role>.start@<instance>.log` (pg-regression 专属目录, 不污染 `.pg/changes/`). 编排器可直接 `tail -100 .pg/regression/*/<env>/logs/role.*.start@*.log` 排错。历史写入 `.pg/changes/regression-*/2-build/<env>/logs/` 的日志保留作为历史归档。
 
 #### 0.4 清理临时目录
 

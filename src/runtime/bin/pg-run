@@ -1,0 +1,572 @@
+#!/usr/bin/env python3
+"""pg-run — 菜单式运行 pg-skills 模块/环境/角色操作.
+
+从 .pg/project.yaml 读取配置，逐级菜单引导用户选择并执行。
+
+用法:
+    python3 pg-run
+    python3 pg-run --module backend --action build          # 跳过菜单，直达执行
+    python3 pg-run --env dev-local --action prepare_env     # env 级别
+    python3 pg-run --env dev-local --role backend --instance backend-1 --action start  # role 级别
+    python3 pg-run --cmd "echo hello"                       # 直接执行
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import shlex
+import subprocess
+import sys
+from pathlib import Path
+from typing import Any
+
+
+# ----- 路径解析 -----
+
+def find_project_root() -> Path:
+    env_root = os.environ.get("PG_PROJECT_ROOT")
+    if env_root:
+        p = Path(env_root).resolve()
+        if _has_config(p):
+            return p
+    cwd = Path.cwd().resolve()
+    if _has_config(cwd):
+        return cwd
+    p = Path(__file__).resolve().parent
+    for _ in range(6):
+        if _has_config(p):
+            return p
+        p = p.parent
+    return cwd
+
+
+def _has_config(path: Path) -> bool:
+    return (path / ".pg" / "project.yaml").is_file()
+
+
+def find_pg_skills_root(project_root: Path) -> Path:
+    return project_root / ".pg" / "skills"
+
+
+def find_invoke_hook(project_root: Path) -> Path:
+    return (
+        find_pg_skills_root(project_root)
+        / "src" / "runtime" / "bin" / "pg-invoke-hook.py"
+    )
+
+
+# ----- YAML 加载 -----
+
+def _load_yaml():
+    try:
+        import yaml
+    except ImportError:
+        sys.stderr.write("Error: PyYAML is required. Install via `pip install pyyaml`.\n")
+        sys.exit(2)
+    return yaml
+
+
+def load_config(project_root: Path) -> dict:
+    path = project_root / ".pg" / "project.yaml"
+    if not path.is_file():
+        sys.stderr.write(f"Error: project.yaml not found at {path}\n")
+        sys.exit(1)
+    yaml = _load_yaml()
+    with open(path, encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+# ----- 菜单渲染 -----
+
+def print_header(title: str):
+    width = 60
+    print()
+    print("=" * width)
+    print(f"  {title}")
+    print("=" * width)
+
+
+def print_menu(items: list[tuple[str, str]], back_option: bool = True):
+    for i, (label, desc) in enumerate(items, 1):
+        desc_str = f" — {desc}" if desc else ""
+        print(f"  {i:2d}) {label}{desc_str}")
+    if back_option:
+        print(f"  b) 返回上级菜单")
+    print(f"  q) 退出")
+    print()
+
+
+def get_choice(max_num: int) -> str:
+    while True:
+        try:
+            raw = input("请选择: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return "q"
+        if raw in ("q", "b"):
+            return raw
+        if raw.isdigit() and 1 <= int(raw) <= max_num:
+            return raw
+        print(f"  请输入 1-{max_num}, b 或 q")
+
+
+def pause():
+    try:
+        input("\n按 Enter 继续...")
+    except (EOFError, KeyboardInterrupt):
+        print()
+
+
+# ----- 命令执行 -----
+
+def run_shell(
+    cmd: str,
+    cwd: Path | None = None,
+    timeout: int | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> int:
+    print(f"\n>>> {cmd}\n")
+    env = os.environ.copy()
+    if extra_env:
+        env.update(extra_env)
+    try:
+        proc = subprocess.run(
+            ["bash", "-c", cmd],
+            cwd=str(cwd or Path.cwd()),
+            timeout=timeout,
+            env=env,
+        )
+    except subprocess.TimeoutExpired:
+        print(f"\n!!! 命令超时 (>{timeout}s)")
+        return -9
+    except KeyboardInterrupt:
+        print("\n!!! 命令被中断")
+        return -1
+    if proc.returncode == 0:
+        print(f"\n✓ 成功 (exit=0)")
+    else:
+        print(f"\n✗ 失败 (exit={proc.returncode})")
+    return proc.returncode
+
+
+def extract_command(action_value: Any) -> tuple[str, int | None]:
+    if isinstance(action_value, str):
+        return action_value, None
+    if isinstance(action_value, dict):
+        cmd = action_value.get("cmd") or action_value.get("script", "")
+        timeout = action_value.get("timeout_seconds")
+        return cmd, timeout
+    return str(action_value), None
+
+
+# ----- Module 操作 -----
+
+def module_items(config: dict) -> dict:
+    return config.get("modules", {})
+
+
+def resolve_module_actions(module_name: str, module_cfg: dict) -> list[tuple[str, str, Any]]:
+    actions: list[tuple[str, str, Any]] = []
+    if "build" in module_cfg:
+        actions.append(("build", "编译", module_cfg["build"]))
+    if "lint" in module_cfg:
+        actions.append(("lint", "静态检查", module_cfg["lint"]))
+    tests = module_cfg.get("test", {})
+    if isinstance(tests, dict):
+        for key in tests:
+            label = f"test.{key}"
+            desc = {}.get(key, key)
+            actions.append((label, f"测试 ({key})", tests[key]))
+    return actions
+
+
+def run_module_flow(config: dict, project_root: Path):
+    mods = module_items(config)
+    if not mods:
+        print("  没有定义 modules")
+        return
+
+    while True:
+        print_header("选择 Module")
+        names = sorted(mods.keys())
+        items = [(n, mods[n].get("description", mods[n].get("language", ""))) for n in names]
+        print_menu(items)
+        choice = get_choice(len(names))
+        if choice == "q":
+            sys.exit(0)
+        if choice == "b":
+            return
+        module_name = names[int(choice) - 1]
+        _module_action_flow(module_name, mods[module_name], project_root)
+
+
+def _module_action_flow(name: str, cfg: dict, project_root: Path):
+    actions = resolve_module_actions(name, cfg)
+    if not actions:
+        print(f"  {name} 没有可用的 build/lint/test 操作")
+        return
+
+    while True:
+        print_header(f"Module: {name}")
+        items = [(a[0], a[1]) for a in actions]
+        print_menu(items)
+        choice = get_choice(len(actions))
+        if choice == "q":
+            sys.exit(0)
+        if choice == "b":
+            return
+        action_name, _, action_val = actions[int(choice) - 1]
+        cmd, timeout = extract_command(action_val)
+        if not cmd:
+            print(f"  {name}.{action_name} 没有可执行的命令")
+            continue
+
+        module_root = project_root / (cfg.get("root", "."))
+        log_dir = project_root / ".pg" / "runs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        env = {
+            "PG_PROJECT_ROOT": str(project_root),
+            "PG_SKILLS_PATH": str(find_pg_skills_root(project_root)),
+            "PG_MODULE_ROOT": str(module_root),
+            "PG_MODULE": name,
+            "PG_HOOK_TYPE": action_name,
+            "PG_LOG_FILE": str(log_dir / f"{name}-{action_name.replace('.', '-')}.log"),
+            "PG_RESULT_FILE": str(log_dir / f"{name}-{action_name.replace('.', '-')}.json"),
+        }
+        print(f"\n--- 执行 {name} / {action_name} ---")
+        print(f"    命令: {cmd}")
+        print(f"    workdir: {project_root}")
+        run_shell(cmd, cwd=project_root, timeout=timeout, extra_env=env)
+        pause()
+
+
+# ----- Environment (env-level) 操作 -----
+
+def env_items(config: dict) -> dict:
+    return config.get("environments", {})
+
+
+def run_env_flow(config: dict, project_root: Path):
+    envs = env_items(config)
+    if not envs:
+        print("  没有定义 environments")
+        return
+
+    while True:
+        print_header("选择 Environment")
+        names = sorted(envs.keys())
+        items = [(n, envs[n].get("description", "")) for n in names]
+        print_menu(items)
+        choice = get_choice(len(names))
+        if choice == "q":
+            sys.exit(0)
+        if choice == "b":
+            return
+        env_name = names[int(choice) - 1]
+        _env_action_flow(env_name, envs[env_name], project_root)
+
+
+def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
+    env_actions = []
+    for a in ("prepare_env", "clean_env"):
+        if a in cfg:
+            env_actions.append((a, cfg[a]))
+    if not env_actions:
+        print(f"  {env_name} 没有定义 prepare_env/clean_env 操作")
+        return
+
+    while True:
+        print_header(f"Environment: {env_name}")
+        desc_map = {"prepare_env": "准备环境", "clean_env": "清理环境"}
+        items = [(a, desc_map.get(a, a)) for a, _ in env_actions]
+        print_menu(items)
+        choice = get_choice(len(env_actions))
+        if choice == "q":
+            sys.exit(0)
+        if choice == "b":
+            return
+        action_name, action_cfg = env_actions[int(choice) - 1]
+
+        hook = find_invoke_hook(project_root)
+        if hook.is_file():
+            cmd = (
+                f"python3 {shlex.quote(str(hook))} invoke-hook"
+                f" --change manual"
+                f" --env {shlex.quote(env_name)}"
+                f" --action {shlex.quote(action_name)}"
+            )
+            timeout = action_cfg.get("timeout_seconds", 300)
+            print(f"\n--- 执行 {env_name} / {action_name} ---")
+            run_shell(cmd, cwd=project_root, timeout=timeout)
+        else:
+            cmd, timeout = extract_command(action_cfg)
+            if cmd:
+                print(f"\n--- 执行 {env_name} / {action_name} ---")
+                run_shell(f"bash {shlex.quote(cmd)}", cwd=project_root, timeout=timeout)
+            else:
+                print(f"  {env_name}.{action_name} 没有可执行的命令")
+        pause()
+
+
+# ----- Role 操作 -----
+
+def run_role_flow(config: dict, project_root: Path):
+    envs = env_items(config)
+    if not envs:
+        print("  没有定义 environments")
+        return
+
+    while True:
+        print_header("选择 Environment")
+        names = sorted(envs.keys())
+        items = [(n, envs[n].get("description", "")) for n in names]
+        print_menu(items)
+        choice = get_choice(len(names))
+        if choice == "q":
+            sys.exit(0)
+        if choice == "b":
+            return
+        env_name = names[int(choice) - 1]
+        _role_env_flow(env_name, envs[env_name], project_root)
+
+
+def _role_env_flow(env_name: str, env_cfg: dict, project_root: Path):
+    roles = env_cfg.get("roles", {})
+    if not roles:
+        print(f"  {env_name} 没有定义 roles")
+        return
+
+    while True:
+        print_header(f"Environment: {env_name} — 选择 Role")
+        names = sorted(roles.keys())
+        items = [(n, "") for n in names]
+        print_menu(items)
+        choice = get_choice(len(names))
+        if choice == "q":
+            sys.exit(0)
+        if choice == "b":
+            return
+        role_name = names[int(choice) - 1]
+        _role_instance_flow(env_name, role_name, roles[role_name], project_root)
+
+
+def _role_instance_flow(env_name: str, role_name: str, role_cfg: dict, project_root: Path):
+    instances = role_cfg.get("instances", [])
+    if not instances:
+        print(f"  {role_name} 没有定义 instances")
+        return
+
+    while True:
+        print_header(f"{env_name} / {role_name} — 选择 Instance")
+        items = []
+        for inst in instances:
+            host = inst.get("host", "")
+            port = inst.get("port", "")
+            detail = f"@{host}:{port}" if host else ""
+            items.append((inst["name"], detail))
+        print_menu(items)
+        choice = get_choice(len(instances))
+        if choice == "q":
+            sys.exit(0)
+        if choice == "b":
+            return
+        inst = instances[int(choice) - 1]
+        _role_action_flow(env_name, role_name, inst, role_cfg, project_root)
+
+
+def _role_action_flow(env_name: str, role_name: str, inst: dict, role_cfg: dict, project_root: Path):
+    actions = role_cfg.get("actions", {})
+    if not actions:
+        print(f"  {role_name} 没有定义 actions")
+        return
+
+    while True:
+        print_header(f"{env_name} / {role_name} / {inst['name']} — 选择 Action")
+        act_names = sorted(actions.keys())
+        items = [(a, actions[a].get("description", "") if isinstance(actions[a], dict) else "") for a in act_names]
+        print_menu(items)
+        choice = get_choice(len(act_names))
+        if choice == "q":
+            sys.exit(0)
+        if choice == "b":
+            return
+        action_name = act_names[int(choice) - 1]
+
+        hook = find_invoke_hook(project_root)
+        if hook.is_file():
+            inst_host = inst.get("host", "")
+            cmd = (
+                f"python3 {shlex.quote(str(hook))} invoke-hook"
+                f" --change manual"
+                f" --env {shlex.quote(env_name)}"
+                f" --role {shlex.quote(role_name)}"
+                f" --instance {shlex.quote(inst['name'])}"
+                f" --action {shlex.quote(action_name)}"
+            )
+            print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / {action_name} ---")
+            run_shell(cmd, cwd=project_root)
+        else:
+            act_cfg = actions[action_name]
+            script = act_cfg.get("script") if isinstance(act_cfg, dict) else ""
+            if script:
+                args = act_cfg.get("args", []) if isinstance(act_cfg, dict) else []
+                rendered = []
+                for a in args:
+                    a = str(a)
+                    a = a.replace("{role}", role_name)
+                    a = a.replace("{instance.name}", inst["name"])
+                    a = a.replace("{instance.host}", inst.get("host", ""))
+                    rendered.append(a)
+                cmd = f"bash {shlex.quote(script)} {' '.join(shlex.quote(a) for a in rendered)}"
+                print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / {action_name} ---")
+                run_shell(cmd, cwd=project_root)
+            else:
+                print(f"  {role_name}.{action_name} 没有可执行的脚本")
+        pause()
+
+
+# ----- 直接执行 -----
+
+def run_custom_flow():
+    print_header("直接执行命令")
+    print("  输入要执行的 shell 命令（或留空返回）")
+    try:
+        cmd = input("$ ").strip()
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
+    if cmd:
+        run_shell(cmd)
+        pause()
+
+
+# ----- 主菜单 -----
+
+def main_menu(config: dict, project_root: Path):
+    menu_options = [
+        ("Module 操作", "build/lint/test 编译、检查、测试"),
+        ("Environment 操作", "prepare_env/clean_env 准备/清理环境"),
+        ("Role 操作", "start/stop/logs/tail 启停角色实例"),
+        ("直接执行命令", "输入任意 shell 命令执行"),
+    ]
+
+    handlers = [
+        lambda: run_module_flow(config, project_root),
+        lambda: run_env_flow(config, project_root),
+        lambda: run_role_flow(config, project_root),
+        lambda: run_custom_flow(),
+    ]
+
+    while True:
+        print_header("pg-run — pg-skills 运行菜单")
+        print_menu(menu_options, back_option=False)
+        choice = get_choice(len(menu_options))
+        if choice == "q":
+            print("  再见")
+            break
+        if choice == "b":
+            continue
+        idx = int(choice) - 1
+        handlers[idx]()
+    sys.exit(0)
+
+
+# ----- 非交互模式（CLI flags 直达） -----
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    parser = argparse.ArgumentParser(
+        prog="pg-run",
+        description="pg-skills 运行菜单 — 选择模块/环境/角色操作并执行",
+    )
+    parser.add_argument("--module", help="module 名称（跳过菜单）")
+    parser.add_argument("--env", help="environment 名称")
+    parser.add_argument("--role", help="role 名称")
+    parser.add_argument("--instance", help="instance 名称")
+    parser.add_argument("--action", help="action 名称（build/lint/test.*/start/stop/logs/tail/prepare_env/clean_env）")
+    parser.add_argument("--cmd", help="直接执行的 shell 命令（跳过菜单）")
+    return parser.parse_args(argv)
+
+
+def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> int:
+    if args.cmd:
+        return run_shell(args.cmd, cwd=project_root)
+
+    if args.module:
+        mods = module_items(config)
+        if args.module not in mods:
+            sys.stderr.write(f"Error: module '{args.module}' not found\n")
+            return 1
+        if not args.action:
+            sys.stderr.write("Error: --action is required with --module\n")
+            return 1
+        actions = resolve_module_actions(args.module, mods[args.module])
+        matched = [a for a in actions if a[0] == args.action]
+        if not matched:
+            sys.stderr.write(f"Error: action '{args.action}' not available for module '{args.module}'\n")
+            return 1
+        _, _, action_val = matched[0]
+        cmd, timeout = extract_command(action_val)
+        if not cmd:
+            sys.stderr.write(f"Error: {args.module}.{args.action} has no executable command\n")
+            return 1
+        module_root = project_root / (mods[args.module].get("root", "."))
+        log_dir = project_root / ".pg" / "runs"
+        log_dir.mkdir(parents=True, exist_ok=True)
+        env = {
+            "PG_PROJECT_ROOT": str(project_root),
+            "PG_SKILLS_PATH": str(find_pg_skills_root(project_root)),
+            "PG_MODULE_ROOT": str(module_root),
+            "PG_MODULE": args.module,
+            "PG_HOOK_TYPE": args.action,
+            "PG_LOG_FILE": str(log_dir / f"{args.module}-{args.action.replace('.', '-')}.log"),
+            "PG_RESULT_FILE": str(log_dir / f"{args.module}-{args.action.replace('.', '-')}.json"),
+        }
+        return run_shell(cmd, cwd=project_root, timeout=timeout, extra_env=env)
+
+    if args.env and args.action in ("prepare_env", "clean_env"):
+        hook = find_invoke_hook(project_root)
+        cmd = (
+            f"python3 {shlex.quote(str(hook))} invoke-hook"
+            f" --change manual"
+            f" --env {shlex.quote(args.env)}"
+            f" --action {shlex.quote(args.action)}"
+        )
+        return run_shell(cmd, cwd=project_root)
+
+    if args.env and args.role and args.instance and args.action:
+        hook = find_invoke_hook(project_root)
+        cmd = (
+            f"python3 {shlex.quote(str(hook))} invoke-hook"
+            f" --change manual"
+            f" --env {shlex.quote(args.env)}"
+            f" --role {shlex.quote(args.role)}"
+            f" --instance {shlex.quote(args.instance)}"
+            f" --action {shlex.quote(args.action)}"
+        )
+        return run_shell(cmd, cwd=project_root)
+
+    sys.stderr.write("Error: incomplete arguments. See --help\n")
+    return 1
+
+
+def main():
+    args = parse_args(sys.argv[1:])
+
+    project_root = find_project_root()
+    config = load_config(project_root)
+
+    has_direct = any([
+        args.cmd,
+        args.module,
+        args.env and args.action in ("prepare_env", "clean_env"),
+        args.env and args.role and args.instance and args.action,
+    ])
+    if has_direct:
+        sys.exit(direct_exec(args, config, project_root))
+
+    main_menu(config, project_root)
+
+
+if __name__ == "__main__":
+    main()
