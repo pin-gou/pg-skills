@@ -12,6 +12,7 @@ pg-fix-regression-runner.py — OS 层串行循环，修复生产代码 regressi
 - Git 操作 (branch/push) 由 runner 直接执行，LLM 不参与调度
 """
 
+import argparse
 import hashlib
 import json
 import os
@@ -29,14 +30,37 @@ SKILLS_DIR = RUNNER_DIR.parent.parent
 PROJECT_ROOT = Path.cwd()
 
 ISSUES_DIR = PROJECT_ROOT / ".pg" / "regression"
-RESULTS_DIR = PROJECT_ROOT / ".pg" / "regression" / "results"
-SUMMARY_DIR = PROJECT_ROOT / ".pg" / "regression"
 DEFAULT_BRANCH = "master"
 
 GITEE_TOKEN = os.environ.get("GITEE_TOKEN", "")
 GITEE_API_BASE = os.environ.get("GITEE_API_BASE", "https://gitee.com/api/v5")
 
 FIX_PROD_AGENT = "pg-regression/fix-prod"
+
+# ==================== Run dir resolution ====================
+
+def resolve_run_dir(cli_arg: str | None, project_root: Path) -> Path:
+    if cli_arg:
+        p = Path(cli_arg)
+        if not p.is_absolute():
+            p = project_root / p
+        return p.resolve()
+
+    reg_dir = project_root / ".pg" / "regression"
+    candidates = sorted(
+        [p for p in reg_dir.iterdir()
+         if p.is_dir() and re.match(r"^[a-z][a-z0-9-]*-\d{8}-\d{2}$", p.name)],
+        key=lambda p: p.stat().st_mtime,
+        reverse=True,
+    )
+    if candidates:
+        return candidates[0].resolve()
+
+    sys.stderr.write(
+        "Warning: no --run-dir given and no <suite>-<date>-<NN> dir found; "
+        "using .pg/regression/\n"
+    )
+    return reg_dir.resolve()
 
 
 # ==================== Helpers ====================
@@ -135,7 +159,7 @@ def _create_gitee_pr(branch, base, title, body):
 
 # ==================== Per-issue processing ====================
 
-def process_issue(issue: dict, suite: str) -> dict:
+def process_issue(issue: dict, suite: str, run_dir: Path) -> dict:
     """Process a single issue: branch → fix → push → PR → cleanup."""
     idx = issue.get("id", "unknown")
     title = issue.get("title", "")
@@ -180,7 +204,7 @@ def process_issue(issue: dict, suite: str) -> dict:
         return result
 
     # 2. Write prompt file
-    prompt_dir = PROJECT_ROOT / "temp" / "fix-issues"
+    prompt_dir = run_dir / "prompts"
     prompt_dir.mkdir(parents=True, exist_ok=True)
     prompt_file = prompt_dir / f"{idx}-prompt.txt"
     prompt_text = f"""issue:
@@ -286,7 +310,7 @@ config:
 
     # 6. Write result file
     result["duration_s"] = round(time.time() - start, 1)
-    _write_result_file(result)
+    _write_result_file(result, run_dir)
 
     # 7. Remove fixed issue from suite JSON file
     _remove_issue_from_suite_file(suite, idx)
@@ -328,13 +352,14 @@ def _cleanup(branch):
         pass
 
 
-def _write_result_file(result: dict):
-    """Write per-issue result JSON to .pg/regression/results/."""
-    RESULTS_DIR.mkdir(parents=True, exist_ok=True)
+def _write_result_file(result: dict, run_dir: Path):
+    """Write per-issue result JSON to <run_dir>/results/."""
+    results_dir = run_dir / "results"
+    results_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d-%H%M")
     pr_suffix = f"-pr{result.get('prNumber', '')}" if result.get('prNumber') else ""
     filename = f"{now}-{result['suite']}-{result['id']}{pr_suffix}.json"
-    result_file = RESULTS_DIR / filename
+    result_file = results_dir / filename
     result_file.write_text(
         json.dumps(result, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -364,11 +389,11 @@ def _remove_issue_from_suite_file(suite: str, issue_id: str):
 
 # ==================== Summary ====================
 
-def write_summary(results: list[dict]):
+def write_summary(results: list[dict], run_dir: Path):
     """Write final summary report."""
-    SUMMARY_DIR.mkdir(parents=True, exist_ok=True)
+    run_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d-%H%M")
-    summary_file = SUMMARY_DIR / f"summary-{now}.md"
+    summary_file = run_dir / f"summary-{now}.md"
 
     success = [r for r in results if r["status"] == "success"]
     escalate = [r for r in results if r["status"] == "escalate"]
@@ -413,7 +438,7 @@ def write_summary(results: list[dict]):
         lines.append("")
 
     lines.append("---\n")
-    lines.append("**结果文件**: `.pg/regression/results/`")
+    lines.append(f"**结果文件**: `{run_dir}/results/`")
 
     summary_file.write_text("\n".join(lines), encoding="utf-8")
     print(f"\n📋 汇总报告: {summary_file}")
@@ -422,9 +447,21 @@ def write_summary(results: list[dict]):
 # ==================== Main loop ====================
 
 def main():
+    parser = argparse.ArgumentParser(
+        description="Fix production code regression issues from .pg/regression/<suite>.json"
+    )
+    parser.add_argument("--run-dir", default=None,
+                        help="Run directory (e.g. .pg/regression/backend-20260627-01). "
+                             "Sets results/ and summary output paths. "
+                             "Defaults to the latest <suite>-<date>-<NN> dir.")
+    args = parser.parse_args()
+
+    run_dir = resolve_run_dir(args.run_dir, PROJECT_ROOT)
+
     print("=" * 60)
     print("pg-fix-regression-runner 启动")
     print(f"时间: {datetime.now().strftime('%Y-%m-%d %H:%M')}")
+    print(f"Run dir: {run_dir}")
     print("=" * 60)
 
     # 1. Read all issue JSON files
@@ -445,7 +482,6 @@ def main():
         for iss in data.get("issues", []):
             iss["_suite"] = suite
             if not iss.get("id"):
-                # Auto-generate id from title + suite
                 slug = _make_slug(iss.get("title", "fix"))
                 h = hashlib.md5(f"{suite}:{iss.get('title', '')}".encode()).hexdigest()[:6]
                 iss["id"] = f"{slug}-{h}"
@@ -464,11 +500,11 @@ def main():
     results = []
     for iss in all_issues:
         suite = iss["_suite"]
-        r = process_issue(iss, suite)
+        r = process_issue(iss, suite, run_dir)
         results.append(r)
 
     # 3. Summary
-    write_summary(results)
+    write_summary(results, run_dir)
 
     success = sum(1 for r in results if r["status"] == "success")
     print(f"\n{'='*60}")
