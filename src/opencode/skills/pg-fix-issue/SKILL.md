@@ -2,7 +2,7 @@
 name: pg-fix-issue
 description: 复现问题、收集错误信息、进行系统化诊断、对根因进行修复。触发词："修复问题"、"fix issue"
 license: MIT
-compatibility: 项目根目录需要 `.pg/project.yaml` (v3.0 4-段结构: modules/environments/tracks/stages + fix_issue). service 启停走 `pg-invoke-hook.py` (runtime 层独立 CLI, 与 pg-build 共享入口, hooks 协议; 旧路径 `pg-pipeline-runner.py invoke-hook` 仍作为 thin wrapper 可用).
+compatibility: 项目根目录需要 `.pg/project.yaml` (v3.0 4-段结构 modules/environments/tracks/stages + fix_issue). service 启停走 `pg-invoke-hook.py` (runtime 层独立 CLI, 与 pg-build 共享入口, hooks 协议; 旧路径 `pg-pipeline-runner.py invoke-hook` 仍作为 thin wrapper 可用).
 metadata:
   author: pg-spec
   version: "3.0"
