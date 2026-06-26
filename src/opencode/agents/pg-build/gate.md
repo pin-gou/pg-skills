@@ -19,21 +19,29 @@ permission:
 
 **红线：禁止自行加载 pg-build 或其他流程编排类 SKILL——你处于编排器管理的管线中，加载 SKILL 会破坏编排逻辑。**
 
+## 启动指令（dispatch_file 模式）
+
+orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_file` 路径**——你的完整任务指令在那个文件里。**第一步必须执行**：
+
+1. 用 Read 工具读取 `dispatch_file` 路径对应的文件
+2. **逐字执行**文件中所有内容作为你的任务指令
+3. 文件中提到的 `report_seq` 是 runner 预分配的全局 seq 编号，**必须**用 `cat > 2-build/{report_seq}-{item}-gate-verify.md << 'EOF' ... EOF` 写报告
+
+**绝对禁止**：
+- ❌ 改写、摘要或重组 dispatch_file 中的指令
+- ❌ 忽略 dispatch_file 而自己另写任务
+- ❌ 不读 dispatch_file 就开始干活
+
+> 设计动机：dispatch_file 模式让 orchestrator 完全 bypass 指令内容，从架构上杜绝"派送时被改写"的可能性。
+
 ## 报告定位
 
-本 agent 产出**门控评估报告**（序号式命名），是 track 内"我**评审了**哪些 P-N 检查项、PASS/FAIL、G-N 详细说明"的记录：
+本 agent 产出**门控评估报告**（全局时序编号），是 track 内"我**评审了**哪些 P-N 检查项、PASS/FAIL、G-N 详细说明"的记录：
 
-- **首次评估**（verify PROCEED 后）：`2-build/{track.id}-1-gate-assessment.md`
-- **gate-fix 循环**（gate FAIL → fix-gate → re-verify → 再 gate）：序号继续递增
-- **final-gate**：独立命名 `2-build/final-gate-assessment.md`，不嵌入序号
-
-文件命名遵循 [方案 D：统一序号命名](../skills/pg-build/SKILL.md#报告体系)：
-- 模板：`.pg/changes/{change_name}/2-build/{track.id}-{N}-gate-assessment.md`
+- 模板：`.pg/changes/{change_name}/2-build/{report_seq}-{item}-gate-verify.md`
 - 所有报告存放于 `<change>/2-build/` 子目录（与 `1-propose-review/` 平行）
-- `{N}` 由 **agent 启动时**扫描子目录已有报告推断（取最大 + 1；无文件时为 1）
-- 写文件前必须再扫一次确认无并发冲突
+- `{report_seq}` 来自 dispatch_file 中的预分配值，**禁止更改**
 - **gate agent 自行写盘**：用 `cat > {file} << 'EOF' ... EOF` 把 Gate Assessment 全文写入对应路径。**不要**把 markdown 全文返回编排器（编排器不会替你落盘，历史上因此出现过报告丢失）
-- **final-gate** 命名例外：`2-build/final-gate-assessment.md`（不嵌入序号）
 
 ### 与其他报告的配对阅读
 

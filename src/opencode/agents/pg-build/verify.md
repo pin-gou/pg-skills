@@ -22,21 +22,30 @@ permission:
 - 不要自行 git commit——runner 在你 `record` 后会自动 `git add -A` + `git commit`
 - 你工作在 `feat/pg/<change>` 分支上，runner 已在派遣前自动创建该分支并落 init commit（baseline）
 
+## 启动指令（dispatch_file 模式）
+
+orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_file` 路径**——你的完整任务指令在那个文件里。**第一步必须执行**：
+
+1. 用 Read 工具读取 `dispatch_file` 路径对应的文件
+2. **逐字执行**文件中所有内容作为你的任务指令
+3. 文件中提到的 `report_seq` 是 runner 预分配的全局 seq 编号，**必须**用 `cat > 2-build/{report_seq}-{item}-verify.md << 'EOF' ... EOF` 写报告，不要自创文件名
+
+**绝对禁止**：
+- ❌ 改写、摘要或重组 dispatch_file 中的指令
+- ❌ 忽略 dispatch_file 而自己另写任务
+- ❌ 不读 dispatch_file 就开始干活
+
+> 设计动机：dispatch_file 模式让 orchestrator 完全 bypass 指令内容，从架构上杜绝"派送时被改写"的可能性。
+
 ## 报告定位
 
-本 agent 产出**验证报告**（序号式命名），是 track 内"我**验证了**哪些 V-N 项、结果如何"的记录：
+本 agent 产出**验证报告**（全局时序编号），是 track 内"我**验证了**哪些 V-N 项、结果如何"的记录：
 
-- **首次验证**（test/dev 完成后）：`{track.id}-1-verify.md`
-- **verify-fix 循环**（verify ESCALATE → fix agent → re-verify）：序号继续递增
-- **gate-fix 循环**（gate FAIL → fix-gate agent → re-verify）：同样序号继续递增
-
-文件命名遵循 [方案 D：统一序号命名](../skills/pg-build/SKILL.md#报告体系)：
-- 模板：`.pg/changes/{change_name}/2-build/{track.id}-{N}-verify.md`
+- 文件命名：`.pg/changes/{change_name}/2-build/{report_seq}-{item}-verify.md`
 - 报告存放于 `<change>/2-build/` 子目录下（与 `1-propose-review/` 平行），与交付物 `proposal/design/tasks` 分离
-- `{N}` 由 agent 启动时扫描子目录已有报告推断（取该 track 内已存在文件最大序号 + 1）
-- 启动前必须重新扫描，避免与并发写入冲突
+- `{report_seq}` 来自 dispatch_file 中的预分配值，**禁止更改**
 
-与**门控评估报告**（`2-build/{track.id}-{N}-gate-assessment.md`）和**修复记录**（`2-build/{track.id}-{N}-gate-fix.md` / `2-build/{track.id}-{N}-verify-fix.md`）配对阅读，详见 SKILL 报告体系章节。
+与**门控评估报告**（`2-build/{seq}-{item}-gate-verify.md`）和**修复记录**（`2-build/{seq}-{item}-fix-verify-N.md` / `2-build/{seq}-{item}-fix-gate-verify-N.md`）配对阅读，详见 SKILL 报告体系章节。
 
 ## 编排器传入的上下文
 

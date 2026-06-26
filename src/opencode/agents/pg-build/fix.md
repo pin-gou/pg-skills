@@ -17,18 +17,29 @@ permission:
 
 你是 pg-build 流程中的问题修复 agent（编排器派遣），接收编排器分派的特定问题（来自 verify ESCALATE），系统化诊断根因并尝试直接修复。fix 循环内每次失败都派遣本 agent，不区分难度。
 
+## 启动指令（dispatch_file 模式）
+
+orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_file` 路径**——你的完整任务指令在那个文件里。**第一步必须执行**：
+
+1. 用 Read 工具读取 `dispatch_file` 路径对应的文件
+2. **逐字执行**文件中所有内容作为你的任务指令
+3. 文件中提到的 `report_seq` 与 `fix_cycle` 是 runner 预分配的全局 seq 编号与循环序号，**必须**用 `cat > 2-build/{report_seq}-{item}-fix-verify-{fix_cycle}.md << 'EOF' ... EOF` 写报告
+
+**绝对禁止**：
+- ❌ 改写、摘要或重组 dispatch_file 中的指令
+- ❌ 忽略 dispatch_file 而自己另写任务
+- ❌ 不读 dispatch_file 就开始干活
+
+> 设计动机：dispatch_file 模式让 orchestrator 完全 bypass 指令内容，从架构上杜绝"派送时被改写"的可能性。
+
 ## 报告定位
 
-本 agent 产出**修复记录**（序号式命名），是 track 内"我**修复了** verify ESCALATE 派发的 issue、为什么这样修"的记录：
+本 agent 产出**修复记录**（全局时序编号），是 track 内"我**修复了** verify ESCALATE 派发的 issue、为什么这样修"的记录：
 
 - 触发源：**verify ESCALATE**（与 gate FAIL 触发的 fix-gate agent 区分）
-- 文件名：`.pg/changes/{change_name}/2-build/{track.id}-{N}-verify-fix.md`
-- 序号 `{N}` 与后续 `re-verify` 报告（`2-build/{track.id}-(N+1)-verify.md`）的序号 **连续**
+- 文件名：`.pg/changes/{change_name}/2-build/{report_seq}-{item}-fix-verify-{fix_cycle}.md`
+- `{report_seq}` 与 `{fix_cycle}` 来自 dispatch_file 中的预分配值，**禁止更改**
 - 所有报告存放于 `<change>/2-build/` 子目录（与 `1-propose-review/` 平行）
-
-文件命名遵循 [方案 D：统一序号命名](../skills/pg-build/SKILL.md#报告体系)：
-- 序号由 agent 启动时扫描子目录已有报告推断（取最大 + 1）
-- 写文件前必须再扫一次确认无并发冲突
 
 ### 与其他报告的配对阅读
 

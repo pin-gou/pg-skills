@@ -453,6 +453,18 @@ class TestCmdDetectSimpleTrack(unittest.TestCase):
 #   5. _infer_next_report_n scans 2-build/ correctly.
 #   6. Missing commands produces workflow_failed.
 
+
+def _read_dispatch_prompt(dispatch_file):
+    """Read the rendered+merged prompt from a dispatch file written by the runner.
+
+    Replaces the old `result["prompt_final_no_modify"]` test pattern: the runner
+    no longer returns the prompt content, only the file path. Tests that want
+    to assert on the prompt body must read it from the dispatch file.
+    """
+    with open(dispatch_file, encoding="utf-8") as f:
+        return f.read()
+
+
 class TestExecutePhaseSimpleTrack(unittest.TestCase):
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="test-simple-track-exec-")
@@ -572,7 +584,7 @@ class TestExecutePhaseSimpleTrack(unittest.TestCase):
         state = self._empty_state()
         runner = self._patch_runner(self.runner)
         result = runner._execute_phase(config, self.change, state, "simple-foo")
-        prompt = result["prompt_final_no_modify"]
+        prompt = _read_dispatch_prompt(result["dispatch_file"])
         # Both commands appear.
         self.assertIn("echo first", prompt)
         self.assertIn("echo second", prompt)
@@ -589,7 +601,7 @@ class TestExecutePhaseSimpleTrack(unittest.TestCase):
         state = self._empty_state()
         runner = self._patch_runner(self.runner)
         result = runner._execute_phase(config, self.change, state, "simple-foo")
-        prompt = result["prompt_final_no_modify"]
+        prompt = _read_dispatch_prompt(result["dispatch_file"])
         self.assertIn("失败处理决策表", prompt)
         self.assertIn("`fail`", prompt)
         self.assertIn("`continue`", prompt)
@@ -607,8 +619,9 @@ class TestExecutePhaseSimpleTrack(unittest.TestCase):
         state = self._empty_state()
         runner = self._patch_runner(self.runner)
         result = runner._execute_phase(config, self.change, state, "simple-foo")
-        prompt = result["prompt_final_no_modify"]
-        self.assertIn("simple-foo-3-simple.md", prompt)
+        prompt = _read_dispatch_prompt(result["dispatch_file"])
+        # New seq-based naming: report file = "{report_seq}-{item}-simple-verify.md"
+        self.assertIn("simple-foo-simple-verify.md", prompt)
 
 
 class TestBuildSimpleDispatch(unittest.TestCase):
@@ -737,8 +750,14 @@ class TestBuildSimpleDispatch(unittest.TestCase):
         self.assertEqual(result["item"], "simple-foo")
         self.assertEqual(result["sub"], "simple")
         self.assertEqual(result["attempt"], 1)
-        self.assertIsInstance(result["prompt_final_no_modify"], str)
-        self.assertIn("prompt_injection", result)
+        # New: dispatch_file (path) replaces prompt_final_no_modify (content).
+        self.assertIn("dispatch_file", result)
+        self.assertIsInstance(result["dispatch_file"], str)
+        # The dispatch file must exist and contain the rendered prompt.
+        self.assertTrue(os.path.isfile(result["dispatch_file"]))
+        self.assertGreater(os.path.getsize(result["dispatch_file"]), 0)
+        self.assertIn("dispatch_seq", result)
+        self.assertIn("report_seq", result)
         self.assertIn("next_call_timeout_seconds", result)
 
     def test_build_simple_dispatch_prompt_includes_track_metadata(self):
@@ -746,7 +765,7 @@ class TestBuildSimpleDispatch(unittest.TestCase):
                                             "commands": ["echo hi"]}})
         result = self.runner._build_simple_dispatch(
             cfg, self.change, "simple-foo")
-        prompt = result["prompt_final_no_modify"]
+        prompt = _read_dispatch_prompt(result["dispatch_file"])
         self.assertIn("simple-foo", prompt)
         self.assertIn("echo hi", prompt)
         self.assertIn("track.type", prompt)
@@ -783,7 +802,7 @@ class TestBuildSimpleDispatch(unittest.TestCase):
                                             "commands": ["echo hi"]}})
         result = self.runner._build_simple_dispatch(
             cfg, self.change, "simple-foo")
-        prompt = result["prompt_final_no_modify"]
+        prompt = _read_dispatch_prompt(result["dispatch_file"])
         self.assertIn("Simple Track 命令执行要求", prompt)
         self.assertIn("待执行命令（顺序执行", prompt)
         self.assertIn("返回格式", prompt)
@@ -1058,7 +1077,7 @@ class TestExecutePhaseAdvancedPolicies(unittest.TestCase):
         result = self.runner._execute_phase(config, self.change, state, "simple-foo")
         self.assertEqual(result["action"], "dispatch")
         self.assertEqual(result["agent"], "pg-build/simple")
-        prompt = result["prompt_final_no_modify"]
+        prompt = _read_dispatch_prompt(result["dispatch_file"])
         self.assertIn("sleep 5", prompt)
         self.assertIn("timeout=2s", prompt)
 
@@ -1076,7 +1095,7 @@ class TestExecutePhaseAdvancedPolicies(unittest.TestCase):
         }
         state = self._empty_state()
         result = self.runner._execute_phase(config, self.change, state, "simple-foo")
-        prompt = result["prompt_final_no_modify"]
+        prompt = _read_dispatch_prompt(result["dispatch_file"])
         # Both commands present
         self.assertIn("false", prompt)
         self.assertIn("echo ok", prompt)
@@ -1097,7 +1116,7 @@ class TestExecutePhaseAdvancedPolicies(unittest.TestCase):
         }
         state = self._empty_state()
         result = self.runner._execute_phase(config, self.change, state, "simple-foo")
-        prompt = result["prompt_final_no_modify"]
+        prompt = _read_dispatch_prompt(result["dispatch_file"])
         self.assertIn("on_failure=retry", prompt)
         self.assertIn("retry_max=2", prompt)
         # The retry-timeout hint must be in the bullet below the command
@@ -1121,7 +1140,7 @@ class TestExecutePhaseAdvancedPolicies(unittest.TestCase):
         state = self._empty_state()
         result = self.runner._execute_phase(config, self.change, state, "simple-foo")
         self.assertEqual(result["action"], "dispatch")
-        prompt = result["prompt_final_no_modify"]
+        prompt = _read_dispatch_prompt(result["dispatch_file"])
         self.assertIn("track.on_failure: continue_all", prompt)
         # Decision table mentions continue_all semantics.
         self.assertIn("continue_all", prompt)

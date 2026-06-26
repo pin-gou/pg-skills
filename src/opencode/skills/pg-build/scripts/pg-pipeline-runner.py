@@ -500,7 +500,8 @@ _SUB_TRACK_FIELDS = {
                "verification_step", "expected", "actual",
                "root_cause_phase", "affected_tasks",
                "design_doc_path", "tasks_path", "fix_cycle",
-               "fix_report_filename", "tasks_preformatted"],
+               "fix_report_filename", "dispatch_seq", "report_seq",
+               "tasks_preformatted"],
     "fix-gate": ["id", "review_level", "modules", "module_details", "stage",
                "module_roots", "module_names",
                "max_gate_fix_retries", "fix_routing",
@@ -510,21 +511,23 @@ _SUB_TRACK_FIELDS = {
                "design_doc_path", "tasks_path",
                "fix_cycle", "gate_cycles", "cycles_remaining",
                "gate_report_path", "fix_report_filename",
+               "dispatch_seq", "report_seq",
                "tasks_preformatted"],
     "gate":   ["id", "review_level", "modules", "module_details", "stage",
                "module_roots", "module_names",
                "max_fix_retries", "fix_routing",
-               "tasks_preformatted", "next_report_n"],
+               "tasks_preformatted", "dispatch_seq", "report_seq"],
     "simple": ["id", "review_level", "label", "modules", "module_details",
                "module_roots", "module_names",
                "max_fix_retries", "fix_routing",
                "tasks_preformatted", "tasks_validation", "tasks_noop",
                "stage", "rollback_context",
                "track_type", "track_timeout", "track_on_failure",
-               "commands_normalized", "next_report_n"],
+               "commands_normalized", "dispatch_seq", "report_seq"],
     "final-gate": [
                "_change", "proposal_path", "tasks_path",
                "design_doc_path", "design_doc_paths", "report_paths",
+               "dispatch_seq", "report_seq",
                "tasks_preformatted"],
 }
 
@@ -685,12 +688,10 @@ def _render_prompt_template(template, ctx):
 # Each sub-agent type has its own template. Templates use {{var}}, {#if},
 # {#each}, {this.X} syntax. Renderer is _render_prompt_template (stdlib-only).
 # These are the single source of truth (SSOT) for what sub-agent prompts look
-# like. SKILL.md keeps a human-readable copy for reference but the runner
-# does the actual rendering — so LLM orchestrators can simply do:
-#
-#   prompt = action["prompt_final_no_modify"]
-#
-# instead of hand-assembling the prompt from ctx fields.
+# like. The runner does the actual rendering AND writes the rendered+merged
+# content to a dispatch file under 2-build/ — so the LLM orchestrator simply
+# forwards the dispatch_file path to the sub-agent, never sees the prompt
+# content, and cannot accidentally rewrite it.
 
 _PROMPT_TEMPLATE_BASE = """\
 ## 任务：{{context.id}} - {{context.label}}
@@ -840,9 +841,13 @@ _PROMPT_BLOCK_GATE = """\
 ### Gate 审计要求
 - `stage.gate` 已写入 Track 配置（见上）。
 - **只读不写**源码；**完成后用 `cat >` 自行写盘**到
-  `2-build/{{context.id}}-{{context.next_report_n}}-gate-assessment.md`，
+  `2-build/{{context.report_seq}}-{{context.id}}-gate-verify.md`，
   不要把 markdown 全文塞进返回里。
 - 按 design.md 列 P-N 审计项逐项核对 evidence。
+
+> 关于 seq 编号：dispatch 文件 (`{{context.dispatch_seq}}`) 与本报告
+> (`{{context.report_seq}}`) 共享全局递增序列；本报告的 seq 由
+> runner 预分配，禁止更改。
 """
 
 _PROMPT_BLOCK_FIX = """\
@@ -899,7 +904,11 @@ fix_cycle: {{context.fix_cycle}} / {{context.max_fix_retries}}
 5. 跑 tasks.md verify 章节的所有 V-* 验证项（curl 等）
 6. 抓 `runner invoke-hook --action logs --tail-lines 100` 日志确认无 ERROR
 7. 停止 `runner invoke-hook --action stop` 服务（如启动过）
-8. 用 `cat > 2-build/{{context.id}}-{{context.next_report_n}}-{{context.fix_report_filename}} << 'EOF' ... EOF` 自行写盘
+8. 用 `cat > 2-build/{{context.report_seq}}-{{context.id}}-fix-verify-{{context.fix_cycle}}.md << 'EOF' ... EOF` 自行写盘
+
+> 关于 seq 编号：dispatch 文件 (`{{context.dispatch_seq}}`) 与本报告
+> (`{{context.report_seq}}`) 共享全局递增序列；本报告的 seq 由
+> runner 预分配，禁止更改。fix_cycle 嵌入文件名以区分多次循环的修复记录。
 
 返回格式同 base dispatch（summary / outputs / tasks_updated / status）。
 """
@@ -962,7 +971,11 @@ cycles_remaining: {{context.cycles_remaining}}
 5. 跑 design.md 中 P-N 审计项对应的验证项（curl 等）—— 对齐 `audit_step` 字段
 6. 抓 `runner invoke-hook --action logs --tail-lines 100` 日志确认无 ERROR
 7. 停止 `runner invoke-hook --action stop` 服务（如启动过）
-8. 用 `cat > 2-build/{{context.id}}-{{context.next_report_n}}-{{context.fix_report_filename}} << 'EOF' ... EOF` 自行写盘
+8. 用 `cat > 2-build/{{context.report_seq}}-{{context.id}}-fix-gate-verify-{{context.fix_cycle}}.md << 'EOF' ... EOF` 自行写盘
+
+> 关于 seq 编号：dispatch 文件 (`{{context.dispatch_seq}}`) 与本报告
+> (`{{context.report_seq}}`) 共享全局递增序列；本报告的 seq 由
+> runner 预分配，禁止更改。fix_cycle 嵌入文件名以区分多次循环的修复记录。
 
 返回格式同 base dispatch（summary / outputs / tasks_updated / status）。
 """
@@ -1033,14 +1046,14 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
    a. （可选）环境准备：缺依赖时 `apt install` / `pip install` / `npm install -g` 等
    b. 用 `bash -c '<cmd>'` 执行（runner 在编排器侧用 `timeout N` 包裹时遵守）
    c. 失败时按决策表处理
-3. 全部完成或按决策表终止后：用 `cat > 2-build/{{context.id}}-{{context.next_report_n}}-simple.md <<'EOF' ... EOF` 写执行报告
+3. 全部完成或按决策表终止后：用 `cat > 2-build/{{context.report_seq}}-{{context.id}}-simple-verify.md <<'EOF' ... EOF` 写执行报告
    （包含每条命令的摘要：cmd / 退出码 / stdout 末尾 ~50 行 / stderr 末尾 ~50 行 / 耗时）
 4. 返回结果
 
 #### 返回格式
 
 - summary: 一句话总结（如 "执行 3/3 条命令成功" 或 "Command #2 失败: <err>，按 on_failure=fail 终止"）
-- outputs: 产物文件列表（如 `2-build/{{context.id}}-1-simple.md`）
+- outputs: 产物文件列表（如 `2-build/{{context.report_seq}}-{{context.id}}-simple-verify.md`）
 - tasks_updated: false（simple track 不更新 tasks.md 复选框）
 - status: SUCCESS / FAILED
 
@@ -1091,12 +1104,16 @@ final-gate agent 必须读取以下 4 类文件才能做完整审计：
 4. 检查 `context-chain.md` 没有未解决的 error
 5. 列出跨 track 不一致 / 缺失项（如有）
 
-**写盘要求（必须）**：完成所有审计后，用 `cat > .pg/changes/{{context._change}}/2-build/final-gate-assessment.md << 'EOF' ... EOF` 自行写盘。**不要**把 markdown 全文塞进返回里——编排器不会替你落盘。
+**写盘要求（必须）**：完成所有审计后，用 `cat > .pg/changes/{{context._change}}/2-build/{{context.report_seq}}-final-gate-gate-verify.md << 'EOF' ... EOF` 自行写盘。**不要**把 markdown 全文塞进返回里——编排器不会替你落盘。
+
+> 关于 seq 编号：dispatch 文件 (`{{context.dispatch_seq}}`) 与本报告
+> (`{{context.report_seq}}`) 共享全局递增序列；本报告的 seq 由
+> runner 预分配，禁止更改。
 
 ### 返回格式
 
 - summary: 一句话总结整体判定（PASS / FAIL）
-- **不要**返回 markdown 全文（已落盘到 `final-gate-assessment.md`）
+- **不要**返回 markdown 全文（已落盘到 `{report_seq}-final-gate-gate-verify.md`）
 """
 
 
@@ -1899,19 +1916,18 @@ def _enrich_context_with_prompt_injection(ctx, config, item, sub):
     """Build the pre-assembled prompt injection for the dispatch action.
 
     Reads `apply_change_rules` from config.yaml and, for the current
-    (item, sub), assembles the prepend / append fragments that the LLM
-    orchestrator should splice into the sub-agent prompt.
+    (item, sub), assembles the prepend / append fragments that the runner
+    itself splices into the sub-agent prompt (via _merge_prompt_injection)
+    before writing the dispatch file.
 
-    The LLM does NOT need to know how apply_change_rules works — it
-    just receives `prompt_injection` already shaped for direct use:
+    The LLM orchestrator does NOT see the rendered prompt at all — it
+    only receives the dispatch_file path. The LLM does NOT need to know
+    how apply_change_rules works:
 
-        prompt = (prompt_injection["prepend"]
-                  + "\n\n"
-                  + default_prompt_template
-                  + "\n\n"
-                  + prompt_injection["append"])
+        content = _merge_prompt_injection(rendered, ctx)
+        # == prepend + "\n\n" + rendered + "\n\n" + append
 
-    Field reference:
+    Field reference (ctx["prompt_injection"]):
       target_agent: "pg-build/{sub}"  (which agent this targets)
       prepend:     ""  | <assembled block>
       append:      ""  | <assembled block>
@@ -1963,23 +1979,33 @@ def dispatch_action(agent, item, sub, context, attempt, init_commit=None):
     # in {#if sub in [...]} blocks (sub is the dispatched sub type).
     if "sub" not in context:
         context["sub"] = sub
-    # Render the prompt template here so the LLM orchestrator doesn't need
-    # to know how templates work — it just reads `prompt_final_no_modify`.
+    change = context.get("_change", "")
+    # Pre-allocate dispatch + report seq so the rendered prompt can include
+    # them in the report filename (e.g. `cat > 2-build/{report_seq}-{item}-...`).
+    seq = _allocate_seq(change)
+    dispatch_seq = _format_seq(seq)
+    report_seq = _format_seq(seq + 1)
+    context["dispatch_seq"] = dispatch_seq
+    context["report_seq"] = report_seq
+    # Render the prompt template, then merge apply_change_rules prepend/append
+    # fragments. Both steps happen here in the runner so the LLM orchestrator
+    # never sees the rendered prompt content — it only receives the path of
+    # the dispatch file and tells the sub-agent to read it.
     template_str = _build_prompt_template(item, sub)
     rendered = _render_prompt_template(template_str, context)
+    content = _merge_prompt_injection(rendered, context)
+    dispatch_path = _write_dispatch_file_with_seq(
+        change, item, sub, content, seq=seq, cycle=None, agent=agent,
+    )
     result = {
         "action": "dispatch",
         "item": item,
         "sub": sub,
         "agent": agent,
         "attempt": attempt,
-        "prompt_final_no_modify": rendered,
-        "prompt_injection": context.get("prompt_injection", {
-            "target_agent": f"pg-build/{sub}",
-            "prepend": "",
-            "append": "",
-            "rules_applied": [],
-        }),
+        "dispatch_file": dispatch_path,
+        "dispatch_seq": dispatch_seq,
+        "report_seq": report_seq,
     }
     # Surface bootstrap-init commit result only when it actually ran
     # (first-dispatch path). Subsequent re-entries pass init_commit=None
@@ -1995,7 +2021,7 @@ def dispatch_fix_action(item, cycle, context, config=None):
     context["sub"] = "fix"
     context["fix_cycle"] = cycle
     # 报告文件名走 ctx 字段，让 BLOCK 末尾 cat > 命令与 sub 解耦
-    context.setdefault("fix_report_filename", "verify-fix.md")
+    context.setdefault("fix_report_filename", "fix-verify.md")
     # Populate fix-issue fields from the most recent verify report so the
     # template's FIX ISSUE REQUEST block has real values (not empty strings).
     change = context.get("_change", "")
@@ -2004,21 +2030,27 @@ def dispatch_fix_action(item, cycle, context, config=None):
         # Don't overwrite fields already set by callers (e.g. rollback_reason).
         for k, v in issue_ctx.items():
             context.setdefault(k, v)
+    # Pre-allocate seqs before rendering so the template can include them.
+    seq = _allocate_seq(change)
+    dispatch_seq = _format_seq(seq)
+    report_seq = _format_seq(seq + 1)
+    context["dispatch_seq"] = dispatch_seq
+    context["report_seq"] = report_seq
     template_str = _build_prompt_template(item, "fix")
     rendered = _render_prompt_template(template_str, context)
+    content = _merge_prompt_injection(rendered, context)
+    dispatch_path = _write_dispatch_file_with_seq(
+        change, item, "fix", content, seq=seq, cycle=cycle, agent=FIX_AGENT,
+    )
     return {
         "action": "dispatch_fix",
         "item": item,
         "sub": "fix",
         "agent": FIX_AGENT,
         "fix_cycle": cycle,
-        "prompt_final_no_modify": rendered,
-        "prompt_injection": context.get("prompt_injection", {
-            "target_agent": "pg-build/fix",
-            "prepend": "",
-            "append": "",
-            "rules_applied": [],
-        }),
+        "dispatch_file": dispatch_path,
+        "dispatch_seq": dispatch_seq,
+        "report_seq": report_seq,
     }
 
 
@@ -2032,7 +2064,7 @@ def dispatch_fix_gate_action(item, gate_cycle, context, config=None):
         _enrich_context_with_prompt_injection(context, config, item, "fix-gate")
     context["sub"] = "fix-gate"
     context["fix_cycle"] = gate_cycle          # 用 gate_cycle 当 fix_cycle 喂 prompt
-    context.setdefault("fix_report_filename", "gate-fix.md")
+    context.setdefault("fix_report_filename", "fix-gate-verify.md")
     # max_gate_fix_retries 在 track_cfg 中，下游需要从 context 取
     # （filter_track_context 已把 track-level 元数据放进来，但 max_gate_fix_retries
     # 只在 _SUB_TRACK_FIELDS["fix-gate"] 白名单里，runner 还需要从 config 反查）
@@ -2041,21 +2073,27 @@ def dispatch_fix_gate_action(item, gate_cycle, context, config=None):
         issue_ctx = _build_fix_issue_context(change, item, gate_cycle, kind="gate")
         for k, v in issue_ctx.items():
             context.setdefault(k, v)
+    # Pre-allocate seqs before rendering.
+    seq = _allocate_seq(change)
+    dispatch_seq = _format_seq(seq)
+    report_seq = _format_seq(seq + 1)
+    context["dispatch_seq"] = dispatch_seq
+    context["report_seq"] = report_seq
     template_str = _build_prompt_template(item, "fix-gate")
     rendered = _render_prompt_template(template_str, context)
+    content = _merge_prompt_injection(rendered, context)
+    dispatch_path = _write_dispatch_file_with_seq(
+        change, item, "fix-gate", content, seq=seq, cycle=gate_cycle, agent=FIX_GATE_AGENT,
+    )
     return {
         "action": "dispatch_fix_gate",
         "item": item,
         "sub": "fix-gate",
         "agent": FIX_GATE_AGENT,
         "gate_cycle": gate_cycle,
-        "prompt_final_no_modify": rendered,
-        "prompt_injection": context.get("prompt_injection", {
-            "target_agent": "pg-build/fix-gate",
-            "prepend": "",
-            "append": "",
-            "rules_applied": [],
-        }),
+        "dispatch_file": dispatch_path,
+        "dispatch_seq": dispatch_seq,
+        "report_seq": report_seq,
     }
 
 
@@ -2556,6 +2594,184 @@ def _infer_next_report_n(change, item_id):
     return max_n + 1
 
 
+# ============================================================
+# Global sequential numbering for 2-build/ files
+# ============================================================
+#
+# All markdown files produced during a pg-build run get a globally
+# monotonically-increasing 3-digit sequence number (001, 002, ...) so that
+# `ls 2-build/` reflects event order. Two file classes share the same
+# number space:
+#
+#   * Dispatch instruction files (written by runner, read by sub-agent)
+#   * Sub-agent report files (written by sub-agent, read by gate/next-pass)
+#
+# `dispatch_file = "2-build/{seq}-{item}-{sub}-dispatch[-{cycle}].md"`
+#   - `{cycle}` present only for fix / fix-gate cycles
+#
+# `report_file  = "2-build/{seq}-{item}-{kind}[-N].md"`
+#   - `{kind}` ∈ {test-verify, dev-verify, verify, gate-assessment,
+#                  fix-verify-N, fix-gate-verify-N, simple-verify,
+#                  final-gate-assessment}
+#   - sub-agent learns the report seq from the dispatch file (it's
+#     `dispatch_seq + 1`), so the sub-agent does NOT need a separate
+#     allocation call.
+#
+# `_allocate_seq(change)` returns the next integer. Counter is held in
+# module-level state (reset each runner process) but bootstrapped from the
+# filesystem at first call to be crash-safe. The counter is shared across
+# all dispatch types in a single runner process.
+
+_SEQ_COUNTERS = {}
+
+
+def _allocate_seq(change):
+    """Allocate next global sequence number for a 2-build/ file.
+
+    On first call for a given `change`, scans 2-build/ to find the highest
+    existing seq number and seeds the in-memory counter above that value.
+    Subsequent calls increment without scanning (synchronous; runner
+    serializes dispatches).
+    """
+    if not change:
+        # Defensive: never produce 0/None for a missing change name.
+        return 1
+    if change not in _SEQ_COUNTERS:
+        apply_dir = get_apply_dir(change)
+        max_seen = 0
+        if os.path.isdir(apply_dir):
+            for fname in os.listdir(apply_dir):
+                if not fname.endswith(".md"):
+                    continue
+                # Accept both old style "{item}-{N}-*.md" and new "{NNN}-*.md"
+                # but only the new style contributes to global seq.
+                m = re.match(r"^(\d{3})-", fname)
+                if m:
+                    try:
+                        max_seen = max(max_seen, int(m.group(1)))
+                    except ValueError:
+                        continue
+        _SEQ_COUNTERS[change] = max_seen
+    _SEQ_COUNTERS[change] += 1
+    return _SEQ_COUNTERS[change]
+
+
+def _format_seq(seq):
+    """Zero-pad sequence number to 3 digits for filename consistency."""
+    return f"{int(seq):03d}"
+
+
+def _write_manifest(change, entry):
+    """Append one record to 2-build/manifest.yaml (best-effort audit log).
+
+    `entry` is a dict with keys: seq, file, item, sub, kind, cycle (|None),
+    agent, role (dispatch | report). Failures are non-fatal; the manifest is
+    a convenience for human review, not a critical-state file.
+    """
+    try:
+        apply_dir = get_apply_dir(change)
+        os.makedirs(apply_dir, exist_ok=True)
+        manifest_path = os.path.join(apply_dir, "manifest.yaml")
+        with open(manifest_path, "a", encoding="utf-8") as f:
+            f.write(f"- seq: {entry.get('seq')}\n")
+            f.write(f"  file: {entry.get('file')}\n")
+            f.write(f"  item: {entry.get('item')}\n")
+            f.write(f"  sub: {entry.get('sub')}\n")
+            f.write(f"  kind: {entry.get('kind')}\n")
+            cycle = entry.get("cycle")
+            f.write(f"  cycle: {cycle if cycle is not None else 'null'}\n")
+            f.write(f"  role: {entry.get('role')}\n")
+            f.write(f"  agent: {entry.get('agent')}\n")
+            f.write(f"  timestamp: {datetime.now().isoformat()}\n")
+    except Exception as e:
+        # Best-effort; do not fail the dispatch because of a manifest write.
+        print(f"[warn] manifest write failed for {change}: {e}", file=sys.stderr)
+
+
+def _dispatch_file_name(change, item, sub, cycle=None):
+    """Build the dispatch instruction file name: {seq}-{item}-{sub}-dispatch[-{cycle}].md.
+
+    `seq` is allocated at call time (global counter). The full path is
+    returned; the file is NOT yet written (caller decides content).
+    """
+    seq = _allocate_seq(change)
+    name = f"{_format_seq(seq)}-{item}-{sub}-dispatch"
+    if cycle is not None:
+        name += f"-{int(cycle)}"
+    name += ".md"
+    return seq, os.path.join(get_apply_dir(change), name)
+
+
+def _write_dispatch_file(change, item, sub, content, cycle=None, agent=None):
+    """Allocate seq, write the dispatch instruction file, append manifest.
+
+    `content` is the fully-rendered + prompt_injection-merged prompt string.
+    Returns (seq, absolute_path).
+    """
+    seq, path = _dispatch_file_name(change, item, sub, cycle=cycle)
+    apply_dir = get_apply_dir(change)
+    os.makedirs(apply_dir, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    _write_manifest(change, {
+        "seq": _format_seq(seq),
+        "file": os.path.basename(path),
+        "item": item,
+        "sub": sub,
+        "kind": "dispatch",
+        "cycle": int(cycle) if cycle is not None else None,
+        "role": "dispatch",
+        "agent": agent or f"pg-build/{sub}",
+    })
+    return seq, path
+
+
+def _write_dispatch_file_with_seq(change, item, sub, content, seq, cycle=None, agent=None):
+    """Write dispatch file with a pre-allocated seq (caller manages counter).
+
+    Used by dispatch functions that need to inject `dispatch_seq` /
+    `report_seq` into the context BEFORE rendering the prompt template.
+    Returns the absolute path.
+    """
+    name = f"{_format_seq(seq)}-{item}-{sub}-dispatch"
+    if cycle is not None:
+        name += f"-{int(cycle)}"
+    name += ".md"
+    path = os.path.join(get_apply_dir(change), name)
+    apply_dir = get_apply_dir(change)
+    os.makedirs(apply_dir, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    _write_manifest(change, {
+        "seq": _format_seq(seq),
+        "file": os.path.basename(path),
+        "item": item,
+        "sub": sub,
+        "kind": "dispatch",
+        "cycle": int(cycle) if cycle is not None else None,
+        "role": "dispatch",
+        "agent": agent or f"pg-build/{sub}",
+    })
+    return path
+
+
+def _merge_prompt_injection(content, context):
+    """Apply `apply_change_rules` prepend/append fragments to rendered prompt.
+
+    Replaces the orchestrator's old in-line merge. The runner now does this
+    before writing the dispatch file, so the orchestrator never sees the
+    `prompt_injection` field at all.
+    """
+    pi = context.get("prompt_injection") or {}
+    prepend = pi.get("prepend") or ""
+    append = pi.get("append") or ""
+    if prepend:
+        content = prepend + "\n\n" + content
+    if append:
+        content = content + "\n\n" + append
+    return content
+
+
 def _compute_simple_timeout(commands_normalized):
     """next_call_timeout_seconds = sum(cmd.timeout_seconds) + N*30 余量.
 
@@ -2634,7 +2850,9 @@ def _build_simple_context(config, change, item_id):
         "track_timeout": track_default_timeout,
         "track_on_failure": track_on_failure,
         "commands_normalized": commands_normalized,
-        "next_report_n": _infer_next_report_n(change, item_id),
+        # Report seq is set by _build_simple_dispatch via _allocate_seq (global,
+        # not per-track). Kept unset here so we can detect overrides if needed.
+        "report_seq": None,
         # ---- stage (optional; only when simple track is bound to an env) ----
         "stage": {},
     }
@@ -2654,7 +2872,7 @@ def _build_simple_dispatch(config, change, item_id):
     """Build the dispatch action for a simple track.
 
     Returns a dict with the same shape as dispatch_action (action=dispatch,
-    agent=pg-build/simple, prompt_final_no_modify, prompt_injection,
+    agent=pg-build/simple, dispatch_file, dispatch_seq, report_seq,
     next_call_timeout_seconds) so the LLM orchestrator can treat it
     uniformly with the TDVG dispatch path.
     """
@@ -2666,21 +2884,32 @@ def _build_simple_dispatch(config, change, item_id):
             "reason": f"Simple track {item_id} 缺少 commands 配置",
         }
 
+    # Honor apply_change_rules targeting simple agent (previously hardcoded empty).
+    _enrich_context_with_prompt_injection(ctx, config, item_id, "simple")
+
+    # Pre-allocate dispatch + report seq so the rendered prompt can include
+    # them in the report filename (e.g. `cat > 2-build/{report_seq}-{item}-...`).
+    seq = _allocate_seq(change)
+    dispatch_seq = _format_seq(seq)
+    report_seq = _format_seq(seq + 1)
+    ctx["dispatch_seq"] = dispatch_seq
+    ctx["report_seq"] = report_seq
+
     template_str = _build_prompt_template(item_id, "simple")
     rendered = _render_prompt_template(template_str, ctx)
+    content = _merge_prompt_injection(rendered, ctx)
+    dispatch_path = _write_dispatch_file_with_seq(
+        change, item_id, "simple", content, seq=seq, cycle=None, agent=SIMPLE_AGENT,
+    )
     return {
         "action": "dispatch",
         "agent": SIMPLE_AGENT,
         "item": item_id,
         "sub": "simple",
         "attempt": 1,
-        "prompt_final_no_modify": rendered,
-        "prompt_injection": {
-            "target_agent": SIMPLE_AGENT,
-            "prepend": "",
-            "append": "",
-            "rules_applied": [],
-        },
+        "dispatch_file": dispatch_path,
+        "dispatch_seq": dispatch_seq,
+        "report_seq": report_seq,
         "next_call_timeout_seconds": _compute_simple_timeout(
             ctx["commands_normalized"]),
     }
@@ -2862,6 +3091,7 @@ def _resume_waiting(config, change, state, cur, init_commit=None):
         return dispatch_fix_action(item_id, cur.get("fix_cycles", 1), ctx)
 
     ctx = filter_track_context(config, item_id, sub, change=change)
+    ctx["_change"] = change
     if has_rollback:
         rb = pg_context_chain.rollback_get(change, item_id)
         _enrich_context_with_rollback(ctx, rb)
@@ -3132,13 +3362,27 @@ def _enter_final_gate(config, change, state):
     save_state(state)
     # Build final-gate context (paths to proposal/tasks/designs/reports).
     fg_ctx = _build_final_gate_context(change)
+    # Pre-allocate seqs before rendering.
+    seq = _allocate_seq(change)
+    dispatch_seq = _format_seq(seq)
+    report_seq = _format_seq(seq + 1)
+    fg_ctx["dispatch_seq"] = dispatch_seq
+    fg_ctx["report_seq"] = report_seq
     template_str = _build_prompt_template("final-gate", "gate")
     rendered = _render_prompt_template(template_str, fg_ctx)
+    content = _merge_prompt_injection(rendered, fg_ctx)
+    # final-gate is special: there is no `sub` field, but we use "gate" in
+    # the dispatch file name to keep the naming rule consistent.
+    dispatch_path = _write_dispatch_file_with_seq(
+        change, "final-gate", "gate", content, seq=seq, cycle=None, agent=FINAL_GATE_AGENT,
+    )
     return {
         "action": "dispatch_final_gate",
         "agent": FINAL_GATE_AGENT,
         "item": "final-gate",
-        "prompt_final_no_modify": rendered,
+        "dispatch_file": dispatch_path,
+        "dispatch_seq": dispatch_seq,
+        "report_seq": report_seq,
     }
 
 
@@ -3182,6 +3426,7 @@ def cmd_record(change, status, report_path="", summary="", outputs="", issues=""
             save_state(state)
 
             ctx = filter_track_context(config, item_id, "verify", change=change)
+            ctx["_change"] = change
             _enrich_context_with_tasks(ctx, change, item_id, "verify")
             return _inject_commit(
                 dispatch_action(
@@ -3192,7 +3437,12 @@ def cmd_record(change, status, report_path="", summary="", outputs="", issues=""
             )
 
         # Normal sub-agent completed
-        pipeline_mark(change, item_id, sub)
+        # Simple tracks have no :sub in tasks.md heading (sec["sub"]=None),
+        # so mark without sub to match all sections for the item.
+        if sub == "simple":
+            pipeline_mark(change, item_id)
+        else:
+            pipeline_mark(change, item_id, sub)
         pg_context_chain.sub_end(change, item_id, sub, "COMPLETED", summary, outputs, issues)
 
         if sub in ("test", "dev"):
@@ -3425,6 +3675,7 @@ def _advance_to_next_sub(config, change, state, item_id, current_sub):
     save_state(state)
 
     ctx = filter_track_context(config, item_id, next_sub, change=change)
+    ctx["_change"] = change
     _enrich_context_with_tasks(ctx, change, item_id, next_sub)
     return dispatch_action(
         agent=SUB_AGENTS[next_sub],
@@ -3449,6 +3700,7 @@ def _advance_from_verify(config, change, state, item_id, report_path):
     save_state(state)
 
     ctx = filter_track_context(config, item_id, "gate", change=change)
+    ctx["_change"] = change
     if report_path:
         ctx["report_path"] = report_path
     _enrich_context_with_tasks(ctx, change, item_id, "gate")

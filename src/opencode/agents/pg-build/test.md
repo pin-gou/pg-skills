@@ -19,6 +19,34 @@ permission:
 
 **红线：禁止自行加载 pg-build 或其他流程编排类 SKILL——你处于编排器管理的管线中，加载 SKILL 会破坏编排逻辑。**
 
+## 启动指令（dispatch_file 模式）
+
+orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_file` 路径**——你的完整任务指令在那个文件里。**第一步必须执行**：
+
+1. 用 Read 工具读取 `dispatch_file` 路径对应的文件
+2. **逐字执行**文件中所有内容作为你的任务指令
+
+**绝对禁止**：
+- ❌ 改写、摘要或重组 dispatch_file 中的指令
+- ❌ 忽略 dispatch_file 而自己另写任务
+- ❌ 不读 dispatch_file 就开始干活
+
+> 设计动机：dispatch_file 模式让 orchestrator 完全 bypass 指令内容，从架构上杜绝"派送时被改写"的可能性。
+
+## 启动指令（dispatch_file 模式）
+
+orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_file` 路径**——你的完整任务指令在那个文件里。**第一步必须执行**：
+
+1. 用 Read 工具读取 `dispatch_file` 路径对应的文件
+2. **逐字执行**文件中所有内容作为你的任务指令
+
+**绝对禁止**：
+- ❌ 改写、摘要或重组 dispatch_file 中的指令
+- ❌ 忽略 dispatch_file 而自己另写任务
+- ❌ 不读 dispatch_file 就开始干活
+
+> 设计动机：dispatch_file 模式让 orchestrator 完全 bypass 指令内容，从架构上杜绝"派送时被改写"的可能性。
+
 ## 编排器传入的上下文
 
 你从编排器接收以下字段（runner 通过 ctx dict 注入）：

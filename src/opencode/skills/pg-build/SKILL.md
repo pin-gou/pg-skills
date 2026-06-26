@@ -161,9 +161,9 @@ while true; do
   CALL_TIMEOUT=$(echo "$ACTION_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('next_call_timeout_seconds', $CALL_TIMEOUT))")
   ACTION=$(echo "$ACTION_JSON" | python3 -c "import json,sys; print(json.load(sys.stdin).get('action', ''))")
   case $ACTION in
-    "dispatch")         → prompt = action.prompt_final_no_modify + pi.prepend/append → 派送 sub-agent → record（见「派送 sub-agent」节）
-    "dispatch_fix")     → 同上（prompt_final_no_modify 已包含 FIX ISSUE REQUEST 块）
-    "dispatch_final_gate") → 同上（prompt_final_no_modify 已包含 final-gate 审计上下文）
+    "dispatch")         → 传 dispatch_file 路径给 sub-agent（见「派送 sub-agent」节）→ record
+    "dispatch_fix")     → 同上（runner 已把 FIX ISSUE REQUEST 块写进 dispatch_file）
+    "dispatch_final_gate") → 同上（runner 已把 final-gate 审计上下文写进 dispatch_file）
     "phase_result")
       缓存 ACTION.environment 信息（name / config / instances）
       if $ACTION.terminate == true:
@@ -369,39 +369,60 @@ RUNNER="python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py"
 
 ## 派送 sub-agent
 
-### 唯一规则：prompt 字段名已自带"勿改"语义
+### 核心机制：runner 写文件，sub-agent 自己读
 
-`next` 返回的 **`prompt_final_no_modify`** 字段包含了 sub-agent 所需的全部内容：Track 配置 / Module 配置 / Stage 配置 / 实例拓扑 / Hooks 调用约定（含 timeout_seconds）/ 任务清单 / 模块路径约束 / 返回格式。
+`next` 返回的 **`dispatch_file`** 字段是 sub-agent 完整任务指令的**文件路径**——runner 在写文件前已完成：
 
-**字段名已表达"勿修改"**——`prompt_final_no_modify` 即"最终的、不得修改的 prompt"。orchestrator 必须**逐字符原样**传递给 Task tool，**禁止**摘要、改写、重组、压缩、重新格式化。
+1. Jinja 模板渲染（`{{context.*}}` 替换）
+2. `apply_change_rules` 的 prepend/append 合并（由 runner 内部 `_merge_prompt_injection` 完成）
+3. 全局 seq 编号分配与文件落盘
+4. `manifest.yaml` 追加
 
-> 字段名命名动机：原名 `prompt_template` 容易被 LLM 误读为"待加工模板"（来自训练数据中 prompt template 的常见用法），故改为 `prompt_final_no_modify` 在源头消除误解。
+**orchestrator 唯一要做的事**：把 `dispatch_file` 路径告知 sub-agent（用 Task tool 派送），让 sub-agent 自己读文件。
 
-### 唯一允许的处理：按 prompt_injection 规则首尾追加
+**绝对禁止**：
+- ❌ 修改 runner 返回的 `dispatch_file` 路径
+- ❌ 试图自己重新组织 prompt（runner 已写好）
+- ❌ 读 dispatch_file 内容后改写再传给 sub-agent
+- ❌ 直接复制 dispatch_file 内容作为 Task tool 的 prompt
 
-runner 可能附带 `prompt_injection` 字段，含 `prepend` / `append`（可能为空字符串）。这是**唯一允许**的对 prompt 的处理——**只追加，不修改**：
+> 设计动机：LLM orchestrator 在派送 sub-agent 时有强烈"重写/总结"本能（哪怕字段名叫 `prompt_final_no_modify` 也会被改）。把指令完全 bypass 到文件系统是**架构层面**的根治——orchestrator 根本不接触指令内容，也就不可能改。
+
+### 派送代码示例
 
 ```python
-prompt = action["prompt_final_no_modify"]
-pi = action.get("prompt_injection", {})
-if pi.get("prepend"):
-    prompt = pi["prepend"] + "\n\n" + prompt
-if pi.get("append"):
-    prompt = prompt + "\n\n" + pi["append"]
-# 此时 prompt = (prepend + "\n\n") + prompt_final_no_modify + ("\n\n" + append)
+# 从 dispatch action 取出文件路径
+dispatch_file = action["dispatch_file"]
+
+# 把路径作为 Task tool 的 prompt 传入——不传任何改写过的内容
+task_prompt = (
+    f"你的完整任务指令已由 runner 写入文件 {dispatch_file}。\n"
+    f"**第一步**：用 Read 工具读取该文件，逐字执行其中所有内容。\n"
+    f"**禁止**：改写、摘要或重组文件中的指令。"
+)
+
+# 派送 sub-agent
+Task(
+    subagent_type=action["agent"],  # e.g. "pg-build/dev"
+    description=f"Execute {action['item']}:{action['sub']}",
+    prompt=task_prompt,
+)
 ```
+
+### 关键字段
 
 | 字段 | 说明 |
 |------|------|
-| `prepend` | apply_change_rules 生成的头部片段；无规则时为空字符串 |
-| `append` | 尾部片段；无规则时为空字符串 |
-| `rules_applied` | 实际生效的 rule id 列表（仅调试用） |
+| `dispatch_file` | 完整任务指令文件路径（含已合并的 `apply_change_rules` 内容），由 sub-agent 读取 |
+| `dispatch_seq` | 本次派遣的全局 seq 编号（3 位 0 填充，如 `005`） |
+| `report_seq` | 预分配给 sub-agent 报告的 seq 编号（`dispatch_seq + 1`），sub-agent 写报告时**必须**使用此值 |
+| `next_call_timeout_seconds` | bash 超时值（仅简单 track 返回） |
 
 ### 步骤 2：dispatch 并 record
 
 | 场景 | 动作 |
 |------|------|
-| dispatch / dispatch_fix / dispatch_final_gate | `prompt = action["prompt_final_no_modify"]` → 叠加上 `prompt_injection.prepend/append`（如果有）→ 用 Task tool 派送。**不要修改 prompt 内容**。完成后 `$RUNNER record ...` |
+| dispatch / dispatch_fix / dispatch_final_gate | 读 `action["dispatch_file"]` → 写一句"读文件 {dispatch_file} 逐字执行"作为 Task tool 的 prompt → 派送。**不要读 dispatch_file 内容、不要改写**。完成后 `$RUNNER record ...` |
 | done | 输出摘要报告 → 加载 pg-verify-and-merge SKILL 继续执行（自动合并验证） |
 | workflow_failed | 输出失败报告 → break |
 | phase_result | 缓存环境信息；如 `terminate==true` 则输出失败报告 → break；否则 `$RUNNER record completed` |
@@ -424,27 +445,30 @@ if pi.get("append"):
 
 ## 模板语法参考（runner 端 _render_prompt_template 支持）
 
-> 以下语法仅供开发调试参考。orchestrator 不需要手动使用；runner 已在 `prompt_final_no_modify` 中渲染好。
+> 以下语法仅供开发调试参考。orchestrator 不需要手动使用；runner 在写 dispatch_file 前已完成渲染与 `apply_change_rules` 合并。
 
 - `{{var}}` / `{{context.field.sub}}` — 取值；`context.` 前缀会回退到 ctx 顶层 key
 - `{{var \| filter(arg=N)}}` — 过滤器（`tojson(indent=N)` / `toyaml` 支持；新模板默认用 `toyaml` 压缩 prompt 篇幅）
-- `{#if cond}...{/if}` — 条件块（cond 支持 `var in [...]` / `this.X` / 真值）
+- `{#if cond}...{/if}`` — 条件块（cond 支持 `var in [...]` / `this.X` / 真值）
 - `{#each list}...{/each}` — 循环块（循环体内 `this` 绑定当前项）
 - 缺失字段渲染为空字符串（不暴露模板占位符）
 
 runner 端常量 `_PROMPT_TEMPLATE_BASE` + 6 个 `_PROMPT_BLOCK_*` 常量定义了各 sub 类型的具体模板。SKILL.md 展示的模板块（如 `## 任务：{{context.id}} - {{context.label}}`）是这些常量的文档副本，实际渲染以 runner 端代码为准。
 
-### Agent 报告类型对照
+### Agent 报告类型对照（统一时序编号）
+
+所有 sub-agent 产出的报告文件遵循**全局递增 3 位 seq 编号**（`001`, `002`, ...），与 `dispatch_file` 共享同一 seq 空间。`{seq}` 字段由 runner 预分配（`action["report_seq"]`），sub-agent 写报告时**必须**使用。
 
 | sub | 必读报告 | 报告落盘路径 | 必填字段 / 必跑流程补充 |
 |-----|---------|-------------|----------------------|
 | `test` | tasks.md 中 test 章节 | 无（仅更新 tasks.md 复选框） | TDD 红 Phase：只写测试代码，不创建或修改生产代码。预期首次编译失败。 |
-| `dev` | design.md / tasks.md dev 章节 | 修改源码 + 更新 tasks.md 复选框 | 调用 `pg-invoke-hook.py invoke-hook` 触发 start/stop/logs/tail（runner 已注入 CLI 示例到 prompt_final_no_modify）；改完跑 `stage.test_commands` 验证 |
-| `verify` | tasks.md verify 章节 | `2-build/{track.id}-(N+1)-verify.md` | 按需 `pg-invoke-hook.py invoke-hook` 启停服务；按 tasks.md V-* 清单逐项 curl/检查 |
-| `gate` | `2-build/{track.id}-{N}-verify.md` | `2-build/{track.id}-(N+1)-gate-assessment.md` | **只读不写**源码；`cat >` 自行写盘 |
-| `fix-gate` | `2-build/{track.id}-{N}-gate-assessment.md`（G-N 章节） | `2-build/{track.id}-(N+1)-gate-fix.md` | 仅用 `pg-invoke-hook.py invoke-hook --action start\|stop` |
-| `fix` | `2-build/{track.id}-{N}-verify.md`（ESCALATE Issue 详情） | `2-build/{track.id}-(N+1)-verify-fix.md` | **继承 base dispatch 全集**（见「fix agent 的 prompt 构建」章节，必填 9 项） |
-| `final-gate` | 各 track gate assessment + design.md（🆕 标记） + context-chain.md | `2-build/final-gate-assessment.md` | 不嵌入序号；`cat >` 落盘 |
+| `dev` | design.md / tasks.md dev 章节 | 修改源码 + 更新 tasks.md 复选框 | 调用 `pg-invoke-hook.py invoke-hook` 触发 start/stop/logs/tail；改完跑 `stage.test_commands` 验证 |
+| `verify` | tasks.md verify 章节 | `2-build/{report_seq}-{item}-verify.md` | 按需 `pg-invoke-hook.py invoke-hook` 启停服务；按 tasks.md V-* 清单逐项 curl/检查 |
+| `gate` | 上一轮 verify 报告 | `2-build/{report_seq}-{item}-gate-verify.md` | **只读不写**源码；`cat >` 自行写盘 |
+| `fix-gate` | 最近 gate report（G-N 章节） | `2-build/{report_seq}-{item}-fix-gate-verify-{cycle}.md` | 仅用 `pg-invoke-hook.py invoke-hook --action start\|stop` |
+| `fix` | verify 报告（ESCALATE Issue 详情） | `2-build/{report_seq}-{item}-fix-verify-{cycle}.md` | **继承 base dispatch 全集**（见「fix agent 的 prompt 构建」章节，必填 9 项） |
+| `simple` | 自身执行 | `2-build/{report_seq}-{item}-simple-verify.md` | 简单 track 不写 `tasks.md` 复选框 |
+| `final-gate` | 各 track gate assessment + design.md（🆕 标记） + context-chain.md | `2-build/{report_seq}-final-gate-gate-verify.md` | 独立文件（item=final-gate, kind=gate-verify） |
 
 **所有 agent 类型**：如果 `context.rollback_context` 存在，在 prompt 末尾追加：
 
