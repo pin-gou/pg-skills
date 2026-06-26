@@ -117,7 +117,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-regression --suite
 
 ```bash
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --change regression-<suite> --env <env-name> --action prepare_env
+  --change regression-<suite> --env <env-name> --action prepare_env --skill pg-regression
 ```
 
 `timeout_seconds` 由 `pg-invoke-hook.py` 从 `environments.<env>.prepare_env.timeout_seconds` 自动反查并写入 spec, LLM 不传。`--change` 用于 spec.change + log_path 路由（统一使用 `regression-<suite>` 命名, 便于 `ls .pg/changes/regression-*/2-build/<env>/logs/` 定位历史日志）。
@@ -153,7 +153,8 @@ for i in yaml.safe_load(open('.pg/project.yaml'))['environments']['${ENV}']['rol
     print(i['name'])
 "); do
     python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-      --change ${CHANGE} --env ${ENV} --role ${ROLE} --instance ${INSTANCE} --action start
+      --change ${CHANGE} --env ${ENV} --role ${ROLE} --instance ${INSTANCE} --action start \
+      --skill pg-regression
     # 任一 instance 失败 → exit 1, 后续 role/instance 不再继续
   done
 done
@@ -199,7 +200,7 @@ fi
 
 ```bash
 python3 .pg/skills/src/runtime/lib/pg-run-hook.py <<EOF
-{"command": $(python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test <module> <test_key>), "suite": "<suite>", "env": "<env>", "module": "<module>", "log_path": "temp/<suite>-<test_key>-test-output.log"}
+{"command": $(python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test <module> <test_key>), "suite": "<suite>", "skill": "pg-regression", "env": "<env>", "module": "<module>", "log_path": "temp/<suite>-<test_key>-test-output.log"}
 EOF
 ```
 
@@ -209,7 +210,7 @@ EOF
 
 ```bash
 python3 .pg/skills/src/runtime/lib/pg-run-hook.py <<EOF
-{"command": $(python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test frontend e2e), "suite": "frontend", "env": "dev-local", "module": "frontend", "log_path": "temp/frontend-e2e-test-output.log"}
+{"command": $(python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test frontend e2e), "suite": "frontend", "skill": "pg-regression", "env": "dev-local", "module": "frontend", "log_path": "temp/frontend-e2e-test-output.log"}
 EOF
 ```
 
@@ -217,7 +218,7 @@ EOF
 
 ```bash
 python3 .pg/skills/src/runtime/lib/pg-run-hook.py <<EOF
-{"command": $(python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test backend unit), "suite": "backend", "env": "dev-local", "module": "backend", "log_path": "temp/backend-unit-test-output.log"}
+{"command": $(python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test backend unit), "suite": "backend", "skill": "pg-regression", "env": "dev-local", "module": "backend", "log_path": "temp/backend-unit-test-output.log"}
 EOF
 ```
 
@@ -225,10 +226,10 @@ EOF
 
 ```bash
 python3 .pg/skills/src/runtime/lib/pg-run-hook.py <<EOF
-{"command": $(python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test agent unit), "suite": "agent", "env": "dev-3tier", "module": "agent", "log_path": "temp/agent-unit-test-output.log"}
+{"command": $(python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test agent unit), "suite": "agent", "skill": "pg-regression", "env": "dev-3tier", "module": "agent", "log_path": "temp/agent-unit-test-output.log"}
 EOF
 python3 .pg/skills/src/runtime/lib/pg-run-hook.py <<EOF
-{"command": $(python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test agent integration), "suite": "agent", "env": "dev-3tier", "module": "agent", "log_path": "temp/agent-integration-test-output.log"}
+{"command": $(python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test agent integration), "suite": "agent", "skill": "pg-regression", "env": "dev-3tier", "module": "agent", "log_path": "temp/agent-integration-test-output.log"}
 EOF
 ```
 

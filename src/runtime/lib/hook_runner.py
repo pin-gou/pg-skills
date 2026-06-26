@@ -205,6 +205,7 @@ class HookRunner:
             'PG_MODULE': target,
             'PG_HOOK_TYPE': hook_type,
             'PG_ENV': env or '',
+            'PG_SKILL_NAME': 'pg-skills',
         }
 
         # 准备 CLI flags

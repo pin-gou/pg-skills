@@ -820,12 +820,13 @@ runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-ho
 ```bash
 # 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
+  --skill pg-build
 
 # 看 100 行日志 (runner 把 --tail-lines 100 追加到 hook args 末尾)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
   --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
-  --tail-lines 100
+  --tail-lines 100 --skill pg-build
 ```
 
 **重要不变量**：
@@ -866,12 +867,13 @@ runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-ho
 ```bash
 # 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
+  --skill pg-build
 
 # 看 100 行日志
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
   --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
-  --tail-lines 100
+  --tail-lines 100 --skill pg-build
 ```
 
 **重要不变量**：
@@ -930,12 +932,13 @@ runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-ho
 ```bash
 # 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
+  --skill pg-build
 
 # 看 100 行日志
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
   --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
-  --tail-lines 100
+  --tail-lines 100 --skill pg-build
 ```
 
 **重要不变量**：
@@ -1030,12 +1033,13 @@ LLM 自行判断是否需要启动服务；runner 不替你启停。
 ```bash
 # 启动 backend (runner 自动从 action_metadata 读 timeout_seconds)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
+  --skill pg-build
 
 # 看 100 行日志
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
   --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
-  --tail-lines 100
+  --tail-lines 100 --skill pg-build
 ```
 {/if}
 
@@ -1201,6 +1205,7 @@ def _render_role_action(act_cfg, *, role, instance_name, instance_host,
         "hook_type": act_cfg.get("name", ""),
         "timeout_seconds": timeout,
         "log_path": log_path,
+        "skill": "pg-build",
     }
     cmd = (
         f"python3 {shlex.quote(PG_HOOK_RUNNER)}"
@@ -1361,7 +1366,7 @@ def _build_stage_context(config, item, change=None):
             "invoke-hook "
             "--change <CHANGE> --env <ENV> --role <ROLE> "
             "--instance <INSTANCE> --action <ACTION> "
-            "[--stage <STAGE>] [--tail-lines <N>]"
+            "[--stage <STAGE>] [--tail-lines <N>] [--skill <SKILL>]"
         )
         hooks_payload = {
             "supported_actions": sorted({
@@ -3200,6 +3205,7 @@ def _execute_phase(config, change, state, item_id):
             "hook_type": bare,  # prepare_env or clean_env
             "timeout_seconds": timeout_seconds,
             "log_path": str(_phase_log_path(change, item_id)),
+            "skill": "pg-build",
         }
         cmd = (
             f"python3 {shlex.quote(PG_HOOK_RUNNER)}"

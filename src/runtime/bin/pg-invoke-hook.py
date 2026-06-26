@@ -112,6 +112,7 @@ def build_env_level_hook_spec(
     action: str,
     act_cfg: dict,
     project_root: Path,
+    skill: str = "",
 ) -> dict:
     """Build pg-run-hook.py spec for environment-level hooks (prepare_env / clean_env).
 
@@ -120,6 +121,8 @@ def build_env_level_hook_spec(
     a spec shape that pg-run-hook.py can consume: role/instance_host are
     empty strings; log_path is namespaced under env-level hooks subdir so
     it doesn't collide with role.* action logs.
+
+    skill: optional skill name; injected as PG_SKILL_NAME via pg-run-hook.py.
     """
     rendered_args = []
     for raw in (act_cfg.get("args") or []):
@@ -135,7 +138,7 @@ def build_env_level_hook_spec(
         / f"env.{action}.log"
     )
 
-    return {
+    spec = {
         "cmd": inner_cmd,
         "change": change,
         "stage": stage,
@@ -147,6 +150,9 @@ def build_env_level_hook_spec(
         "timeout_seconds": act_cfg.get("timeout_seconds"),
         "log_path": log_path,
     }
+    if skill:
+        spec["skill"] = skill
+    return spec
 
 
 def build_role_hook_spec(
@@ -160,6 +166,7 @@ def build_role_hook_spec(
     act_cfg: dict,
     tail_lines,
     project_root: Path,
+    skill: str = "",
 ) -> dict:
     """Build pg-run-hook.py spec for per-role actions (start/stop/logs/tail)."""
     rendered_args = []
@@ -184,7 +191,7 @@ def build_role_hook_spec(
         / f"role.{role}.{action}@{instance}.log"
     )
 
-    return {
+    spec = {
         "cmd": inner_cmd,
         "change": change,
         "stage": stage,
@@ -196,6 +203,9 @@ def build_role_hook_spec(
         "timeout_seconds": act_cfg.get("timeout_seconds"),
         "log_path": log_path,
     }
+    if skill:
+        spec["skill"] = skill
+    return spec
 
 
 # ----- 主流程 -----
@@ -265,6 +275,9 @@ def invoke_hook_main(argv=None) -> int:
                         ))
     parser.add_argument("--tail-lines", type=int, default=None,
                         help="(logs/tail only) append --tail-lines N to hook args")
+    parser.add_argument("--skill", default="",
+                        help="skill name (e.g. pg-build, pg-regression); "
+                             "injected as PG_SKILL_NAME via pg-run-hook.py")
 
     # argv layout: caller passes [program_name, "invoke-hook", *flags].
     # For test convenience we accept both [program, "invoke-hook", ...]
@@ -319,6 +332,7 @@ def invoke_hook_main(argv=None) -> int:
             action=args.action,
             act_cfg=env_hook_cfg,
             project_root=project_root,
+            skill=args.skill,
         )
     else:
         # Per-role lifecycle action (start / stop / logs / tail).
@@ -360,6 +374,7 @@ def invoke_hook_main(argv=None) -> int:
             act_cfg=act_cfg,
             tail_lines=args.tail_lines,
             project_root=project_root,
+            skill=args.skill,
         )
 
     pg_hook_runner = (

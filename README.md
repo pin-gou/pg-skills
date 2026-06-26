@@ -282,6 +282,7 @@ fi
 | `PG_ROLE` | role 名 | role action 时 |
 | `PG_INSTANCE_NAME` | instance 名 | role action 时 |
 | `PG_INSTANCE_HOST` | instance host | role action 时 |
+| `PG_SKILL_NAME` | 调用方 skill 名（pg-build/pg-regression/pg-fix-issue） | 全部 |
 
 > ~~`PG_MODULE` / `PG_MODULE_ROOT`~~ 已不再注入——module 维度不经过 hook 协议。
 
