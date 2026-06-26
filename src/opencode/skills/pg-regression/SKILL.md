@@ -85,7 +85,8 @@ regression:
 │       ├── 1-prompt.md          # 发给 fix-prod agent 的提示词
 │       ├── 2-agent.log          # opencode run 的 stdout + stderr
 │       └── 3-result.json        # 修复结果（含 PR 链接）
-└── fix-issue-runner-summary.md                    # 人类可读汇总报告
+├── fix-issue-runner-summary.md                    # 人类可读汇总报告
+└── report.md                                      # 单次运行的人类可读汇总报告
 ```
 
 首次运行自动创建目录。
@@ -506,11 +507,80 @@ python3 .opencode/skills/pg-regression/scripts/pg-regression-summary.py \
   --out "${RUN_DIR}/fix-issue-runner-summary.md"
 ```
 
+#### 3.3a 写 report.md
+
+从 `fix-results.json` 生成单次运行的人类可读报告，落盘到 run 目录：
+
+```bash
+python3 <<'REPORT_EOF'
+import json, sys
+from pathlib import Path
+
+suite = "{suite}"
+RUN_DIR = f".pg/regression/{suite}-..."
+
+fix_file = Path(f"{RUN_DIR}/temp/{suite}-fix-results.json")
+if not fix_file.exists():
+    # fallback: 单 test_key 场景可能按 test_key 命名
+    fix_file = Path(f"{RUN_DIR}/temp/{suite}-phase1-fix-results.json")
+    if fix_file.exists():
+        pass
+    else:
+        print("⚠️ fix-results.json not found, skip report.md")
+        sys.exit(0)
+
+data = json.loads(fix_file.read_text())
+agents = data.get("agents", [])
+
+total_fixed = sum(a["stats"]["fixed"] for a in agents)
+total_unfixable = sum(a["stats"]["unfixable"] for a in agents)
+status_icon = "✅" if total_unfixable == 0 else "⚠️"
+
+lines = []
+lines.append("# 回归测试报告\n")
+lines.append(f"| 元数据 | |\n|---|---|\n")
+lines.append(f"| 套件 | {data.get('suiteLabel', suite)} |\n")
+lines.append(f"| 日期 | {data.get('date', 'unknown')} |\n")
+lines.append(f"| 状态 | {status_icon} {'全部通过' if data['testRun']['failed'] == 0 else '部分修复'} |\n\n")
+
+lines.append("## 测试结果\n\n")
+lines.append(f"- **总计**: {data['testRun']['total']}\n")
+lines.append(f"- **通过**: {data['testRun']['passed']}\n")
+lines.append(f"- **失败（含已修复）**: {data['testRun']['failed']}\n")
+lines.append(f"- **跳过**: {data['testRun']['skipped']}\n\n")
+
+if agents:
+    lines.append("## 测试修复\n\n")
+    lines.append("| 测试目标 | 结果 | 已修复 | 无法修复 |\n")
+    lines.append("|----------|------|--------|----------|\n")
+    for a in agents:
+        icon = "✅" if a["overview"]["failed"] == 0 else "❌"
+        lines.append(f"| {a['target']} | {icon} | {a['stats']['fixed']} | {a['stats']['unfixable']} |\n")
+    lines.append("\n")
+
+unfixable = [uf for a in agents for uf in a.get("unfixableIssues", [])]
+if unfixable:
+    lines.append("## 生产代码问题\n\n")
+    lines.append("| # | 标题 | 组件 | 文件 | 根因 |\n")
+    lines.append("|---|------|------|------|------|\n")
+    for i, uf in enumerate(unfixable, 1):
+        lines.append(f"| {i} | {uf.get('title', '')} | {uf.get('component', '')} | {uf.get('file', '')} | {uf.get('rootCause', '')} |\n")
+    lines.append("\n")
+else:
+    lines.append("## 生产代码问题\n\n无\n")
+
+report_path = Path(f"{RUN_DIR}/report.md")
+report_path.write_text("".join(lines), encoding="utf-8")
+print(f"✅ 报告已写入: {report_path}")
+REPORT_EOF
+```
+
 #### 3.4 输出最终状态
 
 ```
 ✅ 问题清单已写入 .pg/regression/<suite>.json
 📋 汇总报告: ${RUN_DIR}/fix-issue-runner-summary.md
+📋 详细报告: ${RUN_DIR}/report.md
 📁 Run 目录: ${RUN_DIR}
 ```
 
