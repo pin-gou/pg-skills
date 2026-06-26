@@ -161,8 +161,17 @@ def process_issue(issue: dict, suite: str) -> dict:
     try:
         _run_git("checkout", DEFAULT_BRANCH)
         _run_git("pull", "--ff-only", "origin", DEFAULT_BRANCH)
-        # Delete existing branch if present (cleanup)
+    except subprocess.CalledProcessError as e:
+        result["status"] = "failed"
+        result["errorMessage"] = f"git checkout/pull failed: {e.stderr.strip()}"
+        print(f"  ❌ {result['errorMessage']}", file=sys.stderr)
+        return result
+    # Delete existing branch if present (non-fatal)
+    try:
         _run_git("branch", "-D", branch, timeout=10)
+    except subprocess.CalledProcessError:
+        pass
+    try:
         _run_git("checkout", "-b", branch)
     except subprocess.CalledProcessError as e:
         result["status"] = "failed"
