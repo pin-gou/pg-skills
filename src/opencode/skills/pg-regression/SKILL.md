@@ -175,7 +175,10 @@ mkdir -p temp && rm -f temp/{suite}-test-output.log temp/{suite}-phase1-failures
 pg-fix-regression-runner.py 正在运行时拒绝执行，避免竞争：
 
 ```bash
-RUNNER_PID=$(pgrep -f pg-fix-regression-runner.py 2>/dev/null || true)
+RUNNER_PID=$(for pid in $(pgrep -f "pg-fix-regression-runner" 2>/dev/null); do
+  exe=$(readlink "/proc/$pid/exe" 2>/dev/null) || continue
+  case "$exe" in */python3*|*/python*) echo "$pid";; esac
+done)
 if [ -n "$RUNNER_PID" ]; then
   echo "❌ pg-fix-regression-runner.py (PID=$RUNNER_PID) 正在运行，拒绝启动 pg-regression"
   exit 1
@@ -600,7 +603,7 @@ regression:
 | Maven 增量编译未检测到变化 | Java 源文件未修改 | 手动 `touch` 源文件 |
 | 测试数据库容器未运行 | docker-compose 未启动 | 执行 docker compose up -d |
 | agent suite 跑 dev-3tier 失败 | 本地无 box-1/box-2 | 改用 dev-local 或配置 SSH 免密到测试机 |
-| runner 被 pg-regression 拒绝启动 | runner 进程残留 | `kill $(pgrep -f pg-fix-regression-runner.py)` 后重试 |
+| runner 被 pg-regression 拒绝启动 | runner 进程残留（或 pgrep 误判 pgrep/自身 bash 进程） | `ps aux | grep pg-fix-regression-runner | grep -v grep` 确认；确认后 `kill $(ps aux | grep pg-fix-regression-runner | grep -v grep | awk '{print $2}')` 后重试 |
 | runner 报告"无 suite JSON 文件" | pg-regression 未在 runner 之前执行 | 先跑 pg-regression |
 | runner 创建 PR 失败 | GITEE_TOKEN 失效 | `export GITEE_TOKEN=<新 token>` |
 | Phase 3.2 写出问题清单为空 | `temp/{suite}-fix-results.json` 无 agents/unfixableIssues | 检查 Phase 2 fix-test agent 是否上报生产代码问题 |
