@@ -1,0 +1,1697 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pg-skills Workshop — AI 驱动的迭代式开发闭环</title>
+<style>
+:root {
+  --bg: #f8f9fa;
+  --text: #1a1a2e;
+  --primary: #2563eb;
+  --primary-light: #dbeafe;
+  --secondary: #7c3aed;
+  --accent: #f59e0b;
+  --accent-bg: #fef3c7;
+  --code-bg: #1e293b;
+  --code-text: #e2e8f0;
+  --border: #e2e8f0;
+  --card-bg: #ffffff;
+  --success: #10b981;
+  --danger: #ef4444;
+  --muted: #64748b;
+  --nav-bg: #ffffff;
+  --shadow: 0 1px 3px rgba(0,0,0,0.08);
+}
+
+.dark {
+  --bg: #0f172a;
+  --text: #e2e8f0;
+  --primary: #60a5fa;
+  --primary-light: #1e3a5f;
+  --secondary: #a78bfa;
+  --accent: #fbbf24;
+  --accent-bg: #2a2410;
+  --code-bg: #1e293b;
+  --code-text: #e2e8f0;
+  --border: #334155;
+  --card-bg: #1e293b;
+  --nav-bg: #1e293b;
+  --shadow: 0 1px 3px rgba(0,0,0,0.3);
+  --muted: #94a3b8;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Noto Sans SC", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.7;
+  font-size: 15px;
+}
+
+/* Progress bar */
+#progress-bar {
+  position: fixed; top: 0; left: 0; height: 3px;
+  background: linear-gradient(90deg, var(--primary), var(--secondary));
+  z-index: 1000;
+  transition: width 0.3s ease;
+}
+
+/* Theme toggle */
+#theme-toggle {
+  position: fixed; top: 16px; right: 20px; z-index: 999;
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 8px; padding: 8px 12px; cursor: pointer;
+  font-size: 14px; color: var(--text);
+  box-shadow: var(--shadow);
+}
+
+/* Sidebar nav */
+#sidebar {
+  position: fixed; top: 0; left: 0; bottom: 0; width: 260px;
+  background: var(--nav-bg); border-right: 1px solid var(--border);
+  overflow-y: auto; z-index: 100;
+  padding: 20px 0;
+}
+#sidebar h2 {
+  font-size: 14px; color: var(--primary); padding: 0 16px 12px;
+  border-bottom: 1px solid var(--border); margin-bottom: 8px;
+}
+#sidebar a {
+  display: block; padding: 6px 16px; text-decoration: none;
+  color: var(--muted); font-size: 13px; border-left: 2px solid transparent;
+  transition: all 0.15s;
+}
+#sidebar a:hover, #sidebar a.active {
+  color: var(--text); background: var(--primary-light);
+  border-left-color: var(--primary);
+}
+#sidebar a.sub { padding-left: 28px; font-size: 12px; }
+#sidebar .section-group {
+  display: block; padding: 10px 16px 2px; font-size: 11px;
+  color: var(--muted); font-weight: 600; letter-spacing: 0.5px;
+  border-top: 1px solid var(--border); margin-top: 6px;
+  text-transform: uppercase;
+}
+#sidebar .section-group:first-of-type { border-top: none; margin-top: 0; }
+
+/* Main content */
+#content {
+  margin-left: 260px; padding: 40px 48px 80px; max-width: 960px;
+}
+
+.section { display: none; }
+.section.active { display: block; }
+.section h1 {
+  font-size: 28px; font-weight: 700; margin-bottom: 8px;
+  color: var(--primary);
+}
+.section h2 {
+  font-size: 20px; font-weight: 600; margin: 32px 0 12px;
+  padding-bottom: 6px; border-bottom: 2px solid var(--primary-light);
+}
+.section h3 {
+  font-size: 16px; font-weight: 600; margin: 24px 0 8px;
+  color: var(--secondary);
+}
+.section h4 { font-size: 14px; font-weight: 600; margin: 16px 0 6px; }
+.section p { margin: 8px 0; }
+.section ul, .section ol { margin: 8px 0; padding-left: 24px; }
+.section li { margin: 4px 0; }
+
+/* Cards */
+.card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px; margin: 16px 0;
+  box-shadow: var(--shadow);
+}
+.tip-card { border-left: 4px solid var(--accent); background: var(--accent-bg); }
+.info-card { border-left: 4px solid var(--primary); background: var(--primary-light); }
+.danger-card { border-left: 4px solid var(--danger); background: #fef2f2; }
+.dark .danger-card { background: #2a1010; }
+
+/* Code blocks */
+pre {
+  background: var(--code-bg); color: var(--code-text);
+  padding: 16px 20px; border-radius: 8px; overflow-x: auto;
+  font-size: 13px; line-height: 1.6; margin: 12px 0;
+  position: relative;
+}
+code { font-family: "JetBrains Mono", "Fira Code", monospace; }
+.copy-btn {
+  position: absolute; top: 8px; right: 8px;
+  background: rgba(255,255,255,0.1); border: none; color: #94a3b8;
+  padding: 4px 8px; border-radius: 4px; font-size: 11px; cursor: pointer;
+}
+.copy-btn:hover { background: rgba(255,255,255,0.2); color: #fff; }
+
+/* Tables */
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+th, td { padding: 10px 12px; text-align: left; border: 1px solid var(--border); }
+th { background: var(--primary-light); font-weight: 600; }
+tr:nth-child(even) { background: rgba(0,0,0,0.02); }
+.dark tr:nth-child(even) { background: rgba(255,255,255,0.03); }
+
+/* Collapsible */
+.collapse-toggle {
+  cursor: pointer; user-select: none;
+  display: inline-flex; align-items: center; gap: 6px;
+}
+.collapse-toggle::before { content: "▶"; font-size: 10px; transition: transform 0.2s; }
+.collapse-toggle.open::before { transform: rotate(90deg); }
+.collapse-body { overflow: hidden; max-height: 0; transition: max-height 0.3s ease; }
+.collapse-body.open { max-height: 2000px; }
+
+/* Checkbox checklist */
+.checklist { list-style: none; padding-left: 0 !important; }
+.checklist li { margin: 6px 0; display: flex; align-items: flex-start; gap: 8px; }
+.checklist input[type="checkbox"] { margin-top: 5px; flex-shrink: 0; }
+
+/* SVG container */
+.svg-container {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 20px; margin: 16px 0;
+  overflow-x: auto; text-align: center;
+}
+.svg-container svg { max-width: 100%; height: auto; }
+
+/* Tags */
+.tag {
+  display: inline-block; padding: 2px 8px; border-radius: 4px;
+  font-size: 11px; font-weight: 600; margin: 2px;
+}
+.tag-blue { background: #dbeafe; color: #1d4ed8; }
+.tag-green { background: #d1fae5; color: #065f46; }
+.tag-purple { background: #ede9fe; color: #6d28d9; }
+.tag-red { background: #fee2e2; color: #b91c1c; }
+.tag-yellow { background: #fef3c7; color: #92400e; }
+.dark .tag-blue { background: #1e3a5f; color: #60a5fa; }
+.dark .tag-green { background: #064e3b; color: #34d399; }
+.dark .tag-purple { background: #2e1065; color: #a78bfa; }
+.dark .tag-red { background: #450a0a; color: #f87171; }
+.dark .tag-yellow { background: #2a2410; color: #fbbf24; }
+
+.keyword { display: inline-block; font-weight: 600; color: var(--primary); }
+
+/* Scrollbar */
+#sidebar::-webkit-scrollbar { width: 4px; }
+#sidebar::-webkit-scrollbar-thumb { background: var(--border); border-radius: 2px; }
+
+/* Responsive */
+@media (max-width: 768px) {
+  #sidebar { display: none; }
+  #content { margin-left: 0; padding: 24px 16px; }
+}
+
+/* Print */
+@media print {
+  #sidebar, #progress-bar, #theme-toggle, .copy-btn { display: none !important; }
+  #content { margin-left: 0; }
+  .section { display: block !important; page-break-inside: avoid; }
+}
+
+/* Animated highlight */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(20px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.section.active { animation: fadeInUp 0.4s ease-out; }
+
+/* Comparison boxes */
+.compare-row { display: flex; gap: 16px; margin: 12px 0; flex-wrap: wrap; }
+.compare-box {
+  flex: 1; min-width: 200px; border-radius: 8px; padding: 16px;
+}
+.compare-box-old { background: #fef2f2; border: 1px solid #fecaca; }
+.compare-box-new { background: #d1fae5; border: 1px solid #a7f3d0; }
+.dark .compare-box-old { background: #2a1010; border-color: #450a0a; }
+.dark .compare-box-new { background: #064e3b; border-color: #065f46; }
+
+.step-number {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 50%;
+  background: var(--primary); color: #fff; font-size: 12px; font-weight: 700;
+  flex-shrink: 0;
+}
+
+.flex-row { display: flex; align-items: flex-start; gap: 10px; }
+</style>
+</head>
+<body>
+
+<div id="progress-bar"></div>
+<button id="theme-toggle">🌙 暗色</button>
+
+<nav id="sidebar">
+  <h2>📘 pg-skills Workshop</h2>
+
+  <span class="section-group">基础概念</span>
+  <a href="#sec1" class="active">1. 为什么需要</a>
+  <a href="#sec2">2. 架构全景</a>
+
+  <span class="section-group">新项目接入</span>
+  <a href="#sec3-onboard">3.1 4 步接入</a>
+  <a href="#sec3-yaml">3.2 project.yaml</a>
+  <a href="#sec3-hook">3.3 Hook 协议</a>
+  <a href="#sec3-demo">3.4 执行演示</a>
+  <a href="#sec3-checklist">3.5 Checklist</a>
+
+  <span class="section-group">日常使用</span>
+  <a href="#sec4-overview">4.1 概述</a>
+  <a href="#sec4-define">4.2 定界</a>
+  <a href="#sec4-propose">4.3 提案</a>
+  <a href="#sec4-build">4.4 构建</a>
+  <a href="#sec5">5. Bug 修复</a>
+  <a href="#sec6">6. 回归测试</a>
+  <a href="#sec7">7. 动手实操</a>
+  <a href="#sec8">8. 常见问题</a>
+</nav>
+
+<div id="content">
+
+<!-- ============================================================ -->
+<div id="sec1" class="section active">
+<h1>1. 为什么需要 pg-skills</h1>
+<p class="muted" style="font-size:14px">AI 辅助开发的标准化持续迭代工作流</p>
+
+<h2>1.1 常见痛点</h2>
+<div class="compare-row">
+  <div class="compare-box compare-box-old">
+    <h4 style="color:var(--danger)">✕ 传统 AI 编码</h4>
+    <ul>
+      <li>需求模糊 → AI 猜着做 → 反复返工</li>
+      <li>范围蔓延 → 做了不该做的事 → 破坏现有功能</li>
+      <li>质量不可控 → "看起来对但测试挂了"</li>
+      <li>环境差异 → "在我机器上能跑"</li>
+    </ul>
+  </div>
+  <div class="compare-box compare-box-new">
+    <h4 style="color:var(--success)">✓ pg-skills 方式</h4>
+    <ul>
+      <li>先定界再提案，需求对齐再编码</li>
+      <li>pipeline 自动编排，绝不越界</li>
+      <li>TDVG 四阶段门控，不合格不通过</li>
+      <li>统一 project.yaml SSOT，环境单一入口</li>
+    </ul>
+  </div>
+</div>
+
+<h2>1.2 核心三句话</h2>
+<div class="card" style="border-left:4px solid var(--primary); font-size:16px; line-height:2;">
+  <div>🔵 <strong>定界（Define）</strong>：改之前先划清边界，AI 不猜、不越界</div>
+  <div>🟢 <strong>提案 → 构建（Propose → Build）</strong>：先生成设计文档，人审完了再编码</div>
+  <div>🟠 <strong>回归 → 修复（Regression → Fix）</strong>：测试是质量防线，问题统一管理闭环</div>
+</div>
+
+<h2>1.3 三个闭环对比</h2>
+<table>
+  <tr><th>维度</th><th>普通 AI 编码</th><th>pg-skills</th></tr>
+  <tr><td>开始前</td><td>自然语言描述</td><td><code>/2-pg-propose</code> 生成 proposal + design</td></tr>
+  <tr><td>编码中</td><td>AI 自由发挥</td><td>Pipeline 按 stages × tracks  编排，不可越界</td></tr>
+  <tr><td>完成后</td><td>用户自己跑测试</td><td>自动 TDVG + Gate 审查</td></tr>
+  <tr><td>出问题</td><td>人工定位+猜测</td><td><code>/5-pg-fix-issue</code> 系统化诊断修复</td></tr>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<div id="sec2" class="section">
+<h1>2. 架构全景——三层模型</h1>
+
+<h2>2.1 三层架构</h2>
+<div class="svg-container">
+<svg viewBox="0 0 700 400" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#2563eb"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient>
+    <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#059669"/><stop offset="100%" stop-color="#10b981"/></linearGradient>
+    <linearGradient id="g3" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#d97706"/><stop offset="100%" stop-color="#f59e0b"/></linearGradient>
+  </defs>
+  <!-- L1 -->
+  <rect x="40" y="20" width="620" height="110" rx="10" fill="url(#g1)" opacity="0.15"/>
+  <rect x="40" y="20" width="620" height="110" rx="10" stroke="url(#g1)" stroke-width="2" fill="none"/>
+  <text x="60" y="50" font-size="14" font-weight="700" fill="var(--text)">L1：pg-skills 共享能力层</text>
+  <text x="60" y="72" font-size="12" fill="var(--muted)">.opencode/skills/ 下的 13 个 SKILL 定义（跨项目复用）</text>
+  <rect x="60" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
+  <text x="72" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-propose</text>
+  <rect x="168" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
+  <text x="180" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-build</text>
+  <rect x="276" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
+  <text x="288" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-fix-issue</text>
+  <rect x="384" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
+  <text x="396" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-regression</text>
+  <rect x="492" y="85" width="80" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
+  <text x="504" y="104" font-size="12" font-weight="600" fill="var(--text)">+ 9 个</text>
+
+  <!-- Arrow -->
+  <line x1="350" y1="130" x2="350" y2="150" stroke="var(--muted)" stroke-width="2" marker-end="url(#arrow)"/>
+  <defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
+
+  <!-- L2 -->
+  <rect x="40" y="155" width="620" height="110" rx="10" fill="url(#g2)" opacity="0.15"/>
+  <rect x="40" y="155" width="620" height="110" rx="10" stroke="url(#g2)" stroke-width="2" fill="none"/>
+  <text x="60" y="185" font-size="14" font-weight="700" fill="var(--text)">L2：.pg/ 项目配置层（SSOT）</text>
+  <text x="60" y="207" font-size="12" fill="var(--muted)">.pg/project.yaml = 单一可信源，所有 SKILL 以此为驱动</text>
+  <rect x="60" y="220" width="96" height="28" rx="6" fill="url(#g2)" opacity="0.3"/>
+  <text x="72" y="239" font-size="12" font-weight="600" fill="var(--text)">project.yaml</text>
+  <rect x="168" y="220" width="80" height="28" rx="6" fill="url(#g2)" opacity="0.3"/>
+  <text x="176" y="239" font-size="12" font-weight="600" fill="var(--text)">hooks/</text>
+  <rect x="260" y="220" width="96" height="28" rx="6" fill="url(#g2)" opacity="0.3"/>
+  <text x="272" y="239" font-size="12" font-weight="600" fill="var(--text)">changes/</text>
+  <rect x="368" y="220" width="80" height="28" rx="6" fill="url(#g2)" opacity="0.3"/>
+  <text x="376" y="239" font-size="12" font-weight="600" fill="var(--text)">context/</text>
+  <rect x="460" y="220" width="80" height="28" rx="6" fill="url(#g2)" opacity="0.3"/>
+  <text x="468" y="239" font-size="12" font-weight="600" fill="var(--text)">skills/</text>
+
+  <!-- Arrow -->
+  <line x1="350" y1="265" x2="350" y2="285" stroke="var(--muted)" stroke-width="2" marker-end="url(#arrow)"/>
+
+  <!-- L3 -->
+  <rect x="160" y="290" width="380" height="90" rx="10" fill="url(#g3)" opacity="0.15"/>
+  <rect x="160" y="290" width="380" height="90" rx="10" stroke="url(#g3)" stroke-width="2" fill="none"/>
+  <text x="180" y="320" font-size="14" font-weight="700" fill="var(--text)">L3：业务代码层</text>
+  <text x="180" y="342" font-size="12" fill="var(--muted)">你的真实项目代码，不感知 pipeline 机制</text>
+  <rect x="180" y="355" width="100" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
+  <text x="187" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-backend</text>
+  <rect x="290" y="355" width="100" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
+  <text x="297" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-frontend</text>
+  <rect x="400" y="355" width="100" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
+  <text x="407" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-agent</text>
+</svg>
+</div>
+
+<div class="info-card card">
+  <strong>核心原则</strong>：L1 不含任何项目特定知识（无 webvirt、无 pangee）；L2 是项目的<strong>单一可信源</strong>；L3 只关心业务代码。
+</div>
+
+<h2>2.2 项目目录结构</h2>
+<pre>
+.pg/
+├── project.yaml           # 统一配置 SSOT（六段结构）
+├── changes/               # 变更产物
+│   ├── add-login-page/    # 某次变更
+│   │   ├── proposal.md    # 做什么、为什么做
+│   │   ├── design.md      # 怎么做、验证标准
+│   │   ├── tasks.md       # stages × tracks  任务列表
+│   │   └── 2-build/       # pipeline 过程产物
+│   └── archive/           # 已完成变更归档
+├── hooks/                 # 环境生命周期脚本
+│   ├── role-backend-start.sh
+│   ├── role-agent-start.sh
+│   ├── env-dev-local-prepare.sh
+│   └── ...
+├── context/               # 项目上下文快照
+└── skills/                # pg-skills 嵌入（git subtree）
+</pre>
+
+<h2>2.3 AGENTS.md 的角色</h2>
+<p>AGENTS.md 是 AI 的"入职手册"——包含项目的技术栈、包结构、数据库约定、编码风格、路径规范等。pg-propose 会自动从 AGENTS.md 提取上下文写入 <code>.pg/context/summary.yaml</code>。</p>
+</div>
+
+<!-- ============================================================ -->
+<div id="sec3-onboard" class="section">
+<h1>3. 新项目接入——Two Pillars</h1>
+<p class="muted">接入新项目，最重要的两件事：<strong>写对 project.yaml</strong> + <strong>写对 hooks</strong></p>
+
+<h2>3.1 4 步接入流程</h2>
+<div class="card">
+<ol>
+  <li><strong>git subtree 拉入 pg-skills</strong></li>
+  <li><strong>pg init 生成骨架 + symlink</strong></li>
+  <li><strong>重启 opencode</strong>（加载 slash commands + skills + sub-agents）</li>
+  <li><strong>在 opencode 中触发 pg-init-project skill</strong>（AI 自动扫描仓库，生成 project.yaml）</li>
+</ol>
+</div>
+
+<pre>
+<span style="color:#94a3b8"># ① 用 git subtree 把 pg-skills 同步进项目</span>
+git remote add pg-skills git@gitee.com:shao_hq/pg-skills.git
+git fetch pg-skills
+git subtree add --prefix=.pg/skills pg-skills master --squash
+
+<span style="color:#94a3b8"># ② 跑 pg init 创建 .pg/ 骨架 + .opencode/ symlink</span>
+python3 .pg/skills/src/runtime/bin/pg init
+
+<span style="color:#94a3b8"># ③ 重启 opencode 后，在 opencode 中执行 pg-init-project</span>
+<span style="color:#94a3b8"># ④ 验证</span>
+python3 .pg/skills/src/runtime/bin/pg doctor
+</pre>
+
+<div class="tip-card card">
+  <strong>讲师强调</strong>：接入新项目最重要的两件事就是 <strong>① 写对 project.yaml（骨架）</strong>和 <strong>② 写对 hooks（血肉）</strong>。这两件不对，AI 再怎么跑 pipeline 都是错的。
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div id="sec3-yaml" class="section">
+<h1>3.2 project.yaml —— 六段结构</h1>
+
+<div class="svg-container">
+<svg viewBox="0 0 720 420" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr-down" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+  </defs>
+
+  <!-- ======== Layer 2: workflow-specific ======== -->
+
+  <!-- pg-build container -->
+  <rect x="36" y="60" width="200" height="152" rx="8" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="136" y="82" font-size="12" font-weight="700" fill="#6d28d9" text-anchor="middle">pg-build 专用</text>
+
+  <rect x="56" y="95" width="160" height="42" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="136" y="115" font-size="13" font-weight="600" fill="#6d28d9" text-anchor="middle">tracks</text>
+  <text x="136" y="131" font-size="11" fill="#64748b" text-anchor="middle">TDV 循环编排</text>
+
+  <rect x="56" y="148" width="160" height="42" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="136" y="168" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">stages</text>
+  <text x="136" y="184" font-size="11" fill="#64748b" text-anchor="middle">Pipeline 阶段编排</text>
+
+  <!-- pg-fix-issue container -->
+  <rect x="260" y="60" width="200" height="152" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="360" y="82" font-size="12" font-weight="700" fill="#b91c1c" text-anchor="middle">pg-fix-issue 专用</text>
+
+  <rect x="280" y="110" width="160" height="42" rx="6" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="360" y="130" font-size="13" font-weight="600" fill="#b91c1c" text-anchor="middle">fix_issue</text>
+  <text x="360" y="146" font-size="11" fill="#64748b" text-anchor="middle">Bug 修复参数</text>
+
+  <!-- pg-regression container -->
+  <rect x="484" y="60" width="200" height="152" rx="8" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="584" y="82" font-size="12" font-weight="700" fill="#4338ca" text-anchor="middle">pg-regression 专用</text>
+
+  <rect x="504" y="110" width="160" height="42" rx="6" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="584" y="130" font-size="13" font-weight="600" fill="#4338ca" text-anchor="middle">regression</text>
+  <text x="584" y="146" font-size="11" fill="#64748b" text-anchor="middle">回归测试套件</text>
+
+  <!-- Arrow from each workflow down to shared config -->
+  <line x1="136" y1="212" x2="136" y2="243" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-down)"/>
+  <line x1="360" y1="212" x2="360" y2="243" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-down)"/>
+  <line x1="584" y1="212" x2="584" y2="243" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-down)"/>
+
+  <!-- ======== Layer 1: 公共配置 ======== -->
+  <rect x="36" y="250" width="648" height="90" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
+  <rect x="36" y="250" width="648" height="26" rx="10" fill="#059669"/>
+  <rect x="36" y="265" width="648" height="11" fill="#059669"/>
+  <text x="360" y="268" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">公共配置（所有 workflow 共享）</text>
+
+  <rect x="56" y="285" width="290" height="42" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="201" y="305" font-size="13" font-weight="600" fill="#1d4ed8" text-anchor="middle">modules</text>
+  <text x="201" y="321" font-size="11" fill="#64748b" text-anchor="middle">代码模块 + build/lint/test 命令</text>
+
+  <rect x="376" y="285" width="290" height="42" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
+  <text x="521" y="305" font-size="13" font-weight="600" fill="#065f46" text-anchor="middle">environments</text>
+  <text x="521" y="321" font-size="11" fill="#64748b" text-anchor="middle">运行时拓扑 + role 启停动作</text>
+
+  <!-- ======== Footer ======== -->
+  <text x="36" y="375" font-size="11" fill="#64748b">补充字段：verifyMerge / flyway / git / rules / test_strategy / coding_standards</text>
+
+  <rect x="36" y="385" width="648" height="30" rx="6" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
+  <text x="48" y="404" font-size="11" font-family="monospace" fill="#2563eb">python3 .pg/skills/src/opencode/scripts/pg-parse-config.py &lt;workflow&gt;</text>
+  <text x="475" y="404" font-size="11" fill="#64748b">exit code ≠ 0 → 修复 project.yaml</text>
+</svg>
+</div>
+
+<h3>modules 段</h3>
+<pre>
+modules:
+  backend:
+    root: webvirt-backend
+    language: java
+    build: .pg/hooks/backend-build.sh     <span style="color:#94a3b8"># 虽在 hooks/ 下，但不走 hook 协议</span>
+    lint: cd webvirt-backend && mvn checkstyle:check  <span style="color:#94a3b8"># 也可能 inline</span>
+    test:
+      unit: .pg/hooks/backend-test.sh
+      integration:
+        cmd: .pg/hooks/backend-test.sh
+        timeout_seconds: 3600
+</pre>
+
+<h3>environments 段</h3>
+<pre>
+environments:
+  dev-local:
+    description: "本机全栈开发"
+    prepare_env: { script: .pg/hooks/env-dev-local-prepare.sh, timeout_seconds: 300 }
+    clean_env:   { script: .pg/hooks/env-dev-local-clean.sh, timeout_seconds: 120 }
+    roles:
+      backend:
+        instances:
+          - { name: backend-1, host: localhost, port: 9080 }
+        actions:
+          start: { script: .pg/hooks/role-backend-start.sh, timeout_seconds: 300 }
+          stop:  { script: .pg/hooks/role-backend-stop.sh, timeout_seconds: 30 }
+          logs:  { script: .pg/hooks/role-backend-logs.sh, args: ["{lines:100}"] }
+</pre>
+
+<h3>tracks + stages 段</h3>
+<pre>
+<span style="color:#94a3b8"># tracks：定义在哪些 modules 上跑 TDV 循环</span>
+tracks:
+  backend:
+    modules: [backend, agent-proto]
+    max_fail_retries: 3
+    max_gate_fix_retries: 2
+    review_level: security
+  agent:
+    modules: [agent, agent-proto]
+  frontend:
+    modules: [frontend]
+
+<span style="color:#94a3b8"># stages：定义 pipeline 阶段编排</span>
+stages:
+  - name: dev
+    tracks: [backend, agent, openapi-gen, frontend]
+    test_key: unit
+    gate: all_pass
+    environment:
+      required: true
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<div id="sec3-hook" class="section">
+<h1>3.3 Hook 协议详解</h1>
+
+<h2>两条铁律</h2>
+<div class="card">
+<table>
+  <tr><th>维度</th><th>走 hook 协议？</th><th>配置位置</th><th>调度方式</th></tr>
+  <tr>
+    <td><strong>Environments</strong><br><span style="font-size:12px;color:var(--muted)">prepare_env / clean_env / role start/stop/logs</span></td>
+    <td><span class="tag tag-green">✅ 走 hook</span></td>
+    <td><code>.pg/hooks/&lt;name&gt;.sh</code></td>
+    <td><code>pg-invoke-hook.py</code> 统一入口</td>
+  </tr>
+  <tr>
+    <td><strong>Modules</strong><br><span style="font-size:12px;color:var(--muted)">build / lint / test</span></td>
+    <td><span class="tag tag-red">❌ 不走 hook</span></td>
+    <td><code>project.yaml modules.&lt;m&gt;.{build,lint,test}</code></td>
+    <td>Runner 直接 <code>timeout N bash -c '&lt;cmd&gt;'</code></td>
+  </tr>
+</table>
+</div>
+
+<div class="danger-card card">
+  <strong>⚠ 常见误区</strong>：module 命令虽然可以是 <code>.pg/hooks/backend-build.sh</code> 这样指向脚本文件，但它是被 runner 当作<strong>普通 shell 命令</strong>执行的——没有 <code>PG_*</code> 注入，不走 hook 生命周期。是否走 hook 协议取决于配置在 project.yaml 的<strong>哪个位置</strong>，不在于是不是脚本文件。
+</div>
+
+<h2>Hook 标准模板</h2>
+<pre>
+<span style="color:#94a3b8">#!/usr/bin/env bash</span>
+<span style="color:#94a3b8"># .pg/hooks/role-backend-start.sh</span>
+set -uo pipefail
+
+<span style="color:#94a3b8"># === 1. 加载 hook-helpers（必须）===</span>
+<span style="color:#f59e0b">source</span> <span style="color:#10b981">"$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"</span>
+<span style="color:#f59e0b">trap</span> <span style="color:#10b981">'pg_fail_on_error $? $LINENO'</span> ERR
+
+<span style="color:#94a3b8"># === 2. 业务逻辑 ===</span>
+start_backend() { ... }
+
+<span style="color:#94a3b8"># === 3. 报告结果 ===</span>
+DURATION=$(($(date +%s) - START))
+<span style="color:#f59e0b">pg_exit</span> --status=pass --duration=$DURATION
+
+<span style="color:#94a3b8"># 失败时用 pg_fail：</span>
+<span style="color:#94a3b8"># pg_fail --category=test_failure --code=PG-E-0601 \</span>
+<span style="color:#94a3b8">#         --message="mvn test failed" --agent-recoverable=true</span>
+</pre>
+
+<h2>注入的环境变量</h2>
+<table>
+  <tr><th>变量</th><th>说明</th><th>适用范围</th></tr>
+  <tr><td><code>PG_SKILLS_PATH</code></td><td>pg-skills 根路径</td><td>全部</td></tr>
+  <tr><td><code>PG_PROJECT_ROOT</code></td><td>项目根路径</td><td>全部</td></tr>
+  <tr><td><code>PG_RESULT_FILE</code></td><td>写 result.json 的路径</td><td>全部</td></tr>
+  <tr><td><code>PG_LOG_FILE</code></td><td>写 stdout/stderr 的路径</td><td>全部</td></tr>
+  <tr><td><code>PG_CHANGE_NAME</code></td><td>当前 change 名</td><td>全部</td></tr>
+  <tr><td><code>PG_STAGE</code></td><td>当前 stage 名</td><td>全部</td></tr>
+  <tr><td><code>PG_ENV</code></td><td>当前环境（dev-local / dev-3tier）</td><td>全部</td></tr>
+  <tr><td><code>PG_ROLE</code></td><td>role 名</td><td>role action 时</td></tr>
+  <tr><td><code>PG_INSTANCE_NAME</code></td><td>instance 名</td><td>role action 时</td></tr>
+  <tr><td><code>PG_INSTANCE_HOST</code></td><td>instance host</td><td>role action 时</td></tr>
+</table>
+
+<h2>pg-invoke-hook.py 统一入口</h2>
+<p>LLM 和 runner <strong>不直接调用 hook 脚本</strong>，通过 <code>pg-invoke-hook.py</code> 统一调度。</p>
+
+<pre>
+<span style="color:#94a3b8"># 调用 role action</span>
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --change &lt;change-name&gt; \
+  --env dev-local \
+  --role backend \
+  --instance backend-1 \
+  --action start
+
+<span style="color:#94a3b8"># 查看日志（不启动服务，安全无害）</span>
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --change demo \
+  --env dev-local \
+  --role backend \
+  --instance backend-1 \
+  --action logs \
+  --tail-lines 20
+
+<span style="color:#94a3b8"># 查询环境准备状态</span>
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py status \
+  --change &lt;change-name&gt;
+</pre>
+
+<h2>错误 Category 枚举（SSOT）</h2>
+<table>
+  <tr><th>category</th><th>severity</th><th>agent-recoverable</th><th>用途</th></tr>
+  <tr><td><code>prereq_missing</code></td><td><span class="tag tag-red">blocked</span></td><td>false</td><td>缺前置命令/库</td></tr>
+  <tr><td><code>port_in_use</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>端口占用</td></tr>
+  <tr><td><code>timeout</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>操作超时</td></tr>
+  <tr><td><code>health_check_fail</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>健康检查失败</td></tr>
+  <tr><td><code>dependency_not_ready</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>依赖未就绪</td></tr>
+  <tr><td><code>network</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>SSH/HTTP/DNS 失败</td></tr>
+  <tr><td><code>test_failure</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>测试断言失败</td></tr>
+  <tr><td><code>config_invalid</code></td><td><span class="tag tag-red">blocked</span></td><td>false</td><td>配置错误</td></tr>
+  <tr><td><code>invariant_violation</code></td><td><span class="tag tag-red">blocked</span></td><td>true</td><td>跨模块不变量违反</td></tr>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<div id="sec3-demo" class="section">
+<h1>3.4 执行演示——运行 hooks</h1>
+
+<h2>演示 1：查看 logs（安全无害）</h2>
+<pre>
+<span style="color:#94a3b8"># 查看 backend 日志（只读操作，不启动服务）</span>
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --change demo-hooks \
+  --env dev-local \
+  --role backend \
+  --instance backend-1 \
+  --action logs \
+  --tail-lines 10
+</pre>
+
+<h2>演示 2：完整启停一个 role</h2>
+<pre>
+<span style="color:#94a3b8"># 启动 backend（讲师演示，学员可不执行）</span>
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --change demo-hooks \
+  --env dev-local \
+  --role backend \
+  --instance backend-1 \
+  --action start
+
+<span style="color:#94a3b8"># 停止 backend</span>
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --change demo-hooks \
+  --env dev-local \
+  --role backend \
+  --instance backend-1 \
+  --action stop
+
+<span style="color:#94a3b8"># 查询 prepare_env 状态</span>
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py status \
+  --change demo-hooks
+</pre>
+
+<h2>演示 3：读取 workflow config</h2>
+<pre>
+<span style="color:#94a3b8"># 查看 pg-propose 需要读取的配置段</span>
+python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
+
+<span style="color:#94a3b8"># 查看 pg-build 需要读取的配置段</span>
+python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-build
+
+<span style="color:#94a3b8"># 查看 pg-fix-issue 需要读取的配置段</span>
+python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
+</pre>
+
+<div class="info-card card">
+  <strong>讲师提问</strong>：为什么不直接用 bash 跑 hook 脚本，而要用 <code>pg-invoke-hook.py</code>？<br>
+  <strong>答案</strong>：因为 hook 协议需要注入 <code>PG_*</code> 环境变量、写 <code>result.json</code>、标准化错误分类。直接跑脚本会丢失这些上下文。
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div id="sec3-checklist" class="section">
+<h1>3.5 新项目接入 Checklist</h1>
+
+<div class="card">
+<ul class="checklist">
+  <li><input type="checkbox"> <code>git subtree</code> 拉入 pg-skills → <code>.pg/skills/</code></li>
+  <li><input type="checkbox"> <code>pg init</code> 生成骨架 + symlink</li>
+  <li style="margin-top:12px"><strong>写 project.yaml（最重要）</strong></li>
+  <li><input type="checkbox" style="margin-left:24px"> modules：每个模块的根目录 + build/lint/test 命令</li>
+  <li><input type="checkbox" style="margin-left:24px"> environments：有哪些环境，每个环境有哪些 role</li>
+  <li><input type="checkbox" style="margin-left:24px"> tracks：哪些 track，每个 track 跑哪些 module</li>
+  <li><input type="checkbox" style="margin-left:24px"> stages：分几个阶段，阶段内 track 顺序</li>
+  <li><input type="checkbox" style="margin-left:24px"> fix_issue：修复迭代参数</li>
+  <li><input type="checkbox" style="margin-left:24px"> regression：回归测试套件</li>
+  <li style="margin-top:12px"><strong>写 hooks（第二重要）</strong></li>
+  <li><input type="checkbox" style="margin-left:24px"> 每个 role 的 start / stop / logs 脚本</li>
+  <li><input type="checkbox" style="margin-left:24px"> 每个环境的 prepare_env / clean_env 脚本</li>
+  <li><input type="checkbox" style="margin-left:24px"> 遵循 hook 协议（source hook-helpers.sh + pg_exit）</li>
+  <li style="margin-top:12px"><input type="checkbox"> <code>pg doctor</code> 校验</li>
+  <li><input type="checkbox"> 跑一个最小 <code>/2b-pg-quick-build</code> 验证全链路通</li>
+</ul>
+</div>
+
+<div class="tip-card card">
+  <strong>关键提醒</strong>：project.yaml 的 <code>modules.&lt;m&gt;.build</code> 字段可以直接指向 <code>.pg/hooks/</code> 下的脚本——比如 <code>backend-build.sh</code> 虽然是一个脚本文件，但它<strong>不在 hook 协议中</strong>，而是被 runner 当作普通 shell 命令执行。<strong>不要被"脚本在 hooks 目录下"误导</strong>，是否走 hook 协议取决于它在 project.yaml 的哪个位置。
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 4.1 概述 -->
+<div id="sec4-overview" class="section">
+<h1>4. 日常开发工作流</h1>
+
+<div class="tip-card card">
+<p><strong>本章结构</strong>：4.1 全景路线图 → 4.2 定界 → 4.3 提案 → 4.4 构建。每节都讲核心机制 + 实操要点。</p>
+</div>
+
+<h2>4.1 概述 —— 全景路线图</h2>
+
+<div class="svg-container">
+<svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+  </defs>
+
+  <!-- 标准流 -->
+  <rect x="30" y="40" width="490" height="60" rx="30" fill="none" stroke="#2563eb" stroke-width="2"/>
+  <text x="275" y="28" font-size="12" font-weight="700" fill="#2563eb" text-anchor="middle">标准流（正经功能开发）</text>
+  <circle cx="80" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="80" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">1</text>
+  <text x="80" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Define</text>
+  <text x="80" y="118" font-size="10" fill="#64748b" text-anchor="middle">/1-pg-define</text>
+
+  <line x1="102" y1="70" x2="158" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
+
+  <circle cx="180" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="180" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">2</text>
+  <text x="180" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Propose</text>
+  <text x="180" y="118" font-size="10" fill="#64748b" text-anchor="middle">/2-pg-propose</text>
+
+  <line x1="202" y1="70" x2="258" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
+
+  <circle cx="280" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="280" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">3</text>
+  <text x="280" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Review</text>
+  <text x="280" y="118" font-size="10" fill="#64748b" text-anchor="middle">人工 / 2.1 refine</text>
+
+  <line x1="302" y1="70" x2="358" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
+
+  <circle cx="380" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="380" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">4</text>
+  <text x="380" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Build</text>
+  <text x="380" y="118" font-size="10" fill="#64748b" text-anchor="middle">/3-pg-build</text>
+
+  <line x1="402" y1="70" x2="458" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
+
+  <circle cx="480" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
+  <text x="480" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">5</text>
+  <text x="480" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Merge</text>
+  <text x="480" y="118" font-size="10" fill="#64748b" text-anchor="middle">verify-and-merge</text>
+
+  <!-- 快捷流 -->
+  <rect x="30" y="160" width="220" height="60" rx="30" fill="none" stroke="#059669" stroke-width="2"/>
+  <text x="140" y="148" font-size="12" font-weight="700" fill="#059669" text-anchor="middle">快捷流（小改动）</text>
+  <circle cx="80" cy="190" r="22" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="80" y="194" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">Q</text>
+  <text x="80" y="225" font-size="11" font-weight="600" fill="#065f46" text-anchor="middle">Quick-build</text>
+  <text x="80" y="238" font-size="10" fill="#64748b" text-anchor="middle">/2b-pg-quick-build</text>
+
+  <line x1="102" y1="190" x2="158" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <circle cx="180" cy="190" r="22" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="180" y="194" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">M</text>
+  <text x="180" y="225" font-size="11" font-weight="600" fill="#065f46" text-anchor="middle">Merge</text>
+
+  <!-- 修复/回归流 -->
+  <rect x="280" y="160" width="240" height="60" rx="30" fill="none" stroke="#ea580c" stroke-width="2"/>
+  <text x="400" y="148" font-size="12" font-weight="700" fill="#ea580c" text-anchor="middle">修复/回归流</text>
+  <circle cx="320" cy="190" r="22" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="320" y="194" font-size="12" font-weight="700" fill="#9a3412" text-anchor="middle">F</text>
+  <text x="320" y="225" font-size="11" font-weight="600" fill="#9a3412" text-anchor="middle">Fix-issue</text>
+  <text x="320" y="238" font-size="10" fill="#64748b" text-anchor="middle">/5-pg-fix-issue</text>
+
+  <line x1="342" y1="190" x2="398" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <circle cx="420" cy="190" r="22" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="420" y="194" font-size="12" font-weight="700" fill="#9a3412" text-anchor="middle">R</text>
+  <text x="420" y="225" font-size="11" font-weight="600" fill="#9a3412" text-anchor="middle">Regression</text>
+  <text x="420" y="238" font-size="10" fill="#64748b" text-anchor="middle">/4-pg-regression</text>
+
+  <line x1="442" y1="190" x2="478" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <circle cx="500" cy="190" r="22" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="500" y="194" font-size="12" font-weight="700" fill="#9a3412" text-anchor="middle">PR</text>
+  <text x="500" y="225" font-size="11" font-weight="600" fill="#9a3412" text-anchor="middle">PR</text>
+
+  <text x="360" y="270" font-size="11" fill="#64748b" text-anchor="middle">三路径共享同一个 .pg/project.yaml 与 hooks 基础设施</text>
+</svg>
+</div>
+
+<h3>输入/输出对照表</h3>
+<table>
+  <tr><th>阶段</th><th>入口</th><th>输入</th><th>输出</th></tr>
+  <tr><td>1. 定界</td><td><code>/1-pg-define</code></td><td>模糊需求</td><td>边界清单 + scope summary</td></tr>
+  <tr><td>2. 提案</td><td><code>/2-pg-propose</code></td><td>边界 + project.yaml</td><td>proposal + design + tasks + environment.yaml</td></tr>
+  <tr><td>3. 评审</td><td><code>/2.1-pg-propose-refine</code></td><td>review-notes 评审意见</td><td>修改后的 proposal/design/tasks</td></tr>
+  <tr><td>4. 构建</td><td><code>/3-pg-build</code></td><td>设计文档 + project.yaml</td><td>代码 + 测试 + 报告 + 自动归档</td></tr>
+  <tr><td>5. 合并</td><td><code>pg-verify-and-merge</code></td><td>feature branch</td><td>合入 master</td></tr>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<!-- 4.2 定界 -->
+<div id="sec4-define" class="section">
+<h1>4.2 定界 —— `/1-pg-define`</h1>
+
+<p style="color:var(--muted); font-style:italic">"接到需求先别急着写代码，问自己三个问题。"</p>
+
+<h2>第一个问题：需求有多复杂？</h2>
+<table>
+  <tr><th>复杂度</th><th>特征</th><th>建议</th></tr>
+  <tr>
+    <td><span class="tag tag-red">过大</span></td>
+    <td>跨 ≥2 模块、涉 DB schema / K8s 变更、tasks 数量远超上下文窗口</td>
+    <td><strong>拆分为多个 change</strong>，每阶段只做一件事，分周推进</td>
+  </tr>
+  <tr>
+    <td><span class="tag tag-yellow">适中</span></td>
+    <td>单模块、≤8 tasks、无 DB schema 变更、有明确边界</td>
+    <td>走标准流 <code>/2-pg-propose</code> + <code>/3-pg-build</code></td>
+  </tr>
+  <tr>
+    <td><span class="tag tag-green">过小</span></td>
+    <td>改按钮文案、修 CSS、调整提示文字</td>
+    <td><strong>直接 vibe coding</strong>，完全没必要走 pg-* 流程</td>
+  </tr>
+</table>
+
+<div class="tip-card card">
+<h4 style="margin:0 0 8px">关于"拆"的建议</h4>
+<p>比如"优化创建 VM 的性能" → 拆成 (1) 模板磁盘预缓存、(2) 异步状态推送、(3) 前端进度条展示，三个 change 分三周推进。每个 change 独立 propose → build → merge，<strong>互不阻塞</strong>，且每个都能在 LLM 上下文窗口内完成。</p>
+</div>
+
+<h2>第二个问题：正经功能还是临时修 bug？</h2>
+<div class="compare-row">
+  <div class="compare-box compare-box-new">
+    <h4 style="color:var(--success)">正经功能 → 标准流</h4>
+    <p><code>/1-pg-define</code> → <code>/2-pg-propose</code> → review → <code>/3-pg-build</code></p>
+  </div>
+  <div class="compare-box compare-box-new" style="background:#fef3c7;border-color:#fcd34d">
+    <h4 style="color:#92400e">Bug → 修复流</h4>
+    <p><code>/5-pg-fix-issue</code>（系统化诊断 + 修复，详见第 5 章）</p>
+  </div>
+</div>
+
+<h2>第三个问题：scope 想清楚了吗？</h2>
+<p><code>/1-pg-define</code> 是一个<strong>探索姿态</strong>，AI 不是机械提问而是思考伙伴。它会帮你做这些事：</p>
+<ol>
+  <li><strong>澄清模糊表述</strong> —— "太慢是多慢？具体哪个场景？"把模糊词转化为可测量描述</li>
+  <li><strong>划定边界</strong> —— 影响范围是单一模块还是跨多个组件？明确 in / out of scope</li>
+  <li><strong>暴露隐式假设</strong> —— 挑战"必须用 X"的前提，打开替代方案空间</li>
+  <li><strong>识别集成点</strong> —— 会触及哪些现有功能？依赖其他系统或团队吗？</li>
+  <li><strong>对标既有模式</strong> —— grep 同类功能，遵循项目既有风格</li>
+  <li><strong>揭示风险</strong> —— 破坏性变更？兼容性？边界情况（并发、权限、空值）？</li>
+  <li><strong>收敛完成标准</strong> —— 怎么算做好了？区分 MVP 和迭代</li>
+</ol>
+
+<div class="danger-card card">
+<h4 style="margin:0 0 8px">⚠ 探索中的禁忌（自检信号）</h4>
+<ul style="margin:0;padding-left:20px">
+  <li>🔴 过早解决：跳过对问题的理解就"直接用 X 就行"</li>
+  <li>🔴 功能蔓延：用户每说一个想法就延伸 3 个额外功能 —— 记住 YAGNI</li>
+  <li>🔴 过度工程化：设计一个通用框架处理所有场景</li>
+  <li>🔴 确认偏误：只在代码库中找支持自己假设的证据</li>
+  <li>🔴 写代码冲动：发现自己在想"那行代码怎么写"而非"方案是否合理"</li>
+</ul>
+</div>
+
+<h2>定界完成后的三个选择</h2>
+<p>边界清晰后，AI 会用 <code>question</code> 工具给你三个选项（<strong>用户做选择</strong>，AI 不替你决定）：</p>
+<table>
+  <tr><th>选项</th><th>适用</th></tr>
+  <tr><td><strong>走 <code>/2-pg-propose</code></strong></td><td>正经功能、跨模块、需要设计评审</td></tr>
+  <tr><td><strong>走 <code>/2b-pg-quick-build</code></strong></td><td>明确小改动、≤8 tasks、单 module</td></tr>
+  <tr><td><strong>直接 vibe coding</strong></td><td>改文案/样式，无需任何 SKILL</td></tr>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<!-- 4.3 提案 -->
+<div id="sec4-propose" class="section">
+<h1>4.3 提案 —— `/2-pg-propose`</h1>
+
+<p style="color:var(--muted); font-style:italic">"边界有了，现在出图纸。图纸有四份，每份给不同的人看。"</p>
+
+<h2>四份文档 + 一份 SSOT</h2>
+<table>
+  <tr><th>文件</th><th>读者</th><th>职责</th></tr>
+  <tr><td><code>proposal.md</code></td><td>产品 / 架构师</td><td>做什么、为什么、不做哪些</td></tr>
+  <tr><td><code>design.md</code></td><td>开发者</td><td>怎么做、架构决策、V-* 验证标准</td></tr>
+  <tr><td><code>tasks.md</code></td><td>Pipeline Runner</td><td>stages × tracks 任务矩阵</td></tr>
+  <tr><td><code>1-propose-review/review-notes.md</code></td><td>人机评审</td><td>6 类自审项 + checkbox 追踪</td></tr>
+  <tr><td><code>environment.yaml</code></td><td>Runner 部署引擎</td><td>每个 stage 选哪个 environment（SSOT）</td></tr>
+</table>
+
+<h2>核心机制：tasks.md 的 stages × tracks  展开</h2>
+
+<p>pg-propose 读取 <code>project.yaml</code> 的 stages 段后，逐 stage 做两步过滤：</p>
+
+<h3>Step 1：on_conditions 判定</h3>
+<p>检查本 change 的 <code>affected_paths</code> 是否命中该 stage 的 <code>on_conditions</code> 规则：</p>
+<ul>
+  <li><span class="tag tag-red">未命中</span> → 该 stage <strong>整体跳过</strong>，tasks.md 中<strong>不生成任何章节</strong></li>
+  <li><span class="tag tag-green">命中</span> → 进入 Step 2</li>
+</ul>
+
+<h3>Step 2：affected_tracks 判定</h3>
+<p>对 stage.tracks 列表中的每个 track：</p>
+<ul>
+  <li>在 <code>affected_tracks</code> 中 → 展开为 <code>T→D→V→G</code> 四个子章节（含具体任务）</li>
+  <li>不在 <code>affected_tracks</code> 中 → 生成占位章节 <code>- 无</code></li>
+</ul>
+
+<div class="svg-container">
+<svg viewBox="0 0 720 360" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr-r2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+  </defs>
+
+  <text x="20" y="22" font-size="13" font-weight="700" fill="var(--text)">举例：只改前端代码时</text>
+
+  <!-- project.yaml stages -->
+  <rect x="20" y="40" width="220" height="240" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="130" y="60" font-size="12" font-weight="600" fill="var(--text)" text-anchor="middle">project.yaml stages</text>
+
+  <rect x="32" y="75" width="196" height="44" rx="4" fill="#fef2f2" stroke="#ef4444" stroke-width="1"/>
+  <text x="44" y="93" font-size="11" font-weight="600" fill="#b91c1c">prepare-env-scripts</text>
+  <text x="44" y="109" font-size="10" fill="#64748b">on_conditions: 命中 .pg/hooks</text>
+
+  <rect x="32" y="128" width="196" height="44" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
+  <text x="44" y="146" font-size="11" font-weight="600" fill="#065f46">dev</text>
+  <text x="44" y="162" font-size="10" fill="#64748b">tracks: [backend, agent, frontend]</text>
+
+  <rect x="32" y="181" width="196" height="44" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="44" y="199" font-size="11" font-weight="600" fill="#64748b">dev-mock-integration</text>
+  <text x="44" y="215" font-size="10" fill="#64748b">注释中，未启用</text>
+
+  <rect x="32" y="234" width="196" height="44" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="44" y="252" font-size="11" font-weight="600" fill="#64748b">real-integration</text>
+  <text x="44" y="268" font-size="10" fill="#64748b">注释中，未启用</text>
+
+  <!-- arrow -->
+  <line x1="240" y1="160" x2="290" y2="160" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r2)"/>
+
+  <!-- tasks.md output -->
+  <rect x="290" y="40" width="410" height="280" rx="6" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="495" y="60" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">tasks.md（生成结果）</text>
+
+  <!-- Skipped stage note -->
+  <rect x="302" y="75" width="386" height="30" rx="4" fill="#fee2e2" stroke="#ef4444" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="310" y="94" font-size="10" fill="#b91c1c">✗ prepare-env-scripts：on_conditions 不命中 → 整体跳过，无章节</text>
+
+  <!-- dev stage expanded -->
+  <text x="302" y="130" font-size="11" font-weight="600" fill="var(--text)">## dev stage</text>
+
+  <rect x="302" y="138" width="386" height="28" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="310" y="156" font-size="10" fill="#64748b">### backend track → - 无（不在 affected_tracks）</text>
+
+  <rect x="302" y="172" width="386" height="28" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
+  <text x="310" y="190" font-size="10" fill="#64748b">### agent track → - 无（不在 affected_tracks）</text>
+
+  <rect x="302" y="206" width="386" height="90" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
+  <text x="310" y="224" font-size="11" font-weight="600" fill="#065f46">### frontend track（在 affected_tracks）</text>
+  <text x="320" y="241" font-size="10" font-family="monospace" fill="#065f46">  - [ ] test: ...</text>
+  <text x="320" y="256" font-size="10" font-family="monospace" fill="#065f46">  - [ ] dev: ...</text>
+  <text x="320" y="271" font-size="10" font-family="monospace" fill="#065f46">  - [ ] verify: ...</text>
+  <text x="320" y="286" font-size="10" font-family="monospace" fill="#065f46">  - [ ] gate: ...</text>
+
+  <text x="20" y="345" font-size="10" fill="#64748b">未启用的 stage 不出现在 tasks.md 中；启用的 stage 中未涉及的 track 只占位不展开任务</text>
+</svg>
+</div>
+
+<h2>environment 选择：影响 runner 的部署行为</h2>
+
+<p>对于 <code>environment.required: true</code> 的 stage，pg-propose 会读取该 stage 的 <code>selection_rules</code>，根据本 change 的 <code>affected_tracks</code> 选定 environment 并写入 <code>environment.yaml</code>。</p>
+
+<table>
+  <tr><th>场景</th><th>选择</th><th>依据</th></tr>
+  <tr><td>只改 backend + frontend</td><td><code>dev-local</code></td><td>单机能跑，无需跨主机</td></tr>
+  <tr><td>改 agent 且需要双 agent 通信</td><td><code>dev-3tier</code></td><td>跨主机拓扑，验证 libvirt 连接</td></tr>
+  <tr><td>默认</td><td><code>dev-local</code></td><td>评审阶段可升级到 dev-3tier</td></tr>
+</table>
+
+<div class="danger-card card">
+<h4 style="margin:0 0 8px">⚠ environment 选错代价很大</h4>
+<ul style="margin:0;padding-left:20px">
+  <li>runner 在错误的 host 上启服务 → 启动失败</li>
+  <li>用错的 hook 脚本 → 端口冲突或环境变量缺失</li>
+  <li>跨机通信走错网段 → 联调失败</li>
+</ul>
+<p><code>environment.yaml</code> <strong>缺失 → workflow_failed 硬性终止</strong>。这是 SSOT 的硬约束：runner 不知道该用哪个环境，宁可终止也不猜。</p>
+</div>
+
+<h2>评审闭环：review-notes.md + /2.1-pg-propose-refine</h2>
+
+<ol>
+  <li>pg-propose 自审生成 <code>review-notes.md</code>（6 类审查项 + checkbox）</li>
+  <li>人工评审，把发现的问题在 review-notes 中标 <code>[x]</code> 或 <code>[~]</code></li>
+  <li>执行 <code>/2.1-pg-propose-refine</code>，AI 按 scope 精准修改 proposal / design / tasks</li>
+  <li>通常需要 1-2 轮 refine 迭代，直到 review-notes 全部 <code>[x]</code></li>
+</ol>
+
+<div class="info-card card">
+<p style="margin:0"><strong>人工 review 的硬规则</strong>：API 契约变更、DB schema 变更、跨模块能力演进，必须经人工 review 后才能进入 build 阶段。</p>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<!-- 4.4 构建 -->
+<div id="sec4-build" class="section">
+<h1>4.4 构建 —— `/3-pg-build`</h1>
+
+<p style="color:var(--muted); font-style:italic">"图纸审完了，Runner 开始施工。<strong>人只做一件事</strong>：执行命令等结果。"</p>
+
+<h2>驱动流程：调用-派送-记录 循环</h2>
+
+<div class="svg-container">
+<svg viewBox="0 0 700 110" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr-r3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+  </defs>
+
+  <rect x="20" y="20" width="140" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="90" y="44" font-size="12" font-weight="600" fill="#1d4ed8" text-anchor="middle">LLM 调用</text>
+  <text x="90" y="60" font-size="11" fill="#1d4ed8" text-anchor="middle">$RUNNER next &lt;change&gt;</text>
+
+  <line x1="160" y1="45" x2="190" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
+
+  <rect x="195" y="20" width="160" height="50" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="275" y="44" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">Runner 返回</text>
+  <text x="275" y="60" font-size="10" fill="#92400e" text-anchor="middle">action: dispatch / phase_result /</text>
+  <text x="275" y="73" font-size="10" fill="#92400e" text-anchor="middle">done / workflow_failed</text>
+
+  <line x1="355" y1="45" x2="385" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
+
+  <rect x="390" y="20" width="140" height="50" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
+  <text x="460" y="44" font-size="12" font-weight="600" fill="#065f46" text-anchor="middle">派送 sub-agent</text>
+  <text x="460" y="60" font-size="10" fill="#065f46" text-anchor="middle">Task tool 调 agent</text>
+
+  <line x1="530" y1="45" x2="560" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
+
+  <rect x="565" y="20" width="120" height="50" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="625" y="44" font-size="12" font-weight="600" fill="#6d28d9" text-anchor="middle">Runner 记录</text>
+  <text x="625" y="60" font-size="11" fill="#6d28d9" text-anchor="middle">$RUNNER record</text>
+
+  <text x="350" y="100" font-size="11" fill="#64748b" text-anchor="middle">重复直到 runner 返回 done 或 workflow_failed</text>
+</svg>
+</div>
+
+<h3>Runner 自动管的事（你不用操心）</h3>
+<ul>
+  <li>切到 <code>feat/pg/&lt;change&gt;</code> feature branch</li>
+  <li>启动时 init commit（<code>chore(&lt;change&gt;): bootstrap pg-build</code>）</li>
+  <li>每个 sub 阶段 record commit（<code>chore(&lt;change&gt;): auto-record &lt;item&gt;:&lt;sub&gt; &lt;status&gt;</code>）</li>
+  <li>报告顺序编号 <code>{track.id}-{N}-{kind}.md</code></li>
+  <li>final-gate pass 后自动归档到 <code>changes/archive/</code></li>
+</ul>
+
+<h2>TDVG 四阶段：每个 track 内部循环</h2>
+
+<div class="svg-container">
+<svg viewBox="0 0 650 80" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr-r4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+  </defs>
+  <rect x="20" y="15" width="120" height="50" rx="8" fill="#f87171"/>
+  <text x="80" y="40" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">T Test</text>
+  <text x="80" y="56" font-size="10" fill="#fff" text-anchor="middle">写测试（红 phase）</text>
+
+  <line x1="140" y1="40" x2="170" y2="40" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r4)"/>
+
+  <rect x="175" y="15" width="120" height="50" rx="8" fill="#34d399"/>
+  <text x="235" y="40" font-size="13" font-weight="700" fill="#065f46" text-anchor="middle">D Dev</text>
+  <text x="235" y="56" font-size="10" fill="#065f46" text-anchor="middle">实现代码（绿 phase）</text>
+
+  <line x1="295" y1="40" x2="325" y2="40" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r4)"/>
+
+  <rect x="330" y="15" width="120" height="50" rx="8" fill="#fbbf24"/>
+  <text x="390" y="40" font-size="13" font-weight="700" fill="#92400e" text-anchor="middle">V Verify</text>
+  <text x="390" y="56" font-size="10" fill="#92400e" text-anchor="middle">验证功能</text>
+
+  <line x1="450" y1="40" x2="480" y2="40" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r4)"/>
+
+  <rect x="485" y="15" width="120" height="50" rx="8" fill="#818cf8"/>
+  <text x="545" y="40" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">G Gate</text>
+  <text x="545" y="56" font-size="10" fill="#fff" text-anchor="middle">门控审查</text>
+</svg>
+</div>
+
+<h2>环境准备与清理</h2>
+
+<p>当 stage 的 <code>environment.required: true</code> 时，runner 在进入该 stage 前<strong>自动执行</strong> <code>prepare_env</code>，完成后自动 <code>clean_env</code>。</p>
+
+<div class="svg-container">
+<svg viewBox="0 0 700 130" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arr-r5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+
+  <rect x="20" y="20" width="120" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="80" y="44" font-size="12" font-weight="600" fill="#1d4ed8" text-anchor="middle">runner next</text>
+  <text x="80" y="60" font-size="10" fill="#1d4ed8" text-anchor="middle">进入新 stage</text>
+
+  <line x1="140" y1="45" x2="170" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r5)"/>
+
+  <rect x="175" y="20" width="140" height="50" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="245" y="44" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">prepare_env</text>
+  <text x="245" y="60" font-size="10" fill="#92400e" text-anchor="middle">自动调用 hook</text>
+
+  <line x1="315" y1="45" x2="345" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r5)"/>
+
+  <rect x="350" y="20" width="140" height="50" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
+  <text x="420" y="44" font-size="12" font-weight="600" fill="#065f46" text-anchor="middle">phase_result</text>
+  <text x="420" y="60" font-size="10" fill="#065f46" text-anchor="middle">LLM 接收结果</text>
+
+  <line x1="490" y1="45" x2="520" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r5)"/>
+
+  <rect x="525" y="20" width="140" height="50" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="595" y="44" font-size="12" font-weight="600" fill="#6d28d9" text-anchor="middle">stage 内执行</text>
+  <text x="595" y="60" font-size="10" fill="#6d28d9" text-anchor="middle">TDVG 循环</text>
+
+  <text x="20" y="105" font-size="11" fill="#64748b">phase_result 成功 → LLM $RUNNER record completed 推进；phase_result 失败且 terminate==true → 流程终止</text>
+  <text x="20" y="120" font-size="11" fill="#64748b">stage 完成后或 pipeline 终止时 → runner 自动 clean_env</text>
+</svg>
+</div>
+
+<p><strong>使用哪个环境？</strong>由 <code>environment.yaml</code> 中该 stage 的字段决定（pg-propose 阶段已选定）。runner 通过 <code>pg-invoke-hook.py invoke-hook --action prepare_env</code> 触发，不传 --role / --instance（env-level 操作）。</p>
+
+<div class="tip-card card">
+<p style="margin:0"><strong>幂等性</strong>：prepare_env 是幂等的——多次执行不会产生副作用。hook 脚本内已做"已就绪则跳过"的判断。</p>
+</div>
+
+<h2>流程中断怎么恢复</h2>
+
+<table>
+  <tr><th>中断场景</th><th>恢复方式</th></tr>
+  <tr>
+    <td>会话中断（网络/超时）</td>
+    <td>重新 <code>$RUNNER next</code>，runner 从断点恢复，不丢失进度</td>
+  </tr>
+  <tr>
+    <td>Sub-agent 返回空</td>
+    <td><code>$RUNNER record failed</code> 触发重试（最多 <code>max_fail_retries</code> 次）</td>
+  </tr>
+  <tr>
+    <td><strong><code>workflow_failed</code>（铁律）</strong></td>
+    <td><strong>人工介入</strong>：修复根因 → 删除 <code>2-build/.pipeline-state.json</code> → 重新 <code>$RUNNER next</code> → runner 扫描 tasks.md checkbox，<strong>从第一个含未完成任务 <code>[ ]</code> 的章节恢复</strong></td>
+  </tr>
+</table>
+
+<div class="danger-card card">
+<h4 style="margin:0 0 8px">⚠ workflow_failed 恢复的关键点</h4>
+<p style="margin:0">不是<strong>从头开始</strong>！runner 重新扫描 tasks.md，定位到<strong>第一个未勾选 <code>[ ]</code> 的章节</strong>作为恢复起点。已完成的 <code>[x]</code> 章节全部跳过。这就是为什么 propose 阶段每个子任务都必须有 checkbox —— 它是 build 阶段断点恢复的依据。</p>
+</div>
+
+<h2>副产物目录结构</h2>
+<pre>
+.pg/changes/&lt;change&gt;/
+├── proposal.md                       ← pg-propose 产物（不动）
+├── design.md                         ← pg-propose 产物（不动）
+├── tasks.md                          ← pg-propose 产物（runner 持续更新 checkbox）
+├── environment.yaml                  ← pg-propose 产物（per-change SSOT）
+├── 1-propose-review/
+│   └── review-notes.md               ← 评审历史（归档保留，build 不读）
+└── 2-build/                          ← pg-build 过程产物
+    ├── context-chain.md
+    ├── .pipeline-state.json          ← state 文件（恢复用）
+    ├── known-issues.md
+    ├── final-gate-assessment.md
+    └── {track}-{N}-{kind}.md         ← 报告：verify / verify-fix / gate / gate-fix
+</pre>
+
+<h2>4.5 流程差异速查表</h2>
+
+<table>
+  <tr><th></th><th>标准流</th><th>快捷流</th><th>修复流</th><th>回归流</th></tr>
+  <tr><td>入口</td><td><code>/2-pg-propose</code> + <code>/3-pg-build</code></td><td><code>/2b-pg-quick-build</code></td><td><code>/5-pg-fix-issue</code></td><td><code>/4-pg-regression</code></td></tr>
+  <tr><td>设计文档</td><td>4 份</td><td>零产物落盘</td><td>仅诊断报告</td><td>仅问题清单</td></tr>
+  <tr><td>change 目录</td><td>是</td><td>否</td><td>否</td><td>否</td></tr>
+  <tr><td>人工参与</td><td>提案 review</td><td>无</td><td>确认复现方案</td><td>无</td></tr>
+  <tr><td>适用场景</td><td>正经开发、跨模块、涉 DB</td><td>小改动、单模块、≤8 tasks</td><td>Bug 修复</td><td>回归测试</td></tr>
+</table>
+</div>
+
+<!-- ============================================================ -->
+<div id="sec5" class="section">
+<h1>5. Bug 修复工作流</h1>
+
+<h2>5.1 传统 vs pg-skills</h2>
+<div class="compare-row">
+  <div class="compare-box compare-box-old">
+    <h4 style="color:var(--danger)">传统修复</h4>
+    <p>人工看日志 → 猜根因 → 改代码 → 提交 → CI 跑测试 → 修得对不对完全看人品</p>
+  </div>
+  <div class="compare-box compare-box-new">
+    <h4 style="color:var(--success)">pg-skills 修复</h4>
+    <p>系统化诊断 → 规划复现 → 用户确认 → 定位修复 → executor 验证 → PR / ESCALATE</p>
+  </div>
+</div>
+
+<h2>5.2 fix-issue 六阶段流程</h2>
+<div class="svg-container">
+<svg viewBox="0 0 650 280" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="10" width="180" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1"/>
+  <text x="100" y="30" font-size="12" font-weight="600" fill="#1e40af" text-anchor="middle">Phase 0: Load Config</text>
+  <text x="100" y="50" font-size="11" fill="#1e40af" text-anchor="middle">读取 project.yaml + AGENTS.md</text>
+
+  <line x1="190" y1="35" x2="210" y2="35" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+  <defs><marker id="a4" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+
+  <rect x="215" y="10" width="180" height="50" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1"/>
+  <text x="305" y="30" font-size="12" font-weight="600" fill="#6d28d9" text-anchor="middle">Phase 1: Call Chain</text>
+  <text x="305" y="50" font-size="11" fill="#6d28d9" text-anchor="middle">调用链分析 + 代码扫描</text>
+
+  <line x1="395" y1="35" x2="415" y2="35" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+
+  <rect x="420" y="10" width="180" height="50" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
+  <text x="510" y="30" font-size="12" font-weight="600" fill="#065f46" text-anchor="middle">Phase 2: Plan</text>
+  <text x="510" y="50" font-size="11" fill="#065f46" text-anchor="middle">复现步骤 + Success Criteria</text>
+
+  <rect x="10" y="85" width="590" height="40" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="6,3"/>
+  <text x="305" y="102" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">Phase 3: 用户确认（复现方案 + criteria）</text>
+  <text x="305" y="118" font-size="11" fill="#92400e" text-anchor="middle">确认后进入自动修复循环</text>
+
+  <line x1="305" y1="125" x2="305" y2="145" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+
+  <rect x="10" y="150" width="590" height="50" rx="6" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="305" y="170" font-size="12" font-weight="600" fill="#b91c1c" text-anchor="middle">Phase 4: 自动修复（主力 agent 诊断 + 修复代码）</text>
+  <text x="305" y="190" font-size="11" fill="#b91c1c" text-anchor="middle">定位根因 → 修改代码 → 进入验证</text>
+
+  <line x1="305" y1="200" x2="305" y2="215" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
+
+  <rect x="10" y="220" width="590" height="40" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="160" y="240" font-size="12" font-weight="600" fill="#1e40af" text-anchor="middle">Phase 5: Executor 验证</text>
+  <text x="400" y="240" font-size="12" font-weight="600" fill="#1e40af" text-anchor="middle">Phase 6: 通过 → PR / 失败 → ESCALATE</text>
+
+  <rect x="600" y="160" width="45" height="45" rx="22" fill="#10b981"/>
+  <text x="622" y="182" font-size="18" font-weight="700" fill="#fff" text-anchor="middle">↺</text>
+  <text x="622" y="198" font-size="9" fill="#10b981" text-anchor="middle">重试</text>
+</svg>
+</div>
+
+<h2>5.3 SMART Success Criteria 示例</h2>
+<pre>
+criteria:
+  - description: "创建 VM 后状态从 CREATING:DISK_COPYING 变为 RUNNING"
+    verify_method: api_call
+    endpoint: "GET /api/compute.webvirt.../v3/model-services/{id}"
+    expected: "status=RUNNING"
+
+  - description: "Agent 日志包含 6 字段 slog.Error"
+    verify_method: log_filter
+    log_path: "/var/log/webvirt-agent.log"
+    pattern: '"command_id":.*"instance_id":.*"action":.*"stage":.*"op":.*"error":'
+</pre>
+
+<div class="info-card card">
+  <strong>触发方式</strong>：在 opencode 中输入 <code>/5-pg-fix-issue</code>，然后描述问题。例如：<br>
+  <code>用户创建 VM 时，状态一直 CREATING 不变成 RUNNING</code>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div id="sec6" class="section">
+<h1>6. 回归测试与问题闭环</h1>
+
+<h2>6.1 回归流流程</h2>
+<div class="svg-container">
+<svg viewBox="0 0 650 120" xmlns="http://www.w3.org/2000/svg">
+  <rect x="10" y="20" width="130" height="50" rx="8" fill="#2563eb"/>
+  <text x="75" y="45" font-size="13" font-weight="600" fill="#fff" text-anchor="middle">按 suite 声明</text>
+  <text x="75" y="62" font-size="11" fill="#fff" text-anchor="middle">启动环境 + 跑测试</text>
+
+  <line x1="140" y1="45" x2="165" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#a5)"/>
+  <defs><marker id="a5" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+
+  <rect x="170" y="20" width="130" height="50" rx="8" fill="#7c3aed"/>
+  <text x="235" y="45" font-size="13" font-weight="600" fill="#fff" text-anchor="middle">每个失败单元</text>
+  <text x="235" y="62" font-size="11" fill="#fff" text-anchor="middle">调度 fix-test agent</text>
+
+  <line x1="300" y1="45" x2="325" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#a5)"/>
+
+  <rect x="330" y="20" width="130" height="50" rx="8" fill="#059669"/>
+  <text x="395" y="45" font-size="13" font-weight="600" fill="#fff" text-anchor="middle">输出 JSON 问题清单</text>
+  <text x="395" y="62" font-size="11" fill="#fff" text-anchor="middle">→ known-issues.md</text>
+
+  <line x1="460" y1="45" x2="485" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#a5)"/>
+
+  <rect x="490" y="20" width="130" height="50" rx="8" fill="#10b981"/>
+  <text x="555" y="45" font-size="13" font-weight="600" fill="#fff" text-anchor="middle">可选：修复</text>
+  <text x="555" y="62" font-size="11" fill="#fff" text-anchor="middle">pg-fix-regression-runner</text>
+</svg>
+</div>
+
+<h2>6.2 测试失败分流</h2>
+<div class="svg-container">
+<svg viewBox="0 0 600 130" xmlns="http://www.w3.org/2000/svg">
+  <ellipse cx="300" cy="20" rx="100" ry="18" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="300" y="25" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">test 失败</text>
+
+  <line x1="220" y1="38" x2="150" y2="65" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a6)"/>
+  <defs><marker id="a6" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+  <text x="150" y="58" font-size="11" fill="#10b981" text-anchor="middle">测试脚本错了？</text>
+  <rect x="60" y="70" width="180" height="40" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
+  <text x="150" y="90" font-size="12" font-weight="600" fill="#065f46" text-anchor="middle">fix-test agent</text>
+  <text x="150" y="105" font-size="11" fill="#065f46" text-anchor="middle">自动修复测试脚本</text>
+
+  <line x1="380" y1="38" x2="450" y2="65" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a6)"/>
+  <text x="450" y="58" font-size="11" fill="#ef4444" text-anchor="middle">生产代码有 bug？</text>
+  <rect x="360" y="70" width="180" height="40" rx="6" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
+  <text x="450" y="90" font-size="12" font-weight="600" fill="#b91c1c" text-anchor="middle">known-issues.md 记录</text>
+  <text x="450" y="105" font-size="11" fill="#b91c1c" text-anchor="middle">后续 /5-pg-fix-issue 处理</text>
+</svg>
+</div>
+
+<h2>6.3 regression.suite 配置声明</h2>
+<pre>
+regression:
+  suite:
+    frontend:
+      environment:
+        name: dev-local
+        required_roles: [backend, agent, frontend]
+      module: frontend
+      test_keys: [e2e]
+
+    backend:
+      environment:
+        name: dev-local
+        required_roles: [backend, agent]
+      module: backend
+      test_keys: [unit]
+
+    agent:
+      environment:
+        name: dev-3tier
+        required_roles: [backend, agent]
+      module: agent
+      test_keys: [unit]
+</pre>
+</div>
+
+<!-- ============================================================ -->
+<div id="sec7" class="section">
+<h1>7. 动手实操</h1>
+
+<h2>练习 1：环境感知（15min）</h2>
+<div class="card">
+<pre>
+<span style="color:#94a3b8"># 检查 pg-skills 是否接入正常</span>
+python3 .pg/skills/src/runtime/bin/pg doctor
+
+<span style="color:#94a3b8"># 读取 workflow config</span>
+python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-build
+
+<span style="color:#94a3b8"># 查看 propose 参考文档</span>
+ls .opencode/skills/pg-propose/references/
+</pre>
+<p><strong>目标</strong>：熟悉 pg 基础命令和文档位置。</p>
+</div>
+
+<h2>练习 2：快捷构建——改前端文案（15min）</h2>
+<div class="card">
+<p>在 opencode 中执行：</p>
+<pre>
+/2b-pg-quick-build
+描述：把登录页的 "登录" 按钮文案改为 "立即登录"，把 "注册" 改为 "免费注册"
+</pre>
+<p><strong>目标</strong>：体验快捷流——不写设计文档直接改代码。</p>
+<div class="tip-card card" style="margin-top:8px">
+  快捷流适合 ≤8 tasks、≤8 文件、单 module 的小改动。如果觉得不合适，直接退出改用标准流。
+</div>
+</div>
+
+<h2>练习 3：完整标准流——加一个 RPC 端点（20min）</h2>
+<div class="card">
+<p>在 opencode 中执行：</p>
+<pre>
+/2-pg-propose change-name=add-health-check-rpc
+描述：在 agent 端新增一个 HealthCheck RPC，backend 端定时调用检测 agent 存活
+</pre>
+<p><strong>目标</strong>：</p>
+<ul>
+  <li>观察 proposal / design / tasks 的生成过程</li>
+  <li>理解 stages × tracks  的展开逻辑</li>
+  <li>读懂 review-notes.md 的评审项</li>
+</ul>
+</div>
+
+<h2>练习 4：模拟一次 fix-issue（10min）</h2>
+<div class="card">
+<p>在 opencode 中执行：</p>
+<pre>
+/5-pg-fix-issue
+描述：agent 启动时如果 libvirtd 未运行，报错信息是英文堆栈，需要改为中文提示
+</pre>
+<p><strong>目标</strong>：熟悉 fix-issue 的执行流程和六阶段输出。</p>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div id="sec8" class="section">
+<h1>8. 常见问题与排查</h1>
+
+<h2>Q&A</h2>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle open"><strong>Build 跑到一半失败了怎么办？</strong></div>
+  <div class="collapse-body open">
+    <p>查看 <code>.pg/changes/&lt;name&gt;/2-build/*.md</code> 中的报告。gate 或 verify 报告会写明失败原因。修复后重跑 <code>/3-pg-build</code>。</p>
+  </div>
+</div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>怎么知道当前 pipeline 跑到哪一步了？</strong></div>
+  <div class="collapse-body">
+    <p>查看 <code>.pg/changes/&lt;name&gt;/2-build/.pipeline-state.json</code>。</p>
+  </div>
+</div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>提案评审时发现了问题，怎么改？</strong></div>
+  <div class="collapse-body">
+    <p>在 review-notes.md 中标记 <code>[ ]</code> 为 <code>[x]</code>（已修）或 <code>[~]</code>（跳过），然后执行 <code>/2.1-pg-propose-refine</code>。AI 会自动按 scope 精准修改 proposal / design / tasks。</p>
+  </div>
+</div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>怎么新增一个回归测试套件？</strong></div>
+  <div class="collapse-body">
+    <p>编辑 <code>.pg/project.yaml</code> 的 <code>regression.suite</code> 段，增加一个新 suite 配置：</p>
+<pre>
+regression:
+  suite:
+    my-new-suite:
+      environment:
+        name: dev-local
+        required_roles: []
+      module: backend
+      test_keys: [unit]
+</pre>
+  </div>
+</div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>怎么加一个测试环境（比如 staging）？</strong></div>
+  <div class="collapse-body">
+    <p>编辑 <code>.pg/project.yaml</code> 的 <code>environments</code> 段，新增一个环境 + 各 role 的 actions。然后为该环境编写对应的 hook 脚本（prepare_env / clean_env / role start/stop/logs）。</p>
+  </div>
+</div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>pg-skills 版本怎么升级？</strong></div>
+  <div class="collapse-body">
+<pre>
+<span style="color:#94a3b8"># 升级到最新版</span>
+pg upgrade
+
+<span style="color:#94a3b8"># 升级到指定版</span>
+pg upgrade v0.3.0
+
+<span style="color:#94a3b8"># 查看远程可用版本</span>
+pg upgrade --list
+
+<span style="color:#94a3b8"># 校验</span>
+pg doctor
+</pre>
+  </div>
+</div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>怎么验证 hooks 写得对不对？</strong></div>
+  <div class="collapse-body">
+    <p>用 <code>pg-invoke-hook.py</code> 的 <code>logs</code> 动作（只读操作，安全无害）验证 hook 脚本是否能正常加载并执行：</p>
+<pre>
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --change test-hooks \
+  --env dev-local \
+  --role backend \
+  --instance backend-1 \
+  --action logs \
+  --tail-lines 10
+</pre>
+  </div>
+</div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>module 命令和 hook 脚本的区别到底是什么？</strong></div>
+  <div class="collapse-body">
+    <p>核心区别两点：</p>
+    <ol>
+      <li><strong>是否有 PG_* 注入</strong>：hook 脚本有 <code>$PG_ROLE</code>、<code>$PG_ENV</code> 等；module 命令没有</li>
+      <li><strong>错误处理方式</strong>：hook 脚本用 <code>pg_exit</code> / <code>pg_fail</code> 写 result.json；module 命令只看 exit code</li>
+    </ol>
+    <p>判断标准很简单：看它在 project.yaml 中配置在<strong>哪个位置</strong>——modules 下的都是 module 命令，environments 下的都是 hook。</p>
+  </div>
+</div>
+</div>
+
+<!-- ============================================================ -->
+<div id="sec-appendix" class="section">
+<h1>附录：参考速查卡</h1>
+
+<h2>命令速查</h2>
+<table>
+  <tr><th>命令</th><th>功能</th></tr>
+  <tr><td><code>/1-pg-define</code></td><td>定界——扫描边界</td></tr>
+  <tr><td><code>/2-pg-propose</code></td><td>提案——生成设计文档</td></tr>
+  <tr><td><code>/2.1-pg-propose-refine</code></td><td>按评审意见修设计</td></tr>
+  <tr><td><code>/2b-pg-quick-build</code></td><td>小改动直接编码</td></tr>
+  <tr><td><code>/3-pg-build</code></td><td>构建——pipeline 实现</td></tr>
+  <tr><td><code>/4-pg-regression</code></td><td>回归——跑全量测试</td></tr>
+  <tr><td><code>/5-pg-fix-issue</code></td><td>修复——系统化修 bug</td></tr>
+  <tr><td><code>/6-pg-archive</code></td><td>归档已完成变更</td></tr>
+</table>
+
+<h2>关键路径</h2>
+<pre>
+配置 SSOT：        .pg/project.yaml
+解读命令：         python3 .pg/skills/src/opencode/scripts/pg-parse-config.py &lt;workflow&gt;
+检查接入：         python3 .pg/skills/src/runtime/bin/pg doctor
+升级：             pg upgrade
+调用 hook：        python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+                    --change &lt;C&gt; --env &lt;E&gt; --role &lt;R&gt; --instance &lt;I&gt; --action &lt;A&gt;
+</pre>
+
+<h2>产物速查</h2>
+<pre>
+.pg/changes/&lt;name&gt;/
+├── proposal.md            ← 做什么、为什么
+├── design.md              ← 怎么做、验证标准
+├── tasks.md               ← stages × tracks  任务矩阵
+├── environment.yaml       ← 环境选择 SSOT
+├── 1-propose-review/
+│   └── review-notes.md    ← 评审记录
+└── 2-build/               ← pipeline 产物
+    ├── *.md               ← 各 track 的验证/门控报告
+    └── final-gate-assessment.md
+</pre>
+
+<h2>错误分类速查</h2>
+<table>
+  <tr><th>Category</th><th>Severity</th><th>Recoverable</th></tr>
+  <tr><td>prereq_missing</td><td>blocked</td><td>否</td></tr>
+  <tr><td>port_in_use</td><td>recoverable</td><td>是</td></tr>
+  <tr><td>timeout</td><td>recoverable</td><td>是</td></tr>
+  <tr><td>test_failure</td><td>recoverable</td><td>是</td></tr>
+  <tr><td>config_invalid</td><td>blocked</td><td>否</td></tr>
+  <tr><td>invariant_violation</td><td>blocked</td><td>是</td></tr>
+</table>
+
+<p style="text-align:center; margin-top:48px; color:var(--muted); font-size:13px">
+  pg-skills Workshop · 更多文档见 <code>.pg/skills/README.md</code>
+</p>
+
+</div><!-- /section -->
+
+<script>
+// Progress bar
+window.addEventListener('scroll', () => {
+  const h = document.documentElement.scrollHeight - window.innerHeight;
+  const p = window.scrollY / h * 100;
+  document.getElementById('progress-bar').style.width = p + '%';
+});
+
+// Theme toggle
+document.getElementById('theme-toggle').addEventListener('click', () => {
+  document.body.classList.toggle('dark');
+  const btn = document.getElementById('theme-toggle');
+  btn.textContent = document.body.classList.contains('dark') ? '☀️ 亮色' : '🌙 暗色';
+});
+
+// Sidebar navigation
+const navLinks = document.querySelectorAll('#sidebar a');
+const sections = document.querySelectorAll('.section');
+
+navLinks.forEach(link => {
+  link.addEventListener('click', (e) => {
+    e.preventDefault();
+    const id = link.getAttribute('href').slice(1);
+    sections.forEach(s => s.classList.remove('active'));
+    document.getElementById(id).classList.add('active');
+    navLinks.forEach(l => l.classList.remove('active'));
+    link.classList.add('active');
+    window.scrollTo({ top: 0, behavior: 'smooth' });
+  });
+});
+
+// Observe scroll to update sidebar
+const observer = new IntersectionObserver((entries) => {
+  entries.forEach(entry => {
+    if (entry.isIntersecting) {
+      const id = entry.target.id;
+      navLinks.forEach(l => {
+        l.classList.remove('active');
+        if (l.getAttribute('href') === '#' + id) l.classList.add('active');
+      });
+    }
+  });
+}, { threshold: 0.3 });
+sections.forEach(s => observer.observe(s));
+
+// Collapsible QA
+function toggleQA(card) {
+  const toggle = card.querySelector('.collapse-toggle');
+  const body = card.querySelector('.collapse-body');
+  toggle.classList.toggle('open');
+  body.classList.toggle('open');
+}
+
+// Copy buttons for code blocks
+document.querySelectorAll('pre').forEach(pre => {
+  const btn = document.createElement('button');
+  btn.className = 'copy-btn';
+  btn.textContent = '复制';
+  btn.onclick = () => {
+    navigator.clipboard.writeText(pre.textContent.replace('复制', ''));
+    btn.textContent = '已复制!';
+    setTimeout(() => { btn.textContent = '复制'; }, 2000);
+  };
+  pre.appendChild(btn);
+});
+
+// Checkbox persistence
+document.querySelectorAll('.checklist input[type="checkbox"]').forEach(cb => {
+  const key = 'pg-checklist-' + cb.parentElement.textContent.trim().slice(0, 30);
+  const saved = localStorage.getItem(key);
+  if (saved === 'true') cb.checked = true;
+  cb.addEventListener('change', () => {
+    localStorage.setItem(key, cb.checked);
+  });
+});
+
+// Show first section by default
+sections.forEach((s, i) => {
+  s.classList.toggle('active', i === 0);
+});
+</script>
+</body>
+</html>
