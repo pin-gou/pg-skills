@@ -93,25 +93,17 @@ modules:
       e2e: "..."             # 可能缺失
 ```
 
-### 1.5 Environment 配置（从 config.yaml `environments.keys()[0]` 读）
+### 1.5 Environment（仅 name）
 
 ```yaml
 env:
   name: <env_name>          # 如 dev-local
-  instances:
-    backend: [{name: backend-1, host: localhost, port: 9080}]
-    frontend: [...]         # 可能没有
-  actions:
-    role.backend.start:
-      script: .pg/scripts/backend-up.sh
-      args: ["backend", "backend-1", "--grpc"]
-    role.backend.stop:
-      script: .pg/scripts/backend-down.sh
-      args: ["backend", "backend-1"]
-    role.backend.logs:
-      script: .pg/scripts/backend-logs.sh
-      args: ["{lines:100}"]
 ```
+
+> **详细配置（instances / actions）不注入到 prompt**。请在步骤 1 环境自检时调用
+> `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-env <env_name>`
+> 获取 `{"name": ..., "resolved_actions": {<env>.<role>.<instance>.<action>: {"cmd": "bash ...", "timeout_seconds": N}}}`，
+> 把 `resolved_actions` 缓存到本地变量（如 `ENV_RESOLVED`）供步骤 3 verify 使用。
 
 ### 1.6 限制与边界
 
@@ -119,10 +111,10 @@ env:
 limits:
   max_retries_per_task: 3       # 同一 task 连续 3 次失败 → 终止
   max_total_retries: 8          # 全部 task 累计失败上限
-branch:
-  name: feat/pg/micro-<slug>    # 主 agent 已切好, 你就在该分支工作
-  base: master                   # 用于 self_check 范围对比
 ```
+
+> **pg-quick-build 不切分支**：直接在当前分支修改代码。每 task 完成时 `git add -A && git commit` 即可。
+> 修改前确保 `git status` 干净；如有未提交改动，先 `git stash` 暂存，task 结束后 `git stash pop` 还原。
 
 ---
 
@@ -131,13 +123,19 @@ branch:
 ### 步骤 1：环境自检（一次性）
 
 ```bash
-git status --porcelain          # 必须是空或在 main 分支
-git branch --show-current        # 应为 feat/pg/micro-<slug>
-git log <base>..HEAD --oneline   # 启动时为空（主 agent 已 init commit）
+git status --porcelain          # 必须为空 (pg-quick-build 不切分支, 在当前分支工作)
+git log --oneline -5            # 确认最近 5 个 commit 是预期的基线
 ```
 
-如果当前分支不对 → `git checkout -b feat/pg/micro-<slug>` 自行补救。
-如果 `git status` 非空 → 提交前先 `git stash`，处理完再 `git stash pop`。
+**获取 env 详情并缓存**（与上一步合并执行）：
+
+```bash
+ENV_RESOLVED=$(python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-env <env_name>)
+# ENV_RESOLVED 是 JSON: {"name": "<env_name>", "resolved_actions": {<env>.<role>.<instance>.<action>: {"cmd": "bash ...", "timeout_seconds": N}, ...}}
+# verify task 步骤 3 直接用 ENV_RESOLVED 里的 .cmd 字符串调 bash
+```
+
+如果 `git status` 非空 → 提交前先 `git stash`，处理完再 `git stash pop`（不要丢弃用户已有的未提交改动）。
 
 ### 步骤 2：按 tasks 顺序执行
 
@@ -199,7 +197,11 @@ for task in tasks:
 1. 启动服务：
 
 ```bash
-bash <env.actions["role.<role>.start"].script> <args[0]> <args[1]> ...
+# 从步骤 1 缓存的 ENV_RESOLVED 取目标 role+instance 的 start 命令
+# 例: dev-local.backend.backend-1.start → "bash .pg/hooks/role-backend-start.sh backend backend-1 --grpc"
+START_KEY="<env_name>.<role>.<instance>.start"
+START_CMD=$(echo "$ENV_RESOLVED" | python3 -c "import json,sys; print(json.load(sys.stdin)['resolved_actions']['$START_KEY']['cmd'])")
+bash -c "$START_CMD"
 ```
 
 2. 等待端口就绪（轮询 netstat，最多 60s）：
@@ -220,7 +222,13 @@ curl -sS -i http://localhost:<port><path> | head -30
 mvn checkstyle:check 2>&1 | tail -10
 ```
 
-4. 决定是否收尾服务：默认保持运行（让主 agent 决定是否 stop）；如果 verify 是最后一个 task 且 evidence 收集完成 → `bash <env.actions["role.<role>.stop"].script> <args...>`
+4. 决定是否收尾服务：默认保持运行（让主 agent 决定是否 stop）；如果 verify 是最后一个 task 且 evidence 收集完成 → 用 `ENV_RESOLVED` 解析 stop 命令并执行：
+
+```bash
+STOP_KEY="<env_name>.<role>.<instance>.stop"
+STOP_CMD=$(echo "$ENV_RESOLVED" | python3 -c "import json,sys; print(json.load(sys.stdin)['resolved_actions']['$STOP_KEY']['cmd'])")
+bash -c "$STOP_CMD"
+```
 
 5. 收集结果：
 
@@ -271,23 +279,11 @@ def self_check():
     if v_in_design - v_in_tasks:
         issues.append(f"未覆盖 V-*: {v_in_design - v_in_tasks}")
 
-    # 3. Scope creep: git diff --name-only 相对于 base 分支 ⊆ design.files
-    declared = {f["path"] for f in design["files"]}
-    changed = run(f"git diff --name-only {branch.base}..HEAD")
-    extra = set(changed) - declared
-    if extra:
-        issues.append(f"scope creep: {extra}")
-
-    # 4. 最终 lint + test.unit 日志干净
+    # 3. 最终 lint + test.unit 日志干净
     #    （检查最近一次 dev task 返回的 output）
     last_dev = [r for t, r in zip(tasks, results) if t["sub"] == "dev"][-1]
     if "BUILD SUCCESS" not in last_dev["output"] and "Failures: 0, Errors: 0" not in last_dev["output"]:
         issues.append("最终 lint/test 日志不干净")
-
-    # 5. commit 数 ≥ tasks 数
-    commit_count = run(f"git log {branch.base}..HEAD --oneline | wc -l")
-    if commit_count < len(tasks):
-        issues.append(f"commit 数 ({commit_count}) < tasks 数 ({len(tasks)})")
 
     return issues
 ```
@@ -301,7 +297,6 @@ def self_check():
 
 ```yaml
 status: SUCCESS | FAILED | ABORTED
-branch: feat/pg/micro-<slug>
 commits:
   - sha: abc1234
     message: "feat(micro): 为 RoleController 加 GET 列表导出 csv 端点"
@@ -316,9 +311,7 @@ evidence:                            # verify 子阶段产出
   V-2: "[INFO] BUILD SUCCESS"
 self_check:
   v_coverage: PASS | FAIL
-  scope_creep: PASS | FAIL
   lint_clean: PASS | FAIL
-  commits_count: PASS | FAIL
   all_tasks_success: PASS | FAIL
 issues: []                           # self_check 发现的问题
 summary: "<一句话总结: 例如 '3 个 task 全部完成, 2 条 V-* 验证通过'>"
@@ -328,7 +321,7 @@ outputs:                             # 本次变更涉及的文件
 ```
 
 **主 agent 收尾行为**：
-- `status=SUCCESS` → 输出最终摘要 + 推送建议（仅文字，不执行）
+- `status=SUCCESS` → 输出最终摘要（commit 列表 + V-* evidence + self_check）
 - `status=FAILED` / `ABORTED` → 输出失败报告 + 建议走 `pg-propose`
 
 ---
@@ -341,7 +334,7 @@ outputs:                             # 本次变更涉及的文件
 | 累计失败 > 8 | ABORTED + 报告 |
 | 服务启动超时（>60s）| verify task 标 FAILED → 累计 +1 → 下一 task |
 | `try_fix` 遇到未知错误 | 返回 False → 当前 attempt 失败 → 进入下一 attempt |
-| 自检 5 项任一 FAIL | status=FAILED 返回，由主 agent 决定 |
+| 自检 3 项任一 FAIL | status=FAILED 返回，由主 agent 决定 |
 | 自己识别的脚本错误（如脚本不存在） | ABORTED + 报告 |
 
 ---

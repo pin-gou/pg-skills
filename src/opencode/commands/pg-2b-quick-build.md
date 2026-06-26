@@ -2,7 +2,6 @@
 name: 2b-pg-quick-build
 description: 2b. 跳过 pg-propse，不生成 proposal.md/design.md/tasks.md，直接构建代码
 trigger: slash
-model: pg-router/pg-expert
 ---
 
 # Pg Quick Build

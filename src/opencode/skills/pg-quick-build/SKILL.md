@@ -59,12 +59,11 @@ Phase 0: 定界
   ├─ 0.2 构造 in-memory design
   ├─ 0.3 构造 in-memory tasks
   ├─ 0.4 上下文预估 + 强停判断
-  └─ 0.5 question 确认 + TodoWrite + 切分支
-                                                      
-Phase 1: 派遣                                           
-  ├─ 1.0 切 feat/pg/micro-<slug> 分支
-  ├─ 1.1 构造 ctx dict (design + tasks + modules + env + limits)
-  └─ 1.2 Task tool → pg-quick-build/worker ──────────►  接收 ctx
+  └─ 0.5 question 确认 + TodoWrite
+                                                       
+Phase 1: 派遣
+  ├─ 1.0 构造 ctx dict (design + tasks + modules + env + limits)
+  └─ 1.1 Task tool → pg-quick-build/worker ──────────►  接收 ctx
                                                             ├─ 步骤1: 环境自检
                                                             ├─ 步骤2: 循环 tasks
                                                             │    ├─ sub=test  → 写测试
@@ -72,7 +71,7 @@ Phase 1: 派遣
                                                             │    └─ sub=verify → 启服务 + curl + lint
                                                             ├─ 步骤3: git commit 每 task
                                                             ├─ 步骤4: try_fix 自助修
-                                                            └─ 步骤5: self_check 5 项
+                                                            └─ 步骤5: self_check 3 项
                                                       
 Phase 2: 收尾                                     ◄─────  返回 {status, commits, evidence,
   ├─ 2.0 校验返回值结构                                     self_check, issues, summary}
@@ -187,7 +186,7 @@ if estimate > 0.5 * MODEL_CTX:
 | 用户需求涉及 DB migration / K8s 资源 | 走 pg-propose |
 | 用户需求涉及多 track 联调 | 走 pg-propose |
 
-#### 步骤 0.5：question 确认 + TodoWrite + 切分支
+#### 步骤 0.5：question 确认 + TodoWrite
 
 **展示计划**：
 
@@ -198,6 +197,7 @@ if estimate > 0.5 * MODEL_CTX:
 **变更摘要**: <design.summary>
 **Environment**: <env_name> (config.yaml 中 environments 第一个)
 **Module**: <唯一 module>
+**分支**: 保持在当前分支（pg-quick-build 不切分支，直接在原分支上修改代码）
 
 ### Design
 | 文件 | 改动 | 预估行数 |
@@ -229,7 +229,7 @@ if estimate > 0.5 * MODEL_CTX:
 ```
 header: 确认计划
 options:
-  - 确认，开始执行 — 切分支、派遣 worker
+  - 确认，开始执行 — 派遣 worker
   - 修改计划 — 用户提供调整
   - 改用 pg-propose — 范围太大, 走完整流程
 ```
@@ -237,13 +237,7 @@ options:
 **用户确认后**：
 
 1. 创建 TodoWrite（9 项：步骤 0.0-0.5 + Phase 1 派遣 + Phase 2 收尾）
-2. 切分支：
-
-```bash
-git checkout -b feat/pg/micro-<slug>
-```
-
-3. 更新 TodoWrite，准备进入 Phase 1
+2. 更新 TodoWrite，准备进入 Phase 1
 
 #### 步骤 0.6：Phase 0 自核查
 
@@ -255,7 +249,6 @@ git checkout -b feat/pg/micro-<slug>
 - [ ] 上下文预估 ≤ 0.5 * MODEL_CTX
 - [ ] 强停条件全部通过
 - [ ] question 已确认
-- [ ] 分支已切 (feat/pg/micro-<slug>)
 - [ ] TodoWrite 已创建
 ```
 
@@ -273,17 +266,11 @@ ctx = {
   "tasks": tasks,                          # in-memory tasks list
   "modules": config["modules"],            # 完整 modules 段
   "env": {
-    "name": env_name,                      # environments[0]
-    "instances": env_def["roles"][role]["instances"],
-    "actions": env_def["roles"][role]["actions"],  # role.<role>.{start,stop,logs}
+    "name": env_name,                      # environments[0] - worker 自行 --resolve-env 取详情
   },
   "limits": {
     "max_retries_per_task": 3,
     "max_total_retries": 8,
-  },
-  "branch": {
-    "name": f"feat/pg/micro-{slug}",
-    "base": "master",
   },
 }
 ```
@@ -315,24 +302,27 @@ result = task(
 ## 4. Module 配置
 {yaml.dump(modules_for_tasks, allow_unicode=True)}
 
-## 5. Environment 配置
-{yaml.dump(env, allow_unicode=True)}
+## 5. Environment（仅 name）
+env.name: {env_name}
+> 环境的 instances / actions 等详情不注入到 prompt；请在步骤 1 环境自检中自行调用
+> `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-env {env_name}`
+> 获取 `resolved_actions` 后缓存到本地变量供后续 verify task 使用。
 
 ## 6. 限制与边界
 - max_retries_per_task: 3
 - max_total_retries: 8
-- 分支: feat/pg/micro-{slug} (你应已在该分支)
+- 分支: 保持当前分支（pg-quick-build 不切分支）
 - 禁止修改 modules[*].root 之外的目录
 - 禁止跨 task 边界修复
 - 禁止 git push / gh pr create
 
 ## 7. 你的完整工作流
 （详见 .opencode/agents/pg-quick-build/worker.md 完整说明）
-- 步骤1: 环境自检 (git status, branch, log)
+- 步骤1: 环境自检 (git status, log) + --resolve-env 缓存
 - 步骤2: 循环 tasks, 每 task 完成后 git commit
 - 步骤3: 按 sub 分支执行 (test/dev/verify)
 - 步骤4: 失败时 try_fix 自助修
-- 步骤5: self_check 5 项 (返回前必做)
+- 步骤5: self_check 3 项 (返回前必做)
 
 ## 8. 返回格式
 {yaml.dump(return_schema, allow_unicode=True)}
@@ -342,12 +332,10 @@ result = task(
 
 #### 步骤 1.3：接收 result，做最小校验
 
-主 agent 只校验返回值的**结构完整性**（不重复 worker 的 5 项 self_check）：
+主 agent 只校验返回值的**结构完整性**（不重复 worker 的 3 项 self_check）：
 
 ```python
 assert result["status"] in ("SUCCESS", "FAILED", "ABORTED")
-assert result["branch"] == f"feat/pg/micro-{slug}"
-assert len(result["commits"]) >= len(tasks)
 assert isinstance(result["evidence"], dict)
 assert isinstance(result["self_check"], dict)
 ```
@@ -366,10 +354,10 @@ assert isinstance(result["self_check"], dict)
 ## 微变更完成
 
 **变更名**: {slug}
-**分支**: feat/pg/micro-{slug}
 **Environment**: {env_name}
 **Module**: {module_name}
 **Tasks**: {len(completed)}/{len(tasks)} 完成
+**Commit 数**: {len(commits)} (worker 每 task 一 commit)
 
 | # | sub | 标题 | commit | 状态 |
 |---|-----|------|--------|------|
@@ -385,17 +373,12 @@ assert isinstance(result["self_check"], dict)
 | 检查项 | 结果 |
 |--------|------|
 | V-* 覆盖 | ✅ |
-| Scope creep | ✅ |
 | Lint/test 干净 | ✅ |
-| Commit 数 ≥ tasks | ✅ |
 | 所有 task SUCCESS | ✅ |
 
 ### 后续建议（仅文字，不执行）
-- 推送并创建 PR:
-  ```bash
-  git push origin feat/pg/micro-{slug}
-  gh pr create --base master --title "micro: <summary>" --body "..."
-  ```
+- 查看改动: `git status` / `git diff`
+- 提交暂存: `git add -A && git commit --amend` (合并到上一个 commit) 或 `git reset --soft HEAD~N` 后重整
 - 如需正式 proposal 化以备归档: 走 `/2-pg-propose <slug>`
 - 如需合并到 master: 走 `/4-pg-verify-and-merge <slug>`（注意：微变更无 review-notes，pg-verify-and-merge 可能要求走 pg-propose 后再触发）
 ```
@@ -424,8 +407,8 @@ assert isinstance(result["self_check"], dict)
 - 或手动修复后重新 `/2b-pg-quick-build <summary>` 重跑（会基于现有分支继续）
 
 ### 当前分支状态
-git log feat/pg/micro-{slug} --oneline
-<已有 commits 列表>
+git log --oneline -10
+<最近 10 个 commits>
 ```
 
 ---
@@ -455,7 +438,6 @@ git log feat/pg/micro-{slug} --oneline
 
 ### 基础设施失败
 
-- `git checkout -b` 失败 → 报告（不计入重试）
 - `pg-parse-config.py` exit code ≠ 0 → 修复 config.yaml 后重试
 
 ---
@@ -483,7 +465,7 @@ git log feat/pg/micro-{slug} --oneline
 - ❌ **禁止**在 `.pg/changes/` 下创建任何目录
 - ❌ **禁止**加载 worker prompt 之外的 `pg-*` SKILL
 - ❌ **禁止**主 agent 自己执行 mvn / curl / 启停服务（这些全部由 worker 完成）
-- ❌ **禁止**主 agent 自己做 self_check（worker 的 5 项检查已足够）
+- ❌ **禁止**主 agent 自己做 self_check（worker 的 3 项检查已足够）
 - ❌ **禁止** git push / gh pr create（推送由用户自行决定）
 
 ---

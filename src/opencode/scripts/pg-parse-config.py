@@ -911,6 +911,20 @@ def main():
                 test_key=args[i + 2])
             print(json.dumps(result, ensure_ascii=False))
             i += 3
+        elif args[i] == "--resolve-env" and i + 1 < len(args):
+            env_name = args[i + 1]
+            envs = data.get("environments") or {}
+            if env_name not in envs:
+                print(json.dumps(
+                    {"error": f"environment not found: {env_name}",
+                     "available": list(envs.keys())},
+                    ensure_ascii=False))
+            else:
+                resolved = compute_resolved_actions({env_name: envs[env_name]})
+                print(json.dumps(
+                    {"name": env_name, "resolved_actions": resolved},
+                    ensure_ascii=False))
+            i += 2
         else:
             print(json.dumps({"error": f"Unknown argument: {args[i]}"}, ensure_ascii=False))
             i += 1
