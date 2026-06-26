@@ -260,6 +260,9 @@ def run_script(script_path, *args, change=None, track_id=None):
 
 
 def run_bash(command, timeout_seconds=None, log_path=None, header="", change=None, track_id=None):
+    # Convert timeout_seconds to int if it is a string
+    if timeout_seconds is not None and isinstance(timeout_seconds, str):
+        timeout_seconds = int(timeout_seconds)
     """Execute a bash command, optionally teeing output to a log file in real time.
 
     When log_path is provided, opens the file in append mode and writes each
@@ -347,8 +350,8 @@ def _get_next_call_timeout(config):
     for env_name, env_cfg in config.get("environments", {}).items():
         for hook in ("prepare_env", "clean_env"):
             to = env_cfg.get(hook, {}).get("timeout_seconds")
-            if to and to > max_to:
-                max_to = to
+            if to and int(to) > max_to:
+                max_to = int(to)
     _TIMEOUT_CACHE = max_to + 30
     return _TIMEOUT_CACHE
 
