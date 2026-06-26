@@ -3133,6 +3133,7 @@ def _resume_waiting(config, change, state, cur, init_commit=None):
             ctx["cycles_remaining"] = ctx["max_gate_fix_retries"] - gate_cycles
             return dispatch_fix_gate_action(item_id, gate_cycles, ctx, config=config)
         ctx = filter_track_context(config, item_id, "fix", change=change)
+        ctx["_change"] = change
         return dispatch_fix_action(item_id, cur.get("fix_cycles", 1), ctx)
 
     ctx = filter_track_context(config, item_id, sub, change=change)
@@ -3550,6 +3551,7 @@ def cmd_record(change, status, report_path="", summary="", outputs="", issues=""
             save_state(state)
             fix_cycle = cur.get("fix_cycles", 1)
             ctx = filter_track_context(config, item_id, "fix", change=change)
+            ctx["_change"] = change
             return _inject_commit(
                 dispatch_fix_action(item_id, fix_cycle, ctx),
                 change, item_id, sub, status,
@@ -3615,6 +3617,7 @@ def cmd_record(change, status, report_path="", summary="", outputs="", issues=""
         save_state(state)
 
         ctx = filter_track_context(config, item_id, "fix", change=change)
+        ctx["_change"] = change
         return _inject_commit(
             dispatch_fix_action(item_id, fix_cycles + 1, ctx),
             change, item_id, sub, status,
