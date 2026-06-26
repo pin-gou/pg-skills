@@ -203,24 +203,38 @@ def process_issue(issue: dict, suite: str, run_dir: Path) -> dict:
         print(f"  ❌ {result['errorMessage']}", file=sys.stderr)
         return result
 
-    # 2. Write prompt file
-    prompt_dir = run_dir / "prompts"
-    prompt_dir.mkdir(parents=True, exist_ok=True)
-    prompt_file = prompt_dir / f"{idx}-prompt.txt"
-    prompt_text = f"""issue:
-  id: {idx}
-  suite: {suite}
-  title: {title}
-  description: {issue.get('description', '')}
-  component: {issue.get('component', '')}
-  file: {issue.get('file', '')}
-  test_targets: {json.dumps(issue.get('test_targets', []))}
-  expected: {issue.get('expected', '')}
-  actual: {issue.get('actual', '')}
-  branchName: {branch}
+    # 2. Write prompt file (Markdown format)
+    branch_slug = branch.replace("fix/", "", 1)
+    issue_dir = run_dir / "fix-issues" / f"{idx}-{branch_slug}"
+    issue_dir.mkdir(parents=True, exist_ok=True)
+    prompt_file = issue_dir / "1-prompt.md"
+    test_targets_str = ', '.join(issue.get('test_targets', [])) or '(无)'
+    prompt_text = f"""# Issue #{idx}: {title}
 
-config:
-  defaultBranch: {DEFAULT_BRANCH}
+## 上下文
+
+| 字段 | 值 |
+|------|-----|
+| Suite | {suite} |
+| Component | {issue.get('component', '')} |
+| 源文件 | {issue.get('file', '')} |
+| 默认分支 | {DEFAULT_BRANCH} |
+| 修复分支 | `{branch}` |
+| 受影响的测试 | {test_targets_str} |
+
+## 预期行为
+
+{issue.get('expected', '')}
+
+## 实际行为
+
+{issue.get('actual', '')}
+
+## 根因
+
+{issue.get('description', '')}
+
+## 指令
 
 请按 fix-prod 工作流执行：检查工作区 → 加载 pg-fix-issue SKILL 修复 → git commit → 输出 JSON。
 """
@@ -237,15 +251,20 @@ config:
             capture_output=True, text=True,
             timeout=7200,  # 2h per issue max
         )
+        # Persist agent output for audit
+        agent_log = issue_dir / "2-agent.log"
+        agent_log.write_text(
+            f"=== STDOUT ===\n{fix_proc.stdout}\n=== STDERR ===\n{fix_proc.stderr}\n=== EXIT: {fix_proc.returncode} ===",
+            encoding="utf-8")
     except subprocess.TimeoutExpired:
         result["status"] = "failed"
         result["errorMessage"] = "subprocess timeout (2h)"
         print(f"  ❌ 超时", file=sys.stderr)
+        # Persist partial agent output if available
+        agent_log = issue_dir / "2-agent.log"
+        agent_log.write_text("=== TIMEOUT (2h) ===\nstdout/stderr not available", encoding="utf-8")
         _cleanup(branch)
         return result
-
-    # Clean up prompt file
-    prompt_file.unlink(missing_ok=True)
 
     if fix_proc.returncode != 0:
         result["status"] = "failed"
@@ -353,13 +372,14 @@ def _cleanup(branch):
 
 
 def _write_result_file(result: dict, run_dir: Path):
-    """Write per-issue result JSON to <run_dir>/results/."""
-    results_dir = run_dir / "results"
-    results_dir.mkdir(parents=True, exist_ok=True)
-    now = datetime.now().strftime("%Y%m%d-%H%M")
-    pr_suffix = f"-pr{result.get('prNumber', '')}" if result.get('prNumber') else ""
-    filename = f"{now}-{result['suite']}-{result['id']}{pr_suffix}.json"
-    result_file = results_dir / filename
+    """Write per-issue result JSON to fix-issues/<idx>-<slug>/3-result.json."""
+    idx = result.get("id", "unknown")
+    suite = result.get("suite", "unknown")
+    branch = result.get("branchName", f"fix/{suite}-unknown")
+    branch_slug = branch.replace("fix/", "", 1)
+    issue_dir = run_dir / "fix-issues" / f"{idx}-{branch_slug}"
+    issue_dir.mkdir(parents=True, exist_ok=True)
+    result_file = issue_dir / "3-result.json"
     result_file.write_text(
         json.dumps(result, indent=2, ensure_ascii=False),
         encoding="utf-8",
@@ -393,7 +413,7 @@ def write_summary(results: list[dict], run_dir: Path):
     """Write final summary report."""
     run_dir.mkdir(parents=True, exist_ok=True)
     now = datetime.now().strftime("%Y%m%d-%H%M")
-    summary_file = run_dir / f"summary-{now}.md"
+    summary_file = run_dir / "fix-issue-runner-summary.md"
 
     success = [r for r in results if r["status"] == "success"]
     escalate = [r for r in results if r["status"] == "escalate"]
@@ -438,7 +458,7 @@ def write_summary(results: list[dict], run_dir: Path):
         lines.append("")
 
     lines.append("---\n")
-    lines.append(f"**结果文件**: `{run_dir}/results/`")
+    lines.append(f"**结果文件**: `{run_dir}/fix-issues/`")
 
     summary_file.write_text("\n".join(lines), encoding="utf-8")
     print(f"\n📋 汇总报告: {summary_file}")
@@ -452,7 +472,7 @@ def main():
     )
     parser.add_argument("--run-dir", default=None,
                         help="Run directory (e.g. .pg/regression/backend-20260627-01). "
-                             "Sets results/ and summary output paths. "
+                             "Sets fix-issues/ and summary output paths. "
                              "Defaults to the latest <suite>-<date>-<NN> dir.")
     args = parser.parse_args()
 

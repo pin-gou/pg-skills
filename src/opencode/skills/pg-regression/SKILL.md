@@ -80,10 +80,12 @@ regression:
 ├── <env>/logs/                                      # hooks 日志（prepare_env/start/stop）
 │   └── env.prepare_env.log
 │   └── role.<role>.<action>@<instance>.log
-├── prompts/                                         # runner 修复 prompt
-├── results/                                         # runner 修复结果
-│   └── <datetime>-<suite>-<id>-pr<N>.json
-└── summary-<datetime>.md                            # 人类可读汇总报告
+├── fix-issues/                                     # per-issue 审计目录（prompt + log + result）
+│   └── <idx>-<slug>/
+│       ├── 1-prompt.md          # 发给 fix-prod agent 的提示词
+│       ├── 2-agent.log          # opencode run 的 stdout + stderr
+│       └── 3-result.json        # 修复结果（含 PR 链接）
+└── fix-issue-runner-summary.md                    # 人类可读汇总报告
 ```
 
 首次运行自动创建目录。
@@ -501,14 +503,14 @@ mkdir -p "$RUN_DIR"
 DATE_TAG=$(date +%Y%m%d-%H%M)
 python3 .opencode/skills/pg-regression/scripts/pg-regression-summary.py \
   --suites .pg/regression/*.json \
-  --out "${RUN_DIR}/summary-$DATE_TAG.md"
+  --out "${RUN_DIR}/fix-issue-runner-summary.md"
 ```
 
 #### 3.4 输出最终状态
 
 ```
 ✅ 问题清单已写入 .pg/regression/<suite>.json
-📋 汇总报告: ${RUN_DIR}/summary-<datetime>.md
+📋 汇总报告: ${RUN_DIR}/fix-issue-runner-summary.md
 📁 Run 目录: ${RUN_DIR}
 ```
 
@@ -535,10 +537,10 @@ sys.exit(1)
 " .pg/regression/*.json 2>/dev/null; then
   nohup python3 .opencode/skills/pg-regression/scripts/pg-fix-regression-runner.py \
     --run-dir "$RUN_DIR" \
-    > "$RUN_DIR/runner.log" 2>&1 &
+    > "$RUN_DIR/fix-issue-runner.log" 2>&1 &
   echo "✅ pg-fix-regression-runner.py 已启动 (PID=$!)"
-  echo "   日志: $RUN_DIR/runner.log"
-  echo "   结果: $RUN_DIR/results/"
+  echo "   日志: $RUN_DIR/fix-issue-runner.log"
+  echo "   结果: $RUN_DIR/fix-issues/"
 else
   echo "✅ 无生产代码问题，跳过 runner"
 fi
