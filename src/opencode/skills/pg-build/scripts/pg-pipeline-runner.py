@@ -492,7 +492,8 @@ _SUB_TRACK_FIELDS = {
     "verify": ["id", "review_level", "modules", "module_details", "stage",
                "module_roots", "module_names",
                "max_fix_retries", "fix_routing",
-               "tasks_preformatted", "tasks_validation", "tasks_noop"],
+               "tasks_preformatted", "tasks_validation", "tasks_noop",
+               "dispatch_seq", "report_seq"],
     "fix":    ["id", "review_level", "modules", "module_details", "stage",
                "module_roots", "module_names",
                "max_fix_retries", "fix_routing",
@@ -836,7 +837,46 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
 - LLM **不**自己拼 spec / 不解析 PG_* env vars / 不算 log_path；这些都由 runner 完成。
 """
 
-_PROMPT_BLOCK_VERIFY = _PROMPT_BLOCK_DEV  # verify uses the same hooks block
+_PROMPT_BLOCK_VERIFY = """\
+### Hooks 调用约定 (LLM 触发 role action 的唯一入口)
+runner **不**预渲染 cmd 字典；LLM 通过 `runner invoke-hook` CLI 触发 hook，
+runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-hook.py。
+
+**必填参数**：`--change` `--env` `--role` `--instance` `--action`
+**可选参数**：`--stage` (默认 manual) `--tail-lines` (仅 logs/tail 生效)
+
+```yaml
+{{context.stage.environment.hooks | toyaml}}
+```
+
+调用示例：
+```bash
+# 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
+  --skill pg-build
+
+# 看 100 行日志 (runner 把 --tail-lines 100 追加到 hook args 末尾)
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
+  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
+  --tail-lines 100 --skill pg-build
+```
+
+**重要不变量**：
+- `timeout_seconds` 是 INFORMATION（来自 project.yaml 的 `actions.<action>.timeout_seconds`）。
+  LLM **不**传 `--timeout` flag（不存在）；runner 内部读取并通过 `pg-run-hook.py` 强制执行。
+- `--host` / `--port` 也不是 CLI flag；runner 从 `environment.instances[role][].host` 自动反查。
+- LLM **不**自己拼 spec / 不解析 PG_* env vars / 不算 log_path；这些都由 runner 完成。
+
+### 写盘要求
+**完成后用 `cat >` 自行写盘**到
+`2-build/{{context.report_seq}}-{{context.id}}-verify.md`，
+包含每个 V-* 项的原始证据。
+
+> 关于 seq 编号：dispatch 文件 (`{{context.dispatch_seq}}`) 与本报告
+> (`{{context.report_seq}}`) 共享全局递增序列；本报告的 seq 由
+> runner 预分配，禁止更改。
+"""
 
 _PROMPT_BLOCK_GATE = """\
 ### Gate 审计要求
