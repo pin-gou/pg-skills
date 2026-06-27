@@ -396,7 +396,11 @@ def _compute_changed_files(project_root: Path, ref: str) -> list:
 
 
 def _upgrade_pull(project_root: Path, current: str, ref: str, force: bool = False) -> int:
-    """执行 git subtree pull."""
+    """Upgrade pg-skills.
+
+    --force: clone-to-temp + 覆盖复制 (绕过 git subtree, 脏树健壮)
+    非 force: git subtree pull (要求干净工作树)
+    """
     remote = 'pg-skills'
     prefix = '.pg/skills'
 
@@ -406,23 +410,20 @@ def _upgrade_pull(project_root: Path, current: str, ref: str, force: bool = Fals
     )
     if check.returncode != 0:
         print(f'ERROR: remote "{remote}" not configured.')
-        print(f'  Run: git remote add {remote} git@gitee.com:shao_hq/pg-skills.git')
+        print(f'  Run: git remote add {remote} https://gitee.com/shao_hq/pg-skills.git')
         print(f'  Run: git fetch {remote}')
         return 1
 
-    stashed = False
     if force:
-        status = subprocess.run(
-            ['git', '-C', str(project_root), 'status', '--porcelain'],
-            capture_output=True, text=True,
-        )
-        if status.stdout.strip():
-            print('Working tree has modifications, stashing...')
-            subprocess.run(
-                ['git', '-C', str(project_root), 'stash', 'push', '-m', 'pg-upgrade-auto-stash'],
-                capture_output=True, text=True,
-            )
-            stashed = True
+        return _upgrade_by_copy(project_root, project_root / prefix, ref)
+
+    status = subprocess.run(
+        ['git', '-C', str(project_root), 'status', '--porcelain'],
+        capture_output=True, text=True,
+    )
+    if status.stdout.strip():
+        print('ERROR: Working tree has modifications. Run with --force to overwrite.')
+        return 1
 
     if not (project_root / prefix).exists():
         print(f'INFO: {prefix}/ not found, performing initial subtree add')
@@ -434,32 +435,80 @@ def _upgrade_pull(project_root: Path, current: str, ref: str, force: bool = Fals
     result = subprocess.run(cmd, cwd=str(project_root), text=True)
     if result.returncode != 0:
         print(f'ERROR: git subtree failed (exit {result.returncode})')
-        print(f'  Try: pg upgrade --interactive')
-        if stashed:
-            subprocess.run(
-                ['git', '-C', str(project_root), 'stash', 'pop'],
-                capture_output=True, text=True,
-            )
-            print('Stash restored.')
+        print(f'  Try: pg upgrade --force')
         return 1
-
-    if stashed:
-        subprocess.run(
-            ['git', '-C', str(project_root), 'stash', 'pop'],
-            capture_output=True, text=True,
-        )
-        print('Stash restored.')
 
     pg_skills_root = find_pg_skills_root()
     new_version = (pg_skills_root / 'VERSION').read_text().strip()
 
-    # 刷新 .opencode/ symlink (处理新增/删除的 agent/command/skill)
     create_opencode_symlinks(project_root, pg_skills_root)
-
-    # 刷新 pg-run symlink
     create_pg_run_symlink(project_root)
 
     print(f'✓ pg-skills {current} → {new_version}: {n_changed(project_root)} files updated')
+    return 0
+
+
+def _upgrade_by_copy(project_root: Path, pg_skills_dir: Path, ref: str) -> int:
+    """Clone target ref to temp dir → 覆盖复制到 .pg/skills/.
+
+    绕过 git subtree, 兼容脏工作树.
+    """
+    from datetime import datetime
+    import shutil
+    import tempfile
+
+    remote_https = f'https://gitee.com/shao_hq/pg-skills.git'
+    remote_ssh = f'git@gitee.com:shao_hq/pg-skills.git'
+
+    # 1. 备份现有 .pg/skills/
+    backup_dir = None
+    if pg_skills_dir.exists():
+        ts = datetime.now().strftime('%Y%m%d%H%M%S')
+        backup_dir = project_root / f'.pg/skills.backup.{ts}'
+        print(f'Backing up existing {pg_skills_dir} to {backup_dir} ...')
+        shutil.copytree(pg_skills_dir, backup_dir)
+
+    # 2. Clone 到临时目录
+    tmp_dir = Path(tempfile.mkdtemp(prefix='pg-upgrade-'))
+    print(f'Cloning {remote_https} (branch {ref}) ...')
+    clone_result = subprocess.run(
+        ['git', 'clone', '--depth=1', '--branch', ref, remote_https, str(tmp_dir)],
+        capture_output=True, text=True, timeout=120,
+    )
+    if clone_result.returncode != 0:
+        print(f'  https failed, trying ssh ...')
+        clone_result = subprocess.run(
+            ['git', 'clone', '--depth=1', '--branch', ref, remote_ssh, str(tmp_dir)],
+            capture_output=True, text=True, timeout=120,
+        )
+    if clone_result.returncode != 0:
+        print(f'ERROR: clone failed: {clone_result.stderr.strip()[-300:]}')
+        if backup_dir and backup_dir.exists():
+            print(f'  Backup preserved at {backup_dir}, restore manually.')
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        return 1
+
+    # 3. 删除旧 .pg/skills/ → 复制新文件
+    if pg_skills_dir.exists():
+        shutil.rmtree(pg_skills_dir)
+    print(f'Copying files to .pg/skills/ ...')
+    shutil.copytree(tmp_dir, pg_skills_dir)
+
+    # 4. 清理临时目录
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+
+    # 5. 刷新 symlinks
+    create_opencode_symlinks(project_root, pg_skills_dir)
+    create_pg_run_symlink(project_root)
+
+    new_version = (pg_skills_dir / 'VERSION').read_text().strip()
+    print(f'✓ pg-skills upgraded to {new_version} (by copy, {ref})')
+
+    # 6. 提示备份
+    if backup_dir and backup_dir.exists():
+        print(f'  ⚠ Backup preserved at {backup_dir}')
+        print(f'    如需本地修改请自行还原：rm -rf .pg/skills && mv {backup_dir} .pg/skills')
+
     return 0
 
 
