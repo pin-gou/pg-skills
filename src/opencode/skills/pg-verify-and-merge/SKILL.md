@@ -2,7 +2,7 @@
 name: pg-verify-and-merge
 description: 将 feature branch 模拟合并到 master 并按需验证后合并。pg-build 完成后自动触发。
 license: MIT
-compatibility: 项目根目录需要 `.pg/project.yaml`（v3.0 schema：modules / environments / tracks / stages / regression.suite / verifyMerge / flyway / git）。SKILL 通过 `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-verify-and-merge` 统一注入所有配置（tracks / regressionSuites / verifyMerge / flyway / git 五段 JSON），不再单独调用 `--key` 取值。
+compatibility: 项目根目录需要 `.pg/project.yaml`（v3.0 schema：modules / environments / tracks / stages / regression.suite / verify_merge / flyway / git）。SKILL 通过 `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-verify-and-merge` 统一注入所有配置（tracks / regressionSuites / verify_merge / flyway / git 五段 JSON），不再单独调用 `--key` 取值。
 metadata:
   author: pg
   version: "3.0"
@@ -21,10 +21,10 @@ pg-build 完成后，将 feature branch 合并到 master 前，先将 feature br
 - **与 pg-regression / pg-fix-issue 同一套配置**：所有命令、路径、env 派生自 `.pg/project.yaml`，不再有 v2 的 `pipeline.tracks.*.lint` 和已废弃的 `testSuites.*` 段引用（硬切换，无兼容层）。
 - **AffectedTracks 自动推断**：从 `<change>/tasks.md` 章节号读起，tasks.md 缺失则 fallback 到 `git diff` + `tracks.<t>.root` 路径前缀匹配，最后 fallback 到 `regression.suite` 的 key 列表。**simple track 永远过滤**（`openapi-gen` 等跑 commands 不跑 TDVG，无 regression.suite）。
 - **按 AffectedTracks 过滤**：只跑 manager agent 传入（或自动推断）的受影响 track 对应的 testSuite（不是全跑）。
-- **merge 无冲突时跳过测试**：`verifyMerge.skipTestsIfNoConflict=true`（默认）时，无冲突 = 跳过 Phase 2 = 加速合并。
+- **merge 无冲突时跳过测试**：`verify_merge.skip_tests_if_no_conflict=true`（默认）时，无冲突 = 跳过 Phase 2 = 加速合并。
 - **envSetup / verifySetup 派生**：从 `environments.<env>.prepare_env` 派生 envSetup，从 `required_roles` 的 `start` action 派生 verifySetup probe。
 - **outputFormat 智能推断**：按 `modules.<m>.language + test_key` 推断（`e2e → playwright`，`java → maven-surefire`，`go → go-test`），可在 `regression.suite.<n>.output_format` 显式覆盖。
-- **Key 改进**：模拟合并后不切换分支，Phase 2 的验证和 Phase 3 的提交都在 default-branch 上完成。
+- **Key 改进**：模拟合并后不切换分支，Phase 2 的验证和 Phase 3 的提交都在 default_branch 上完成。
 
 ## 何时使用
 
@@ -45,7 +45,7 @@ manager agent **无需显式传入** `AffectedTracks`（除非有特殊原因要
 
 1. **CLI 参数**：`pg-parse-config.py pg-verify-and-merge --affected-tracks backend,frontend`（manager agent 显式覆盖时使用）
 2. **`tasks.md` 章节号**：读 `<change>/tasks.md` 的 `## {N}. {stage.name}.{track_id} ...` 二级章节，提取所有 `track_id` 并去重
-3. **`git diff` 路径前缀匹配**：`git diff origin/<Git.default-branch> HEAD --name-only` 与 `tracks.<t>.modules[*].root` 做前缀匹配
+3. **`git diff` 路径前缀匹配**：`git diff origin/<Git.default_branch> HEAD --name-only` 与 `tracks.<t>.modules[*].root` 做前缀匹配
 4. **`regression.suite` keys 兜底**：所有 `regression.suite.<n>` 的 key（去掉 simple track）
 
 **Simple track 永远过滤**：`tracks.<t>.type == "simple"` 的 track（如 `openapi-gen`）在所有 4 层路径中都会被剔除，因为它们跑 commands 不跑 TDVG，没有 regression.suite 对应。simple track 的代码生成已经在 pg-build 阶段由 runner 直接验证过。
@@ -63,15 +63,15 @@ manager agent **无需显式传入** `AffectedTracks`（除非有特殊原因要
 | `regressionSuites.<t>.verifySetup` | `environments.<env>.actions.<role>.start` (first role) | Phase 2 suite 环境就绪探测 |
 | `regressionSuites.<t>.runAllCommand` | `modules.<m>.test.<test_key>` 串行链 (含 timeout 包装) | Phase 2 跑测试 |
 | `regressionSuites.<t>.outputFormat` | `regression.suite.<n>.output_format` (override) → fallback `modules.<m>.language + test_key` 推断 | Phase 2 解析失败清单 |
-| `verifyMerge.skipTestsIfNoConflict` | `verifyMerge.skipTestsIfNoConflict` | Phase 1.5 跳过判断 |
-| `flyway.migration-path` | `flyway.migration-path` | Phase 0 migration 重编号 |
-| `git.default-branch` | `git.default-branch` | Phase 1/3 目标分支 |
+| `verify_merge.skip_tests_if_no_conflict` | `verify_merge.skip_tests_if_no_conflict` | Phase 1.5 跳过判断 |
+| `flyway.migration_path` | `flyway.migration_path` | Phase 0 migration 重编号 |
+| `git.default_branch` | `git.default_branch` | Phase 1/3 目标分支 |
 
 ## 前置条件
 
 - Feature branch 已推送到远端
 - 当前在 feature branch 上，无未提交的修改（pg-build 已完成并提交）
-- `git remote` 可访问 origin/`Git.default-branch`
+- `git remote` 可访问 origin/`Git.default_branch`
 - `.pg/changes/<change>/tasks.md` 存在（pg-build 阶段已生成）
 
 ## 阶段结构
@@ -84,7 +84,7 @@ mkdir -p temp
 python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-verify-and-merge \
     --change-dir ".pg/changes/<CHANGE>" \
     > temp/vm-context.json
-# ↑ stdout: tracks / regressionSuites / verifyMerge / flyway / git / __meta
+# ↑ stdout: tracks / regressionSuites / verify_merge / flyway / git / __meta
 # 注: __meta 含 affected_tracks 数组 (simple track 已过滤)
 ```
 
@@ -100,12 +100,12 @@ Phase 0: Auto-fix on Feature Branch（feature branch）
     ├── Step 2: 对 AffectedTracks 每个 track 跑 lint
     └── Step 3: 提交所有修复
     ↓
-Phase 1: 模拟合并到 master（切换到 default-branch）
+Phase 1: 模拟合并到 master（切换到 default_branch）
     ├── 合并
     └── 检测 unmerged 文件，写入 temp/merge-status.txt
     ↓
 Phase 1.5: 判定是否跳过 Phase 2
-    ├── 条件 1: merge 无冲突 + skipTestsIfNoConflict=true → SKIP
+    ├── 条件 1: merge 无冲突 + skip_tests_if_no_conflict=true → SKIP
     └── 条件 2: AffectedTracks 中无可运行 testSuite → SKIP
     ↓
 Phase 2: 按受影响 testSuites 顺序跑测试（可能整体跳过）
@@ -113,7 +113,7 @@ Phase 2: 按受影响 testSuites 顺序跑测试（可能整体跳过）
     ├── Phase 2x-2: regressionSuites[1]: ...
     └── ...
     ↓
-Phase 3: 提交并推送（保持在 default-branch）
+Phase 3: 提交并推送（保持在 default_branch）
     ↓
 Phase 4: 清理
 ```
@@ -127,8 +127,8 @@ Phase 4: 清理
 ```bash
 # 获取当前分支名（后续 Phase 需要）
 CURRENT_BRANCH=$(git branch --show-current)
-MIGRATION_PATH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['flyway']['migration-path'])")
-DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default-branch'])")
+MIGRATION_PATH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['flyway']['migration_path'])")
+DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default_branch'])")
 AFFECTED=$(python3 -c "import json; print(' '.join(json.load(open('temp/vm-context.json'))['__meta']['affected_tracks']))")
 
 # Step 1: Renumber Flyway migrations —— 自动解决并行开发的版本冲突
@@ -170,12 +170,12 @@ git push origin HEAD
 
 ### Phase 1: 模拟合并到 master
 
-> 此 phase 从 feature branch 切换到 `Git.default-branch`，将 feature branch **以 squash 方式**合并到工作区（staged 但未提交）。squash 把 feature branch 上的所有提交（包括 pg-build 自动产生的 `chore(<change>): auto-record ...` 与 `archive change ...` 等历史性提交）压成一个 staged 改动集，避免污染 master 历史。
+> 此 phase 从 feature branch 切换到 `Git.default_branch`，将 feature branch **以 squash 方式**合并到工作区（staged 但未提交）。squash 把 feature branch 上的所有提交（包括 pg-build 自动产生的 `chore(<change>): auto-record ...` 与 `archive change ...` 等历史性提交）压成一个 staged 改动集，避免污染 master 历史。
 
 ```bash
 # $CURRENT_BRANCH 在 Phase 0 中已获取
 CURRENT_BRANCH=$(git branch --show-current)
-DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default-branch'])")
+DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default_branch'])")
 
 # 切换到目标分支并以 squash 方式合并
 git checkout "$DEFAULT_BRANCH"
@@ -213,7 +213,7 @@ fi
 - Phase 3 用一条业务性 commit message（如 `Merge branch 'feat/pg/<change>'`）取代所有中间提交，master 历史更干净。
 - 冲突检测行为与普通 merge 一致：`--squash` 仍会因冲突失败退出。
 
-**关键约束：** Phase 1 完成后，整个 Phase 2 验证期间都必须保持在 `Git.default-branch` 分支上，**禁止切换回 feature branch**。这样 Phase 2 验证的就是合并后的代码。
+**关键约束：** Phase 1 完成后，整个 Phase 2 验证期间都必须保持在 `Git.default_branch` 分支上，**禁止切换回 feature branch**。这样 Phase 2 验证的就是合并后的代码。
 
 ---
 
@@ -222,7 +222,7 @@ fi
 > **核心目标**：根据 merge 状态与 AffectedTracks，决定 Phase 2 是否需要跑测试。
 >
 > 跳过条件（任一满足即跳过）：
-> 1. merge 无冲突（`MERGE_STATUS=CLEAN`）且 `verifyMerge.skipTestsIfNoConflict=true`（默认 true）
+> 1. merge 无冲突（`MERGE_STATUS=CLEAN`）且 `verify_merge.skip_tests_if_no_conflict=true`（默认 true）
 > 2. AffectedTracks 中没有可运行的 testSuite（如全部 track 都是 openapi-gen 等无 testSuite 的类型）
 
 ```bash
@@ -232,10 +232,10 @@ SKIP_REASON=""
 
 # 条件 1: merge 无冲突 + 配置允许跳过
 MERGE_STATUS=$(cat temp/merge-status.txt | cut -d= -f2)
-SKIP_IF_NO_CONFLICT=$(python3 -c "import json; print(str(json.load(open('temp/vm-context.json'))['verifyMerge']['skipTestsIfNoConflict']).lower())")
+SKIP_IF_NO_CONFLICT=$(python3 -c "import json; print(str(json.load(open('temp/vm-context.json'))['verify_merge']['skip_tests_if_no_conflict']).lower())")
 if [ "$MERGE_STATUS" = "CLEAN" ] && [ "$SKIP_IF_NO_CONFLICT" = "true" ]; then
     SKIP_TESTS=true
-    SKIP_REASON="merge 无冲突且 skipTestsIfNoConflict=true"
+    SKIP_REASON="merge 无冲突且 skip_tests_if_no_conflict=true"
 fi
 
 # 条件 2: 过滤出 AffectedTracks 中存在 regression.suite 的子集
@@ -271,7 +271,7 @@ fi
 
 > **核心原则：** 在合并后的代码上验证，不在 feature branch 上验证。
 >
-> **状态保持：** Phase 2 整个过程都运行在 `Git.default-branch` 分支上，此时工作区已经包含 feature branch 的变更（staged but not committed）。Phase 2 验证的就是合并后的代码。
+> **状态保持：** Phase 2 整个过程都运行在 `Git.default_branch` 分支上，此时工作区已经包含 feature branch 的变更（staged but not committed）。Phase 2 验证的就是合并后的代码。
 >
 > **跳过逻辑**：当 `SKIP_TESTS=true` 时，整个 Phase 2 输出跳过原因，不执行任何测试。
 
@@ -403,7 +403,7 @@ MSG
 
 ```bash
 CURRENT_BRANCH=$(git branch --show-current)
-DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default-branch'])")
+DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default_branch'])")
 
 git commit -m "$(cat temp/commit-message.txt)"
 
@@ -415,7 +415,7 @@ fi
 git push origin "$DEFAULT_BRANCH"
 ```
 
-**验证条件：** squash 合并提交已推送到远端 `Git.default-branch`。
+**验证条件：** squash 合并提交已推送到远端 `Git.default_branch`。
 
 > **注意**：
 > - Phase 3 不再执行 `git merge --abort` 再 `git merge`，因为我们已经在正确的分支和工作区状态下。只需 `git commit` 即可。
@@ -426,9 +426,9 @@ git push origin "$DEFAULT_BRANCH"
 ### Phase 4: 清理
 
 ```bash
-# 此时已在 Git.default-branch 分支上
+# 此时已在 Git.default_branch 分支上
 CURRENT_BRANCH=$(git branch --show-current)
-DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default-branch'])")
+DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default_branch'])")
 
 # 提示删除 feature branch
 echo "Feature branch '$CURRENT_BRANCH' has been merged and committed to $DEFAULT_BRANCH"
@@ -436,14 +436,14 @@ echo "To delete local branch: git branch -d $CURRENT_BRANCH"
 echo "To delete remote branch: git push origin --delete $CURRENT_BRANCH"
 ```
 
-**注意：** Phase 4 不再需要切换分支或恢复 stash，因为整个流程都在 `Git.default-branch` 上执行。
+**注意：** Phase 4 不再需要切换分支或恢复 stash，因为整个流程都在 `Git.default_branch` 上执行。
 
 ---
 
 ## 输出格式
 
 ```
-目标分支: <Git.default-branch>
+目标分支: <Git.default_branch>
 AffectedTracks: <tracks>
 Skip Tests: <true|false>
 Skip Reason: <reason if skipped>
@@ -464,13 +464,13 @@ Phase: <phase> (<phase_name>)
 |---------|---------|------|
 | **Setup**（pg-parse-config.py 失败） | 中止，提示修复 config.yaml | exit code ≠ 0 通常因 config 不合规（如 regression.suite 缺 module） |
 | Setup（affected_tracks 推断全部失败） | 中止，提示手动传 `--affected-tracks` | tasks.md 缺失 + git diff 失败 + 无 suite_keys 三层兜底全失败 |
-| Phase 0 (renumber) | 中止，提示手动检查 migration 版本冲突 | 自动重编号失败，通常因本地 default-branch 不存在或 git tree 不完整 |
+| Phase 0 (renumber) | 中止，提示手动检查 migration 版本冲突 | 自动重编号失败，通常因本地 default_branch 不存在或 git tree 不完整 |
 | Phase 0 (lint) | 中止，提示手动修复 | lint 自动修复未必全覆盖 |
 | Phase 1 | 中止，提示手动解决冲突 | 合并冲突必须人工介入 |
 | Phase 2 (envSetup) | 中止，提示环境问题 | 依赖服务未启动或配置错误 |
 | Phase 2 (verifySetup) | 中止，提示环境未就绪 | 30 次重试后仍未就绪 |
 | Phase 2 (runAllCommand) | 中止，提示修复并重试 | 测试失败，需人工修复 |
-| Phase 3 | 中止，提示手动解决合并问题 | 冲突窗口期 default-branch 可能又有新提交 |
+| Phase 3 | 中止，提示手动解决合并问题 | 冲突窗口期 default_branch 可能又有新提交 |
 
 **不回退。** 任何阶段失败直接中止并报告，由人工决策下一步。
 

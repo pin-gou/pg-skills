@@ -2,7 +2,7 @@
 """Tests for pg-parse-config.py pg-verify-and-merge subcommand.
 
 This is the v3.0 contract for the SKILL: a single CLI call returns
-{ tracks, regressionSuites, verifyMerge, flyway, git, __meta }, with
+{ tracks, regressionSuites, verify_merge, flyway, git, __meta }, with
 AffectedTracks auto-inferred (3-layer fallback, simple track filtered),
 and all module commands pre-resolved to {cmd, timeout_seconds} form.
 
@@ -16,8 +16,8 @@ Covers:
 - runAllCommand chains test_keys with && (max timeout + 30s).
 - outputFormat inference: e2e→playwright, java→maven-surefire, go→go-test.
 - outputFormat suite-level override beats inference.
-- verifyMerge.skipTestsIfNoConflict default true.
-- flyway.migration-path / git.default-branch passthrough.
+- verify_merge.skip_tests_if_no_conflict default true.
+- flyway.migration_path / git.default_branch passthrough.
 - v2 --key pipeline.tracks.X.lint returns null (硬切换).
 - v2 --key testSuites.X returns null (硬切换).
 - AffectedTracks from CLI --affected-tracks.
@@ -309,7 +309,7 @@ class TestPgVerifyAndMergeCLI(unittest.TestCase):
         rc, out, _ = _run_cli("pg-verify-and-merge")
         self.assertEqual(rc, 0)
         d = json.loads(out)
-        for k in ("tracks", "regressionSuites", "verifyMerge",
+        for k in ("tracks", "regressionSuites", "verify_merge",
                   "flyway", "git", "__meta"):
             self.assertIn(k, d, f"missing top-level key: {k}")
 
@@ -373,14 +373,14 @@ class TestPgVerifyAndMergeCLI(unittest.TestCase):
         rc, out, _ = _run_cli("pg-verify-and-merge",
                               "--affected-tracks", "backend")
         d = json.loads(out)
-        self.assertTrue(d["verifyMerge"]["skipTestsIfNoConflict"])
+        self.assertTrue(d["verify_merge"]["skip_tests_if_no_conflict"])
 
     def test_flyway_and_git_passthrough(self):
         rc, out, _ = _run_cli("pg-verify-and-merge",
                               "--affected-tracks", "backend")
         d = json.loads(out)
-        self.assertIn("migration-path", d["flyway"])
-        self.assertIn("default-branch", d["git"])
+        self.assertIn("migration_path", d["flyway"])
+        self.assertIn("default_branch", d["git"])
 
     def test_affected_tracks_from_cli(self):
         rc, out, _ = _run_cli("pg-verify-and-merge",

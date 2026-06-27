@@ -745,7 +745,7 @@ _PROMPT_TEMPLATE_BASE = """\
 ```yaml
 {{context.stage.environment.instances | toyaml}}
 ```
-  每个 instance 是 project.yaml 原样 dict，包含 name/host/port/(可选)libvirt_uri。
+  每个 instance 是 project.yaml 原样 dict，包含 name/host/(可选)port/(可选)libvirt_uri。
 {/if}
 - stage.test_commands: {{context.stage.test_commands}}
 

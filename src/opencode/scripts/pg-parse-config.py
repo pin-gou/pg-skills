@@ -64,7 +64,7 @@ WORKFLOW_KEYS = {
     "pg-build": ["modules", "environments", "tracks", "stages",
                          "git", "apply_change_rules"],
     "pg-verify-and-merge": ["modules", "tracks", "stages",
-                             "git", "flyway", "verifyMerge"],
+                             "git", "flyway", "verify_merge"],
     "pg-propose": ["modules", "tracks", "stages", "rules", "test_strategy",
                     "coding_standards", "proposal_rules"],
     # pg-fix-issue v3.0: resolved_actions removed — service 启停统一由
@@ -680,9 +680,9 @@ def cmd_pg_verify_and_merge(args, config, project_root):
       - regressionSuites: { suite_name: { module, test_keys, envSetup,
                                           verifySetup, runAllCommand,
                                           outputFormat } }   (only for affected tracks)
-      - verifyMerge:   { skipTestsIfNoConflict: bool }
-      - flyway:        { migration-path: str }
-      - git:           { default-branch: str }
+      - verify_merge:  { skip_tests_if_no_conflict: bool }
+      - flyway:        { migration_path: str }
+      - git:           { default_branch: str }
       - __meta:        { affected_tracks_source: 'cli'|'tasks_md'|'git_diff'|'suite_keys' }
 
     Args:
@@ -704,7 +704,7 @@ def cmd_pg_verify_and_merge(args, config, project_root):
         else:
             i += 1
 
-    default_branch = (config.get("git") or {}).get("default-branch", "master")
+    default_branch = (config.get("git") or {}).get("default_branch", "master")
 
     # Decide AffectedTracks and its provenance
     explicit_given = bool(explicit)
@@ -775,9 +775,9 @@ def cmd_pg_verify_and_merge(args, config, project_root):
     return {
         "tracks":           tracks_out,
         "regressionSuites": suites_out,
-        "verifyMerge": {
-            "skipTestsIfNoConflict": (config.get("verifyMerge") or {}).get(
-                "skipTestsIfNoConflict", True),
+        "verify_merge": {
+            "skip_tests_if_no_conflict": (config.get("verify_merge") or {}).get(
+                "skip_tests_if_no_conflict", True),
         },
         "flyway":  config.get("flyway")  or {},
         "git":     config.get("git")     or {},

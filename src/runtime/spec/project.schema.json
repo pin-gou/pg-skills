@@ -45,12 +45,12 @@
       "items": { "$ref": "#/definitions/stage" }
     },
 
-    "verifyMerge": {
+    "verify_merge": {
       "type": "object",
       "description": "pg-verify-and-merge SKILL 专用配置. 顶层段, SKILL 通过 pg-parse-config.py pg-verify-and-merge 子命令消费.",
       "additionalProperties": false,
       "properties": {
-        "skipTestsIfNoConflict": {
+        "skip_tests_if_no_conflict": {
           "type": "boolean",
           "default": true,
           "description": "merge 无冲突时是否跳过 Phase 2 全部测试. 默认 true 加速合并."
@@ -62,15 +62,15 @@
       "description": "Flyway 数据库迁移路径. pg-verify-and-merge Phase 0 用此路径做 migration 重编号.",
       "additionalProperties": false,
       "properties": {
-        "migration-path": { "type": "string", "minLength": 1, "description": "Flyway migration 目录, 相对项目根" }
+        "migration_path": { "type": "string", "minLength": 1, "description": "Flyway migration 目录, 相对项目根" }
       }
     },
     "git": {
       "type": "object",
-      "description": "Git 仓库配置. pg-verify-and-merge Phase 1/3 用 default-branch 切到目标分支.",
+      "description": "Git 仓库配置. pg-verify-and-merge Phase 1/3 用 default_branch 切到目标分支.",
       "additionalProperties": false,
       "properties": {
-        "default-branch": { "type": "string", "minLength": 1, "description": "主分支名 (master / main)" }
+        "default_branch": { "type": "string", "minLength": 1, "description": "主分支名 (master / main)" }
       }
     },
     "rules":      { "type": "object", "additionalProperties": true },
@@ -123,7 +123,7 @@
     "instance": {
       "type": "object",
       "description": "运行时实例",
-      "required": ["name", "host", "port"],
+      "required": ["name", "host"],
       "additionalProperties": false,
       "properties": {
         "name": {
@@ -140,9 +140,10 @@
           "type": "integer",
           "minimum": 1,
           "maximum": 65535,
-          "description": "端口. 同 host 内同 role 的 port 必须唯一, runner 启动时校验."
+          "description": "端口. 可选: agent 实例通过 SSH 远程启动时可省略 (host 上 agent 由 systemd 拉起). 若提供, 同 host 内同 role 的 port 必须唯一, runner 启动时校验."
         },
-        "libvirt_uri": { "type": "string", "description": "agent 专用: libvirt 连接 URI" }
+        "libvirt_uri": { "type": "string", "description": "agent 专用: libvirt 连接 URI" },
+        "description": { "type": "string", "description": "实例描述, 例如登录示例 URL. 仅供 LLM 阅读, runner 不解析." }
       }
     },
 

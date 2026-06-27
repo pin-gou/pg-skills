@@ -5,6 +5,21 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.5.0] - 2026-06-28
+
+### 变更
+
+- **破坏性**：`.pg/project.yaml` 顶层字段名统一为 `snake_case` 风格，与 `review_level` 等已有字段保持一致。原 PascalCase / camelCase / kebab-case 字段硬切换，不保留旧名：
+  | 旧名 | 新名 |
+  |---|---|
+  | `verifyMerge` | `verify_merge` |
+  | `verifyMerge.skipTestsIfNoConflict` | `verify_merge.skip_tests_if_no_conflict` |
+  | `flyway.migration-path` | `flyway.migration_path` |
+  | `git.default-branch` | `git.default_branch` |
+- **破坏性**：JSON Schema (`project.schema.json`) 同步更新为新字段名，YAML 不再接受旧名
+- **破坏性**：`pg-parse-config.py` 输出 JSON 段同步重命名（`verify_merge` / `flyway.migration_path` / `git.default_branch`）
+- `pg-verify-and-merge/SKILL.md` 全文字段引用同步更新；CLI flag `--default-branch` 保持不变（与 YAML 字段是两套命名体系）
+
 ## [0.4.0] - 2026-06-27
 
 ### 新增
