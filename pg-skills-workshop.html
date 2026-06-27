@@ -579,7 +579,7 @@ stages:
     <td><strong>Environments</strong><br><span style="font-size:12px;color:var(--muted)">prepare_env / clean_env / role start/stop/logs</span></td>
     <td><span class="tag tag-green">✅ 走 hook</span></td>
     <td><code>.pg/hooks/&lt;name&gt;.sh</code></td>
-    <td><code>pg-invoke-hook.py</code> 统一入口</td>
+    <td><code>./pg-run</code>（用户）/ <code>pg-invoke-hook.py</code>（agent）统一入口</td>
   </tr>
   <tr>
     <td><strong>Modules</strong><br><span style="font-size:12px;color:var(--muted)">build / lint / test</span></td>
@@ -616,45 +616,48 @@ DURATION=$(($(date +%s) - START))
 <span style="color:#94a3b8">#         --message="mvn test failed" --agent-recoverable=true</span>
 </pre>
 
-<h2>注入的环境变量</h2>
+<h2>注入的环境变量（v4 协议）</h2>
 <table>
   <tr><th>变量</th><th>说明</th><th>适用范围</th></tr>
   <tr><td><code>PG_SKILLS_PATH</code></td><td>pg-skills 根路径</td><td>全部</td></tr>
   <tr><td><code>PG_PROJECT_ROOT</code></td><td>项目根路径</td><td>全部</td></tr>
+  <tr><td><code>PG_RUN_CALLER</code></td><td>调用方身份（pg-build / pg-regression / pg-fix-issue / ad-hoc）</td><td>全部</td></tr>
+  <tr><td><code>PG_RUN_SESSION</code></td><td>session 名（与 caller 正交）</td><td>全部</td></tr>
+  <tr><td><code>PG_HOOK_LOG_DIR</code></td><td>服务内部 stdout/PID 的目标目录（预拼绝对路径）</td><td>全部</td></tr>
   <tr><td><code>PG_RESULT_FILE</code></td><td>写 result.json 的路径</td><td>全部</td></tr>
   <tr><td><code>PG_LOG_FILE</code></td><td>写 stdout/stderr 的路径</td><td>全部</td></tr>
-  <tr><td><code>PG_CHANGE_NAME</code></td><td>当前 change 名</td><td>全部</td></tr>
   <tr><td><code>PG_STAGE</code></td><td>当前 stage 名</td><td>全部</td></tr>
   <tr><td><code>PG_ENV</code></td><td>当前环境（dev-local / dev-3tier）</td><td>全部</td></tr>
   <tr><td><code>PG_ROLE</code></td><td>role 名</td><td>role action 时</td></tr>
   <tr><td><code>PG_INSTANCE_NAME</code></td><td>instance 名</td><td>role action 时</td></tr>
   <tr><td><code>PG_INSTANCE_HOST</code></td><td>instance host</td><td>role action 时</td></tr>
 </table>
+<p style="font-size:13px;color:var(--muted)">1 版本 alias（向下兼容老 hook）：<code>PG_SKILL_NAME</code> → <code>PG_RUN_CALLER</code>，<code>PG_CHANGE_NAME</code> → <code>PG_RUN_SESSION</code></p>
 
-<h2>pg-invoke-hook.py 统一入口</h2>
-<p>LLM 和 runner <strong>不直接调用 hook 脚本</strong>，通过 <code>pg-invoke-hook.py</code> 统一调度。</p>
+<h2>两套入口：用户用 ./pg-run，agent/skill 用 pg-invoke-hook.py</h2>
+<p>hooks 操作有两套入口，使用场景不同：</p>
+<ul>
+  <li><strong>用户手工操作</strong>：<code>./pg-run</code> — 交互式菜单，无需记参数</li>
+  <li><strong>Agent / SKILL 编排流</strong>：<code>pg-invoke-hook.py</code> — 底层 CLI，传入完整参数</li>
+</ul>
+
+<p><code>pg-invoke-hook.py</code> 是底层 CLI，LLM 和 runner <strong>不直接调用 hook 脚本</strong>，通过它统一调度：</p>
 
 <pre>
-<span style="color:#94a3b8"># 调用 role action</span>
+<span style="color:#94a3b8"># Agent / SKILL 内部调用（用户请用 ./pg-run）</span>
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --change &lt;change-name&gt; \
+  --session &lt;session-name&gt; \
   --env dev-local \
   --role backend \
   --instance backend-1 \
   --action start
 
-<span style="color:#94a3b8"># 查看日志（不启动服务，安全无害）</span>
-python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --change demo \
-  --env dev-local \
-  --role backend \
-  --instance backend-1 \
-  --action logs \
-  --tail-lines 20
+<span style="color:#94a3b8"># 用户手工查看日志</span>
+./pg-run --env dev-local --role backend --instance backend-1 --action logs --tail-lines 20
 
-<span style="color:#94a3b8"># 查询环境准备状态</span>
+<span style="color:#94a3b8"># 查询环境准备状态（agent 用）</span>
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py status \
-  --change &lt;change-name&gt;
+  --session &lt;session-name&gt;
 </pre>
 
 <h2>错误 Category 枚举（SSOT）</h2>
@@ -676,42 +679,51 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py status \
 <div id="sec3-demo" class="section">
 <h1>3.4 执行演示——运行 hooks</h1>
 
-<h2>演示 1：查看 logs（安全无害）</h2>
+<h2>演示 1：使用 pg-run 交互菜单（用户首选）</h2>
+<pre>
+<span style="color:#94a3b8"># 启动交互菜单</span>
+./pg-run
+<span style="color:#94a3b8"># ┌─ pg-run — pg-skills 运行菜单 ───────────────────┐</span>
+<span style="color:#94a3b8"># │  1) 启动所有实例         一键启动所有角色实例    │</span>
+<span style="color:#94a3b8"># │  2) 停止所有实例         一键停止所有角色实例    │</span>
+<span style="color:#94a3b8"># │  3) 准备环境并启动所有   先准备环境再启动所有    │</span>
+<span style="color:#94a3b8"># │  4) Module 操作          build/lint/test 编译检查│</span>
+<span style="color:#94a3b8"># │  5) Environment 操作     prepare_env/clean_env   │</span>
+<span style="color:#94a3b8"># │  6) Role 操作            start/stop/logs/tail    │</span>
+<span style="color:#94a3b8"># └──────────────────────────────────────────────────┘</span>
+
+<span style="color:#94a3b8"># 跳过菜单直达</span>
+./pg-run --module backend --action test.unit
+./pg-run --env dev-local --action start_all_instances
+./pg-run --env dev-local --role backend --instance backend-1 --action start
+./pg-run --cmd "curl -s localhost:9080/health"
+</pre>
+
+<h2>演示 2：查看 logs（安全无害）</h2>
 <pre>
 <span style="color:#94a3b8"># 查看 backend 日志（只读操作，不启动服务）</span>
-python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --change demo-hooks \
-  --env dev-local \
-  --role backend \
-  --instance backend-1 \
-  --action logs \
-  --tail-lines 10
+./pg-run --env dev-local --role backend --instance backend-1 --action logs --tail-lines 10
 </pre>
 
-<h2>演示 2：完整启停一个 role</h2>
+<h2>演示 3：完整启停一个 role</h2>
 <pre>
 <span style="color:#94a3b8"># 启动 backend（讲师演示，学员可不执行）</span>
-python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --change demo-hooks \
-  --env dev-local \
-  --role backend \
-  --instance backend-1 \
-  --action start
+./pg-run --env dev-local --role backend --instance backend-1 --action start
 
 <span style="color:#94a3b8"># 停止 backend</span>
-python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --change demo-hooks \
-  --env dev-local \
-  --role backend \
-  --instance backend-1 \
-  --action stop
+./pg-run --env dev-local --role backend --instance backend-1 --action stop
 
-<span style="color:#94a3b8"># 查询 prepare_env 状态</span>
-python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py status \
-  --change demo-hooks
+<span style="color:#94a3b8"># 准备环境（prepare_env）</span>
+./pg-run --env dev-local --action prepare_env
+
+<span style="color:#94a3b8"># 清理环境（clean_env）</span>
+./pg-run --env dev-local --action clean_env
+
+<span style="color:#94a3b8"># 如果想深入调试，底层 CLI 等价于：</span>
+<span style="color:#94a3b8"># python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook --session ...</span>
 </pre>
 
-<h2>演示 3：读取 workflow config</h2>
+<h2>演示 4：读取 workflow config</h2>
 <pre>
 <span style="color:#94a3b8"># 查看 pg-propose 需要读取的配置段</span>
 python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
@@ -724,8 +736,8 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 </pre>
 
 <div class="info-card card">
-  <strong>讲师提问</strong>：为什么不直接用 bash 跑 hook 脚本，而要用 <code>pg-invoke-hook.py</code>？<br>
-  <strong>答案</strong>：因为 hook 协议需要注入 <code>PG_*</code> 环境变量、写 <code>result.json</code>、标准化错误分类。直接跑脚本会丢失这些上下文。
+  <strong>讲师提问</strong>：为什么不直接用 bash 跑 hook 脚本，而要用 <code>./pg-run</code> 或 <code>pg-invoke-hook.py</code>？<br>
+  <strong>答案</strong>：因为 hook 协议需要注入 <code>PG_*</code> 环境变量、写 <code>result.json</code>、标准化错误分类。直接跑脚本会丢失这些上下文。用户首选 <code>./pg-run</code>（交互菜单 + CLI 直达），agent 内部用 <code>pg-invoke-hook.py</code> 精细控制 session 和参数。
 </div>
 </div>
 
@@ -747,8 +759,11 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <li style="margin-top:12px"><strong>写 hooks（第二重要）</strong></li>
   <li><input type="checkbox" style="margin-left:24px"> 每个 role 的 start / stop / logs 脚本</li>
   <li><input type="checkbox" style="margin-left:24px"> 每个环境的 prepare_env / clean_env 脚本</li>
+  <li><input type="checkbox" style="margin-left:24px"> 复制 lib/common.sh SSOT 到 hooks/lib/</li>
   <li><input type="checkbox" style="margin-left:24px"> 遵循 hook 协议（source hook-helpers.sh + pg_exit）</li>
-  <li style="margin-top:12px"><input type="checkbox"> <code>pg doctor</code> 校验</li>
+  <li style="margin-top:12px"><strong>运行时入口</strong></li>
+  <li><input type="checkbox" style="margin-left:24px"> pg-run symlink → .pg/skills/src/runtime/bin/pg-run</li>
+  <li style="margin-top:12px"><input type="checkbox"> <code>pg doctor</code> 校验（含 hooks 检查）</li>
   <li><input type="checkbox"> 跑一个最小 <code>/2b-pg-quick-build</code> 验证全链路通</li>
 </ul>
 </div>
@@ -1528,15 +1543,9 @@ pg doctor
 <div class="card" onclick="toggleQA(this)">
   <div class="collapse-toggle"><strong>怎么验证 hooks 写得对不对？</strong></div>
   <div class="collapse-body">
-    <p>用 <code>pg-invoke-hook.py</code> 的 <code>logs</code> 动作（只读操作，安全无害）验证 hook 脚本是否能正常加载并执行：</p>
+    <p>用 <code>./pg-run</code> 的 <code>logs</code> 动作（只读操作，安全无害）验证 hook 脚本是否能正常加载并执行：</p>
 <pre>
-python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --change test-hooks \
-  --env dev-local \
-  --role backend \
-  --instance backend-1 \
-  --action logs \
-  --tail-lines 10
+./pg-run --env dev-local --role backend --instance backend-1 --action logs --tail-lines 10
 </pre>
   </div>
 </div>
@@ -1569,6 +1578,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
   <tr><td><code>/4-pg-regression</code></td><td>回归——跑全量测试</td></tr>
   <tr><td><code>/5-pg-fix-issue</code></td><td>修复——系统化修 bug</td></tr>
   <tr><td><code>/6-pg-archive</code></td><td>归档已完成变更</td></tr>
+  <tr><td><code>./pg-run</code></td><td>交互式菜单运行（module/env/role 操作）</td></tr>
 </table>
 
 <h2>关键路径</h2>
@@ -1577,8 +1587,9 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 解读命令：         python3 .pg/skills/src/opencode/scripts/pg-parse-config.py &lt;workflow&gt;
 检查接入：         python3 .pg/skills/src/runtime/bin/pg doctor
 升级：             pg upgrade
-调用 hook：        python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-                    --change &lt;C&gt; --env &lt;E&gt; --role &lt;R&gt; --instance &lt;I&gt; --action &lt;A&gt;
+操作 hooks（用户）：   ./pg-run --env &lt;E&gt; --role &lt;R&gt; --instance &lt;I&gt; --action &lt;A&gt;
+操作 hooks（agent）：  python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+                        --session &lt;S&gt; --env &lt;E&gt; --role &lt;R&gt; --instance &lt;I&gt; --action &lt;A&gt;
 </pre>
 
 <h2>产物速查</h2>

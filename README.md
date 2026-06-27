@@ -99,7 +99,7 @@ git commit -m "feat: 接入 pg-skills $(cat .pg/skills/VERSION)"
 
 ```
 pg-skills/
-├── VERSION                       # semver （当前: 0.3.0）
+├── VERSION                       # semver （当前: 0.4.0）
 ├── CHANGELOG.md
 ├── README.md                     # 本文件
 ├── src/
@@ -291,9 +291,33 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 **场景 B：pg-run 菜单 / CLI 直达**
 
 ```bash
-# pg-run 内部自动生成的命令 (无 --session, 留空 → ad-hoc 自动生成 auto-<date>-<pid>)
-python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --env dev-local --role backend --instance backend-1 --action start
+# 交互式菜单（主选项）
+./pg-run
+# ┌─ pg-run — pg-skills 运行菜单 ──────────────────┐
+# │  1) 启动所有实例         一键启动所有角色实例    │
+# │  2) 停止所有实例         一键停止所有角色实例    │
+# │  3) 准备环境并启动所有   先准备环境再启动所有    │
+# │  4) Module 操作          build/lint/test 编译检查│
+# │  5) Environment 操作     prepare_env/clean_env   │
+# │  6) Role 操作            start/stop/logs/tail    │
+# └─────────────────────────────────────────────────┘
+
+# 跳过菜单、直达执行 module 操作
+./pg-run --module backend --action build
+
+# 跳过菜单、直达执行 env 操作
+./pg-run --env dev-local --action prepare_env
+
+# 跳过菜单、一键启动/停止某 env 的全部角色
+./pg-run --env dev-local --action start_all_instances
+./pg-run --env dev-local --action stop_all_instances
+
+# 跳过菜单、直达执行 role action
+./pg-run --env dev-local --role backend --instance backend-1 --action start
+
+# 跳过菜单、直接执行 shell 命令
+./pg-run --cmd "curl -s localhost:9080/health"
+# pg-run 内部自动调 pg-invoke-hook.py (无 --session, 留空 → ad-hoc 自动生成 auto-<date>-<pid>)
 # caller 缺省 'ad-hoc', session 自动生成
 ```
 
@@ -501,6 +525,7 @@ SSOT 见 `src/runtime/spec/error-categories.yaml`。
 | `pg doctor` | 校验安装状态 | `python3 .pg/skills/src/runtime/bin/pg doctor` |
 | `pg-invoke-hook.py invoke-hook` | 触发环境 hook | 见 7.1 节 |
 | `pg-invoke-hook.py status` | 查询 prepare_env 状态 | 见 7.1 节 |
+| `./pg-run` | 交互式菜单运行 | `./pg-run` 或 `./pg-run --module backend --action build` |
 
 ---
 

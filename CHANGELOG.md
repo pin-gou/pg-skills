@@ -5,7 +5,56 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [0.3.0] - 2026-06-25
+## [0.4.0] - 2026-06-27
+
+### 新增
+
+- `pg-run`：菜单式运行时命令（位于 `src/runtime/bin/`），从 `.pg/project.yaml` 读取配置逐级菜单引导用户选择并执行模块/环境/角色操作。支持 `--module/--env/--role/--action/--cmd` 直达模式跳过多层菜单
+- `pg-parse-config.py --resolve-env <name>`：新 CLI flag，按需解析 environment 的 `resolved_actions`（含 `{env}.{role}.{instance}.{action}` 展开的 `cmd` + `timeout_seconds`），供 pg-quick-build worker 等在运行时按需取用，不再提前注入所有 env 详情
+- 示例模板 `lib/common.sh`：hooks 协议 SSOT 公共库（`examples/shell/hooks/lib/`），包含 `pg_resolve_paths`（caller × session 双维度日志目录路由）、`kill_port`、`wait_for_port`、`wait_for_port_with_monitor`、`kill_pid_file` 等工具函数
+- 示例模板正则测试：`examples/shell/hooks/tests/test_template_hooks.py`（143 个断言），验证 5 个模板与 `lib/common.sh` 的一致性、bash 语法正确性、条件 source 守护完整性
+- `pg doctor` 新增检查项：`.pg/hooks/lib/common.sh` 存在性校验，不含 `pg_resolve_paths` 或文件缺失时输出 WARNING
+- pg-regression run 目录系统：单次 run 自动创建 `<suite>-<YYYYMMDD>-<NN>/` 目录，包含 `temp/`、`<env>/logs/`、`fix-issues/<idx>-<slug>/`（含 1-prompt.md / 2-agent.log / 3-result.json）、`fix-test/<idx>-<target-slug>/`、`fix-issue-runner-summary.md`、`report.md`
+- pg-regression fix-test 历史留痕：`pg-record-fix-test.sh` 记录每次 fix-test 调用的 prompt、response 和结构化结果
+- pg-regression `--run-dir` CLI 参数：复现时可指定 run 目录，不指定则自动按 mtime 选取最新目录
+- pg-regression runner 工作目录脏检查：进入 fix-issue 循环前检查 working tree 是否干净（Phase 2a 应已 commit test fix），脏则跳过该 issue
+
+### 变更
+
+- **破坏性**（v4 hooks 协议）：`--change` 改为 `--session`（canonical CLI flag）。`--change` 保留 1 版本作为 deprecated alias（输出 WARN）
+- **破坏性**（v4 hooks 协议）：`--skill` 语义拆分，引入 `--caller` 别名（互为 alias），硬缺省从 `pg-build` 改为 `ad-hoc`。SKILL 调用必须显式传 `--skill pg-build|pg-regression|pg-fix-issue`，否则落入 `.pg/ad-hoc/` 目录
+- **破坏性**（v4 hooks 协议）：`pg-invoke-hook.py` 新增 `--log-dir`（调试覆盖）和 `--timeout-override`（ad-hoc 调试，输出 WARN）标志
+- **破坏性**（v4 hooks 协议）：日志目录路由重构为 caller × session 双维度：
+  - `pg-build` → `.pg/changes/<session>/2-build/<env>/logs/`
+  - `pg-regression` → `.pg/regression/<session>/<env>/logs/`
+  - `pg-fix-issue` → `.pg/fix-issue/<session>/<env>/logs/`
+  - `ad-hoc` → `.pg/ad-hoc/<session>/<env>/logs/`（新顶级目录）
+- **破坏性**（v4 hooks 协议）：`pg-run-hook.py` 注入的 env var 变更：
+  - 新增 `PG_RUN_CALLER` / `PG_RUN_SESSION` / `PG_HOOK_LOG_DIR` / `PG_LOG_FILE` / `PG_RESULT_FILE`
+  - `PG_SKILL_NAME` / `PG_CHANGE_NAME` 降级为 deprecated alias（1 版本兼容）
+  - `PG_RUN_CALLER` 硬缺省 `ad-hoc`（替代旧 `PG_SKILL_NAME` 的 `pg-skills`）
+- **破坏性**（v4 hooks 协议）：所有 SKILL.md（pg-build / pg-fix-issue / pg-regression）文档中 `--change` 统一改为 `--session`，`--skill` 显式标注说明
+- **破坏性**：`pg-pipeline-runner.py` 删除 `_build_fix_issue_context` / `_build_fix_issue_context_gate`——runner 不再解析 verify/gate 报告的结构化字段（issue_title / expected / actual / root_cause_phase / gate_gap_id / file_pos / fix_hint 等），改为直接注入 `verify_report_path` / `gate_report_path` 让 fix agent 读取源报告
+- **破坏性**：`_SUB_TRACK_FIELDS["fix"]` 删除结构化字段（`issue_title`、`verification_step`、`expected`、`actual`、`root_cause_phase`、`affected_tasks`）；新增 `verify_report_path`、`design_doc_path`、`tasks_path`
+- **破坏性**：`_SUB_TRACK_FIELDS["fix-gate"]` 删除结构化字段（`gate_gap_id`、`audit_step`、`file_pos`、`fix_hint`、`affected_tasks`）；保留路径字段
+- **破坏性**：`pg-quick-build` 不再切分支——直接在当前分支修改代码。删除 Phase 0.5 和 Phase 1.2 的 `git checkout -b` 步骤，worker 不再接收 `branch` 字段，return schema 删除 `branch` 字段，self_check 从 5 项减为 3 项（删除 scope_creep和 commits_count 检查）
+- **破坏性**：`pg-quick-build` worker prompt 不再注入完整 env 详情（instances / actions），改为注入 `--resolve-env` 按需获取
+- **破坏性**：pg-regression SKILL.md 的 `--change` 改为 `--session`，`regression-<suite>` 的命名约定保留但不再用于 change 前缀
+- **破坏性**：pg-fix-issue 的 `change_name` 约定由复用 pg-build 的 change 名改为独立生成 `fix-<YYYY-MM-DD>-<bug-slug>`，日志目录走 `.pg/fix-issue/` 而非 `.pg/changes/`
+- `pg-init-project` Phase 3 新增步骤：复制 SSOT 公共库 `.pg/skills/examples/shell/hooks/lib/common.sh` 到 `.pg/hooks/lib/common.sh`
+- `pg-pipeline-runner.py` help text `--change` 改为 `--session`，thin wrapper 转发同步 v4 协议
+- 所有示例 hook 模板（role-start/stop/logs, env-prepare/clean）头部新增 `lib/common.sh` 条件 source + `pg_resolve_paths` 调用，新增 v4 env var 注释文档
+- README.md §Hook 协议大幅扩展：新增 §7.1.2 "v4 协议 — caller × session 双维度路由" 章节，新增 §7.1.3 "三种使用场景的调用范式" 章节
+
+### 修复
+- `pg-pipeline-runner.py:dispatch_fix_action` / `dispatch_fix_gate_action` 在 resume/record 路径上缺少 `_change` 上下文注入，导致 fix agent 拿到空的 change 名（`_change` 键的 setdefault 在 filter_track_context 之前未被填充）
+
+### 备注
+- v4 hook 协议路由表三处同步（runtime `pg-invoke-hook.py:pg_log_dir_for_skill`、`pg-pipeline-runner.py:_pg_log_dir_for_skill`、`lib/common.sh:pg_resolve_paths`），改动任一处前需同步另外两处
+- `pg-regression` run 目录重构后，旧 `results/` 和 `summary.*.md` 不再写入，统一改为 `<suite>-<date>-<NN>/` 子目录结构
+- 测试覆盖更新：`test_invoke_hook.py` 新增 `TestV4Protocol`（10+ 测试覆盖 caller×session 路由、auto-session、deprecated alias）、`test_prompt_template.py` 用例全面适配"必读源报告"新范式、`test_template_hooks.py` 覆盖 SSOT 同步
+
+## [0.3.0] - 2026-06-26
 
 ### 新增
 - `pg-invoke-hook.py`：runtime 层独立 CLI（位于 `src/runtime/bin/`），承担 env-level (prepare_env/clean_env) + per-role (start/stop/logs/tail) hook 的 spec 渲染与 `pg-run-hook.py` 调度。供 `pg-build` / `pg-fix-issue` / `pg-regression` 三个 SKILL 共享调用，**统一 hooks 协议入口**
@@ -26,28 +75,6 @@
 - pg-build / pg-fix-issue / pg-regression 三个 SKILL 不再互相依赖 runner 路径, hooks 协议入口在 runtime 层单一实现
 - 升级路径: 旧 prompt 含 `pg-pipeline-runner.py invoke-hook` 的 sub-agent / 编排器仍可工作 (thin wrapper 透传), 推荐新 prompt 改写为 `pg-invoke-hook.py invoke-hook`
 - 新增 2 个测试文件: `test_invoke_hook.py` (21 个测试覆盖 canonical + thin wrapper) + `test_invoke_hook_env_level_actions.py` (6 个测试覆盖 env-level actions)
-
-### 后续追加 (0.3.0 patch)
-
-#### 新增
-- `pg-invoke-hook.py status` 顶级 subcommand: 透传 prepare_env 状态查询到 `pg-pipeline-runner.py prepare-env-status`. CLI 形式 `pg-invoke-hook.py status --change <C> [--stage <S>]`, stdout JSON + exit code 原样透传. 与 `invoke-hook` 平级, LLM-facing 状态查询入口统一在 runtime 层.
-- 新增测试 `test_pg_invoke_hook_status.py` (14 个测试): 覆盖 dispatcher 路由 / argparse / 透传 / runner exit code 透传 / 实机端到端 CLI
-
-#### 变更
-- **破坏性** (隐式): `pg-invoke-hook.py` 重构为顶级 subcommand 派发器 (`invoke-hook` / `status` 两个并列 subcommand). 调用形式 `pg-invoke-hook.py invoke-hook <flags>` 与新 `pg-invoke-hook.py status <flags>`. 向后兼容: bare flag 形式 (`pg-invoke-hook.py <flags>` 无 subcommand) 仍默认走 `invoke-hook`
-- `pg-build/SKILL.md` 文字统一: 6 处 `runner invoke-hook` 改为 `pg-invoke-hook.py invoke-hook` (line 438/439/441/460/462 标题/492-494 表格); 历史兼容说明保留在 line 470 (`pg-pipeline-runner.py invoke-hook 仍可用, thin wrapper 转发...`), 维持 `test_v3_invoke_hook_migration.py:130` 的 regex contract
-- `pg-build/agents/verify.md` line 100: `pg-pipeline-runner.py prepare-env-status` 改为 `pg-invoke-hook.py status` (含历史兼容注释)
-- `README.md` §Hook 协议: 标志表 `--role`/`--instance` 描述加 "env-level 忽略" 注释; `--action` 列表加 `prepare_env / clean_env`; 新增 §`status` subcommand 章节; §Development 段 `python3 src/runtime/bin/pg validate` 改为 `python3 src/runtime/bin/pg doctor`
-- `test_invoke_hook.py`: PROJECT_ROOT 解析从 7 层相对路径上推改为 walk-up 探测 `.pg/project.yaml` (修复 hardlink 路径下的 pre-existing 解析失败)
-- `test_v3_invoke_hook_migration.py`: `_find_project_root` 增加 cwd fallback + PG_PROJECT_ROOT env var 支持 (同上修复)
-
-#### 修复
-- pre-existing: `test_invoke_hook.py` 在 hardlink 路径下 (`/home/ubuntu/workspace/pg-skills/...`) 走 7 层 `..` 上推到 `/home/.pg/...`, 找不到 `pg-pipeline-runner.py`. 已改为 walk-up 探测, oc2-web-virt 与 upstream pg-skills 双向都能跑
-- pre-existing: `test_v3_invoke_hook_migration.py` 同上 hardlink 现象, `_find_project_root` 只 walk-up 10 层且不 fallback cwd, 在 hardlink 路径下失败
-
-#### 备注
-- `pg-invoke-hook.py` 现承担 **所有** LLM-facing 入口: hook 协议 (`invoke-hook`) + 状态查询 (`status`). runner 仅承担编排状态机 (`next` / `record` / `check` / `progress`)
-- 测试总数: 14 (status) + 21 (invoke-hook) + 6 (env-level actions) + 8 (v3 migration) = **49/49 通过** + `pg doctor` 4/4
 
 ## [0.2.0] - 2026-06-24
 
