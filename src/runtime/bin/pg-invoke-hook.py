@@ -156,7 +156,7 @@ def pg_log_dir_for_skill(caller: str, session: str, env: str, project_root: Path
 
     Routing rules (must stay in sync with .pg/hooks/lib/common.sh:pg_resolve_paths):
       pg-build       -> .pg/changes/<session>/2-build/<env>/logs
-      pg-regression  -> .pg/regression/<session>/<env>/logs   (session 已含 regression- 前缀 + date + seq)
+      pg-regression  -> .pg/regression/<session>/<env>/logs   (session = <suite>-<date>-<seq>)
       pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs    (session 已含 fix- 前缀)
       ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs       (独立顶级目录, 不与 SKILL 命名空间混)
     """
@@ -318,7 +318,7 @@ def invoke_hook_main(argv=None) -> int:
     parser.add_argument("--session", default="",
                         help=(
                             "session 名 (与 caller 正交). "
-                            "pg-build: 提案名; pg-regression: regression-<suite>-<date>-<seq>; "
+                            "pg-build: 提案名; pg-regression: <suite>-<date>-<seq>; "
                             "pg-fix-issue: fix-<date>-<slug>; "
                             "ad-hoc 留空: 自动生成 auto-<date>-<pid>."
                         ))

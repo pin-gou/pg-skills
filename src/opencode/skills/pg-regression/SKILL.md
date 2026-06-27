@@ -124,7 +124,7 @@ DATE=$(date +%Y%m%d)
 EXISTING=$(ls -d .pg/regression/${SUITE}-${DATE}-* 2>/dev/null | wc -l)
 SEQ=$(printf "%02d" $((EXISTING + 1)))
 RUN_DIR=".pg/regression/${SUITE}-${DATE}-${SEQ}"
-CHANGE="regression-${SUITE}-${DATE}-${SEQ}"
+CHANGE="${SUITE}-${DATE}-${SEQ}"
 mkdir -p "$RUN_DIR/temp"
 echo "📁 Run dir: $RUN_DIR"
 ```
@@ -187,7 +187,7 @@ for i in yaml.safe_load(open('.pg/project.yaml'))['environments']['${ENV}']['rol
 done
 ```
 
-> **日志路径**: `pg-invoke-hook.py` 自动写入 `${RUN_DIR}/${ENV}/logs/role.<role>.start@<instance>.log`（通过 `--session $CHANGE` + `--skill pg-regression` 路由）。编排器可直接 `tail -100 ${RUN_DIR}/*/logs/role.*.start@*.log` 排错。
+> **日志路径**: `pg-invoke-hook.py` 通过 `--session $CHANGE` + `--skill pg-regression` 路由，自动写入 `.pg/regression/${CHANGE}/${ENV}/logs/role.<role>.start@<instance>.log`。由于 `CHANGE` 与 `RUN_DIR` 的后缀一致（`<suite>-<date>-<seq>`），它们指向同一目录，编排器可直接 `tail -100 ${RUN_DIR}/*/logs/role.*.start@*.log` 排错。
 
 #### 0.4 清理临时目录
 
