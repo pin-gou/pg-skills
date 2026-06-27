@@ -458,6 +458,27 @@ TRACE_EOF
 
 ---
 
+### Phase 2a: 提交测试脚本修改到默认分支
+
+Phase 2 全部 fix-test agent 执行完毕后，编排器检查工作区中是否有测试文件被修改。
+若有，通过 git 提交并推送到 default 分支，确保 Phase 4 的生产 PR 不会被测试修改污染。
+
+```bash
+if git status --porcelain | grep -qE '\.(spec|test)\.' 2>/dev/null ||
+   git status --porcelain | grep -qE 'tests?/' 2>/dev/null; then
+  git add -A
+  git commit -m "fix(${SUITE}): fix test scripts after regression"
+  git push origin master
+  echo "✅ 测试脚本修改已提交到 master"
+else
+  echo "✅ 无测试脚本修改，跳过提交"
+fi
+```
+
+> **为什么直接 push 到 master 而非创建 PR**：测试脚本修改风险低、不碰生产逻辑，直接提交效率更高。生产代码修复在 Phase 4 中通过独立分支+PR 走 code review。
+
+---
+
 ### Phase 3: 导出 JSON 问题清单 + 汇总报告
 
 #### 3.1 从 agent 报告中提取结构化数据

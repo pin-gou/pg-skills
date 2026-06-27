@@ -181,7 +181,18 @@ def process_issue(issue: dict, suite: str, run_dir: Path, seq: int = 0) -> dict:
     print(f"  分支: {branch}")
     print(f"{'='*60}")
 
-    # 1. Git: checkout master → pull → create branch
+    # 1. Abort if working tree is dirty (test fix should have been committed in Phase 2a)
+    try:
+        status = _run_git("status", "--porcelain")
+        if status.strip():
+            result["status"] = "failed"
+            result["errorMessage"] = f"working tree is dirty; Phase 2a did not commit test fixes. Uncommitted: {status[:200]}"
+            print(f"  ❌ {result['errorMessage']}", file=sys.stderr)
+            return result
+    except subprocess.CalledProcessError:
+        pass
+
+    # 2. Git: checkout master → pull → create branch
     try:
         _run_git("checkout", DEFAULT_BRANCH)
         _run_git("pull", "--ff-only", "origin", DEFAULT_BRANCH)
