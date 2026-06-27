@@ -350,6 +350,12 @@ def _normalize_ref(version: str | None) -> str:
     return version
 
 
+def _to_tag_ref(ref: str) -> str:
+    if bool(re.match(r'^v?\d+\.\d+', ref)):
+        return f'refs/tags/{ref}'
+    return ref
+
+
 def _upgrade_check(project_root: Path, current: str) -> int:
     """Fetch remote tags, 列出可用版本."""
     remote = 'pg-skills'
@@ -384,8 +390,9 @@ def _upgrade_check(project_root: Path, current: str) -> int:
 def _compute_changed_files(project_root: Path, ref: str) -> list:
     """Fetch remote ref 并计算 .pg/skills/ 差异."""
     remote = 'pg-skills'
+    fetch_ref = _to_tag_ref(ref)
     subprocess.run(
-        ['git', '-C', str(project_root), 'fetch', remote, ref],
+        ['git', '-C', str(project_root), 'fetch', remote, fetch_ref],
         capture_output=True, text=True,
     )
     result = subprocess.run(
@@ -425,11 +432,12 @@ def _upgrade_pull(project_root: Path, current: str, ref: str, force: bool = Fals
         print('ERROR: Working tree has modifications. Run with --force to overwrite.')
         return 1
 
+    subtree_ref = _to_tag_ref(ref)
     if not (project_root / prefix).exists():
         print(f'INFO: {prefix}/ not found, performing initial subtree add')
-        cmd = ['git', 'subtree', 'add', f'--prefix={prefix}', remote, ref, '--squash']
+        cmd = ['git', 'subtree', 'add', f'--prefix={prefix}', remote, subtree_ref, '--squash']
     else:
-        cmd = ['git', 'subtree', 'pull', f'--prefix={prefix}', remote, ref, '--squash']
+        cmd = ['git', 'subtree', 'pull', f'--prefix={prefix}', remote, subtree_ref, '--squash']
 
     print(f'Running: {" ".join(cmd)}')
     result = subprocess.run(cmd, cwd=str(project_root), text=True)
@@ -470,15 +478,16 @@ def _upgrade_by_copy(project_root: Path, pg_skills_dir: Path, ref: str) -> int:
 
     # 2. Clone 到临时目录
     tmp_dir = Path(tempfile.mkdtemp(prefix='pg-upgrade-'))
-    print(f'Cloning {remote_https} (branch {ref}) ...')
+    clone_ref = _to_tag_ref(ref)
+    print(f'Cloning {remote_https} ({clone_ref}) ...')
     clone_result = subprocess.run(
-        ['git', 'clone', '--depth=1', '--branch', ref, remote_https, str(tmp_dir)],
+        ['git', 'clone', '--depth=1', '--branch', clone_ref, remote_https, str(tmp_dir)],
         capture_output=True, text=True, timeout=120,
     )
     if clone_result.returncode != 0:
         print(f'  https failed, trying ssh ...')
         clone_result = subprocess.run(
-            ['git', 'clone', '--depth=1', '--branch', ref, remote_ssh, str(tmp_dir)],
+            ['git', 'clone', '--depth=1', '--branch', clone_ref, remote_ssh, str(tmp_dir)],
             capture_output=True, text=True, timeout=120,
         )
     if clone_result.returncode != 0:
