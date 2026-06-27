@@ -489,10 +489,13 @@ def _upgrade_by_copy(project_root: Path, pg_skills_dir: Path, ref: str) -> int:
         return 1
 
     # 3. 删除旧 .pg/skills/ → 复制新文件
-    if pg_skills_dir.exists():
-        shutil.rmtree(pg_skills_dir)
+    if pg_skills_dir.exists() or pg_skills_dir.is_symlink():
+        if pg_skills_dir.is_symlink():
+            pg_skills_dir.unlink()
+        else:
+            shutil.rmtree(pg_skills_dir)
     print(f'Copying files to .pg/skills/ ...')
-    shutil.copytree(tmp_dir, pg_skills_dir)
+    shutil.copytree(tmp_dir, pg_skills_dir, ignore=shutil.ignore_patterns('.git'))
 
     # 4. 清理临时目录
     shutil.rmtree(tmp_dir, ignore_errors=True)
