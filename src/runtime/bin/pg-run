@@ -15,9 +15,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import select
 import shlex
 import subprocess
 import sys
+import termios
 from pathlib import Path
 from typing import Any
 
@@ -111,6 +113,83 @@ def get_choice(max_num: int) -> str:
         print(f"  请输入 1-{max_num}, b 或 q")
 
 
+def _set_menu_terminal():
+    fd = sys.stdin.fileno()
+    old = termios.tcgetattr(fd)
+    new = termios.tcgetattr(fd)
+    new[0] = new[0] & ~(termios.BRKINT | termios.ICRNL | termios.INPCK | termios.ISTRIP | termios.IXON)
+    new[2] = new[2] & ~(termios.CSIZE | termios.PARENB)
+    new[2] = new[2] | termios.CS8
+    new[3] = new[3] & ~(termios.ECHO | termios.ECHONL | termios.ICANON | termios.IEXTEN | termios.ISIG)
+    termios.tcsetattr(fd, termios.TCSADRAIN, new)
+    return old
+
+
+def _render_menu(title: str, items: list[tuple[str, str]], current: int, back_option: bool) -> list[str]:
+    width = 60
+    lines = [f"\n{'=' * width}", f"  {title}", "=" * width]
+    for i, (label, desc) in enumerate(items):
+        desc_str = f" — {desc}" if desc else ""
+        marker = ">" if i == current else " "
+        lines.append(f" {marker} {i + 1:2d}) {label}{desc_str}")
+    if back_option:
+        lines.append(f" {' '}  b) 返回上级菜单")
+    lines.append(f" {' '}  q) 退出")
+    return lines
+
+
+def interactive_menu(title: str, items: list[tuple[str, str]], back_option: bool = True) -> str:
+    if not sys.stdin.isatty():
+        print_header(title)
+        print_menu(items, back_option=back_option)
+        return get_choice(len(items))
+
+    fd = sys.stdin.fileno()
+    old_settings = _set_menu_terminal()
+    current = 0
+
+    try:
+        lines = _render_menu(title, items, current, back_option)
+        sys.stdout.write("\n".join(lines) + "\n")
+        sys.stdout.flush()
+        total_lines = len(lines) + 1
+
+        while True:
+            raw = os.read(fd, 1)
+            if not raw:
+                return "q"
+
+            if raw == b"\x1b":
+                seq = b"\x1b"
+                if select.select([fd], [], [], 0.15)[0]:
+                    seq += os.read(fd, 1)
+                    if select.select([fd], [], [], 0.05)[0]:
+                        seq += os.read(fd, 1)
+
+                if seq == b"\x1b[A" and current > 0:
+                    current -= 1
+                elif seq == b"\x1b[B" and current < len(items) - 1:
+                    current += 1
+                else:
+                    continue
+
+                sys.stdout.write(f"\033[{total_lines}A\033[J")
+                lines = _render_menu(title, items, current, back_option)
+                sys.stdout.write("\n".join(lines) + "\n")
+                sys.stdout.flush()
+
+            elif raw in (b"\r", b"\n"):
+                return str(current + 1)
+            elif raw == b"q":
+                return "q"
+            elif raw == b"b" and back_option:
+                return "b"
+            elif raw == b"\x03":
+                raise KeyboardInterrupt
+    finally:
+        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+
+
 def pause():
     try:
         input("\n按 Enter 继续...")
@@ -188,11 +267,9 @@ def run_module_flow(config: dict, project_root: Path):
         return
 
     while True:
-        print_header("选择 Module")
         names = sorted(mods.keys())
         items = [(n, mods[n].get("description", mods[n].get("language", ""))) for n in names]
-        print_menu(items)
-        choice = get_choice(len(names))
+        choice = interactive_menu("选择 Module", items)
         if choice == "q":
             sys.exit(0)
         if choice == "b":
@@ -208,10 +285,8 @@ def _module_action_flow(name: str, cfg: dict, project_root: Path):
         return
 
     while True:
-        print_header(f"Module: {name}")
         items = [(a[0], a[1]) for a in actions]
-        print_menu(items)
-        choice = get_choice(len(actions))
+        choice = interactive_menu(f"Module: {name}", items)
         if choice == "q":
             sys.exit(0)
         if choice == "b":
@@ -254,17 +329,107 @@ def run_env_flow(config: dict, project_root: Path):
         return
 
     while True:
-        print_header("选择 Environment")
         names = sorted(envs.keys())
         items = [(n, envs[n].get("description", "")) for n in names]
-        print_menu(items)
-        choice = get_choice(len(names))
+        choice = interactive_menu("选择 Environment", items)
         if choice == "q":
             sys.exit(0)
         if choice == "b":
             return
         env_name = names[int(choice) - 1]
         _env_action_flow(env_name, envs[env_name], project_root)
+
+
+def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
+    roles = cfg.get("roles", {})
+    if not roles:
+        print(f"  {env_name} 没有定义 roles，没有实例可启动")
+        return
+
+    hook = find_invoke_hook(project_root)
+    for role_name, role_cfg in sorted(roles.items()):
+        instances = role_cfg.get("instances", [])
+        actions = role_cfg.get("actions", {})
+        start_cfg = actions.get("start")
+        if not start_cfg or not instances:
+            continue
+
+        for inst in instances:
+            if hook.is_file():
+                cmd = (
+                    f"python3 {shlex.quote(str(hook))} invoke-hook"
+                    f" --change manual"
+                    f" --env {shlex.quote(env_name)}"
+                    f" --role {shlex.quote(role_name)}"
+                    f" --instance {shlex.quote(inst['name'])}"
+                    f" --action start"
+                )
+                print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / start ---")
+                rc = run_shell(cmd, cwd=project_root)
+            else:
+                script = start_cfg.get("script") if isinstance(start_cfg, dict) else ""
+                if not script:
+                    print(f"  {role_name}.{inst['name']} 没有可执行的 start 脚本")
+                    continue
+                args = start_cfg.get("args", []) if isinstance(start_cfg, dict) else []
+                rendered = []
+                for a in args:
+                    a = str(a)
+                    a = a.replace("{role}", role_name)
+                    a = a.replace("{instance.name}", inst["name"])
+                    a = a.replace("{instance.host}", inst.get("host", ""))
+                    rendered.append(a)
+                cmd = f"bash {shlex.quote(script)} {' '.join(shlex.quote(a) for a in rendered)}"
+                print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / start ---")
+                rc = run_shell(cmd, cwd=project_root)
+            if rc != 0:
+                print(f"  ⚠ {env_name} / {role_name} / {inst['name']} 启动失败，继续执行其他实例")
+
+
+def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path):
+    roles = cfg.get("roles", {})
+    if not roles:
+        print(f"  {env_name} 没有定义 roles，没有实例可停止")
+        return
+
+    hook = find_invoke_hook(project_root)
+    for role_name, role_cfg in sorted(roles.items()):
+        instances = role_cfg.get("instances", [])
+        actions = role_cfg.get("actions", {})
+        stop_cfg = actions.get("stop")
+        if not stop_cfg or not instances:
+            continue
+
+        for inst in instances:
+            if hook.is_file():
+                cmd = (
+                    f"python3 {shlex.quote(str(hook))} invoke-hook"
+                    f" --change manual"
+                    f" --env {shlex.quote(env_name)}"
+                    f" --role {shlex.quote(role_name)}"
+                    f" --instance {shlex.quote(inst['name'])}"
+                    f" --action stop"
+                )
+                print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / stop ---")
+                rc = run_shell(cmd, cwd=project_root)
+            else:
+                script = stop_cfg.get("script") if isinstance(stop_cfg, dict) else ""
+                if not script:
+                    print(f"  {role_name}.{inst['name']} 没有可执行的 stop 脚本")
+                    continue
+                args = stop_cfg.get("args", []) if isinstance(stop_cfg, dict) else []
+                rendered = []
+                for a in args:
+                    a = str(a)
+                    a = a.replace("{role}", role_name)
+                    a = a.replace("{instance.name}", inst["name"])
+                    a = a.replace("{instance.host}", inst.get("host", ""))
+                    rendered.append(a)
+                cmd = f"bash {shlex.quote(script)} {' '.join(shlex.quote(a) for a in rendered)}"
+                print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / stop ---")
+                rc = run_shell(cmd, cwd=project_root)
+            if rc != 0:
+                print(f"  ⚠ {env_name} / {role_name} / {inst['name']} 停止失败，继续执行其他实例")
 
 
 def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
@@ -276,18 +441,71 @@ def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
         print(f"  {env_name} 没有定义 prepare_env/clean_env 操作")
         return
 
+    has_startable = any(
+        role.get("actions", {}).get("start") and role.get("instances")
+        for role in cfg.get("roles", {}).values()
+    )
+    has_stoppable = any(
+        role.get("actions", {}).get("stop") and role.get("instances")
+        for role in cfg.get("roles", {}).values()
+    )
+
     while True:
-        print_header(f"Environment: {env_name}")
         desc_map = {"prepare_env": "准备环境", "clean_env": "清理环境"}
         items = [(a, desc_map.get(a, a)) for a, _ in env_actions]
-        print_menu(items)
-        choice = get_choice(len(env_actions))
+
+        orch_items = []
+        if has_startable:
+            orch_items.extend([
+                ("start_all_instances", "启动所有实例"),
+                ("prepare_env_and_start", "准备环境并启动所有实例"),
+            ])
+        if has_stoppable:
+            orch_items.append(("stop_all_instances", "停止所有实例"))
+        items.extend(orch_items)
+
+        choice = interactive_menu(f"Environment: {env_name}", items)
         if choice == "q":
             sys.exit(0)
         if choice == "b":
             return
-        action_name, action_cfg = env_actions[int(choice) - 1]
 
+        idx = int(choice) - 1
+        if idx >= len(env_actions):
+            orch_id, _ = orch_items[idx - len(env_actions)]
+            if orch_id == "start_all_instances":
+                _run_env_start_all(env_name, cfg, project_root)
+            elif orch_id == "stop_all_instances":
+                _run_env_stop_all(env_name, cfg, project_root)
+            elif orch_id == "prepare_env_and_start":
+                prepare_cfg = cfg.get("prepare_env", {})
+                hook = find_invoke_hook(project_root)
+                if hook.is_file():
+                    cmd = (
+                        f"python3 {shlex.quote(str(hook))} invoke-hook"
+                        f" --change manual"
+                        f" --env {shlex.quote(env_name)}"
+                        f" --action prepare_env"
+                    )
+                    timeout = prepare_cfg.get("timeout_seconds", 300)
+                    print(f"\n--- 执行 {env_name} / prepare_env ---")
+                    rc = run_shell(cmd, cwd=project_root, timeout=timeout)
+                else:
+                    cmd, timeout = extract_command(prepare_cfg)
+                    if cmd:
+                        print(f"\n--- 执行 {env_name} / prepare_env ---")
+                        rc = run_shell(f"bash {shlex.quote(cmd)}", cwd=project_root, timeout=timeout)
+                    else:
+                        print(f"  {env_name} 没有定义 prepare_env")
+                        rc = -1
+                if rc == 0:
+                    _run_env_start_all(env_name, cfg, project_root)
+                else:
+                    print("  准备环境失败，跳过启动所有实例")
+            pause()
+            continue
+
+        action_name, action_cfg = env_actions[idx]
         hook = find_invoke_hook(project_root)
         if hook.is_file():
             cmd = (
@@ -318,11 +536,9 @@ def run_role_flow(config: dict, project_root: Path):
         return
 
     while True:
-        print_header("选择 Environment")
         names = sorted(envs.keys())
         items = [(n, envs[n].get("description", "")) for n in names]
-        print_menu(items)
-        choice = get_choice(len(names))
+        choice = interactive_menu("选择 Environment", items)
         if choice == "q":
             sys.exit(0)
         if choice == "b":
@@ -338,11 +554,9 @@ def _role_env_flow(env_name: str, env_cfg: dict, project_root: Path):
         return
 
     while True:
-        print_header(f"Environment: {env_name} — 选择 Role")
         names = sorted(roles.keys())
         items = [(n, "") for n in names]
-        print_menu(items)
-        choice = get_choice(len(names))
+        choice = interactive_menu(f"Environment: {env_name} — 选择 Role", items)
         if choice == "q":
             sys.exit(0)
         if choice == "b":
@@ -358,15 +572,13 @@ def _role_instance_flow(env_name: str, role_name: str, role_cfg: dict, project_r
         return
 
     while True:
-        print_header(f"{env_name} / {role_name} — 选择 Instance")
         items = []
         for inst in instances:
             host = inst.get("host", "")
             port = inst.get("port", "")
             detail = f"@{host}:{port}" if host else ""
             items.append((inst["name"], detail))
-        print_menu(items)
-        choice = get_choice(len(instances))
+        choice = interactive_menu(f"{env_name} / {role_name} — 选择 Instance", items)
         if choice == "q":
             sys.exit(0)
         if choice == "b":
@@ -382,11 +594,9 @@ def _role_action_flow(env_name: str, role_name: str, inst: dict, role_cfg: dict,
         return
 
     while True:
-        print_header(f"{env_name} / {role_name} / {inst['name']} — 选择 Action")
         act_names = sorted(actions.keys())
         items = [(a, actions[a].get("description", "") if isinstance(actions[a], dict) else "") for a in act_names]
-        print_menu(items)
-        choice = get_choice(len(act_names))
+        choice = interactive_menu(f"{env_name} / {role_name} / {inst['name']} — 选择 Action", items)
         if choice == "q":
             sys.exit(0)
         if choice == "b":
@@ -441,6 +651,69 @@ def run_custom_flow():
         pause()
 
 
+# ----- 主菜单快捷函数 -----
+
+def _pick_env(config: dict) -> str | None:
+    envs = env_items(config)
+    names = sorted(envs.keys())
+    if not names:
+        print("  没有定义 environments")
+        return None
+    if len(names) == 1:
+        return names[0]
+    items = [(n, envs[n].get("description", "")) for n in names]
+    choice = interactive_menu("选择 Environment", items)
+    if choice in ("q", "b"):
+        return None
+    return names[int(choice) - 1]
+
+
+def _main_menu_start_all(config: dict, project_root: Path):
+    env_name = _pick_env(config)
+    if env_name is not None:
+        _run_env_start_all(env_name, config["environments"][env_name], project_root)
+        pause()
+
+
+def _main_menu_stop_all(config: dict, project_root: Path):
+    env_name = _pick_env(config)
+    if env_name is not None:
+        _run_env_stop_all(env_name, config["environments"][env_name], project_root)
+        pause()
+
+
+def _main_menu_prepare_and_start(config: dict, project_root: Path):
+    env_name = _pick_env(config)
+    if env_name is None:
+        return
+    cfg = config["environments"][env_name]
+    prepare_cfg = cfg.get("prepare_env", {})
+    hook = find_invoke_hook(project_root)
+    if hook.is_file():
+        cmd = (
+            f"python3 {shlex.quote(str(hook))} invoke-hook"
+            f" --change manual"
+            f" --env {shlex.quote(env_name)}"
+            f" --action prepare_env"
+        )
+        timeout = prepare_cfg.get("timeout_seconds", 300)
+        print(f"\n--- 执行 {env_name} / prepare_env ---")
+        rc = run_shell(cmd, cwd=project_root, timeout=timeout)
+    else:
+        cmd, timeout = extract_command(prepare_cfg)
+        if cmd:
+            print(f"\n--- 执行 {env_name} / prepare_env ---")
+            rc = run_shell(f"bash {shlex.quote(cmd)}", cwd=project_root, timeout=timeout)
+        else:
+            print(f"  {env_name} 没有定义 prepare_env")
+            rc = -1
+    if rc == 0:
+        _run_env_start_all(env_name, cfg, project_root)
+    else:
+        print("  准备环境失败，跳过启动所有实例")
+    pause()
+
+
 # ----- 主菜单 -----
 
 def main_menu(config: dict, project_root: Path):
@@ -448,6 +721,9 @@ def main_menu(config: dict, project_root: Path):
         ("Module 操作", "build/lint/test 编译、检查、测试"),
         ("Environment 操作", "prepare_env/clean_env 准备/清理环境"),
         ("Role 操作", "start/stop/logs/tail 启停角色实例"),
+        ("启动所有实例", "一键启动所有角色实例"),
+        ("停止所有实例", "一键停止所有角色实例"),
+        ("准备环境并启动所有实例", "先准备环境，再启动所有角色实例"),
         ("直接执行命令", "输入任意 shell 命令执行"),
     ]
 
@@ -455,13 +731,14 @@ def main_menu(config: dict, project_root: Path):
         lambda: run_module_flow(config, project_root),
         lambda: run_env_flow(config, project_root),
         lambda: run_role_flow(config, project_root),
+        lambda: _main_menu_start_all(config, project_root),
+        lambda: _main_menu_stop_all(config, project_root),
+        lambda: _main_menu_prepare_and_start(config, project_root),
         lambda: run_custom_flow(),
     ]
 
     while True:
-        print_header("pg-run — pg-skills 运行菜单")
-        print_menu(menu_options, back_option=False)
-        choice = get_choice(len(menu_options))
+        choice = interactive_menu("pg-run — pg-skills 运行菜单", menu_options, back_option=False)
         if choice == "q":
             print("  再见")
             break
@@ -483,7 +760,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--env", help="environment 名称")
     parser.add_argument("--role", help="role 名称")
     parser.add_argument("--instance", help="instance 名称")
-    parser.add_argument("--action", help="action 名称（build/lint/test.*/start/stop/logs/tail/prepare_env/clean_env）")
+    parser.add_argument("--action", help="action 名称（build/lint/test.*/start/stop/logs/tail/prepare_env/clean_env/start_all_instances/stop_all_instances/prepare_env_and_start）")
     parser.add_argument("--cmd", help="直接执行的 shell 命令（跳过菜单）")
     return parser.parse_args(argv)
 
@@ -534,6 +811,51 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
         )
         return run_shell(cmd, cwd=project_root)
 
+    if args.env and args.action == "stop_all_instances":
+        env_cfg = config.get("environments", {}).get(args.env)
+        if not env_cfg:
+            sys.stderr.write(f"Error: environment '{args.env}' not found\n")
+            return 1
+        _run_env_stop_all(args.env, env_cfg, project_root)
+        return 0
+
+    if args.env and args.action == "start_all_instances":
+        env_cfg = config.get("environments", {}).get(args.env)
+        if not env_cfg:
+            sys.stderr.write(f"Error: environment '{args.env}' not found\n")
+            return 1
+        _run_env_start_all(args.env, env_cfg, project_root)
+        return 0
+
+    if args.env and args.action == "prepare_env_and_start":
+        env_cfg = config.get("environments", {}).get(args.env)
+        if not env_cfg:
+            sys.stderr.write(f"Error: environment '{args.env}' not found\n")
+            return 1
+        prepare_cfg = env_cfg.get("prepare_env", {})
+        hook = find_invoke_hook(project_root)
+        if hook.is_file():
+            cmd = (
+                f"python3 {shlex.quote(str(hook))} invoke-hook"
+                f" --change manual"
+                f" --env {shlex.quote(args.env)}"
+                f" --action prepare_env"
+            )
+            timeout = prepare_cfg.get("timeout_seconds", 300)
+            print(f"\n--- 执行 {args.env} / prepare_env ---")
+            rc = run_shell(cmd, cwd=project_root, timeout=timeout)
+        else:
+            cmd, timeout = extract_command(prepare_cfg)
+            if cmd:
+                print(f"\n--- 执行 {args.env} / prepare_env ---")
+                rc = run_shell(f"bash {shlex.quote(cmd)}", cwd=project_root, timeout=timeout)
+            else:
+                sys.stderr.write(f"Error: {args.env} has no prepare_env defined\n")
+                return 1
+        if rc == 0:
+            _run_env_start_all(args.env, env_cfg, project_root)
+        return 0 if rc == 0 else 1
+
     if args.env and args.role and args.instance and args.action:
         hook = find_invoke_hook(project_root)
         cmd = (
@@ -559,7 +881,7 @@ def main():
     has_direct = any([
         args.cmd,
         args.module,
-        args.env and args.action in ("prepare_env", "clean_env"),
+        args.env and args.action in ("prepare_env", "clean_env", "start_all_instances", "stop_all_instances", "prepare_env_and_start"),
         args.env and args.role and args.instance and args.action,
     ])
     if has_direct:
