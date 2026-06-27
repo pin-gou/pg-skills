@@ -159,7 +159,7 @@ def _create_gitee_pr(branch, base, title, body):
 
 # ==================== Per-issue processing ====================
 
-def process_issue(issue: dict, suite: str, run_dir: Path) -> dict:
+def process_issue(issue: dict, suite: str, run_dir: Path, seq: int = 0) -> dict:
     """Process a single issue: branch → fix → push → PR → cleanup."""
     idx = issue.get("id", "unknown")
     title = issue.get("title", "")
@@ -168,7 +168,7 @@ def process_issue(issue: dict, suite: str, run_dir: Path) -> dict:
         branch = _make_branch_name(suite, title, idx)
 
     result = {
-        "id": idx, "suite": suite, "title": title,
+        "id": idx, "suite": suite, "title": title, "seq": seq,
         "branchName": branch, "status": "pending",
         "commitSha": None, "filesChanged": [],
         "prUrl": None, "prNumber": None,
@@ -205,7 +205,7 @@ def process_issue(issue: dict, suite: str, run_dir: Path) -> dict:
 
     # 2. Write prompt file (Markdown format)
     branch_slug = branch.replace("fix/", "", 1)
-    issue_dir = run_dir / "fix-issues" / f"{idx}-{branch_slug}"
+    issue_dir = run_dir / "fix-issues" / f"{seq:02d}-{idx}-{branch_slug}"
     issue_dir.mkdir(parents=True, exist_ok=True)
     prompt_file = issue_dir / "1-prompt.md"
     test_targets_str = ', '.join(issue.get('test_targets', [])) or '(无)'
@@ -246,7 +246,7 @@ def process_issue(issue: dict, suite: str, run_dir: Path) -> dict:
         fix_proc = subprocess.run(
             ["opencode", "run",
              "--agent", FIX_PROD_AGENT,
-             "--file", str(prompt_file)],
+             str(prompt_file)],
             capture_output=True, text=True,
             timeout=7200,  # 2h per issue max
         )
@@ -371,12 +371,13 @@ def _cleanup(branch):
 
 
 def _write_result_file(result: dict, run_dir: Path):
-    """Write per-issue result JSON to fix-issues/<idx>-<slug>/3-result.json."""
+    """Write per-issue result JSON to fix-issues/<seq>-<idx>-<slug>/3-result.json."""
     idx = result.get("id", "unknown")
     suite = result.get("suite", "unknown")
+    seq = result.get("seq", 0)
     branch = result.get("branchName", f"fix/{suite}-unknown")
     branch_slug = branch.replace("fix/", "", 1)
-    issue_dir = run_dir / "fix-issues" / f"{idx}-{branch_slug}"
+    issue_dir = run_dir / "fix-issues" / f"{seq:02d}-{idx}-{branch_slug}"
     issue_dir.mkdir(parents=True, exist_ok=True)
     result_file = issue_dir / "3-result.json"
     result_file.write_text(
@@ -517,9 +518,9 @@ def main():
 
     # 2. Serial loop over all issues
     results = []
-    for iss in all_issues:
+    for i, iss in enumerate(all_issues):
         suite = iss["_suite"]
-        r = process_issue(iss, suite, run_dir)
+        r = process_issue(iss, suite, run_dir, seq=i+1)
         results.append(r)
 
     # 3. Summary
