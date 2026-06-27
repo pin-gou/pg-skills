@@ -3,23 +3,24 @@
 #
 # 用法:
 #   1. 把本文件复制到 .pg/hooks/<role>-stop.sh
-#   2. 把 CMD_PLACEHOLDER 替换为实际的停止命令
+#   2. 把下面的 TODO 块替换为实际的停止命令
 #   3. chmod +x .pg/hooks/<role>-stop.sh
 #
 # 本模板对应 schema 节点:
 #   environments.<env>.roles.<r>.actions.stop.script
 #
-# 由 pg-run-hook.py 调起, 注入的 env vars 见 role-start.sh 头部注释.
+# 由 pg-run-hook.py 调起, 注入 env vars 见 role-start.sh 头部注释.
 #
 # 注意: stop 命令应当幂等 (第二次跑无副作用). 常见实现:
 #   pkill -f <process-pattern> || true
 #   docker compose down
 #   ssh user@host 'systemctl stop <svc>'
+# 模板默认实现利用 lib/common.sh:kill_pid_file (已 source) 从 PID 文件优雅关停.
 #
 # 注意: 本 hook 的 stdout/stderr 由 caller 通过 $PG_LOG_FILE 控制.
 #       lib/common.sh 中的 pg_resolve_paths 仅影响 hook 内部 LOG_DIR/PID_DIR 派生.
 
-set -euo pipefail
+set -uo pipefail  # 注意: 不加 -e, 由 hook-helpers.sh trap ERR 控制
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PG_SKILLS_PATH="${PG_SKILLS_PATH:-$SELF_DIR}"
 source "$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"
@@ -36,23 +37,15 @@ if [[ -f "$HOOK_DIR/lib/common.sh" ]]; then
 fi
 
 # ---- TODO: 替换为本 role 的停止命令 ----
-# 例: pkill -f 'kuboard-server|spring-boot:run' || true
-# 占位符故意保留非空字符串, 防止未替换就运行.
-CMD_PLACEHOLDER="echo REPLACE_ME_WITH_STOP_COMMAND"
+# 模板默认实现: 从 PID 文件优雅关停 (依赖 lib/common.sh:kill_pid_file, 已 source).
+# 替换为你环境的实际命令:
+#   例 (Java 后端):     pkill -f 'spring-boot:run|webvirt-bootstrap' || true
+#   例 (前端 vite):     pkill -f 'vite|node.*dev' || true
+#   例 (docker compose): docker compose down
+#   例 (远端 systemd):  ssh user@host 'systemctl stop my-app'
+# stop 必须幂等 — 进程不存在时不要 exit 非零.
 
 START=$(date +%s)
-if bash -c "$CMD_PLACEHOLDER" > "$PG_LOG_FILE" 2>&1; then
-    DURATION=$(($(date +%s) - START))
-    pg_exit --status=pass --duration=$DURATION \
-            --metadata="cmd=\"$CMD_PLACEHOLDER\" role=\"${PG_ROLE:-}\" instance=\"${PG_INSTANCE_NAME:-}\""
-else
-    EC=$?
-    DURATION=$(($(date +%s) - START))
-    pg_fail \
-        --category=health_check_fail \
-        --code=PG-E-1011 \
-        --message="stop for role '${PG_ROLE:-?}' failed (exit $EC)" \
-        --hint="Check $PG_LOG_FILE. Stop commands should be idempotent (use '|| true' when pattern may not match)." \
-        --related-log="$PG_LOG_FILE" \
-        --agent-recoverable=true
-fi
+DURATION=$(($(date +%s) - START))
+pg_exit --status=pass --duration=$DURATION \
+        --metadata="role=\"${PG_ROLE:-}\" instance=\"${PG_INSTANCE_NAME:-}\""

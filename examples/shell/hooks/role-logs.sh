@@ -3,7 +3,7 @@
 #
 # 用法:
 #   1. 把本文件复制到 .pg/hooks/<role>-logs.sh
-#   2. 把 CMD_PLACEHOLDER 替换为实际的日志抓取命令
+#   2. 把下面的 TODO 块替换为实际的日志抓取命令
 #   3. chmod +x .pg/hooks/<role>-logs.sh
 #
 # 本模板对应 schema 节点:
@@ -17,16 +17,16 @@
 # --tail-lines 参数传递 (LLM ↔ runner invoke-hook):
 #   当 LLM 调用 `runner invoke-hook --action logs --tail-lines N` 时,
 #   runner 会把 `--tail-lines N` 作为 args 末尾追加到本脚本的 $@ 末尾。
-#   在 CMD_PLACEHOLDER 中用 `$@` 读取:
-#     CMD_PLACEHOLDER='journalctl -u kuboard-server --no-pager "$@"'
-#   这样 LLM 显式传的 --tail-lines N 会直接传给底层命令 (如 journalctl 的 -n)。
-#   如果 LLM 不传 --tail-lines, $@ 为空 — 需要 CMD_PLACEHOLDER 自己处理默认值。
+#   在 CMD 中用 `$@` 读取:
+#     tail -n "${1:-100}" "$LOG_DIR/${PG_ROLE}.log" "$@"
+#   这样 LLM 显式传的 --tail-lines N 会直接传给底层命令 (如 tail 的 -n)。
+#   如果 LLM 不传 --tail-lines, $1 为空 — 需要 CMD 自己处理默认值。
 #   同样的约定适用于 actions.tail。
 #
 # 注意: 本 hook 的 stdout/stderr 由 caller 通过 $PG_LOG_FILE 控制.
 #       lib/common.sh 中的 pg_resolve_paths 仅影响 hook 内部 LOG_DIR/PID_DIR 派生.
 
-set -euo pipefail
+set -uo pipefail  # 注意: 不加 -e, 由 hook-helpers.sh trap ERR 控制
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PG_SKILLS_PATH="${PG_SKILLS_PATH:-$SELF_DIR}"
 source "$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"
@@ -42,25 +42,18 @@ if [[ -f "$HOOK_DIR/lib/common.sh" ]]; then
     pg_resolve_paths
 fi
 
-# ---- TODO: 替换为日志抓取命令 ----
-# 例 (Spring Boot 应用): journalctl -u kuboard-server --since '-5min' --no-pager
-# 例 (Docker): docker logs --since 5m <container>
-# 例 (vite dev): tail -n 200 .pg/logs/vite.log
-CMD_PLACEHOLDER="echo REPLACE_ME_WITH_LOGS_COMMAND"
+# ---- TODO: 替换为你的日志抓取命令 ----
+# 模板默认实现: 从 $LOG_DIR (pg_resolve_paths 派生) 读取 role 对应的日志尾部.
+# 替换为你环境的实际命令:
+#   例 (Spring Boot 应用): journalctl -u my-app --no-pager -n "${1:-100}"
+#   例 (Docker):           docker logs --tail "${1:-100}" <container>
+#   例 (vite dev):         tail -n "${1:-100}" .pg/logs/vite.log
+#   例 (远端 SSH):         ssh user@host 'journalctl -u my-app --no-pager -n "${1:-100}"'
+# $1 由 runner 注入 LLM 传的 --tail-lines N (缺省 100).
+lines="${1:-100}"
+tail -n "$lines" "$LOG_DIR/${PG_ROLE:-unknown}.log"
 
 START=$(date +%s)
-if bash -c "$CMD_PLACEHOLDER" > "$PG_LOG_FILE" 2>&1; then
-    DURATION=$(($(date +%s) - START))
-    pg_exit --status=pass --duration=$DURATION \
-            --metadata="cmd=\"$CMD_PLACEHOLDER\" role=\"${PG_ROLE:-}\""
-else
-    EC=$?
-    DURATION=$(($(date +%s) - START))
-    pg_fail \
-        --category=health_check_fail \
-        --code=PG-E-1012 \
-        --message="logs for role '${PG_ROLE:-?}' failed (exit $EC)" \
-        --hint="Check $PG_LOG_FILE" \
-        --related-log="$PG_LOG_FILE" \
-        --agent-recoverable=true
-fi
+DURATION=$(($(date +%s) - START))
+pg_exit --status=pass --duration=$DURATION \
+        --metadata="role=\"${PG_ROLE:-}\" lines=\"$lines\""

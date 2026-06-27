@@ -3,7 +3,7 @@
 #
 # 用法:
 #   1. 把本文件复制到 .pg/hooks/prepare_env.sh (或 env-<env>-prepare.sh)
-#   2. 把 CMD_PLACEHOLDER 替换为实际的环境准备命令
+#   2. 把下面的 TODO 块替换为实际的环境准备命令
 #   3. chmod +x
 #
 # 本模板对应 schema 节点:
@@ -19,7 +19,7 @@
 # 注意: 本 hook 的 stdout/stderr 由 caller 通过 $PG_LOG_FILE 控制.
 #       lib/common.sh 中的 pg_resolve_paths 仅影响 hook 内部 LOG_DIR/PID_DIR 派生.
 
-set -euo pipefail
+set -uo pipefail  # 注意: 不加 -e, 由 hook-helpers.sh trap ERR 控制
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PG_SKILLS_PATH="${PG_SKILLS_PATH:-$SELF_DIR}"
 source "$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"
@@ -36,23 +36,15 @@ if [[ -f "$HOOK_DIR/lib/common.sh" ]]; then
 fi
 
 # ---- TODO: 替换为环境准备命令 ----
-# 例 (启动 MariaDB + 跑 flyway): cd db/db-mariadb && docker compose up -d && sleep 5 && mvn -pl kuboard-server flyway:migrate
-# 例 (只跑 migration): mvn -pl kuboard-server flyway:migrate
-CMD_PLACEHOLDER="echo REPLACE_ME_WITH_PREPARE_ENV_COMMAND"
+# 模板默认实现: 空 body. 替换为你环境的实际命令:
+#   例 (启动 MariaDB + 跑 flyway): cd db/db-mariadb && docker compose up -d \
+#         && sleep 5 && mvn -pl webvirt-bootstrap flyway:migrate
+#   例 (只跑 migration): mvn -pl webvirt-bootstrap flyway:migrate
+#   例 (启 redis + 预热): docker compose up -d redis && redis-cli FLUSHALL
+# 失败上报: 调用 `pg_fail --code=PG-E-1020` (dependency_not_ready).
+# 详细字段: --category / --code / --message / --hint / --related-log / --agent-recoverable.
 
 START=$(date +%s)
-if bash -c "$CMD_PLACEHOLDER" > "$PG_LOG_FILE" 2>&1; then
-    DURATION=$(($(date +%s) - START))
-    pg_exit --status=pass --duration=$DURATION \
-            --metadata="cmd=\"$CMD_PLACEHOLDER\" env=\"${PG_ENV:-}\" stage=\"${PG_STAGE:-}\""
-else
-    EC=$?
-    DURATION=$(($(date +%s) - START))
-    pg_fail \
-        --category=dependency_not_ready \
-        --code=PG-E-1020 \
-        --message="prepare_env for '${PG_ENV:-?}' failed (exit $EC)" \
-        --hint="Check $PG_LOG_FILE. Common cause: DB not up yet, migration ran twice, ports already in use." \
-        --related-log="$PG_LOG_FILE" \
-        --agent-recoverable=true
-fi
+DURATION=$(($(date +%s) - START))
+pg_exit --status=pass --duration=$DURATION \
+        --metadata="env=\"${PG_ENV:-}\" stage=\"${PG_STAGE:-}\""

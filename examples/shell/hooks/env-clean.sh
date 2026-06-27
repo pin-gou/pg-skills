@@ -3,7 +3,7 @@
 #
 # 用法:
 #   1. 把本文件复制到 .pg/hooks/clean_env.sh (或 env-<env>-clean.sh)
-#   2. 把 CMD_PLACEHOLDER 替换为实际的环境清理命令
+#   2. 把下面的 TODO 块替换为实际的环境清理命令
 #   3. chmod +x
 #
 # 本模板对应 schema 节点:
@@ -17,7 +17,7 @@
 # 注意: 本 hook 的 stdout/stderr 由 caller 通过 $PG_LOG_FILE 控制.
 #       lib/common.sh 中的 pg_resolve_paths 仅影响 hook 内部 LOG_DIR/PID_DIR 派生.
 
-set -euo pipefail
+set -uo pipefail  # 注意: 不加 -e, 由 hook-helpers.sh trap ERR 控制
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PG_SKILLS_PATH="${PG_SKILLS_PATH:-$SELF_DIR}"
 source "$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"
@@ -34,23 +34,15 @@ if [[ -f "$HOOK_DIR/lib/common.sh" ]]; then
 fi
 
 # ---- TODO: 替换为环境清理命令 ----
-# 例: cd db/db-mariadb && docker compose down -v
-# 例: pkill -f 'kuboard-server' || true; rm -rf .pg/runs/<change>/temp
-CMD_PLACEHOLDER="echo REPLACE_ME_WITH_CLEAN_ENV_COMMAND"
+# 模板默认实现: 空 body. 替换为你环境的实际命令:
+#   例 (停 docker compose): cd db/db-mariadb && docker compose down -v
+#   例 (清临时数据):       rm -rf .pg/runs/<change>/temp
+#   例 (组合):             pkill -f 'webvirt-bootstrap' || true \
+#                             && docker compose down -v
+# clean_env 必须幂等; 进程/容器不存在时不要 exit 非零 (用 '|| true').
+# 失败上报: 调用 `pg_fail --code=PG-E-1021` (health_check_fail).
 
 START=$(date +%s)
-if bash -c "$CMD_PLACEHOLDER" > "$PG_LOG_FILE" 2>&1; then
-    DURATION=$(($(date +%s) - START))
-    pg_exit --status=pass --duration=$DURATION \
-            --metadata="cmd=\"$CMD_PLACEHOLDER\" env=\"${PG_ENV:-}\" stage=\"${PG_STAGE:-}\""
-else
-    EC=$?
-    DURATION=$(($(date +%s) - START))
-    pg_fail \
-        --category=health_check_fail \
-        --code=PG-E-1021 \
-        --message="clean_env for '${PG_ENV:-?}' failed (exit $EC)" \
-        --hint="Check $PG_LOG_FILE. Clean commands should be idempotent — prefer '|| true' for non-essential steps." \
-        --related-log="$PG_LOG_FILE" \
-        --agent-recoverable=true
-fi
+DURATION=$(($(date +%s) - START))
+pg_exit --status=pass --duration=$DURATION \
+        --metadata="env=\"${PG_ENV:-}\" stage=\"${PG_STAGE:-}\""

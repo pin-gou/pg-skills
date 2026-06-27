@@ -3,7 +3,7 @@
 #
 # 用法:
 #   1. 把本文件复制到 .pg/hooks/<role>-start.sh (或 <role>-restart.sh)
-#   2. 把 CMD_PLACEHOLDER 替换为实际的启动命令
+#   2. 把下面的 TODO 块替换为实际的启动命令
 #   3. chmod +x .pg/hooks/<role>-start.sh
 #
 # 本模板对应 schema 节点:
@@ -32,7 +32,7 @@
 # 注意: 本 hook 的 stdout/stderr 由 caller 通过 $PG_LOG_FILE 控制.
 #       lib/common.sh 中的 pg_resolve_paths 仅影响 hook 内部 LOG_DIR/PID_DIR 派生.
 
-set -euo pipefail
+set -uo pipefail  # 注意: 不加 -e, 由 hook-helpers.sh trap ERR 控制
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 export PG_SKILLS_PATH="${PG_SKILLS_PATH:-$SELF_DIR}"
 source "$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"
@@ -48,26 +48,23 @@ if [[ -f "$HOOK_DIR/lib/common.sh" ]]; then
     pg_resolve_paths
 fi
 
+mkdir -p "$LOG_DIR" "$PID_DIR"
+
 # ---- TODO: 替换为本 role 的启动命令 ----
-# 例 (Java 后端): ./run-kuboard-server.sh
-# 例 (前端): pnpm --dir kb-portal dev
-# 例 (数据库): docker compose up -d db
-# 占位符故意保留非空字符串, 防止未替换就运行.
-CMD_PLACEHOLDER="echo REPLACE_ME_WITH_START_COMMAND"
+# 模板默认实现: 空 body (启动成功的典型场景由 hook-helpers.sh trap 接管错误).
+# 替换为你环境的实际命令:
+#   例 (Java 后端 mvn):    mvn spring-boot:run -pl webvirt-bootstrap
+#   例 (前端 vite dev):    pnpm --dir webvirt-frontend dev
+#   例 (数据库 docker):    docker compose up -d postgres
+#   例 (远端 systemd):     ssh user@host 'systemctl start my-app'
+# 把 PID 写到 $PID_DIR/${PG_ROLE}.pid (供 stop / health 复用),
+# 把 stdout/stderr 重定向到 $LOG_DIR/${PG_ROLE}.log.
+#
+# 启动后建议: wait_for_port_with_monitor $PORT "$PG_ROLE" 60 \
+#     "$PID_DIR/${PG_ROLE}.pid" "$LOG_DIR/${PG_ROLE}.log"
+# 来确认端口就绪 + 进程存活 (lib/common.sh 已 source).
 
 START=$(date +%s)
-if bash -c "$CMD_PLACEHOLDER" > "$PG_LOG_FILE" 2>&1; then
-    DURATION=$(($(date +%s) - START))
-    pg_exit --status=pass --duration=$DURATION \
-            --metadata="cmd=\"$CMD_PLACEHOLDER\" role=\"${PG_ROLE:-}\" instance=\"${PG_INSTANCE_NAME:-}\""
-else
-    EC=$?
-    DURATION=$(($(date +%s) - START))
-    pg_fail \
-        --category=health_check_fail \
-        --code=PG-E-1010 \
-        --message="${PG_HOOK_TYPE:-start} for role '${PG_ROLE:-?}' failed (exit $EC)" \
-        --hint="Check $PG_LOG_FILE. Confirm the start command, port availability, and required deps (DB/cache)." \
-        --related-log="$PG_LOG_FILE" \
-        --agent-recoverable=true
-fi
+DURATION=$(($(date +%s) - START))
+pg_exit --status=pass --duration=$DURATION \
+        --metadata="role=\"${PG_ROLE:-}\" instance=\"${PG_INSTANCE_NAME:-}\""
