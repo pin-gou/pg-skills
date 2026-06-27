@@ -246,8 +246,7 @@ def process_issue(issue: dict, suite: str, run_dir: Path) -> dict:
         fix_proc = subprocess.run(
             ["opencode", "run",
              "--agent", FIX_PROD_AGENT,
-             "--file", str(prompt_file),
-             f"修复 #{idx}: {title}"],
+             "--file", str(prompt_file)],
             capture_output=True, text=True,
             timeout=7200,  # 2h per issue max
         )
