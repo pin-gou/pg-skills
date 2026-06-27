@@ -3096,6 +3096,8 @@ def _execute_phase(config, change, state, item_id):
             "hook_type": bare,  # prepare_env or clean_env
             "timeout_seconds": timeout_seconds,
             "log_path": str(_phase_log_path(change, item_id)),
+            "hook_log_dir": str(Path(PROJECT_ROOT) / ".pg" / "changes" / change / "2-build" / env_name / "logs"),
+            "caller": "pg-build",
             "skill": "pg-build",
         }
         cmd = (
