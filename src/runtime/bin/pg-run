@@ -22,7 +22,7 @@ import sys
 import termios
 import time
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 
 def _c(code: str, text: str) -> str:
@@ -94,12 +94,20 @@ def print_header(title: str):
     print("=" * width)
 
 
-def print_menu(items: list[tuple[str, str]], back_option: bool = True):
-    for i, (label, desc) in enumerate(items, 1):
+def print_menu(items: list, back_option: bool = True):
+    num = 1
+    for item in items:
+        if isinstance(item, str):
+            print(f"  {item}")
+            continue
+        label, desc = item
         desc_str = f" — {desc}" if desc else ""
-        print(f"  {i:2d}) {label}{desc_str}")
+        print(f"  {num:2d}) {label}{desc_str}")
+        num += 1
     if back_option:
+        print(f"  --------------------")
         print(f"  b) 返回上级菜单")
+    print(f"  --------------------")
     print(f"  q) 退出")
     print()
 
@@ -130,24 +138,33 @@ def _set_menu_terminal():
     return old
 
 
-def _render_menu(title: str, items: list[tuple[str, str]], current: int, back_option: bool) -> list[str]:
+def _render_menu(title: str, items: list, current: int, back_option: bool) -> list[str]:
     width = 60
     lines = [f"\n{'=' * width}", f"  {title}", "=" * width]
-    for i, (label, desc) in enumerate(items):
+    sel_idx = 0
+    for item in items:
+        if isinstance(item, str):
+            lines.append(f"  {item}")
+            continue
+        label, desc = item
         desc_str = f" — {desc}" if desc else ""
-        marker = ">" if i == current else " "
-        lines.append(f" {marker} {i + 1:2d}) {label}{desc_str}")
+        marker = ">" if sel_idx == current else " "
+        lines.append(f" {marker} {sel_idx + 1:2d}) {label}{desc_str}")
+        sel_idx += 1
     if back_option:
+        lines.append(f"  --------------------")
         lines.append(f" {' '}  b) 返回上级菜单")
+    lines.append(f"  --------------------")
     lines.append(f" {' '}  q) 退出")
     return lines
 
 
-def interactive_menu(title: str, items: list[tuple[str, str]], back_option: bool = True) -> str:
+def interactive_menu(title: str, items: list, back_option: bool = True) -> str:
+    selectable = sum(1 for item in items if not isinstance(item, str))
     if not sys.stdin.isatty():
         print_header(title)
         print_menu(items, back_option=back_option)
-        return get_choice(len(items))
+        return get_choice(selectable)
 
     fd = sys.stdin.fileno()
     old_settings = _set_menu_terminal()
@@ -173,7 +190,7 @@ def interactive_menu(title: str, items: list[tuple[str, str]], back_option: bool
 
                 if seq == b"\x1b[A" and current > 0:
                     current -= 1
-                elif seq == b"\x1b[B" and current < len(items) - 1:
+                elif seq == b"\x1b[B" and current < selectable - 1:
                     current += 1
                 else:
                     continue
@@ -379,6 +396,7 @@ def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
                     f" --instance {shlex.quote(inst['name'])}"
                     f" --action start"
                     f" --skill ad-hoc"
+                f" --session manual"
                 )
                 rc = run_shell(cmd, cwd=project_root)
             else:
@@ -458,6 +476,7 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path):
                     f" --instance {shlex.quote(inst['name'])}"
                     f" --action stop"
                     f" --skill ad-hoc"
+                f" --session manual"
                 )
                 rc = run_shell(cmd, cwd=project_root)
             else:
@@ -558,6 +577,7 @@ def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
                         f"python3 {shlex.quote(str(hook))} invoke-hook"
                         f" --env {shlex.quote(env_name)}"
                         f" --action prepare_env"
+                        f" --session manual"
                     )
                     timeout = prepare_cfg.get("timeout_seconds", 300)
                     print(f"\n--- 执行 {env_name} / prepare_env ---")
@@ -585,6 +605,7 @@ def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
                 f"python3 {shlex.quote(str(hook))} invoke-hook"
                 f" --env {shlex.quote(env_name)}"
                 f" --action {shlex.quote(action_name)}"
+                f" --session manual"
             )
             timeout = action_cfg.get("timeout_seconds", 300)
             print(f"\n--- 执行 {env_name} / {action_name} ---")
@@ -685,6 +706,7 @@ def _role_action_flow(env_name: str, role_name: str, inst: dict, role_cfg: dict,
                 f" --instance {shlex.quote(inst['name'])}"
                 f" --action {shlex.quote(action_name)}"
                 f" --skill ad-hoc"
+                f" --session manual"
             )
             print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / {action_name} ---")
             run_shell(cmd, cwd=project_root)
@@ -744,14 +766,14 @@ def _main_menu_start_all(config: dict, project_root: Path):
     env_name = _pick_env(config)
     if env_name is not None:
         _run_env_start_all(env_name, config["environments"][env_name], project_root)
-    sys.exit(0)
+        sys.exit(0)
 
 
 def _main_menu_stop_all(config: dict, project_root: Path):
     env_name = _pick_env(config)
     if env_name is not None:
         _run_env_stop_all(env_name, config["environments"][env_name], project_root)
-    sys.exit(0)
+        sys.exit(0)
 
 
 def _main_menu_prepare_and_start(config: dict, project_root: Path):
@@ -766,6 +788,7 @@ def _main_menu_prepare_and_start(config: dict, project_root: Path):
             f"python3 {shlex.quote(str(hook))} invoke-hook"
             f" --env {shlex.quote(env_name)}"
             f" --action prepare_env"
+            f" --session manual"
         )
         timeout = prepare_cfg.get("timeout_seconds", 300)
         print(f"\n--- 执行 {env_name} / prepare_env ---")
@@ -789,24 +812,23 @@ def _main_menu_prepare_and_start(config: dict, project_root: Path):
 # ----- 主菜单 -----
 
 def main_menu(config: dict, project_root: Path):
-    menu_options = [
-        ("Module 操作", "build/lint/test 编译、检查、测试"),
-        ("Environment 操作", "prepare_env/clean_env 准备/清理环境"),
-        ("Role 操作", "start/stop/logs/tail 启停角色实例"),
+    menu_options: list = [
         ("启动所有实例", "一键启动所有角色实例"),
         ("停止所有实例", "一键停止所有角色实例"),
         ("准备环境并启动所有实例", "先准备环境，再启动所有角色实例"),
-        ("直接执行命令", "输入任意 shell 命令执行"),
+        "--------------------",
+        ("Module 操作", "build/lint/test 编译、检查、测试"),
+        ("Environment 操作", "prepare_env/clean_env 准备/清理环境"),
+        ("Role 操作", "start/stop/logs/tail 启停角色实例"),
     ]
 
-    handlers = [
-        lambda: run_module_flow(config, project_root),
-        lambda: run_env_flow(config, project_root),
-        lambda: run_role_flow(config, project_root),
+    handlers: list[Callable[[], Any]] = [
         lambda: _main_menu_start_all(config, project_root),
         lambda: _main_menu_stop_all(config, project_root),
         lambda: _main_menu_prepare_and_start(config, project_root),
-        lambda: run_custom_flow(),
+        lambda: run_module_flow(config, project_root),
+        lambda: run_env_flow(config, project_root),
+        lambda: run_role_flow(config, project_root),
     ]
 
     while True:
@@ -879,6 +901,7 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
             f"python3 {shlex.quote(str(hook))} invoke-hook"
             f" --env {shlex.quote(args.env)}"
             f" --action {shlex.quote(args.action)}"
+            f" --session manual"
         )
         return run_shell(cmd, cwd=project_root)
 
@@ -910,6 +933,7 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
                 f"python3 {shlex.quote(str(hook))} invoke-hook"
                 f" --env {shlex.quote(args.env)}"
                 f" --action prepare_env"
+                f" --session manual"
             )
             timeout = prepare_cfg.get("timeout_seconds", 300)
             print(f"\n--- 执行 {args.env} / prepare_env ---")
@@ -935,6 +959,7 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
             f" --instance {shlex.quote(args.instance)}"
             f" --action {shlex.quote(args.action)}"
             f" --skill ad-hoc"
+                f" --session manual"
         )
         return run_shell(cmd, cwd=project_root)
 
