@@ -84,6 +84,9 @@ def cmd_init(args) -> int:
     if not args.no_symlinks:
         create_opencode_symlinks(project_root, pg_skills_root)
 
+    # 3. 创建 pg-run symlink
+    create_pg_run_symlink(project_root)
+
     print(f'✓ pg-skills init in {project_root}')
     print(f'  - pg-skills version: {version}')
     if not args.no_symlinks:
@@ -124,6 +127,25 @@ def create_opencode_symlinks(project_root: Path, pg_skills_root: Path) -> None:
                 continue
             link.symlink_to(entry.resolve())
             print(f'  - symlink: .opencode/{sub}/{entry.name} → .pg/skills/src/opencode/{sub}/{entry.name}')
+
+
+def create_pg_run_symlink(project_root: Path) -> None:
+    """在项目根创建 pg-run symlink 指向 .pg/skills/src/runtime/bin/pg-run.
+
+    幂等: 已存在且目标正确时跳过, 目标错误或为文件时覆盖.
+    """
+    link = project_root / 'pg-run'
+    target = '.pg/skills/src/runtime/bin/pg-run'
+    target_resolved = (project_root / target).resolve()
+    if link.is_symlink():
+        if link.resolve() == target_resolved:
+            return
+        link.unlink()
+    elif link.exists():
+        link.unlink()
+    link.symlink_to(target)
+    link.chmod(link.stat().st_mode | 0o111)
+    print(f'  - symlink: pg-run → {target}')
 
 
 def generate_project_yaml(project_root: Path) -> str:
@@ -433,6 +455,9 @@ def _upgrade_pull(project_root: Path, current: str, ref: str, force: bool = Fals
 
     # 刷新 .opencode/ symlink (处理新增/删除的 agent/command/skill)
     create_opencode_symlinks(project_root, pg_skills_root)
+
+    # 刷新 pg-run symlink
+    create_pg_run_symlink(project_root)
 
     print(f'✓ pg-skills {current} → {new_version}: {n_changed(project_root)} files updated')
     return 0

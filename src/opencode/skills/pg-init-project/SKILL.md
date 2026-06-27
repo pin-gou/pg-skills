@@ -162,18 +162,7 @@ metadata:
    - 源：`.pg/skills/examples/shell/hooks/lib/common.sh`
    - 目标：`.pg/hooks/lib/common.sh`
    - 作用：模板头部条件 `source lib/common.sh` + `pg_resolve_paths` 才能找到目标；`pg_resolve_paths` 优先信任 `PG_HOOK_LOG_DIR`（由 `pg-invoke-hook.py` 预拼），fallback 时按 `PG_RUN_CALLER + PG_RUN_SESSION + PG_ENV` 自拼（v4 caller × session 双维度路由；兼容老式手工调用）
-   - 跳过此步：生成的 hook 仍能工作（走 `$PG_LOG_FILE`），但 pg-regression / pg-fix-issue 日志会回落到 `scripts/logs`，不写到预期的 `.pg/regression/` / `.pg/fix-issue/` 目录
-
-2.6. 创建 `pg-run` symlink 到项目根目录：
-   - 源：`.pg/skills/src/runtime/bin/pg-run`
-   - 目标：项目根目录的 `pg-run`
-   - 命令：
-     ```bash
-     ln -sf .pg/skills/src/runtime/bin/pg-run "$PROJECT_ROOT/pg-run"
-     chmod +x "$PROJECT_ROOT/pg-run"
-     ```
-   - 作用：用户和 agent 可以直接通过 `./pg-run` 启动菜单式运行界面，无需记住长 Python 路径
-   - 跳过此步：不影响功能，但用户需要 `python3 .pg/skills/src/runtime/bin/pg-run` 手动调用
+       - 跳过此步：生成的 hook 仍能工作（走 `$PG_LOG_FILE`），但 pg-regression / pg-fix-issue 日志会回落到 `scripts/logs`，不写到预期的 `.pg/regression/` / `.pg/fix-issue/` 目录
 3. 模板来源：从 `.pg/skills/examples/shell/hooks/role-<action>.sh` 复制并替换 `CMD_PLACEHOLDER`；env 级模板从 `env-prepare.sh` / `env-clean.sh` 复制。模板依赖 `pg-run-hook.py` 注入的 `PG_RUN_CALLER` / `PG_RUN_SESSION` / `PG_ROLE` / `PG_INSTANCE_NAME` / `PG_INSTANCE_HOST` / `PG_HOOK_TYPE` / `PG_LOG_FILE` / `PG_HOOK_LOG_DIR` / `PG_RESULT_FILE` 等 env vars（v4 协议），**不**依赖 `PG_MODULE_ROOT`（module 维度不进 hook 协议）。
 4. chmod 755。
 5. **不**改 trap / `pg_fail` / `pg_exit` 调用——hook 协议是 SSOT。
@@ -273,7 +262,6 @@ pnpm test:e2e
   - .pg/hooks/<role>-<action>.sh × M（仅 environments 维度的 lifecycle actions）
   - .pg/hooks/{prepare_env,clean_env}.sh（如声明）
   - .pg/hooks/lib/common.sh（SSOT 公共库）
-  - pg-run（symlink → .pg/skills/src/runtime/bin/pg-run）
 
 Doctor: OK (4 checks passed)，0 warning
 
@@ -300,7 +288,6 @@ Next steps:
 5. **把 placeholder 留着** —— 在 `project.yaml` 顶部保留 `placeholder` module 不删。**反例**：schema 允许 `minProperties: 1` 但实际项目有 4 个 module，placeholder 残留污染 tracks/stages。
 6. **混淆 module hook 与 environment hook 的边界** —— 把 `modules.<m>.build` 写成 `bash .pg/hooks/kuboard-server-build.sh`，期望它走 hook 协议。**错**：`modules.<m>.build` 是 `executable_command` 字段，runner 直接渲染为 `timeout N bash -c '<cmd>'` 执行，**不**调用 `.pg/hooks/<m>-<action>.sh`。`pg-run-hook.py` 只服务于 `environments.<env>.{prepare_env,clean_env}` 与 `environments.<env>.roles.<r>.{start,stop,...}`。项目里如果残留 `<module>-{build,test,lint}.sh`，是历史模板的产物，删除即可。
 7. **忘记复制 `lib/common.sh`** —— 只复制 5 个 role/env 模板但漏掉 `lib/common.sh`。**反例**：新项目跑 `pg-regression` 时日志写到 `scripts/logs` 而非 `.pg/regression/<suite>/<env>/logs`，排错时找不到日志。`pg doctor` 会有 `hooks_lib_common_present` warning 提示。
-8. **忘记创建 `pg-run` symlink** —— 项目根没有 `pg-run` 入口，用户只能通过长 Python 路径调用菜单。`pg-init-project` 必须创建此 symlink。
 
 ---
 
@@ -311,7 +298,6 @@ Next steps:
 - **MUST**：所有 `TBD:` 项集中在 `description` 字段，**不**污染 `root` / `language` / `cmd` 等结构化字段。
 - **MUST**：跑 `pg doctor` 且输出 0 错误才视为完成。
 - **MUST**：复制 `.pg/skills/examples/shell/hooks/lib/common.sh` 到 `.pg/hooks/lib/common.sh`，让生成的 role-* / env-* hook 能调 `pg_resolve_paths` 做 per-skill 路径路由。
-- **MUST**：创建 `pg-run` symlink：`ln -sf .pg/skills/src/runtime/bin/pg-run "$PROJECT_ROOT/pg-run"` 并 `chmod +x`，让用户和 agent 可直接通过 `./pg-run` 使用菜单界面。
 - **MUST NOT**：引入 `additionalProperties: false` 之外的 schema 字段。
 - **MUST NOT**：从 `examples/<lang>/hooks/module-*.sh` 之外的地方抄 module hook——module 命令应在 `project.yaml` 里以 `executable_command` 形态声明，**不进 hook 协议**。
 - **MUST NOT**：把 `modules.<m>.build` 写成 `bash .pg/hooks/<m>-build.sh`——那是双重封装 + 双重 timeout，runner 不识别。
