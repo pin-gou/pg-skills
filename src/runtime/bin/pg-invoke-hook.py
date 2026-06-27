@@ -155,6 +155,7 @@ def pg_log_dir_for_skill(caller: str, session: str, env: str, project_root: Path
     """Return the per-caller log directory for hook logs (v4 协议).
 
     Routing rules (must stay in sync with .pg/hooks/lib/common.sh:pg_resolve_paths):
+<<<<<<< HEAD
       pg-build       -> .pg/changes/<session>/2-build/<env>/logs
       pg-regression  -> .pg/regression/<session>/<env>/logs   (session 已含 regression- 前缀 + date + seq)
       pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs    (session 已含 fix- 前缀)
@@ -169,6 +170,23 @@ def pg_log_dir_for_skill(caller: str, session: str, env: str, project_root: Path
         return base / "fix-issue" / session / env / "logs"
     # ad-hoc
     return base / "ad-hoc" / session / env / "logs"
+=======
+      ad-hoc        -> .pg/ad-hoc/<change>/<env>/logs
+      pg-build       -> .pg/changes/<change>/2-build/<env>/logs
+      pg-regression  -> .pg/regression/<suite>/<env>/logs   (strips leading "regression-")
+      pg-fix-issue   -> .pg/fix-issue/<change>/<env>/logs
+      兜底/empty     -> .pg/changes/<change>/2-build/<env>/logs (back-compat)
+    """
+    if skill == "ad-hoc":
+        return project_root / ".pg" / "ad-hoc" / change / env / "logs"
+    if skill == "pg-regression" and change.startswith("regression-"):
+        suite = change[len("regression-"):]
+        return project_root / ".pg" / "regression" / suite / env / "logs"
+    if skill == "pg-fix-issue":
+        return project_root / ".pg" / "fix-issue" / change / env / "logs"
+    # pg-build + 兜底 (skill=="" / unknown) 全部走原 changes/<change>/2-build/<env>/logs
+    return project_root / ".pg" / "changes" / change / "2-build" / env / "logs"
+>>>>>>> 4f79c54 (优化 pg-run 的执行)
 
 
 def build_env_level_hook_spec(

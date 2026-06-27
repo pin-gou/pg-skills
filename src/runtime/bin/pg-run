@@ -20,8 +20,13 @@ import shlex
 import subprocess
 import sys
 import termios
+import time
 from pathlib import Path
 from typing import Any
+
+
+def _c(code: str, text: str) -> str:
+    return f"\033[{code}m{text}\033[0m"
 
 
 # ----- 路径解析 -----
@@ -347,7 +352,11 @@ def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
         return
 
     hook = find_invoke_hook(project_root)
-    for role_name, role_cfg in sorted(roles.items()):
+    overall_start = time.time()
+    results = []
+    action_label = "启动"
+
+    for role_name, role_cfg in roles.items():
         instances = role_cfg.get("instances", [])
         actions = role_cfg.get("actions", {})
         start_cfg = actions.get("start")
@@ -355,6 +364,13 @@ def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
             continue
 
         for inst in instances:
+            label = f"{role_name} / {inst['name']}"
+            print()
+            print(_c("1;36", "=" * 60))
+            print(_c("1;33", f"  {action_label}: {label}"))
+            print(_c("1;36", "=" * 60))
+            inst_start = time.time()
+
             if hook.is_file():
                 cmd = (
                     f"python3 {shlex.quote(str(hook))} invoke-hook"
@@ -362,8 +378,8 @@ def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
                     f" --role {shlex.quote(role_name)}"
                     f" --instance {shlex.quote(inst['name'])}"
                     f" --action start"
+                    f" --skill ad-hoc"
                 )
-                print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / start ---")
                 rc = run_shell(cmd, cwd=project_root)
             else:
                 script = start_cfg.get("script") if isinstance(start_cfg, dict) else ""
@@ -379,10 +395,33 @@ def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
                     a = a.replace("{instance.host}", inst.get("host", ""))
                     rendered.append(a)
                 cmd = f"bash {shlex.quote(script)} {' '.join(shlex.quote(a) for a in rendered)}"
-                print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / start ---")
                 rc = run_shell(cmd, cwd=project_root)
-            if rc != 0:
-                print(f"  ⚠ {env_name} / {role_name} / {inst['name']} 启动失败，继续执行其他实例")
+
+            elapsed = time.time() - inst_start
+            ok = rc == 0
+            color = "32" if ok else "31"
+            symbol = "✓" if ok else "✗"
+            print(_c(color, f"  {symbol} {label} {action_label}{'成功' if ok else '失败'} ({elapsed:.1f}s)"))
+            results.append({"role": role_name, "instance": inst["name"],
+                           "duration": elapsed, "ok": ok})
+
+    overall_elapsed = time.time() - overall_start
+    succeeded = sum(1 for r in results if r["ok"])
+    failed = len(results) - succeeded
+    print()
+    print(_c("1;36", "=" * 60))
+    print(_c("1;36", f"  {action_label}统计"))
+    print(_c("1;36", "=" * 60))
+    print(f"  总计: {overall_elapsed:.1f}s")
+    print(_c("1", f"  成功: {succeeded}") + f" | 失败: {failed}")
+    if results:
+        print("  " + "-" * 40)
+        for r in results:
+            color = "32" if r["ok"] else "31"
+            sym = "✓" if r["ok"] else "✗"
+            print(_c(color, f"  {r['role']:12s} / {r['instance']:12s}  {r['duration']:6.1f}s  {sym}"))
+    print(_c("1;36", "=" * 60))
+    print()
 
 
 def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path):
@@ -392,14 +431,25 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path):
         return
 
     hook = find_invoke_hook(project_root)
-    for role_name, role_cfg in sorted(roles.items()):
+    overall_start = time.time()
+    results = []
+    action_label = "停止"
+
+    for role_name, role_cfg in reversed(list(roles.items())):
         instances = role_cfg.get("instances", [])
         actions = role_cfg.get("actions", {})
         stop_cfg = actions.get("stop")
         if not stop_cfg or not instances:
             continue
 
-        for inst in instances:
+        for inst in reversed(instances):
+            label = f"{role_name} / {inst['name']}"
+            print()
+            print(_c("1;36", "=" * 60))
+            print(_c("1;33", f"  {action_label}: {label}"))
+            print(_c("1;36", "=" * 60))
+            inst_start = time.time()
+
             if hook.is_file():
                 cmd = (
                     f"python3 {shlex.quote(str(hook))} invoke-hook"
@@ -407,8 +457,8 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path):
                     f" --role {shlex.quote(role_name)}"
                     f" --instance {shlex.quote(inst['name'])}"
                     f" --action stop"
+                    f" --skill ad-hoc"
                 )
-                print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / stop ---")
                 rc = run_shell(cmd, cwd=project_root)
             else:
                 script = stop_cfg.get("script") if isinstance(stop_cfg, dict) else ""
@@ -424,10 +474,33 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path):
                     a = a.replace("{instance.host}", inst.get("host", ""))
                     rendered.append(a)
                 cmd = f"bash {shlex.quote(script)} {' '.join(shlex.quote(a) for a in rendered)}"
-                print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / stop ---")
                 rc = run_shell(cmd, cwd=project_root)
-            if rc != 0:
-                print(f"  ⚠ {env_name} / {role_name} / {inst['name']} 停止失败，继续执行其他实例")
+
+            elapsed = time.time() - inst_start
+            ok = rc == 0
+            color = "32" if ok else "31"
+            symbol = "✓" if ok else "✗"
+            print(_c(color, f"  {symbol} {label} {action_label}{'成功' if ok else '失败'} ({elapsed:.1f}s)"))
+            results.append({"role": role_name, "instance": inst["name"],
+                           "duration": elapsed, "ok": ok})
+
+    overall_elapsed = time.time() - overall_start
+    succeeded = sum(1 for r in results if r["ok"])
+    failed = len(results) - succeeded
+    print()
+    print(_c("1;36", "=" * 60))
+    print(_c("1;36", f"  {action_label}统计"))
+    print(_c("1;36", "=" * 60))
+    print(f"  总计: {overall_elapsed:.1f}s")
+    print(_c("1", f"  成功: {succeeded}") + f" | 失败: {failed}")
+    if results:
+        print("  " + "-" * 40)
+        for r in results:
+            color = "32" if r["ok"] else "31"
+            sym = "✓" if r["ok"] else "✗"
+            print(_c(color, f"  {r['role']:12s} / {r['instance']:12s}  {r['duration']:6.1f}s  {sym}"))
+    print(_c("1;36", "=" * 60))
+    print()
 
 
 def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
@@ -473,8 +546,10 @@ def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
             orch_id, _ = orch_items[idx - len(env_actions)]
             if orch_id == "start_all_instances":
                 _run_env_start_all(env_name, cfg, project_root)
+                sys.exit(0)
             elif orch_id == "stop_all_instances":
                 _run_env_stop_all(env_name, cfg, project_root)
+                sys.exit(0)
             elif orch_id == "prepare_env_and_start":
                 prepare_cfg = cfg.get("prepare_env", {})
                 hook = find_invoke_hook(project_root)
@@ -497,6 +572,7 @@ def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
                         rc = -1
                 if rc == 0:
                     _run_env_start_all(env_name, cfg, project_root)
+                    sys.exit(0)
                 else:
                     print("  准备环境失败，跳过启动所有实例")
             pause()
@@ -608,6 +684,7 @@ def _role_action_flow(env_name: str, role_name: str, inst: dict, role_cfg: dict,
                 f" --role {shlex.quote(role_name)}"
                 f" --instance {shlex.quote(inst['name'])}"
                 f" --action {shlex.quote(action_name)}"
+                f" --skill ad-hoc"
             )
             print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / {action_name} ---")
             run_shell(cmd, cwd=project_root)
@@ -667,14 +744,14 @@ def _main_menu_start_all(config: dict, project_root: Path):
     env_name = _pick_env(config)
     if env_name is not None:
         _run_env_start_all(env_name, config["environments"][env_name], project_root)
-        pause()
+    sys.exit(0)
 
 
 def _main_menu_stop_all(config: dict, project_root: Path):
     env_name = _pick_env(config)
     if env_name is not None:
         _run_env_stop_all(env_name, config["environments"][env_name], project_root)
-        pause()
+    sys.exit(0)
 
 
 def _main_menu_prepare_and_start(config: dict, project_root: Path):
@@ -703,6 +780,7 @@ def _main_menu_prepare_and_start(config: dict, project_root: Path):
             rc = -1
     if rc == 0:
         _run_env_start_all(env_name, cfg, project_root)
+        sys.exit(0)
     else:
         print("  准备环境失败，跳过启动所有实例")
     pause()
@@ -856,6 +934,7 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
             f" --role {shlex.quote(args.role)}"
             f" --instance {shlex.quote(args.instance)}"
             f" --action {shlex.quote(args.action)}"
+            f" --skill ad-hoc"
         )
         return run_shell(cmd, cwd=project_root)
 
