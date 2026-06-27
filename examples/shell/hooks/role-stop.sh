@@ -27,7 +27,7 @@ trap 'pg_fail_on_error $? $LINENO' ERR
 
 # === 路径派生 (per-skill 路由, 由 pg_resolve_paths 决定) ===
 # 若 .pg/hooks/lib/common.sh 存在, 调 pg_resolve_paths 把 LOG_DIR/PID_DIR
-# 按 PG_SKILL_NAME 路由到 .pg/changes/ / .pg/regression/ / .pg/fix-issue/
+# 按 PG_RUN_CALLER 路由到 .pg/changes/ / .pg/regression/ / .pg/fix-issue/ / .pg/ad-hoc/
 # 若 lib/ 缺失 (eg. 手工复制本模板但没带 lib/), 跳过派生, 输出走 $PG_LOG_FILE
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$HOOK_DIR/lib/common.sh" ]]; then

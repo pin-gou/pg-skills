@@ -5,16 +5,21 @@
 #   - 由 pg-init-project 复制到新项目的 .pg/hooks/lib/common.sh
 #   - 现有项目可 `cp` 此文件覆盖 .pg/hooks/lib/common.sh 来同步上游改动
 #   - 角色/环境 hook (role-*.sh / env-*.sh) 通过 source 此文件获得
-#     pg_resolve_paths (per-skill 路径路由) 与 kill_port / wait_for_port 等工具
+#     pg_resolve_paths (caller × session 维度路由) 与 kill_port / wait_for_port 等工具
 #
 # SSOT 规则:
 #   - 本文件是 hook 协议的一部分, 不要改 PG_* env var 名
-#   - pg_resolve_paths 的路由表 (.pg/changes / .pg/regression / .pg/fix-issue)
-#     与 .pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill
+#   - pg_resolve_paths 的路由表与 .pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill
 #     三处必须保持同步
 #   - 改动本文件前先看上述两处是否需要同步更新
 #   - **优先信任 PG_HOOK_LOG_DIR** (由 pg-invoke-hook.py 预拼的绝对路径); 自拼逻辑作为
 #     老式手工调用 (不走 pg-invoke-hook.py) 的兜底
+#
+# v4 协议:
+#   - 新增 PG_RUN_CALLER / PG_RUN_SESSION 取代 PG_SKILL_NAME / PG_CHANGE_NAME 的语义位置.
+#   - PG_SKILL_NAME / PG_CHANGE_NAME 仍可读 (作为 1 版本 alias), 兼容老 hook.
+#   - 删除 caller="" (空) 分支的 silent fallback — 改用 caller=ad-hoc 显式声明.
+#   - unknown caller → fail-fast (不再降级到 scripts/logs).
 #
 # 调用方:
 #   - 模板 hook (role-start.sh / role-stop.sh / role-logs.sh / env-prepare.sh / env-clean.sh)
@@ -31,14 +36,15 @@ AGENT_PORT=9082
 # 优先：直接信任 pg-invoke-hook.py 预拼的 PG_HOOK_LOG_DIR（权威路径）
 # Fallback（老式手工调用 / 未走 pg-invoke-hook.py）：
 #   路由规则（与 .pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill 同步）：
-#     pg-build       -> .pg/changes/<change>/2-build/<env>/logs|pids
-#     pg-regression  -> .pg/regression/<suite>/<env>/logs|pids   (从 regression-<suite> 截 suite)
-#     pg-fix-issue   -> .pg/fix-issue/<change>/<env>/logs|pids   (change = fix-<date>-<slug>)
-#     兜底 / unknown -> scripts/logs|pids (兼容手工调用)
+#     pg-build       -> .pg/changes/<session>/2-build/<env>/logs|pids
+#     pg-regression  -> .pg/regression/<session>/<env>/logs|pids   (session 含 regression- 前缀)
+#     pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs|pids    (session 含 fix- 前缀)
+#     ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs|pids       (新顶级目录, 不与 SKILL 命名空间混)
 #
 # 调用方必须在 source 此文件前 export:
 #   - PG_HOOK_LOG_DIR  (由 pg-run-hook.py 从 spec.hook_log_dir 注入, 推荐)
-#   - PG_SKILL_NAME / PG_CHANGE_NAME / PG_ENV (兼容老式调用)
+#   - PG_RUN_CALLER / PG_RUN_SESSION / PG_ENV (v4 协议核心字段)
+#   - PG_SKILL_NAME / PG_CHANGE_NAME (1 版本 alias, 兼容老 hook)
 pg_resolve_paths() {
     local project_root="${PG_PROJECT_ROOT:-$PWD}"
 
@@ -48,32 +54,33 @@ pg_resolve_paths() {
         PID_DIR="$LOG_DIR"   # logs 与 pids 同目录 (PG_HOOK_LOG_DIR 指向 logs/)
     else
         # === 兜底路径：自拼 (老式手工调用 / 未走 pg-invoke-hook.py) ===
-        local skill="${PG_SKILL_NAME:-}"
-        local change="${PG_CHANGE_NAME:-}"
+        # v4 caller 优先 PG_RUN_CALLER, 否则 fallback 到 PG_SKILL_NAME (1 版本 alias)
+        local caller="${PG_RUN_CALLER:-${PG_SKILL_NAME:-ad-hoc}}"
+        local session="${PG_RUN_SESSION:-${PG_CHANGE_NAME:-}}"
         local env="${PG_ENV:-unknown}"
 
-        case "$skill" in
+        case "$caller" in
             pg-build)
-                LOG_DIR="$project_root/.pg/changes/${change}/2-build/${env}/logs"
-                PID_DIR="$project_root/.pg/changes/${change}/2-build/${env}/pids"
+                [[ -z "$session" ]] && session="manual"
+                LOG_DIR="$project_root/.pg/changes/${session}/2-build/${env}/logs"
+                PID_DIR="$project_root/.pg/changes/${session}/2-build/${env}/pids"
                 ;;
             pg-regression)
-                local suite="${change#regression-}"
-                LOG_DIR="$project_root/.pg/regression/${suite}/${env}/logs"
-                PID_DIR="$project_root/.pg/regression/${suite}/${env}/pids"
+                LOG_DIR="$project_root/.pg/regression/${session}/${env}/logs"
+                PID_DIR="$project_root/.pg/regression/${session}/${env}/pids"
                 ;;
             pg-fix-issue)
-                LOG_DIR="$project_root/.pg/fix-issue/${change}/${env}/logs"
-                PID_DIR="$project_root/.pg/fix-issue/${change}/${env}/pids"
+                LOG_DIR="$project_root/.pg/fix-issue/${session}/${env}/logs"
+                PID_DIR="$project_root/.pg/fix-issue/${session}/${env}/pids"
                 ;;
-            "")
-                LOG_DIR="$project_root/scripts/logs"
-                PID_DIR="$project_root/scripts/pids"
+            ad-hoc)
+                [[ -z "$session" ]] && session="ad-hoc-unknown"
+                LOG_DIR="$project_root/.pg/ad-hoc/${session}/${env}/logs"
+                PID_DIR="$project_root/.pg/ad-hoc/${session}/${env}/pids"
                 ;;
             *)
-                echo_color "33" "WARN: unknown PG_SKILL_NAME='$skill', falling back to scripts/logs" >&2
-                LOG_DIR="$project_root/scripts/logs"
-                PID_DIR="$project_root/scripts/pids"
+                echo_color "31" "ERROR: unknown PG_RUN_CALLER='$caller' (PG_SKILL_NAME='${PG_SKILL_NAME:-}')" >&2
+                return 1
                 ;;
         esac
     fi

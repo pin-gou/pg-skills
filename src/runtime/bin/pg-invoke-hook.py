@@ -2,8 +2,8 @@
 """pg-invoke-hook.py — runtime 层统一 LLM-facing 入口 (env hooks + role actions).
 
 抽取自 pg-pipeline-runner.py:cmd_invoke_hook (v3.1) 主体实现, 提升到 runtime 层后
-供 pg-build / pg-fix-issue / pg-regression 三个 SKILL 共享调用. pg-pipeline-runner.py
-保留同名子命令 (thin wrapper) 以保证向后兼容.
+供 pg-build / pg-fix-issue / pg-regression 三个 SKILL + pg-run 手动调用 + agent
+ad-hoc 调用共享. pg-pipeline-runner.py 保留同名子命令 (thin wrapper) 以保证向后兼容.
 
 设计动机:
 - pg-pipeline-runner.py 同时承担 "编排状态机" (next/record/check) 与
@@ -11,6 +11,16 @@
   * executor 归 runtime/bin/ (CLAUDE.md 仓库结构第 28-30 行预留位置)
   * SKILL 之间不再互相依赖 runner 路径
   * 测试可走 subprocess.run 黑盒, 不需 mock sys.argv
+
+v4 协议改造:
+- --change → --session (canonical). --change 保留 1 版本作为 deprecated alias.
+- --skill / --caller 硬缺省 'ad-hoc', 任何漏传 caller 的调用都落到 .pg/ad-hoc/.
+- 新增 --log-dir (调试覆盖), --timeout-override (ad-hoc 调试, 输出 WARN).
+- caller 维度路由:
+    pg-build       -> .pg/changes/<session>/2-build/<env>/logs
+    pg-regression  -> .pg/regression/<session>/<env>/logs
+    pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs
+    ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs
 
 顶级 subcommands:
 - invoke-hook — 触发 role action (start/stop/logs/tail) 或 env-level hook
@@ -27,33 +37,41 @@
 
 Usage:
   python3 pg-invoke-hook.py invoke-hook \\
-    --change <C> --env <ENV> --role <ROLE> --instance <I> --action <A> \\
-    [--stage <S>] [--tail-lines <N>]
+    --session <S> --env <ENV> --role <ROLE> --instance <I> --action <A> \\
+    [--stage <ST>] [--tail-lines <N>] [--skill pg-build|pg-regression|pg-fix-issue|ad-hoc] \\
+    [--log-dir <DIR>] [--timeout-override <SECS>]
 
   python3 pg-invoke-hook.py invoke-hook \\
-    --change <C> --env <ENV> --action prepare_env
+    --session <S> --env <ENV> --action prepare_env \\
+    [--skill pg-build|pg-regression|pg-fix-issue|ad-hoc]
 
-  python3 pg-invoke-hook.py status --change <C> [--stage <S>]
+  python3 pg-invoke-hook.py status --change <C> [--stage <ST>]
 
 Args:
-  --change       change name (用于 log_path 路由 + status 状态查询)
-  --env          environment name (必须在 project.yaml environments 中)
-  --stage        stage name (默认: manual)
-  --role         role name (backend/frontend/agent); per-role 必填, env-level 忽略
-  --instance     instance name (必须在 environments.<env>.roles.<role>.instances 中);
-                 per-role 必填, env-level 忽略
-  --action       start|stop|logs|tail (per-role) 或 prepare_env|clean_env (env-level)
-  --tail-lines   (logs/tail only) 追加 --tail-lines N 到 hook args 末尾
+  --session         session 名 (canonical). 与 caller 正交. 留空 + caller=ad-hoc →
+                     自动生成 auto-<date>-<pid>.
+  --change          DEPRECATED alias of --session (1 版本兼容).
+  --env             environment name (必须在 project.yaml environments 中)
+  --stage           stage name (默认: manual)
+  --role            role name (backend/frontend/agent); per-role 必填, env-level 忽略
+  --instance        instance name; per-role 必填, env-level 忽略
+  --action          start|stop|logs|tail (per-role) 或 prepare_env|clean_env (env-level)
+  --tail-lines      (logs/tail only) 追加 --tail-lines N 到 hook args 末尾
+  --skill / --caller 调用方身份. 硬缺省 'ad-hoc'. SKILL 调用必须显式标注.
+  --log-dir         显式覆盖日志目录 (优先级最高, 用于 agent 调试).
+  --timeout-override 覆盖 project.yaml timeout_seconds (ad-hoc 调试, 输出 WARN).
 
-Spec 渲染 (与原 cmd_invoke_hook 100% 等价):
+Spec 渲染 (v4):
   cmd             = "bash " + shlex.quote(act_cfg["script"]) + (args if any)
-  env vars 注入    = PG_CHANGE_NAME / PG_STAGE / PG_ENV / PG_ROLE / PG_INSTANCE_NAME /
-                    PG_INSTANCE_HOST / PG_HOOK_TYPE / PG_SKILL_NAME
-  timeout_seconds  = act_cfg["timeout_seconds"] (LLM 不传, runner 反查)
-  log_path        = per-skill routing (see pg_log_dir_for_skill):
-                    pg-build       -> .pg/changes/<change>/2-build/<env>/logs/...
-                    pg-regression  -> .pg/regression/<suite>/<env>/logs/...
-                    pg-fix-issue   -> .pg/fix-issue/<change>/<env>/logs/...
+  env vars 注入    = PG_RUN_SESSION / PG_RUN_CALLER / PG_STAGE / PG_ENV /
+                    PG_ROLE / PG_INSTANCE_NAME / PG_INSTANCE_HOST / PG_HOOK_TYPE
+                    (PG_SKILL_NAME / PG_CHANGE_NAME 保留 1 版本作为 alias)
+  timeout_seconds  = act_cfg["timeout_seconds"] (可被 --timeout-override 覆盖)
+  log_path        = per-caller 路由 (see pg_log_dir_for_skill):
+                    pg-build       -> .pg/changes/<session>/2-build/<env>/logs
+                    pg-regression  -> .pg/regression/<session>/<env>/logs
+                    pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs
+                    ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs
 """
 from __future__ import annotations
 
@@ -63,6 +81,7 @@ import os
 import shlex
 import subprocess
 import sys
+from datetime import datetime
 from pathlib import Path
 
 
@@ -77,7 +96,7 @@ def find_project_root() -> Path:
       3. 本脚本向上 6 层内查找
     """
     env_root = os.environ.get("PG_PROJECT_ROOT")
-    if env_root and _has_config(env_root):
+    if env_root and _has_config(Path(env_root)):
         return Path(env_root)
 
     cwd = Path.cwd()
@@ -107,33 +126,59 @@ def find_pg_skills_root(project_root: Path) -> Path:
 # 与原 cmd_invoke_hook 一致 (line 3166-3168)
 ENV_LEVEL_ACTIONS = ("prepare_env", "clean_env")
 
+# Caller 维度枚举 (与 .pg/hooks/lib/common.sh:pg_resolve_paths 的 case 分支同步)
+CALLER_PG_BUILD = "pg-build"
+CALLER_PG_REGRESSION = "pg-regression"
+CALLER_PG_FIX_ISSUE = "pg-fix-issue"
+CALLER_AD_HOC = "ad-hoc"
+KNOWN_CALLERS = (CALLER_PG_BUILD, CALLER_PG_REGRESSION, CALLER_PG_FIX_ISSUE, CALLER_AD_HOC)
 
-def pg_log_dir_for_skill(skill: str, change: str, env: str, project_root: Path) -> Path:
-    """Return the per-skill log directory for hook logs.
+
+def resolve_session(session: str, caller: str) -> str:
+    """session 名解析 (v4 协议).
+
+    - session 留空 + caller=ad-hoc → 自动生成 auto-<date>-<pid>
+    - session 留空 + caller 是 SKILL caller → 报错 (SKILL 必须显式传)
+    - session 非空 → 原样返回
+    """
+    if session:
+        return session
+    if caller == CALLER_AD_HOC:
+        return f"auto-{datetime.now().strftime('%Y%m%d-%H%M%S')}-{os.getpid()}"
+    sys.stderr.write(
+        f"Error: --caller={caller} requires explicit --session (got empty)\n"
+    )
+    sys.exit(2)
+
+
+def pg_log_dir_for_skill(caller: str, session: str, env: str, project_root: Path) -> Path:
+    """Return the per-caller log directory for hook logs (v4 协议).
 
     Routing rules (must stay in sync with .pg/hooks/lib/common.sh:pg_resolve_paths):
-      pg-build       -> .pg/changes/<change>/2-build/<env>/logs
-      pg-regression  -> .pg/regression/<suite>/<env>/logs   (strips leading "regression-")
-      pg-fix-issue   -> .pg/fix-issue/<change>/<env>/logs
-      兜底/empty     -> .pg/changes/<change>/2-build/<env>/logs (back-compat)
+      pg-build       -> .pg/changes/<session>/2-build/<env>/logs
+      pg-regression  -> .pg/regression/<session>/<env>/logs   (session 已含 regression- 前缀 + date + seq)
+      pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs    (session 已含 fix- 前缀)
+      ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs       (独立顶级目录, 不与 SKILL 命名空间混)
     """
-    if skill == "pg-regression" and change.startswith("regression-"):
-        suite = change[len("regression-"):]
-        return project_root / ".pg" / "regression" / suite / env / "logs"
-    if skill == "pg-fix-issue":
-        return project_root / ".pg" / "fix-issue" / change / env / "logs"
-    # pg-build + 兜底 (skill=="" / unknown) 全部走原 changes/<change>/2-build/<env>/logs
-    return project_root / ".pg" / "changes" / change / "2-build" / env / "logs"
+    base = project_root / ".pg"
+    if caller == CALLER_PG_BUILD:
+        return base / "changes" / session / "2-build" / env / "logs"
+    if caller == CALLER_PG_REGRESSION:
+        return base / "regression" / session / env / "logs"
+    if caller == CALLER_PG_FIX_ISSUE:
+        return base / "fix-issue" / session / env / "logs"
+    # ad-hoc
+    return base / "ad-hoc" / session / env / "logs"
 
 
 def build_env_level_hook_spec(
-    change: str,
+    session: str,
     env: str,
     stage: str,
     action: str,
     act_cfg: dict,
     project_root: Path,
-    skill: str = "",
+    caller: str = CALLER_AD_HOC,
 ) -> dict:
     """Build pg-run-hook.py spec for environment-level hooks (prepare_env / clean_env).
 
@@ -143,7 +188,8 @@ def build_env_level_hook_spec(
     empty strings; log_path is namespaced under env-level hooks subdir so
     it doesn't collide with role.* action logs.
 
-    skill: optional skill name; injected as PG_SKILL_NAME via pg-run-hook.py.
+    caller: 调用方身份 (pg-build / pg-regression / pg-fix-issue / ad-hoc).
+            注入为 PG_RUN_CALLER via pg-run-hook.py (PG_SKILL_NAME 作为 1 版本兼容 alias).
     """
     rendered_args = []
     for raw in (act_cfg.get("args") or []):
@@ -153,12 +199,14 @@ def build_env_level_hook_spec(
     if rendered_args:
         inner_cmd += " " + " ".join(shlex.quote(a) for a in rendered_args)
 
-    hook_log_dir = pg_log_dir_for_skill(skill, change, env, project_root)
+    hook_log_dir = pg_log_dir_for_skill(caller, session, env, project_root)
     log_path = str(hook_log_dir / f"env.{action}.log")
+    result_path = str(hook_log_dir / f"env.{action}.result.json")
 
     spec = {
         "cmd": inner_cmd,
-        "change": change,
+        "session": session,
+        "change": session,
         "stage": stage,
         "env": env,
         "role": "",
@@ -168,14 +216,14 @@ def build_env_level_hook_spec(
         "timeout_seconds": act_cfg.get("timeout_seconds"),
         "log_path": log_path,
         "hook_log_dir": str(hook_log_dir),
+        "hook_result_path": result_path,
+        "caller": caller,
     }
-    if skill:
-        spec["skill"] = skill
     return spec
 
 
 def build_role_hook_spec(
-    change: str,
+    session: str,
     env: str,
     stage: str,
     action: str,
@@ -185,7 +233,7 @@ def build_role_hook_spec(
     act_cfg: dict,
     tail_lines,
     project_root: Path,
-    skill: str = "",
+    caller: str = CALLER_AD_HOC,
 ) -> dict:
     """Build pg-run-hook.py spec for per-role actions (start/stop/logs/tail)."""
     rendered_args = []
@@ -204,12 +252,14 @@ def build_role_hook_spec(
     if rendered_args:
         inner_cmd += " " + " ".join(shlex.quote(a) for a in rendered_args)
 
-    hook_log_dir = pg_log_dir_for_skill(skill, change, env, project_root)
+    hook_log_dir = pg_log_dir_for_skill(caller, session, env, project_root)
     log_path = str(hook_log_dir / f"role.{role}.{action}@{instance}.log")
+    result_path = str(hook_log_dir / f"role.{role}.{action}@{instance}.result.json")
 
     spec = {
         "cmd": inner_cmd,
-        "change": change,
+        "session": session,
+        "change": session,
         "stage": stage,
         "env": env,
         "role": role,
@@ -219,9 +269,9 @@ def build_role_hook_spec(
         "timeout_seconds": act_cfg.get("timeout_seconds"),
         "log_path": log_path,
         "hook_log_dir": str(hook_log_dir),
+        "hook_result_path": result_path,
+        "caller": caller,
     }
-    if skill:
-        spec["skill"] = skill
     return spec
 
 
@@ -248,20 +298,35 @@ def invoke_hook_main(argv=None) -> int:
     --tail-lines <N> if action is logs|tail and the flag was given,
     builds the pg-run-hook.py spec, and spawns the hook executor.
 
-    timeout_seconds is read from project.yaml (NOT a CLI flag) and
-    passed through to pg-run-hook.py.
+    timeout_seconds is read from project.yaml by default and passed through
+    to pg-run-hook.py. CLI can override via --timeout-override (ad-hoc only,
+    outputs WARN).
+
+    --session (canonical) replaces --change (deprecated alias, 1 version compat).
+    --skill / --caller defaults to 'ad-hoc' (hard default, not empty string).
     """
     parser = argparse.ArgumentParser(
         prog="pg-invoke-hook.py invoke-hook",
         description=(
             "Trigger a role action (start/stop/logs/tail) or env-level hook "
             "(prepare_env/clean_env) via pg-run-hook.py. Used by SKILL "
-            "orchestrators (pg-build / pg-fix-issue / pg-regression); not part "
-            "of any pipeline state machine."
+            "orchestrators (pg-build / pg-fix-issue / pg-regression) and by "
+            "agent ad-hoc / pg-run manual calls. NOT part of any pipeline state "
+            "machine."
         ),
     )
-    parser.add_argument("--change", required=True,
-                        help="change name (used for log_path routing)")
+    parser.add_argument("--session", default="",
+                        help=(
+                            "session 名 (与 caller 正交). "
+                            "pg-build: 提案名; pg-regression: regression-<suite>-<date>-<seq>; "
+                            "pg-fix-issue: fix-<date>-<slug>; "
+                            "ad-hoc 留空: 自动生成 auto-<date>-<pid>."
+                        ))
+    parser.add_argument("--change", default=None,
+                        help=(
+                            "DEPRECATED alias of --session. 仅作 1 个版本兼容, "
+                            "SKILL / pg-run / agent 应改为 --session."
+                        ))
     parser.add_argument("--env", required=True,
                         help="environment name (must be in project.yaml environments)")
     parser.add_argument("--stage", default="manual",
@@ -292,9 +357,24 @@ def invoke_hook_main(argv=None) -> int:
                         ))
     parser.add_argument("--tail-lines", type=int, default=None,
                         help="(logs/tail only) append --tail-lines N to hook args")
-    parser.add_argument("--skill", default="",
-                        help="skill name (e.g. pg-build, pg-regression); "
-                             "injected as PG_SKILL_NAME via pg-run-hook.py")
+    parser.add_argument("--skill", "--caller", dest="caller", default=CALLER_AD_HOC,
+                        choices=list(KNOWN_CALLERS),
+                        help=(
+                            "调用方身份 (caller 维度路由). "
+                            "硬缺省 'ad-hoc' — 任何不显式传 --skill 的调用都视为 ad-hoc, "
+                            "日志落到 .pg/ad-hoc/<session>/<env>/logs/."
+                            "SKILL (pg-build / pg-regression / pg-fix-issue) 必须显式标注."
+                        ))
+    parser.add_argument("--log-dir", default=None,
+                        help=(
+                            "显式覆盖日志目录. 优先级最高 (覆盖 caller/session/env 推导), "
+                            "用于 agent ad-hoc 调试. 透传 PG_HOOK_LOG_DIR 到 hook."
+                        ))
+    parser.add_argument("--timeout-override", type=int, default=None,
+                        help=(
+                            "覆盖 project.yaml 的 timeout_seconds (ad-hoc 调试用). "
+                            "CLI 显式传时会输出 WARN 提示覆盖值."
+                        ))
 
     # argv layout: caller passes [program_name, "invoke-hook", *flags].
     # For test convenience we accept both [program, "invoke-hook", ...]
@@ -304,6 +384,13 @@ def invoke_hook_main(argv=None) -> int:
     if len(argv) < 2 or argv[1] != "invoke-hook":
         argv = [argv[0], "invoke-hook", *argv[1:]]
     args = parser.parse_args(argv[1:][1:])  # slice off program name AND "invoke-hook"
+
+    # --change deprecated alias: 合并到 session
+    if not args.session and args.change:
+        sys.stderr.write(
+            "WARN: --change is deprecated, use --session instead\n"
+        )
+        args.session = args.change
 
     # Per-role actions require --role and --instance at the CLI level.
     if args.action not in ENV_LEVEL_ACTIONS:
@@ -317,6 +404,9 @@ def invoke_hook_main(argv=None) -> int:
                 f"Error: --action {args.action} requires --instance\n"
             )
             return 1
+
+    # session 解析 (留空 + caller=ad-hoc → 自动生成)
+    args.session = resolve_session(args.session, args.caller)
 
     project_root = find_project_root()
     yaml = _load_yaml()
@@ -343,13 +433,13 @@ def invoke_hook_main(argv=None) -> int:
             )
             return 1
         spec = build_env_level_hook_spec(
-            change=args.change,
+            session=args.session,
             env=args.env,
             stage=args.stage,
             action=args.action,
             act_cfg=env_hook_cfg,
             project_root=project_root,
-            skill=args.skill,
+            caller=args.caller,
         )
     else:
         # Per-role lifecycle action (start / stop / logs / tail).
@@ -375,13 +465,13 @@ def invoke_hook_main(argv=None) -> int:
         if not instance_obj:
             sys.stderr.write(
                 f"Error: instance '{args.instance}' not found in "
-                f"environments.{args.env}.roles.{args.role}.instances\n"
+                f"environments.{args.env}.roles.<role>.instances\n"
             )
             return 1
         instance_host = instance_obj.get("host", "")
 
         spec = build_role_hook_spec(
-            change=args.change,
+            session=args.session,
             env=args.env,
             stage=args.stage,
             action=args.action,
@@ -391,8 +481,22 @@ def invoke_hook_main(argv=None) -> int:
             act_cfg=act_cfg,
             tail_lines=args.tail_lines,
             project_root=project_root,
-            skill=args.skill,
+            caller=args.caller,
         )
+
+    # --log-dir 覆盖: 透传 PG_HOOK_LOG_DIR 到 hook (pg-run-hook.py:_PG_ENV_MAP 已映射)
+    if args.log_dir:
+        spec["hook_log_dir"] = args.log_dir
+        spec["log_path"] = str(Path(args.log_dir) / Path(spec["log_path"]).name)
+        spec["hook_result_path"] = str(Path(args.log_dir) / Path(spec["hook_result_path"]).name)
+
+    # --timeout-override 覆盖: 输出 WARN (不阻止, ad-hoc 调试可用) 后替换
+    if args.timeout_override is not None:
+        sys.stderr.write(
+            f"WARN: --timeout-override={args.timeout_override} 覆盖 "
+            f"project.yaml timeout_seconds={spec.get('timeout_seconds')}\n"
+        )
+        spec["timeout_seconds"] = args.timeout_override
 
     pg_hook_runner = (
         find_pg_skills_root(project_root)

@@ -154,12 +154,16 @@ class TestArgparseBasics(unittest.TestCase):
             sys.stderr = backup_stderr
 
     def test_missing_required_change_exits_nonzero(self):
+        # v4 协议: --change / --session 不再 required; caller=ad-hoc 时 session 留空 → 自动生成.
+        # 但 SKILL caller (pg-build / pg-regression / pg-fix-issue) 必须显式传 --session.
+        # 此测试改为: 不传 --session + 显式 caller=pg-build → 应 exit 2.
         backup_stderr = sys.stderr
         sys.stderr = io.StringIO()
         backup_argv = sys.argv[:]
         sys.argv = ["pg-invoke-hook.py", "invoke-hook",
                     "--env", "dev-local", "--role", "backend",
-                    "--instance", "backend-1", "--action", "start"]
+                    "--instance", "backend-1", "--action", "start",
+                    "--caller", "pg-build"]
         try:
             with self.assertRaises(SystemExit) as ctx:
                 self.mod.invoke_hook_main(sys.argv)
@@ -173,7 +177,7 @@ class TestArgparseBasics(unittest.TestCase):
         sys.stderr = io.StringIO()
         backup_argv = sys.argv[:]
         sys.argv = ["pg-invoke-hook.py", "invoke-hook",
-                    "--change", "x", "--env", "dev-local",
+                    "--session", "x", "--env", "dev-local",
                     "--role", "backend", "--instance", "backend-1",
                     "--action", "reboot"]
         try:
@@ -184,18 +188,20 @@ class TestArgparseBasics(unittest.TestCase):
             sys.argv = backup_argv
             sys.stderr = backup_stderr
 
-    def test_timeout_flag_is_rejected(self):
+    def test_timeout_override_flag_is_accepted(self):
+        # v4: --timeout-override 是新 CLI flag, 允许 ad-hoc 覆盖 project.yaml timeout_seconds
+        # (前缀匹配会接受 --timeout = --timeout-override, 因此这里测试精确名)
         backup_stderr = sys.stderr
         sys.stderr = io.StringIO()
         backup_argv = sys.argv[:]
         sys.argv = ["pg-invoke-hook.py", "invoke-hook",
-                    "--change", "x", "--env", "dev-local",
+                    "--session", "x", "--env", "dev-local",
                     "--role", "backend", "--instance", "backend-1",
-                    "--action", "start", "--timeout", "60"]
+                    "--action", "start", "--timeout-override", "60"]
         try:
-            with self.assertRaises(SystemExit) as ctx:
-                self.mod.invoke_hook_main(sys.argv)
-            self.assertEqual(ctx.exception.code, 2)
+            # 不应该 raise (timeout-override 合法)
+            # subprocess.run 是 stub, 不会真正跑 hook
+            self.mod.invoke_hook_main(sys.argv)
         finally:
             sys.argv = backup_argv
             sys.stderr = backup_stderr
@@ -205,7 +211,7 @@ class TestArgparseBasics(unittest.TestCase):
         sys.stderr = io.StringIO()
         backup_argv = sys.argv[:]
         sys.argv = ["pg-invoke-hook.py", "invoke-hook",
-                    "--change", "x", "--env", "dev-local",
+                    "--session", "x", "--env", "dev-local",
                     "--role", "backend", "--instance", "backend-1",
                     "--action", "start", "--host", "remote"]
         try:
@@ -215,6 +221,163 @@ class TestArgparseBasics(unittest.TestCase):
         finally:
             sys.argv = backup_argv
             sys.stderr = backup_stderr
+
+
+# ============================================================
+# 1b. v4 protocol — caller × session
+# ============================================================
+
+class TestV4Protocol(unittest.TestCase):
+    """v4 协议新增行为:
+       - --session 留空 + caller=ad-hoc → 自动生成 auto-<date>-<pid>
+       - --skill / --caller 硬缺省 'ad-hoc'
+       - 新增 --log-dir / --timeout-override
+       - --change 保留为 deprecated alias (1 版本兼容, 输出 WARN)
+    """
+
+    def setUp(self):
+        self.mod = _load_invoke_hook()
+        self._orig_run = self.mod.subprocess.run
+        self.mod.subprocess.run = lambda *a, **kw: type("R", (), {"returncode": 0})()
+        self.captured_spec = None
+        orig_run = self.mod.subprocess.run
+        def _capture(*a, **kw):
+            self.captured_spec = json.loads(kw.get("input") or a[0] if a else kw["input"])
+            return type("R", (), {"returncode": 0})()
+        self.mod.subprocess.run = _capture
+
+    def tearDown(self):
+        self.mod.subprocess.run = self._orig_run
+
+    def _invoke_ok(self, *flags):
+        argv = ["pg-invoke-hook.py", "invoke-hook"] + list(flags)
+        backup_argv = sys.argv[:]
+        backup_stderr = sys.stderr
+        sys.argv = argv
+        sys.stderr = io.StringIO()
+        try:
+            self.mod.invoke_hook_main(sys.argv)
+        finally:
+            sys.argv = backup_argv
+            sys.stderr = backup_stderr
+
+    def test_adhoc_auto_generates_session(self):
+        # 无 --session + 无 --skill → caller=ad-hoc, session 自动生成 auto-<date>-<pid>
+        self._invoke_ok(
+            "--env", "dev-local",
+            "--role", "backend", "--instance", "backend-1",
+            "--action", "start",
+        )
+        spec = self.captured_spec
+        self.assertEqual(spec["caller"], "ad-hoc")
+        self.assertTrue(spec["session"].startswith("auto-"),
+                        f"expected auto-<date>-<pid>, got {spec['session']!r}")
+        # 旧 'change' key 保留作 alias
+        self.assertEqual(spec["change"], spec["session"])
+        # log_path 落到 .pg/ad-hoc/<session>/<env>/logs/...
+        self.assertIn("/.pg/ad-hoc/", spec["log_path"])
+        self.assertIn(spec["session"], spec["log_path"])
+
+    def test_skill_caller_requires_session(self):
+        # caller=pg-build 但 --session 留空 → exit 2
+        backup_stderr = sys.stderr
+        sys.stderr = io.StringIO()
+        backup_argv = sys.argv[:]
+        sys.argv = ["pg-invoke-hook.py", "invoke-hook",
+                    "--env", "dev-local",
+                    "--role", "backend", "--instance", "backend-1",
+                    "--action", "start",
+                    "--caller", "pg-build"]
+        try:
+            with self.assertRaises(SystemExit) as ctx:
+                self.mod.invoke_hook_main(sys.argv)
+            self.assertEqual(ctx.exception.code, 2)
+            self.assertIn("requires explicit --session", sys.stderr.getvalue())
+        finally:
+            sys.argv = backup_argv
+            sys.stderr = backup_stderr
+
+    def test_change_deprecated_alias_emits_warn(self):
+        # --change 仍可工作, 但 stderr 有 WARN
+        backup_stderr = sys.stderr
+        captured = io.StringIO()
+        sys.stderr = captured
+        argv = ["pg-invoke-hook.py", "invoke-hook",
+                "--change", "legacy-change",
+                "--env", "dev-local",
+                "--role", "backend", "--instance", "backend-1",
+                "--action", "start"]
+        backup_argv = sys.argv[:]
+        sys.argv = argv
+        try:
+            self.mod.invoke_hook_main(sys.argv)
+        finally:
+            sys.argv = backup_argv
+            sys.stderr = backup_stderr
+        err = captured.getvalue()
+        self.assertIn("deprecated", err)
+        # 同时 'change' 字段写入 spec (alias)
+        self.assertEqual(self.captured_spec["change"], "legacy-change")
+        self.assertEqual(self.captured_spec["session"], "legacy-change")
+
+    def test_log_dir_override(self):
+        # --log-dir 覆盖路由
+        self._invoke_ok(
+            "--env", "dev-local",
+            "--role", "backend", "--instance", "backend-1",
+            "--action", "start",
+            "--log-dir", "/tmp/dbg-test",
+        )
+        spec = self.captured_spec
+        self.assertEqual(spec["hook_log_dir"], "/tmp/dbg-test")
+        self.assertTrue(spec["log_path"].startswith("/tmp/dbg-test/"),
+                        f"expected /tmp/dbg-test/, got {spec['log_path']!r}")
+        self.assertTrue(spec["hook_result_path"].startswith("/tmp/dbg-test/"))
+
+    def test_timeout_override_emits_warn(self):
+        backup_stderr = sys.stderr
+        captured = io.StringIO()
+        sys.stderr = captured
+        argv = ["pg-invoke-hook.py", "invoke-hook",
+                "--env", "dev-local",
+                "--role", "backend", "--instance", "backend-1",
+                "--action", "start",
+                "--timeout-override", "60"]
+        backup_argv = sys.argv[:]
+        sys.argv = argv
+        try:
+            self.mod.invoke_hook_main(sys.argv)
+        finally:
+            sys.argv = backup_argv
+            sys.stderr = backup_stderr
+        err = captured.getvalue()
+        self.assertIn("--timeout-override=60", err)
+        self.assertIn("WARN", err)
+        self.assertEqual(self.captured_spec["timeout_seconds"], 60)
+
+    def test_caller_alias_works(self):
+        # --caller 与 --skill 等价 (互为 alias)
+        self._invoke_ok(
+            "--session", "demo-change",
+            "--env", "dev-local",
+            "--role", "backend", "--instance", "backend-1",
+            "--action", "start",
+            "--caller", "pg-regression",
+        )
+        self.assertEqual(self.captured_spec["caller"], "pg-regression")
+        self.assertIn("/.pg/regression/demo-change/", self.captured_spec["log_path"])
+
+    def test_hook_result_path_in_spec(self):
+        # spec 包含 hook_result_path (修 D5)
+        self._invoke_ok(
+            "--session", "demo-change",
+            "--env", "dev-local",
+            "--role", "backend", "--instance", "backend-1",
+            "--action", "start",
+        )
+        spec = self.captured_spec
+        self.assertIn("hook_result_path", spec)
+        self.assertTrue(spec["hook_result_path"].endswith(".result.json"))
 
 
 # ============================================================
@@ -271,7 +434,7 @@ class TestSpecRendering(unittest.TestCase):
 
     def test_basic_spec_shape(self):
         self._invoke_ok(
-            "--change", "add-host-memory-overview",
+            "--session", "add-host-memory-overview",
             "--env", "dev-local",
             "--role", "backend", "--instance", "backend-1",
             "--action", "start",
@@ -290,24 +453,25 @@ class TestSpecRendering(unittest.TestCase):
         self.assertEqual(spec["instance_host"], "localhost")
 
     def test_log_path_format(self):
+        # v4: 无 --skill / --caller → caller 默认 'ad-hoc' → .pg/ad-hoc/<session>/<env>/logs/...
         self._invoke_ok(
-            "--change", "add-host-memory-overview",
+            "--session", "add-host-memory-overview",
             "--env", "dev-local",
             "--role", "backend", "--instance", "backend-1",
             "--action", "start",
         )
         expected = os.path.join(
             PROJECT_ROOT,
-            ".pg/changes/add-host-memory-overview/2-build/dev-local/logs",
+            ".pg/ad-hoc/add-host-memory-overview/dev-local/logs",
             "role.backend.start@backend-1.log",
         )
         self.assertEqual(self.captured_spec["log_path"], expected)
 
     def test_log_path_pg_regression_skill(self):
-        # pg-regression → .pg/regression/<suite>/<env>/logs/...
-        # (hook 内部 pg_resolve_paths 从 regression-<suite> 截 suite 段)
+        # pg-regression → .pg/regression/<session>/<env>/logs/...
+        # (v4: session 保留 regression-<suite> 前缀, 不再 strip)
         self._invoke_ok(
-            "--change", "regression-backend",
+            "--session", "regression-backend",
             "--env", "dev-local",
             "--role", "backend", "--instance", "backend-1",
             "--action", "start",
@@ -315,16 +479,16 @@ class TestSpecRendering(unittest.TestCase):
         )
         expected = os.path.join(
             PROJECT_ROOT,
-            ".pg/regression/backend/dev-local/logs",
+            ".pg/regression/regression-backend/dev-local/logs",
             "role.backend.start@backend-1.log",
         )
         self.assertEqual(self.captured_spec["log_path"], expected)
-        self.assertEqual(self.captured_spec["skill"], "pg-regression")
+        self.assertEqual(self.captured_spec["caller"], "pg-regression")
 
     def test_log_path_pg_fix_issue_skill(self):
-        # pg-fix-issue → .pg/fix-issue/<change>/<env>/logs/...
+        # pg-fix-issue → .pg/fix-issue/<session>/<env>/logs/...
         self._invoke_ok(
-            "--change", "fix-2026-06-26-vm-failure",
+            "--session", "fix-2026-06-26-vm-failure",
             "--env", "dev-local",
             "--role", "backend", "--instance", "backend-1",
             "--action", "start",
@@ -336,19 +500,19 @@ class TestSpecRendering(unittest.TestCase):
             "role.backend.start@backend-1.log",
         )
         self.assertEqual(self.captured_spec["log_path"], expected)
-        self.assertEqual(self.captured_spec["skill"], "pg-fix-issue")
+        self.assertEqual(self.captured_spec["caller"], "pg-fix-issue")
 
     def test_log_path_env_level_pg_regression(self):
-        # env-level + pg-regression → .pg/regression/<suite>/<env>/logs/env.<action>.log
+        # env-level + pg-regression → .pg/regression/<session>/<env>/logs/env.<action>.log
         self._invoke_ok(
-            "--change", "regression-frontend",
+            "--session", "regression-frontend",
             "--env", "dev-local",
             "--action", "prepare_env",
             "--skill", "pg-regression",
         )
         expected = os.path.join(
             PROJECT_ROOT,
-            ".pg/regression/frontend/dev-local/logs",
+            ".pg/regression/regression-frontend/dev-local/logs",
             "env.prepare_env.log",
         )
         self.assertEqual(self.captured_spec["log_path"], expected)
@@ -357,7 +521,7 @@ class TestSpecRendering(unittest.TestCase):
         # project.yaml has: actions.start.args = ["{role}", "{instance.name}", "--grpc"]
         # for backend (no instance.host placeholder in this action's args).
         self._invoke_ok(
-            "--change", "add-host-memory-overview",
+            "--session", "add-host-memory-overview",
             "--env", "dev-local",
             "--role", "backend", "--instance", "backend-1",
             "--action", "start",
@@ -373,7 +537,7 @@ class TestSpecRendering(unittest.TestCase):
         # backend.logs has args = ["{lines:100}"] in project.yaml.
         # Without --tail-lines, the literal {lines:100} stays as-is.
         self._invoke_ok(
-            "--change", "add-host-memory-overview",
+            "--session", "add-host-memory-overview",
             "--env", "dev-local",
             "--role", "backend", "--instance", "backend-1",
             "--action", "logs",
@@ -385,7 +549,7 @@ class TestSpecRendering(unittest.TestCase):
 
         # With --tail-lines, runner appends --tail-lines N to args.
         self._invoke_ok(
-            "--change", "add-host-memory-overview",
+            "--session", "add-host-memory-overview",
             "--env", "dev-local",
             "--role", "backend", "--instance", "backend-1",
             "--action", "logs",
@@ -397,7 +561,7 @@ class TestSpecRendering(unittest.TestCase):
 
     def test_tail_lines_ignored_for_start(self):
         self._invoke_ok(
-            "--change", "add-host-memory-overview",
+            "--session", "add-host-memory-overview",
             "--env", "dev-local",
             "--role", "backend", "--instance", "backend-1",
             "--action", "start",
@@ -408,7 +572,7 @@ class TestSpecRendering(unittest.TestCase):
     def test_hook_type_equals_action_for_all_actions(self):
         for action in ("start", "stop", "logs", "tail"):
             self._invoke_ok(
-                "--change", "add-host-memory-overview",
+                "--session", "add-host-memory-overview",
                 "--env", "dev-local",
                 "--role", "backend", "--instance", "backend-1",
                 "--action", action,
@@ -420,7 +584,7 @@ class TestSpecRendering(unittest.TestCase):
         # Environment-level hook: no role/instance, hook_type=prepare_env,
         # log_path is env.prepare_env.log under 2-build/<env>/logs.
         self._invoke_ok(
-            "--change", "add-host-memory-overview",
+            "--session", "add-host-memory-overview",
             "--env", "dev-local",
             "--action", "prepare_env",
         )
@@ -431,7 +595,7 @@ class TestSpecRendering(unittest.TestCase):
         self.assertEqual(spec["hook_type"], "prepare_env")
         expected_log = os.path.join(
             PROJECT_ROOT,
-            ".pg/changes/add-host-memory-overview/2-build/dev-local/logs",
+            ".pg/ad-hoc/add-host-memory-overview/dev-local/logs",
             "env.prepare_env.log",
         )
         self.assertEqual(spec["log_path"], expected_log)
@@ -460,7 +624,7 @@ class TestValidationErrors(unittest.TestCase):
 
     def _expect_exit1(self, *flags):
         defaults = {
-            "--change": "x",
+            "--session": "x",
             "--env": "dev-local",
             "--role": "backend",
             "--instance": "backend-1",
@@ -492,7 +656,7 @@ class TestValidationErrors(unittest.TestCase):
         # start is per-role, --role must be present.
         backup_argv = sys.argv[:]
         sys.argv = ["pg-invoke-hook.py", "invoke-hook",
-                    "--change", "x", "--env", "dev-local",
+                    "--session", "x", "--env", "dev-local",
                     "--instance", "backend-1", "--action", "start"]
         backup_stderr = sys.stderr
         sys.stderr = io.StringIO()
@@ -507,7 +671,7 @@ class TestValidationErrors(unittest.TestCase):
     def test_per_role_action_missing_instance(self):
         backup_argv = sys.argv[:]
         sys.argv = ["pg-invoke-hook.py", "invoke-hook",
-                    "--change", "x", "--env", "dev-local",
+                    "--session", "x", "--env", "dev-local",
                     "--role", "backend", "--action", "start"]
         backup_stderr = sys.stderr
         sys.stderr = io.StringIO()
@@ -551,7 +715,7 @@ class TestThinWrapperBehavior(unittest.TestCase):
         sys.stderr = io.StringIO()
         backup_argv = sys.argv[:]
         sys.argv = ["runner.py", "invoke-hook",
-                    "--change", "x", "--env", "dev-local",
+                    "--session", "x", "--env", "dev-local",
                     "--role", "backend", "--instance", "backend-1",
                     "--action", "reboot"]
         try:
@@ -566,7 +730,7 @@ class TestThinWrapperBehavior(unittest.TestCase):
     def test_wrapper_forwards_validation_error(self):
         # Unknown role should produce the same error path as canonical.
         r = _run_wrapper(
-            "--change", "x", "--env", "dev-local",
+            "--session", "x", "--env", "dev-local",
             "--role", "ghost-role",
             "--instance", "ghost",
             "--action", "start",
@@ -595,7 +759,7 @@ class TestEndToEndInvokeHook(unittest.TestCase):
 
     def test_canonical_cli_unknown_role_exits_1(self):
         r = _run_canonical(
-            "--change", "x", "--env", "dev-local",
+            "--session", "x", "--env", "dev-local",
             "--role", "ghost-role",
             "--instance", "ghost",
             "--action", "start",
@@ -605,7 +769,7 @@ class TestEndToEndInvokeHook(unittest.TestCase):
 
     def test_wrapper_cli_unknown_role_exits_1(self):
         r = _run_wrapper(
-            "--change", "x", "--env", "dev-local",
+            "--session", "x", "--env", "dev-local",
             "--role", "ghost-role",
             "--instance", "ghost",
             "--action", "start",

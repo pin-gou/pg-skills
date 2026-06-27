@@ -118,7 +118,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 
 ```yaml
 fix_issue_context:
-  change_name: "fix-<YYYY-MM-DD>-<bug-slug>"     # 编排器 Phase 0 自动生成, 用于 invoke-hook --change
+  change_name: "fix-<YYYY-MM-DD>-<bug-slug>"     # 编排器 Phase 0 自动生成, 用于 invoke-hook --session
                                                  # (独立于 pg-build 的 change, 避免污染 .pg/changes/)
   selected_env: "<env-name>"                      # Phase 3 用户选的环境
   affected_modules: [...]                          # Phase 0.1 反向匹配得到
@@ -138,8 +138,8 @@ fix_issue_context:
 | `modules.<m>.build` | `pg-parse-config.py --resolve-module-build <m>` → `{cmd, timeout_seconds}` |
 | `modules.<m>.test.<test_key>` | `pg-parse-config.py --resolve-module-test <m> <test_key>` → `{cmd, timeout_seconds}`（test_key 由 `stages[*].test_key` 决定） |
 | `modules.<m>.lint` | `pg-parse-config.py --resolve-module-lint <m>` → `{cmd, timeout_seconds}` |
-| `environments.<env>.roles.<role>.actions.{start,stop,logs,tail}` | **v3.0 变更**：不再由 parser 预渲染。LLM 调 `pg-invoke-hook.py invoke-hook --change <C> --env <ENV> --role <ROLE> --instance <INSTANCE> --action <ACTION> [--tail-lines N]` 触发；runner 内部从 project.yaml 反查 spec |
-| `environments.<env>.prepare_env` / `.clean_env` | LLM 调 `pg-invoke-hook.py invoke-hook --change <C> --env <ENV> --action prepare_env\|clean_env`（v3.0 新增，无需 `--role`/`--instance`） |
+| `environments.<env>.roles.<role>.actions.{start,stop,logs,tail}` | **v3.0 变更**：不再由 parser 预渲染。LLM 调 `pg-invoke-hook.py invoke-hook --session <C> --env <ENV> --role <ROLE> --instance <INSTANCE> --action <ACTION> [--tail-lines N]` 触发；runner 内部从 project.yaml 反查 spec |
+| `environments.<env>.prepare_env` / `.clean_env` | LLM 调 `pg-invoke-hook.py invoke-hook --session <C> --env <ENV> --action prepare_env\|clean_env`（v3.0 新增，无需 `--role`/`--instance`） |
 | `tracks.<t>.modules` | `pg-parse-config.py pg-fix-issue` 输出 `tracks.<t>.modules` |
 | `tracks.<t>.max_fix_retries` | 5（**subagent 重试上限，仅 Phase 5 用**） |
 | `fix_issue.max_iteration_count` | 5（**主 agent 整体迭代上限，Phase 6 用**） |
@@ -491,8 +491,8 @@ question 工具调用:
                v3.0 改动：\n
                 - 选中“是”后, 编排器会在 Phase 4 修复前, 主动调:\n
                   python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\\n
-                    --change <C> --env dev-local --action prepare_env --skill pg-fix-issue\n
-               - runner 走 hooks 协议, 自动注入 PG_CHANGE_NAME / PG_ENV / timeout_seconds\n
+                    --session <C> --env dev-local --action prepare_env --skill pg-fix-issue\n
+               - runner 走 hooks 协议, 自动注入 PG_RUN_SESSION / PG_RUN_CALLER / PG_ENV / timeout_seconds\n
                - 失败 → 立即 ESCALATE, 不进入 Phase 4",
     header: "prepare_env 时机",
     options: [
@@ -513,7 +513,7 @@ question 工具调用:
                v3.0 改动：\n
                 - 选中“是”后, 编排器在 Phase 5 验证成功之后, 主动调:\n
                   python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\\n
-                    --change <C> --env dev-local --action clean_env --skill pg-fix-issue\n
+                    --session <C> --env dev-local --action clean_env --skill pg-fix-issue\n
                - runner 走 hooks 协议, 自动注入 timeout_seconds",
     header: "clean_env 时机",
     options: [
@@ -715,20 +715,22 @@ service 启停（backend / frontend / agent start|stop|logs|tail）以及 enviro
 
 ```bash
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --change <C> --env <ENV> --role <ROLE> --instance <INSTANCE> --action <ACTION> \
-  [--stage <STAGE>] [--tail-lines <N>] [--skill <SKILL>]
+  --session <C> --env <ENV> --role <ROLE> --instance <INSTANCE> --action <ACTION> \
+  [--stage <ST>] [--tail-lines <N>] [--skill pg-fix-issue]
 ```
+
+> v4 协议：`--change` 改为 `--session`（canonical），`--skill` 硬缺省 `ad-hoc`，SKILL 调用必须显式标注 `--skill pg-fix-issue`。
 
 | 标志 | 必填 | 说明 |
 |------|------|------|
-| `--change` | ✅ | 当前 change 名（用于 spec.change + log_path 路由） |
+| `--session` | ✅ | session 名（v4）。pg-fix-issue 调用 = `fix-<YYYY-MM-DD>-<slug>`。`--change` 保留 1 版本作为 deprecated alias |
 | `--env` | ✅ | 必须在 project.yaml `environments` 列表中 |
 | `--role` | ⚠️ | backend / frontend / agent。**仅 `--action start\|stop\|logs\|tail` 必填**；`prepare_env\|clean_env` 时忽略 |
 | `--instance` | ⚠️ | 必须在 `environments.<env>.roles.<role>.instances[]` 中。**仅 `--action start\|stop\|logs\|tail` 必填**；`prepare_env\|clean_env` 时忽略 |
 | `--action` | ✅ | `start` / `stop` / `logs` / `tail`（per-role） 或 `prepare_env` / `clean_env`（environment-level） |
 | `--stage` | ❌ | 默认 `manual`；用于 spec.stage 标记 |
 | `--tail-lines` | ❌ | 仅 `--action logs\|tail` 生效 |
-| `--skill` | ❌ | 调用方 skill 名称（如 `pg-fix-issue`）；注入为 `PG_SKILL_NAME` 环境变量 |
+| `--skill` / `--caller` | ❌ | **硬缺省 `ad-hoc`**。SKILL 调用必须显式标注（pg-fix-issue → `--skill pg-fix-issue`）。注入为 `PG_RUN_CALLER` 环境变量 |
 
 **`--timeout` / `--host` / `--port` 均不是 CLI flag**——LLM 不传，由 runner 从 project.yaml 反查 spec，runner 内部 `subprocess.run(timeout=...)` 强制执行。
 
@@ -738,11 +740,11 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 
 | 触发时机 | 编排器动作 |
 |---------|----------|
-| Phase 4 修复前用户选"是 prepare" | 调 `invoke-hook --change <C> --env <ENV> --action prepare_env --skill pg-fix-issue` |
-| 修复后需要 backend 重启验证 | 调 `invoke-hook --change <C> --env <ENV> --role backend --instance backend-1 --action start --skill pg-fix-issue` |
-| 修复后需要 backend 停止收尾 | 调 `invoke-hook --change <C> --env <ENV> --role backend --instance backend-1 --action stop --skill pg-fix-issue` |
-| 看 backend 日志 | 调 `invoke-hook --change <C> --env <ENV> --role backend --instance backend-1 --action logs --tail-lines 100 --skill pg-fix-issue` |
-| 验证成功后用户选"是 clean" | 调 `invoke-hook --change <C> --env <ENV> --action clean_env --skill pg-fix-issue` |
+| Phase 4 修复前用户选"是 prepare" | 调 `invoke-hook --session <C> --env <ENV> --action prepare_env --skill pg-fix-issue` |
+| 修复后需要 backend 重启验证 | 调 `invoke-hook --session <C> --env <ENV> --role backend --instance backend-1 --action start --skill pg-fix-issue` |
+| 修复后需要 backend 停止收尾 | 调 `invoke-hook --session <C> --env <ENV> --role backend --instance backend-1 --action stop --skill pg-fix-issue` |
+| 看 backend 日志 | 调 `invoke-hook --session <C> --env <ENV> --role backend --instance backend-1 --action logs --tail-lines 100 --skill pg-fix-issue` |
+| 验证成功后用户选"是 clean" | 调 `invoke-hook --session <C> --env <ENV> --action clean_env --skill pg-fix-issue` |
 
 **精细化 vs 整栈的选择规则**（v3.0 通过 invoke-hook 表达）：
 

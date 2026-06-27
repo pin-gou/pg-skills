@@ -145,7 +145,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-regression --suite
 
 ```bash
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --change "$CHANGE" --env <env-name> --action prepare_env --skill pg-regression
+  --session "$CHANGE" --env <env-name> --action prepare_env --skill pg-regression
 ```
 
 `timeout_seconds` 由 `pg-invoke-hook.py` 从 `environments.<env>.prepare_env.timeout_seconds` 自动反查并写入 spec, LLM 不传。
@@ -180,14 +180,14 @@ for i in yaml.safe_load(open('.pg/project.yaml'))['environments']['${ENV}']['rol
     print(i['name'])
 "); do
     python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-      --change ${CHANGE} --env ${ENV} --role ${ROLE} --instance ${INSTANCE} --action start \
+      --session ${CHANGE} --env ${ENV} --role ${ROLE} --instance ${INSTANCE} --action start \
       --skill pg-regression
     # 任一 instance 失败 → exit 1, 后续 role/instance 不再继续
   done
 done
 ```
 
-> **日志路径**: `pg-invoke-hook.py` 自动写入 `${RUN_DIR}/${ENV}/logs/role.<role>.start@<instance>.log`（通过 `--change $CHANGE` + `--skill pg-regression` 路由）。编排器可直接 `tail -100 ${RUN_DIR}/*/logs/role.*.start@*.log` 排错。
+> **日志路径**: `pg-invoke-hook.py` 自动写入 `${RUN_DIR}/${ENV}/logs/role.<role>.start@<instance>.log`（通过 `--session $CHANGE` + `--skill pg-regression` 路由）。编排器可直接 `tail -100 ${RUN_DIR}/*/logs/role.*.start@*.log` 排错。
 
 #### 0.4 清理临时目录
 

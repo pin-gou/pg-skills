@@ -76,8 +76,18 @@ PROJECT_ROOT = find_project_root()
 
 # Map spec fields to PG_* env var names. Each entry: spec_key -> env_var.
 # All keys are optional; only non-empty values are injected.
+#
+# v4 协议:
+# - 新增 "session" -> PG_RUN_SESSION (与 caller 正交的 session 名).
+# - 新增 "caller"  -> PG_RUN_CALLER  (语义更清晰的 caller 维度, 取代 PG_SKILL_NAME).
+# - 保留 "change" / "skill" 作为 1 版本 alias (向下兼容老 hook).
+# - 新增 "log_path" -> PG_LOG_FILE / "hook_result_path" -> PG_RESULT_FILE
+#   (修 D5: pg-run-hook.py 历史上没注入这两个 var, hook 模板头部注释里写了但拿不到).
 _PG_ENV_MAP = {
+    "session": "PG_RUN_SESSION",
     "change": "PG_CHANGE_NAME",
+    "caller": "PG_RUN_CALLER",
+    "skill": "PG_SKILL_NAME",
     "stage": "PG_STAGE",
     "env": "PG_ENV",
     "module": "PG_MODULE",
@@ -85,8 +95,9 @@ _PG_ENV_MAP = {
     "instance_name": "PG_INSTANCE_NAME",
     "instance_host": "PG_INSTANCE_HOST",
     "hook_type": "PG_HOOK_TYPE",
-    "skill": "PG_SKILL_NAME",
     "hook_log_dir": "PG_HOOK_LOG_DIR",
+    "log_path": "PG_LOG_FILE",
+    "hook_result_path": "PG_RESULT_FILE",
 }
 
 
@@ -96,9 +107,9 @@ def build_env(spec):
     Always-injected (project-controlled):
         PG_PROJECT_ROOT — project root (find_project_root)
         PG_SKILLS_PATH  — pg-skills subtree path (computed from __file__)
-        PG_SKILL_NAME   — caller skill, auto-detected (pg-build / pg-regression)
-                          via $PG_RUNNER_ORIGIN env var set by callers; falls
-                          back to "pg-skills".
+        PG_RUN_CALLER   — caller identity (pg-build / pg-regression / pg-fix-issue / ad-hoc)
+                          resolved from $PG_RUNNER_ORIGIN (legacy) or "ad-hoc".
+        PG_SKILL_NAME   — DEPRECATED alias of PG_RUN_CALLER (1 版本兼容).
 
     Spec-injected (caller-controlled):
         Each non-empty value in _PG_ENV_MAP is set as the corresponding
@@ -107,10 +118,10 @@ def build_env(spec):
     env = os.environ.copy()
     env["PG_PROJECT_ROOT"] = PROJECT_ROOT
     env["PG_SKILLS_PATH"] = os.path.join(PROJECT_ROOT, ".pg", "skills")
-    env.setdefault(
-        "PG_SKILL_NAME",
-        os.environ.get("PG_RUNNER_ORIGIN", "pg-skills"),
-    )
+    # v4: PG_RUN_CALLER 硬缺省 'ad-hoc' (历史兼容 PG_RUNNER_ORIGIN alias)
+    env.setdefault("PG_RUN_CALLER", os.environ.get("PG_RUNNER_ORIGIN", "ad-hoc"))
+    # DEPRECATED alias (1 版本), 后续删
+    env.setdefault("PG_SKILL_NAME", env["PG_RUN_CALLER"])
     for spec_key, env_var in _PG_ENV_MAP.items():
         val = spec.get(spec_key)
         if val:

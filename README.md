@@ -244,7 +244,7 @@ python3 .pg/skills/src/runtime/bin/pg init --no-symlinks
 
 ### 7.1 Hook 协议
 
-#### Hook 边界
+#### 7.1.1 Hook 边界
 
 | 维度 | 走 hook 协议？ | 配置位置 | 调度方式 |
 |------|---------------|---------|---------|
@@ -253,7 +253,76 @@ python3 .pg/skills/src/runtime/bin/pg init --no-symlinks
 
 > `examples/<lang>/hooks/module-*.sh` 是历史遗留示例，当前 runner 已不再调用它们。如果项目里残留了 `<module>-{build,test,lint}.sh`，是历史遗留，删除即可（`rm .pg/hooks/<m>-*.sh`）。
 
-#### Hook 脚本模板
+#### 7.1.2 v4 协议 — caller × session 双维度路由
+
+v4 协议把"日志目录路由"拆成两个**正交维度**，三类调用方（pg-build / pg-regression / pg-fix-issue / ad-hoc）共享同一套接口，但落到不同的目录树：
+
+| 维度 | CLI 字段 | 取值规则 | 作用 |
+|------|----------|----------|------|
+| **caller**（调用方身份） | `--skill` / `--caller` | `pg-build` / `pg-regression` / `pg-fix-issue` / `ad-hoc`（**硬缺省**） | 一级目录 |
+| **session**（工作单元） | `--session` | caller=ad-hoc 时留空自动生成 `auto-<date>-<pid>`；SKILL caller 必填 | 二级目录 |
+| **env** | `--env` | 必填 | 三级目录 |
+
+**日志目录路由表**（与 `.pg/hooks/lib/common.sh:pg_resolve_paths` 同步）：
+
+| caller | 日志目录 | session 命名约定 |
+|--------|----------|------------------|
+| `pg-build` | `.pg/changes/<session>/2-build/<env>/logs/` | 提案名（如 `add-foo-bar`） |
+| `pg-regression` | `.pg/regression/<session>/<env>/logs/` | `regression-<suite>-<date>-<seq>` |
+| `pg-fix-issue` | `.pg/fix-issue/<session>/<env>/logs/` | `fix-<date>-<slug>` |
+| `ad-hoc` | `.pg/ad-hoc/<session>/<env>/logs/` | 留空自动生成 `auto-<date>-<pid>`，或显式传入 |
+
+**为什么是 caller 而不是 skill**：旧协议里 `--skill` 既是"调用方身份"又是"pg-skills 这个项目"的概念。v4 拆开后，调用方身份一律叫 **caller**（写为 `PG_RUN_CALLER`），不再和项目名混淆。
+
+**为什么不双写到旧路径**：pg-build / pg-regression / pg-fix-issue 的日志目录**完全保持现状**（路径不变），不需要迁移；ad-hoc 单独走 `.pg/ad-hoc/` 不污染 SKILL 命名空间。
+
+#### 7.1.3 三种使用场景的调用范式
+
+**场景 A：SKILL 调用（编排流内）**
+
+```bash
+# pg-build 子 agent 收到 context 后执行的命令
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --session my-feat --env dev-local \
+  --role backend --instance backend-1 --action start \
+  --skill pg-build --stage dev
+```
+
+**场景 B：pg-run 菜单 / CLI 直达**
+
+```bash
+# pg-run 内部自动生成的命令 (无 --session, 留空 → ad-hoc 自动生成 auto-<date>-<pid>)
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --env dev-local --role backend --instance backend-1 --action start
+# caller 缺省 'ad-hoc', session 自动生成
+```
+
+**场景 C：agent 不经 SKILL 直接调用（ad-hoc 调试）**
+
+```bash
+# 标准 ad-hoc
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --env dev-local --role backend --instance backend-1 --action start
+
+# 调试覆盖日志目录
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --env dev-local --role backend --instance backend-1 --action logs \
+  --log-dir /tmp/debug-backend-1
+
+# ad-hoc 临时改超时 (输出 WARN)
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --env dev-local --role backend --instance backend-1 --action start \
+  --timeout-override 60
+
+# 显式指定 session 名 (便于聚合多次调用)
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  --session debug-backend-crash --env dev-local \
+  --role backend --instance backend-1 --action start
+```
+
+**禁止**直接调 `bash .pg/hooks/role-backend-start.sh`——会绕过协议、缺 PG_* env vars、缺 result.json、缺统一超时。
+
+#### 7.1.4 Hook 脚本模板
 
 ```bash
 #!/usr/bin/env bash
@@ -274,36 +343,45 @@ else
 fi
 ```
 
-#### 注入的环境变量
+#### 7.1.5 注入的环境变量（v4 SSOT）
 
 | 变量 | 说明 | 适用范围 |
 |------|------|---------|
 | `PG_SKILLS_PATH` | pg-skills 仓库根路径 | 全部 |
 | `PG_PROJECT_ROOT` | 项目根路径 | 全部 |
+| `PG_RUN_CALLER` | 调用方身份（pg-build / pg-regression / pg-fix-issue / ad-hoc） | 全部 |
+| `PG_RUN_SESSION` | session 名（与 caller 正交） | 全部 |
 | `PG_RESULT_FILE` | 写 result.json 的路径 | 全部 |
 | `PG_LOG_FILE` | 写 stdout/stderr 的路径 | 全部 |
-| `PG_CHANGE_NAME` | 当前 change 名 | 全部 |
 | `PG_STAGE` | 当前 stage 名 | 全部 |
 | `PG_ENV` | 当前环境（dev-local / dev-3tier） | 全部 |
 | `PG_ROLE` | role 名 | role action 时 |
 | `PG_INSTANCE_NAME` | instance 名 | role action 时 |
 | `PG_INSTANCE_HOST` | instance host | role action 时 |
-| `PG_SKILL_NAME` | 调用方 skill 名（pg-build/pg-regression/pg-fix-issue） | 全部 |
-| `PG_HOOK_LOG_DIR` | **服务内部 stdout/PID 的目标目录（预拼绝对路径，hook 脚本直接信任，不再算路径）** | 全部 |
+| `PG_HOOK_TYPE` | hook 类型（start / stop / restart / logs / tail / prepare / clean） | 全部 |
+| `PG_HOOK_LOG_DIR` | 服务内部 stdout/PID 的目标目录（预拼绝对路径，hook 脚本直接信任） | 全部 |
+
+**1 版本 alias**（向下兼容老 hook，写新代码应改用上面的新名）：
+
+| Alias | 新名 |
+|-------|------|
+| `PG_SKILL_NAME` | `PG_RUN_CALLER` |
+| `PG_CHANGE_NAME` | `PG_RUN_SESSION` |
 
 > ~~`PG_MODULE` / `PG_MODULE_ROOT`~~ 已不再注入——module 维度不经过 hook 协议。
 
-#### `PG_HOOK_LOG_DIR` 的来源与用法
+#### 7.1.6 `PG_HOOK_LOG_DIR` 的来源与用法
 
-`PG_HOOK_LOG_DIR` 由 `pg-invoke-hook.py` 在 spec 阶段通过 `pg_log_dir_for_skill(skill, change, env, project_root)` 计算，作为 spec 字段 `hook_log_dir` 注入到 `pg-run-hook.py`，再由 `pg-run-hook.py` 写入 ENV。
+`PG_HOOK_LOG_DIR` 由 `pg-invoke-hook.py` 在 spec 阶段通过 `pg_log_dir_for_caller(caller, session, env, project_root)` 计算，作为 spec 字段 `hook_log_dir` 注入到 `pg-run-hook.py`，再由 `pg-run-hook.py` 写入 ENV。
 
 **预计算逻辑**（与 `pg_log_dir_for_skill()` Python 实现保持一致）：
 
-| skill | change 形式 | `PG_HOOK_LOG_DIR` |
-|-------|-------------|-------------------|
-| `pg-regression` | `regression-<suite>-<date>-<seq>` | `<root>/.pg/regression/<suite>/<env>/logs` |
-| `pg-fix-issue` | `<change>` | `<root>/.pg/fix-issue/<change>/<env>/logs` |
-| 其他 / 兜底 | `<change>` | `<root>/.pg/changes/<change>/2-build/<env>/logs` |
+| caller | session 形式 | `PG_HOOK_LOG_DIR` |
+|--------|--------------|-------------------|
+| `pg-build` | `<session>`（提案名） | `<root>/.pg/changes/<session>/2-build/<env>/logs` |
+| `pg-regression` | `regression-<suite>-<date>-<seq>` | `<root>/.pg/regression/<session>/<env>/logs` |
+| `pg-fix-issue` | `fix-<date>-<slug>` | `<root>/.pg/fix-issue/<session>/<env>/logs` |
+| `ad-hoc` | `auto-<date>-<pid>` 或显式 | `<root>/.pg/ad-hoc/<session>/<env>/logs` |
 
 **hook 脚本使用约定**：
 
@@ -312,21 +390,14 @@ PROJECT_ROOT="${PG_PROJECT_ROOT:-$PWD}"
 if [ -n "${PG_HOOK_LOG_DIR:-}" ]; then
     LOG_DIR="$PG_HOOK_LOG_DIR"
 else
-    # 老式手工调用兜底
+    # 老式手工调用兜底 (建议改走 pg-invoke-hook.py, 不再依赖此分支)
     LOG_DIR="$PROJECT_ROOT/scripts/logs"
 fi
 PID_DIR="$LOG_DIR"   # logs 与 pids 同目录
 mkdir -p "$LOG_DIR"
 ```
 
-**为什么不在 hook 里自算路径**：早期版本每个 role-start 脚本内部根据 `PG_CHANGE_NAME` + `PG_ENV_NAME` 自拼 `.pg/changes/<change>/2-build/<env>/logs`，结果：
-- `PG_ENV_NAME` 实际从未注入，落到 `unknown/`
-- 不同 skill（pg-build / pg-regression / pg-fix-issue）的日志散落在不同根目录，不便于 audit
-- 容易出现 `changes/.../unknown/logs/` 这种乱码路径
-
-`PG_HOOK_LOG_DIR` 把路径计算收敛到 Python 端的唯一函数 `pg_log_dir_for_skill()`，hook 脚本只读不写，避免漂移。
-
-#### pg-invoke-hook.py CLI
+#### 7.1.7 `pg-invoke-hook.py` CLI
 
 LLM **不**直接调 hook 脚本，也不解析 spec；通过 `pg-invoke-hook.py` 统一入口调度。
 
@@ -334,22 +405,30 @@ LLM **不**直接调 hook 脚本，也不解析 spec；通过 `pg-invoke-hook.py
 
 ```bash
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --change <C> --env <ENV> --role <ROLE> \
+  --session <S> --env <ENV> --role <ROLE> \
   --instance <INSTANCE> --action <ACTION> \
-  [--stage <STAGE>] [--tail-lines <N>]
+  [--stage <ST>] [--tail-lines <N>] \
+  [--skill pg-build|pg-regression|pg-fix-issue|ad-hoc] \
+  [--log-dir <DIR>] [--timeout-override <SECS>]
 ```
 
 | 标志 | 必填 | 说明 |
 |------|------|------|
-| `--change` | ✅ | 当前 change 名（用于 spec.change + log_path 路由） |
+| `--session` | ✅¹ | session 名（与 caller 正交）。caller=ad-hoc 时留空自动生成 `auto-<date>-<pid>` |
+| `--change` | ❌ | DEPRECATED alias of `--session`（1 版本兼容） |
 | `--env` | ✅ | 必须在 project.yaml `environments` 列表中 |
-| `--role` | ✅¹ | backend / frontend / agent。`start/stop/logs/tail` 必填；`prepare_env/clean_env` 忽略 |
-| `--instance` | ✅¹ | 必须在 `environments.<env>.roles.<role>.instances[]` 中 |
+| `--role` | ✅² | backend / frontend / agent。`start/stop/logs/tail` 必填；`prepare_env/clean_env` 忽略 |
+| `--instance` | ✅² | 必须在 `environments.<env>.roles.<role>.instances[]` 中 |
 | `--action` | ✅ | per-role: `start / stop / logs / tail`；env-level: `prepare_env / clean_env` |
 | `--stage` | ❌ | 默认 `manual`；用于 spec.stage 标记 |
 | `--tail-lines` | ❌ | 仅 `--action logs\|tail` 生效 |
+| `--skill` / `--caller` | ❌ | 调用方身份，**硬缺省 `ad-hoc`**。SKILL 调用必须显式标注 |
+| `--log-dir` | ❌ | 显式覆盖日志目录（agent 调试用，优先级最高） |
+| `--timeout-override` | ❌ | 覆盖 project.yaml 的 `timeout_seconds`（ad-hoc 调试用，输出 WARN） |
 
-¹ `--role` / `--instance` 对 env-level actions 是 no-op（CLI parser 不强制、runtime 也忽略）。
+¹ SKILL caller (pg-build / pg-regression / pg-fix-issue) **必须**显式传 `--session`；ad-hoc 留空 → 自动生成 `auto-<date>-<pid>`。
+
+² `--role` / `--instance` 对 env-level actions 是 no-op（CLI parser 不强制、runtime 也忽略）。
 
 ##### --tail-lines 语义
 
@@ -361,6 +440,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 - `--timeout` / `--host` / `--port` **不是 CLI flag**：
   - `timeout_seconds` 由 runner 从 project.yaml 的 `actions.<action>.timeout_seconds` 反查并写入 spec；`pg-run-hook.py` 通过 `subprocess.run(timeout=...)` 强制执行。
   - host / port 由 runner 从 `instances[]` 自动反查。
+- `--timeout-override <N>`：ad-hoc 调试时显式覆盖 `timeout_seconds`，runner 输出 WARN 提示覆盖值。
 
 ##### status subcommand（prepare_env 状态查询）
 
@@ -373,16 +453,19 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py status \
 
 | 标志 | 必填 | 说明 |
 |------|------|------|
-| `--change` | ✅ | 当前 change 名 |
+| `--change` | ✅ | 当前 change 名（status subcommand 暂未改 `--session`，仅作 runner 透传参数） |
 | `--stage` | ❌ | 可选 stage 名过滤 |
 
 典型用法：在 verify agent 中查询 prepare_env 是否已成功执行，避免硬编码 log_path。
 
 > 历史兼容：`pg-pipeline-runner.py prepare-env-status <C> [stage]` 仍可用，`pg-invoke-hook.py status` 是统一 runtime 入口。
 
-#### 历史旧路径
+#### 7.1.8 历史兼容与迁移
 
-`pg-pipeline-runner.py invoke-hook` 仍然可用（thin wrapper 转发到 `pg-invoke-hook.py`），但新代码统一走新路径。
+- `pg-pipeline-runner.py invoke-hook` 仍然可用（thin wrapper 转发到 `pg-invoke-hook.py`），但新代码统一走新路径。
+- `--change` 字段保留 1 版本作为 deprecated alias；SKILL / pg-run / agent 调用方应改为 `--session`。
+- `PG_SKILL_NAME` / `PG_CHANGE_NAME` env var 保留 1 版本作为 alias；hook 写新代码应改为 `PG_RUN_CALLER` / `PG_RUN_SESSION`。
+- 旧 `.pg/changes/manual/` 目录里的历史日志保留为只读归档，新调用**不再**追加。
 
 #### 错误 Category 枚举
 

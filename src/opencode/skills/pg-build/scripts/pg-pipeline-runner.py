@@ -13,8 +13,8 @@ Usage:
     Record sub-agent result, advance, return next action JSON.
 
   python3 pg-pipeline-runner.py invoke-hook \
-      --change <C> --env <ENV> --role <ROLE> --instance <I> --action <A> \
-      [--stage <S>] [--tail-lines <N>]
+      --session <S> --env <ENV> --role <ROLE> --instance <I> --action <A> \
+      [--stage <ST>] [--tail-lines <N>] [--skill <SKILL>]
     历史兼容入口 (thin wrapper, 转发到 .pg/skills/src/runtime/bin/pg-invoke-hook.py).
     新代码统一写新路径:
       python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook ...
@@ -822,7 +822,7 @@ _PROMPT_BLOCK_DEV = """\
 runner **不**预渲染 cmd 字典；LLM 通过 `runner invoke-hook` CLI 触发 hook，
 runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-hook.py。
 
-**必填参数**：`--change` `--env` `--role` `--instance` `--action`
+**必填参数**：`--session` `--env` `--role` `--instance` `--action`
 **可选参数**：`--stage` (默认 manual) `--tail-lines` (仅 logs/tail 生效)
 
 ```yaml
@@ -833,12 +833,12 @@ runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-ho
 ```bash
 # 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
+  --session {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
   --skill pg-build
 
 # 看 100 行日志 (runner 把 --tail-lines 100 追加到 hook args 末尾)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
+  --session {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
   --tail-lines 100 --skill pg-build
 ```
 
@@ -854,7 +854,7 @@ _PROMPT_BLOCK_VERIFY = """\
 runner **不**预渲染 cmd 字典；LLM 通过 `runner invoke-hook` CLI 触发 hook，
 runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-hook.py。
 
-**必填参数**：`--change` `--env` `--role` `--instance` `--action`
+**必填参数**：`--session` `--env` `--role` `--instance` `--action`
 **可选参数**：`--stage` (默认 manual) `--tail-lines` (仅 logs/tail 生效)
 
 ```yaml
@@ -865,12 +865,12 @@ runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-ho
 ```bash
 # 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
+  --session {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
   --skill pg-build
 
 # 看 100 行日志 (runner 把 --tail-lines 100 追加到 hook args 末尾)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
+  --session {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
   --tail-lines 100 --skill pg-build
 ```
 
@@ -908,7 +908,7 @@ _PROMPT_BLOCK_FIX = """\
 runner **不**预渲染 cmd 字典；LLM 通过 `runner invoke-hook` CLI 触发 hook，
 runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-hook.py。
 
-**必填参数**：`--change` `--env` `--role` `--instance` `--action`
+**必填参数**：`--session` `--env` `--role` `--instance` `--action`
 **可选参数**：`--stage` (默认 manual) `--tail-lines` (仅 logs/tail 生效)
 
 ```yaml
@@ -919,12 +919,12 @@ runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-ho
 ```bash
 # 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
+  --session {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
   --skill pg-build
 
 # 看 100 行日志
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
+  --session {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
   --tail-lines 100 --skill pg-build
 ```
 
@@ -974,7 +974,7 @@ _PROMPT_BLOCK_FIX_GATE = """\
 runner **不**预渲染 cmd 字典；LLM 通过 `runner invoke-hook` CLI 触发 hook，
 runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-hook.py。
 
-**必填参数**：`--change` `--env` `--role` `--instance` `--action`
+**必填参数**：`--session` `--env` `--role` `--instance` `--action`
 **可选参数**：`--stage` (默认 manual) `--tail-lines` (仅 logs/tail 生效)
 
 ```yaml
@@ -985,12 +985,12 @@ runner 内部从 project.yaml 反查 action 元数据、拼 spec、调 pg-run-ho
 ```bash
 # 启动 backend (runner 自动读 actions.backend.start.timeout_seconds=300)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
+  --session {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
   --skill pg-build
 
 # 看 100 行日志
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
+  --session {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
   --tail-lines 100 --skill pg-build
 ```
 
@@ -1087,12 +1087,12 @@ LLM 自行判断是否需要启动服务；runner 不替你启停。
 ```bash
 # 启动 backend (runner 自动从 action_metadata 读 timeout_seconds)
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
+  --session {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action start \\
   --skill pg-build
 
 # 看 100 行日志
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \\
-  --change {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
+  --session {{context._change}} --env {{context.stage.environment.name}} --role backend --instance backend-1 --action logs \\
   --tail-lines 100 --skill pg-build
 ```
 {/if}
@@ -1419,7 +1419,7 @@ def _build_stage_context(config, item, change=None):
         command_template = (
             "python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py "
             "invoke-hook "
-            "--change <CHANGE> --env <ENV> --role <ROLE> "
+            "--session <SESSION> --env <ENV> --role <ROLE> "
             "--instance <INSTANCE> --action <ACTION> "
             "[--stage <STAGE>] [--tail-lines <N>] [--skill <SKILL>]"
         )
@@ -1433,7 +1433,7 @@ def _build_stage_context(config, item, change=None):
             "invocation": {
                 "command_template": command_template,
                 "required_args": [
-                    "--change", "--env", "--role", "--instance", "--action",
+                    "--session", "--env", "--role", "--instance", "--action",
                 ],
                 "optional_args": ["--stage", "--tail-lines"],
                 "notes": [
@@ -3794,7 +3794,7 @@ def main():
         print("  python3 pg-pipeline-runner.py prepare-env-status <change> [stage_name]", file=sys.stderr)
         # 历史兼容: invoke-hook 仍作为 pg-pipeline-runner.py 子命令可用 (thin wrapper
         # 转发到 .pg/skills/src/runtime/bin/pg-invoke-hook.py). 新代码统一用新路径.
-        print("  python3 pg-pipeline-runner.py invoke-hook --change <C> --env <ENV> --role <ROLE> --instance <I> --action <A> [--stage <S>] [--tail-lines <N>]   (legacy, forwards to pg-invoke-hook.py)", file=sys.stderr)
+        print("  python3 pg-pipeline-runner.py invoke-hook --session <S> --env <ENV> --role <ROLE> --instance <I> --action <A> [--stage <ST>] [--tail-lines <N>]   (legacy, forwards to pg-invoke-hook.py)", file=sys.stderr)
         print("  python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook ...   (canonical)", file=sys.stderr)
         sys.exit(1)
 

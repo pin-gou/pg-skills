@@ -10,15 +10,19 @@
 #   environments.<env>.roles.<r>.actions.{start, restart}.script
 #
 # 由 pg-run-hook.py 调起, 注入的 env vars (见 .pg/skills/src/runtime/lib/pg-run-hook.py):
+#   PG_RUN_CALLER       调用方身份 (pg-build / pg-regression / pg-fix-issue / ad-hoc)
+#   PG_RUN_SESSION      session 名 (与 caller 正交, e.g. 提案名 / auto-<date>-<pid>)
 #   PG_ROLE             当前 role 名
 #   PG_INSTANCE_NAME    instance 名
 #   PG_INSTANCE_HOST    instance host
 #   PG_HOOK_TYPE        hook 类型 (start / stop / restart / logs / tail ...)
-#   PG_CHANGE_NAME      当前 change 名 (可选)
+#   PG_CHANGE_NAME      DEPRECATED alias of PG_RUN_SESSION (1 版本兼容)
+#   PG_SKILL_NAME       DEPRECATED alias of PG_RUN_CALLER (1 版本兼容)
 #   PG_STAGE            当前 stage 名
 #   PG_ENV              当前 environment 名
 #   PG_LOG_FILE         标准输出 / 错误重定向目标
 #   PG_RESULT_FILE      hook 退出前写 result.json 的路径
+#   PG_HOOK_LOG_DIR     pg-invoke-hook.py 预拼的日志绝对目录 (lib/common.sh:pg_resolve_paths 优先信任)
 #   PG_SKILLS_PATH      pg-skills 仓库根
 #
 # 注意: 不要在本 hook 里 cd "$PG_MODULE_ROOT" —— module 维度的命令不进 hook,
@@ -36,7 +40,7 @@ trap 'pg_fail_on_error $? $LINENO' ERR
 
 # === 路径派生 (per-skill 路由, 由 pg_resolve_paths 决定) ===
 # 若 .pg/hooks/lib/common.sh 存在, 调 pg_resolve_paths 把 LOG_DIR/PID_DIR
-# 按 PG_SKILL_NAME 路由到 .pg/changes/ / .pg/regression/ / .pg/fix-issue/
+# 按 PG_RUN_CALLER 路由到 .pg/changes/ / .pg/regression/ / .pg/fix-issue/ / .pg/ad-hoc/
 # 若 lib/ 缺失 (eg. 手工复制本模板但没带 lib/), 跳过派生, 输出走 $PG_LOG_FILE
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$HOOK_DIR/lib/common.sh" ]]; then

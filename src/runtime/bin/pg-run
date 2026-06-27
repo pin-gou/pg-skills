@@ -358,7 +358,6 @@ def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
             if hook.is_file():
                 cmd = (
                     f"python3 {shlex.quote(str(hook))} invoke-hook"
-                    f" --change manual"
                     f" --env {shlex.quote(env_name)}"
                     f" --role {shlex.quote(role_name)}"
                     f" --instance {shlex.quote(inst['name'])}"
@@ -404,7 +403,6 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path):
             if hook.is_file():
                 cmd = (
                     f"python3 {shlex.quote(str(hook))} invoke-hook"
-                    f" --change manual"
                     f" --env {shlex.quote(env_name)}"
                     f" --role {shlex.quote(role_name)}"
                     f" --instance {shlex.quote(inst['name'])}"
@@ -483,7 +481,6 @@ def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
                 if hook.is_file():
                     cmd = (
                         f"python3 {shlex.quote(str(hook))} invoke-hook"
-                        f" --change manual"
                         f" --env {shlex.quote(env_name)}"
                         f" --action prepare_env"
                     )
@@ -510,7 +507,6 @@ def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
         if hook.is_file():
             cmd = (
                 f"python3 {shlex.quote(str(hook))} invoke-hook"
-                f" --change manual"
                 f" --env {shlex.quote(env_name)}"
                 f" --action {shlex.quote(action_name)}"
             )
@@ -608,7 +604,6 @@ def _role_action_flow(env_name: str, role_name: str, inst: dict, role_cfg: dict,
             inst_host = inst.get("host", "")
             cmd = (
                 f"python3 {shlex.quote(str(hook))} invoke-hook"
-                f" --change manual"
                 f" --env {shlex.quote(env_name)}"
                 f" --role {shlex.quote(role_name)}"
                 f" --instance {shlex.quote(inst['name'])}"
@@ -692,7 +687,6 @@ def _main_menu_prepare_and_start(config: dict, project_root: Path):
     if hook.is_file():
         cmd = (
             f"python3 {shlex.quote(str(hook))} invoke-hook"
-            f" --change manual"
             f" --env {shlex.quote(env_name)}"
             f" --action prepare_env"
         )
@@ -805,7 +799,6 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
         hook = find_invoke_hook(project_root)
         cmd = (
             f"python3 {shlex.quote(str(hook))} invoke-hook"
-            f" --change manual"
             f" --env {shlex.quote(args.env)}"
             f" --action {shlex.quote(args.action)}"
         )
@@ -837,7 +830,6 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
         if hook.is_file():
             cmd = (
                 f"python3 {shlex.quote(str(hook))} invoke-hook"
-                f" --change manual"
                 f" --env {shlex.quote(args.env)}"
                 f" --action prepare_env"
             )
@@ -860,7 +852,6 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
         hook = find_invoke_hook(project_root)
         cmd = (
             f"python3 {shlex.quote(str(hook))} invoke-hook"
-            f" --change manual"
             f" --env {shlex.quote(args.env)}"
             f" --role {shlex.quote(args.role)}"
             f" --instance {shlex.quote(args.instance)}"
