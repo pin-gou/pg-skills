@@ -153,10 +153,8 @@ def build_env_level_hook_spec(
     if rendered_args:
         inner_cmd += " " + " ".join(shlex.quote(a) for a in rendered_args)
 
-    log_path = str(
-        pg_log_dir_for_skill(skill, change, env, project_root)
-        / f"env.{action}.log"
-    )
+    hook_log_dir = pg_log_dir_for_skill(skill, change, env, project_root)
+    log_path = str(hook_log_dir / f"env.{action}.log")
 
     spec = {
         "cmd": inner_cmd,
@@ -169,6 +167,7 @@ def build_env_level_hook_spec(
         "hook_type": action,
         "timeout_seconds": act_cfg.get("timeout_seconds"),
         "log_path": log_path,
+        "hook_log_dir": str(hook_log_dir),
     }
     if skill:
         spec["skill"] = skill
@@ -205,10 +204,8 @@ def build_role_hook_spec(
     if rendered_args:
         inner_cmd += " " + " ".join(shlex.quote(a) for a in rendered_args)
 
-    log_path = str(
-        pg_log_dir_for_skill(skill, change, env, project_root)
-        / f"role.{role}.{action}@{instance}.log"
-    )
+    hook_log_dir = pg_log_dir_for_skill(skill, change, env, project_root)
+    log_path = str(hook_log_dir / f"role.{role}.{action}@{instance}.log")
 
     spec = {
         "cmd": inner_cmd,
@@ -221,6 +218,7 @@ def build_role_hook_spec(
         "hook_type": action,
         "timeout_seconds": act_cfg.get("timeout_seconds"),
         "log_path": log_path,
+        "hook_log_dir": str(hook_log_dir),
     }
     if skill:
         spec["skill"] = skill

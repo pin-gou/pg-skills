@@ -289,8 +289,42 @@ fi
 | `PG_INSTANCE_NAME` | instance 名 | role action 时 |
 | `PG_INSTANCE_HOST` | instance host | role action 时 |
 | `PG_SKILL_NAME` | 调用方 skill 名（pg-build/pg-regression/pg-fix-issue） | 全部 |
+| `PG_HOOK_LOG_DIR` | **服务内部 stdout/PID 的目标目录（预拼绝对路径，hook 脚本直接信任，不再算路径）** | 全部 |
 
 > ~~`PG_MODULE` / `PG_MODULE_ROOT`~~ 已不再注入——module 维度不经过 hook 协议。
+
+#### `PG_HOOK_LOG_DIR` 的来源与用法
+
+`PG_HOOK_LOG_DIR` 由 `pg-invoke-hook.py` 在 spec 阶段通过 `pg_log_dir_for_skill(skill, change, env, project_root)` 计算，作为 spec 字段 `hook_log_dir` 注入到 `pg-run-hook.py`，再由 `pg-run-hook.py` 写入 ENV。
+
+**预计算逻辑**（与 `pg_log_dir_for_skill()` Python 实现保持一致）：
+
+| skill | change 形式 | `PG_HOOK_LOG_DIR` |
+|-------|-------------|-------------------|
+| `pg-regression` | `regression-<suite>-<date>-<seq>` | `<root>/.pg/regression/<suite>/<env>/logs` |
+| `pg-fix-issue` | `<change>` | `<root>/.pg/fix-issue/<change>/<env>/logs` |
+| 其他 / 兜底 | `<change>` | `<root>/.pg/changes/<change>/2-build/<env>/logs` |
+
+**hook 脚本使用约定**：
+
+```bash
+PROJECT_ROOT="${PG_PROJECT_ROOT:-$PWD}"
+if [ -n "${PG_HOOK_LOG_DIR:-}" ]; then
+    LOG_DIR="$PG_HOOK_LOG_DIR"
+else
+    # 老式手工调用兜底
+    LOG_DIR="$PROJECT_ROOT/scripts/logs"
+fi
+PID_DIR="$LOG_DIR"   # logs 与 pids 同目录
+mkdir -p "$LOG_DIR"
+```
+
+**为什么不在 hook 里自算路径**：早期版本每个 role-start 脚本内部根据 `PG_CHANGE_NAME` + `PG_ENV_NAME` 自拼 `.pg/changes/<change>/2-build/<env>/logs`，结果：
+- `PG_ENV_NAME` 实际从未注入，落到 `unknown/`
+- 不同 skill（pg-build / pg-regression / pg-fix-issue）的日志散落在不同根目录，不便于 audit
+- 容易出现 `changes/.../unknown/logs/` 这种乱码路径
+
+`PG_HOOK_LOG_DIR` 把路径计算收敛到 Python 端的唯一函数 `pg_log_dir_for_skill()`，hook 脚本只读不写，避免漂移。
 
 #### pg-invoke-hook.py CLI
 

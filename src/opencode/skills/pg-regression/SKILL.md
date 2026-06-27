@@ -382,6 +382,8 @@ pg-regression/fix-test，请诊断并修复以下测试失败：
 请对每个问题调用 pg-systematic-diagnosing 进行根因分析，然后统一决定修复策略。并将你最终的处理结果汇报给我。
 ```
 
+> 📌 **派发后必做**：把上面构造的完整提示词先落盘到 `/tmp/fix-test-prompt-${IDX}.md`，agent 返回后把完整回复落盘到 `/tmp/fix-test-response-${IDX}.md`，再调 `pg-record-fix-test.sh`（详见 §2.3a）。**留痕是强制步骤**，不可跳过。
+
 #### 2.2 调度策略
 
 **concurrency 推导规则**（由 `suite.module` 决定）：
@@ -408,53 +410,55 @@ pg-regression/fix-test，请诊断并修复以下测试失败：
 
 #### 2.3a 留痕 fix-test 执行记录
 
-每个 `pg-regression/fix-test` agent 返回后、调度下一个 agent 前，将以下内容写入 `${RUN_DIR}/fix-test/<idx>-<target-slug>/`：
+> ⚠️ **强制留痕约束** — 每个 `pg-regression/fix-test` agent 返回后、调度下一个 agent 前，**必须**调用 `pg-record-fix-test.sh` 把 prompt / response 落到 `${RUN_DIR}/fix-test/<idx>-<target-slug>/`。**不可跳过**——无留痕的 agent 调用视为审计缺失。
 
-- `1-prompt.md` — 编排器构造并发送给 agent 的完整提示词
-- `2-response.md` — agent 的完整回复（诊断 + 修复说明）
-- `3-result.json` — 从回复中解析出的结构化结果（与 `fix-results.json` 中该 agent 记录一致）
-
-`<idx>` 使用全局递增序号（与 `fix-issues/` 共享同一序号空间），`<target-slug>` 由 `<target>` 转换（保留字母数字，转换为 kebab-case）。
-
-**写入方式**：用 Python 脚本逐字段写入，避免多行/特殊字符在 heredoc 中转义困难。编排器收到 agent 响应后立即执行：
+每个 agent 返回后立即调用 helper：
 
 ```bash
-python3 <<TRACE_EOF
-import json, os, re
+PROMPT_FILE="/tmp/fix-test-prompt-${IDX}.md"
+RESPONSE_FILE="/tmp/fix-test-response-${IDX}.md"
 
-idx = "<全局序号>"
-target = "<target>"
-run_dir = "<RUN_DIR>"
+# 1. 把即将发送给 agent 的完整提示词写到临时文件
+cat > "$PROMPT_FILE" <<'__PROMPT_EOF__'
+<phase 2.1 构造的完整提示词，含 target / runSingleCommand / testOutputFile / issueList>
+__PROMPT_EOF__
 
-slug = re.sub(r"[^a-z0-9-]+", "-", target.lower()).strip("-")[:40] or "unknown"
-base = os.path.join(run_dir, "fix-test", f"{idx}-{slug}")
-os.makedirs(base, exist_ok=True)
+# 2. 派发 agent (Task tool), 等返回
 
-# 提示词 — 编排器将实际发送的 prompt 嵌入到 PROMPT_TEXT
-PROMPT_TEXT = """<phase 2.1 构造的完整提示词>"""
-# 响应 — agent 完整回复文本
-RESPONSE_TEXT = """<agent 返回的完整文本>"""
-# 结构化结果 — 与 fix-results.json 中该 agent 记录保持一致
-RESULT = {
-    "target": "<target>",
-    "summary": {"total": ..., "passed": ..., "failed": ..., "fixed": ..., "cantFix": ...},
-    "fixes": [...],
-    "cantFixIssues": [...],
-    "modifiedFiles": [...],
-}
+# 3. 把 agent 的完整回复写到临时文件
+cat > "$RESPONSE_FILE" <<'__RESPONSE_EOF__'
+<agent 返回的完整文本，含诊断报告 + 修复说明>
+__RESPONSE_EOF__
 
-with open(os.path.join(base, "1-prompt.md"), "w", encoding="utf-8") as f:
-    f.write(PROMPT_TEXT)
-with open(os.path.join(base, "2-response.md"), "w", encoding="utf-8") as f:
-    f.write(RESPONSE_TEXT)
-with open(os.path.join(base, "3-result.json"), "w", encoding="utf-8") as f:
-    json.dump(RESULT, f, ensure_ascii=False, indent=2)
-
-print(f"✅ 留痕: {base}")
-TRACE_EOF
+# 4. 调用 helper 留痕 (Phase 2.3a 必须步骤)
+bash .opencode/skills/pg-regression/scripts/pg-record-fix-test.sh \
+  --run-dir "$RUN_DIR" \
+  --idx "$IDX" \
+  --target "$TARGET" \
+  --prompt-file "$PROMPT_FILE" \
+  --response-file "$RESPONSE_FILE" \
+  [--result-json '{"summary":{"fixed":N,"cantFix":N},"fixes":[],"cantFixIssues":[],"modifiedFiles":[]}']
 ```
 
-> **说明**：上述模板中 `<...>` 占位符在编排器实际执行时被替换为真实值。Python 脚本内的三引号字符串能安全承载含换行、引号、JSON 片段的多行文本。
+**留痕目录结构**：
+
+```
+${RUN_DIR}/fix-test/${IDX}-${slug}/
+├── 1-prompt.md          # 编排器构造的完整提示词
+├── 2-response.md        # agent 完整回复
+└── 3-result.json        # 可选, 结构化结果 (与 fix-results.json 对齐)
+```
+
+- `<idx>` 使用全局递增序号（与 `fix-issues/` 共享同一序号空间），从 1 开始
+- `<slug>` 由 helper 自动生成：`<target>` 转 kebab-case、限长 40、字母数字 + 连字符
+- helper **幂等**：已存在的 1-prompt.md / 2-response.md 不会覆盖（防止 agent 重复 dispatch 冲掉审计）
+- `--result-json` 缺失时仅落 prompt + response
+
+**为什么使用 helper 而不是内联 Python 脚本**：
+- prompt / response 通常含多行 JSON 片段、嵌套引号、特殊字符，heredoc + Python 三引号在大体积下易转义失败
+- helper 走 `--prompt-file` / `--response-file` 文件路径，避免大字符串内嵌
+- helper 内置参数校验（idx 正整数、文件存在、target-slug 长度限制）
+- 复用 `pg-fix-regression-runner.py` 的 audit 目录布局（`fix-issues/`），便于人/工具对照
 
 ---
 

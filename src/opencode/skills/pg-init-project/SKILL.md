@@ -54,14 +54,25 @@ metadata:
 
 **Hook 协议边界（schema/runtime SSOT）**：hook 只服务于 **environments 维度**，不服务于 modules 维度。具体：
 
-- **走 hook 协议**（生成 `.pg/hooks/<name>.sh`）：`environments.<env>.{prepare_env, clean_env}`、`environments.<env>.roles.<r>.{start, stop, restart, logs, tail, ...}`。runner 通过 `pg-run-hook.py` 调用，注入 `PG_*` env vars（`PG_ROLE` / `PG_INSTANCE_NAME` / `PG_INSTANCE_HOST` / `PG_HOOK_TYPE` / `PG_LOG_FILE` / `PG_SKILL_NAME` ...）。
+- **走 hook 协议**（生成 `.pg/hooks/<name>.sh`）：`environments.<env>.{prepare_env, clean_env}`、`environments.<env>.roles.<r>.{start, stop, restart, logs, tail, ...}`。runner 通过 `pg-run-hook.py` 调用，注入 `PG_*` env vars（`PG_ROLE` / `PG_INSTANCE_NAME` / `PG_INSTANCE_HOST` / `PG_HOOK_TYPE` / `PG_LOG_FILE` / `PG_SKILL_NAME` / `PG_HOOK_LOG_DIR` / `PG_RESULT_FILE` ...）。
 - **不走 hook 协议**（直接写在 `project.yaml` 里）：`modules.<m>.{build, lint, test.<key>}` 字段。这些字段是 `executable_command` 形态（`string` 或 `{cmd, timeout_seconds}`），runner 渲染为 `timeout N bash -c '<cmd>'` 直接执行，**不**经过 `.pg/hooks/<m>-<action>.sh`。原因：单测/单条命令经常需要 ad-hoc 跑（`mvn -Dtest=FooTest`、`pnpm test:e2e --grep "..."`），把每条命令固化成 hook 反而牺牲 agent 灵活性。
 
 因此 `pg-init-project` 的 Phase 3 只为 **environments 节点**生成 hook 脚本。`examples/<language>/hooks/module-<action>.sh` 是 **历史示例模板**，**不再复制到项目里**（项目模块命令直接写在 `project.yaml` 里）。
 
 如果仓库里残留了 `<module>-{build,test,lint}.sh` 之类的旧 hook，提示用户删除（`rm .pg/hooks/<m>-*.sh`）；`pg doctor` 不会把它们当 schema 错误，但它们是死代码。
 
-**SSOT 公共库**：除模板外，pg-init-project 还要把 `.pg/skills/examples/shell/hooks/lib/common.sh` 复制到项目的 `.pg/hooks/lib/common.sh`。该文件是 hook 协议 SSOT，包含 `pg_resolve_paths`（按 `PG_SKILL_NAME` 把 LOG_DIR/PID_DIR 路由到 `.pg/changes/<C>/2-build/<env>/logs` / `.pg/regression/<suite>/<env>/logs` / `.pg/fix-issue/<change>/<env>/logs`）。无此文件时，模板 fallback 到 caller 控制的 `$PG_LOG_FILE`（所有 skill 共用一条日志，pg-regression / pg-fix-issue 不再走隔离目录）。
+**SSOT 公共库**：除模板外，pg-init-project 还要把 `.pg/skills/examples/shell/hooks/lib/common.sh` 复制到项目的 `.pg/hooks/lib/common.sh`。该文件是 hook 协议 SSOT，包含 `pg_resolve_paths`：
+
+- **优先**：直接信任 `PG_HOOK_LOG_DIR`（由 `pg-invoke-hook.py` 在 spec 阶段预拼的绝对路径）
+- **Fallback**：按 `PG_SKILL_NAME` + `PG_CHANGE_NAME` + `PG_ENV` 自拼（兼容老式手工调用 / 未走 `pg-invoke-hook.py`）
+  - `pg-build` → `.pg/changes/<C>/2-build/<env>/logs|pids`
+  - `pg-regression` → `.pg/regression/<suite>/<env>/logs|pids`（从 `regression-<suite>` 截 suite）
+  - `pg-fix-issue` → `.pg/fix-issue/<change>/<env>/logs|pids`
+  - 兜底 → `scripts/logs|pids`
+
+无此文件时，模板 fallback 到 caller 控制的 `$PG_LOG_FILE`（所有 skill 共用一条日志，pg-regression / pg-fix-issue 不再走隔离目录）。
+
+`pg_resolve_paths` 的 fallback 路由表必须与 `.pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill` 三处保持同步（SSOT）。改动前先核对两侧。
 
 **environments 维度的 hook 生成规则**：
 
@@ -150,9 +161,9 @@ metadata:
 2.5. 复制 SSOT 公共库（与模板同源）：
    - 源：`.pg/skills/examples/shell/hooks/lib/common.sh`
    - 目标：`.pg/hooks/lib/common.sh`
-   - 作用：模板头部条件 `source lib/common.sh` + `pg_resolve_paths` 才能找到目标
+   - 作用：模板头部条件 `source lib/common.sh` + `pg_resolve_paths` 才能找到目标；`pg_resolve_paths` 优先信任 `PG_HOOK_LOG_DIR`（由 `pg-invoke-hook.py` 预拼），fallback 时按 `PG_SKILL_NAME + PG_CHANGE_NAME + PG_ENV` 自拼（兼容老式手工调用）
    - 跳过此步：生成的 hook 仍能工作（走 `$PG_LOG_FILE`），但 pg-regression / pg-fix-issue 日志会回落到 `scripts/logs`，不写到预期的 `.pg/regression/` / `.pg/fix-issue/` 目录
-3. 模板来源：从 `.pg/skills/examples/shell/hooks/role-<action>.sh` 复制并替换 `CMD_PLACEHOLDER`；env 级模板从 `env-prepare.sh` / `env-clean.sh` 复制。模板依赖 `pg-run-hook.py` 注入的 `PG_ROLE` / `PG_INSTANCE_NAME` / `PG_INSTANCE_HOST` / `PG_HOOK_TYPE` / `PG_LOG_FILE` / `PG_SKILL_NAME` / `PG_RESULT_FILE` 等 env vars，**不**依赖 `PG_MODULE_ROOT`（module 维度不进 hook 协议）。
+3. 模板来源：从 `.pg/skills/examples/shell/hooks/role-<action>.sh` 复制并替换 `CMD_PLACEHOLDER`；env 级模板从 `env-prepare.sh` / `env-clean.sh` 复制。模板依赖 `pg-run-hook.py` 注入的 `PG_ROLE` / `PG_INSTANCE_NAME` / `PG_INSTANCE_HOST` / `PG_HOOK_TYPE` / `PG_LOG_FILE` / `PG_SKILL_NAME` / `PG_HOOK_LOG_DIR` / `PG_RESULT_FILE` 等 env vars，**不**依赖 `PG_MODULE_ROOT`（module 维度不进 hook 协议）。
 4. chmod 755。
 5. **不**改 trap / `pg_fail` / `pg_exit` 调用——hook 协议是 SSOT。
 

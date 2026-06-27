@@ -11,9 +11,10 @@
 #   - 本文件是 hook 协议的一部分, 不要改 PG_* env var 名
 #   - pg_resolve_paths 的路由表 (.pg/changes / .pg/regression / .pg/fix-issue)
 #     与 .pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill
-#     与 .pg/skills/src/opencode/skills/pg-build/scripts/pg-pipeline-runner.py:_pg_log_dir_for_skill
 #     三处必须保持同步
-#   - 改动本文件前先看上述三处是否需要同步更新
+#   - 改动本文件前先看上述两处是否需要同步更新
+#   - **优先信任 PG_HOOK_LOG_DIR** (由 pg-invoke-hook.py 预拼的绝对路径); 自拼逻辑作为
+#     老式手工调用 (不走 pg-invoke-hook.py) 的兜底
 #
 # 调用方:
 #   - 模板 hook (role-start.sh / role-stop.sh / role-logs.sh / env-prepare.sh / env-clean.sh)
@@ -25,46 +26,57 @@ BACKEND_PORT=9080
 FRONTEND_PORT=3008
 AGENT_PORT=9082
 
-# === 路径解析：根据 PG_SKILL_NAME 自动选择 LOG_DIR/PID_DIR ===
+# === 路径解析：优先使用 PG_HOOK_LOG_DIR，fallback 自拼 ===
 #
-# 路由规则（与 .pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill 同步）：
-#   pg-build       -> .pg/changes/<change>/2-build/<env>/logs|pids
-#   pg-regression  -> .pg/regression/<suite>/<env>/logs|pids   (从 regression-<suite> 截 suite)
-#   pg-fix-issue   -> .pg/fix-issue/<change>/<env>/logs|pids   (change = fix-<date>-<slug>)
-#   兜底 / unknown -> scripts/logs|pids (兼容手工调用)
+# 优先：直接信任 pg-invoke-hook.py 预拼的 PG_HOOK_LOG_DIR（权威路径）
+# Fallback（老式手工调用 / 未走 pg-invoke-hook.py）：
+#   路由规则（与 .pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill 同步）：
+#     pg-build       -> .pg/changes/<change>/2-build/<env>/logs|pids
+#     pg-regression  -> .pg/regression/<suite>/<env>/logs|pids   (从 regression-<suite> 截 suite)
+#     pg-fix-issue   -> .pg/fix-issue/<change>/<env>/logs|pids   (change = fix-<date>-<slug>)
+#     兜底 / unknown -> scripts/logs|pids (兼容手工调用)
 #
-# 调用方必须在 source 此文件前 export PG_SKILL_NAME (由 pg-run-hook.py 从 spec.skill 注入)
-# 以及 PG_CHANGE_NAME / PG_ENV (兼容 PG_ENV_NAME)。
+# 调用方必须在 source 此文件前 export:
+#   - PG_HOOK_LOG_DIR  (由 pg-run-hook.py 从 spec.hook_log_dir 注入, 推荐)
+#   - PG_SKILL_NAME / PG_CHANGE_NAME / PG_ENV (兼容老式调用)
 pg_resolve_paths() {
     local project_root="${PG_PROJECT_ROOT:-$PWD}"
-    local skill="${PG_SKILL_NAME:-}"
-    local change="${PG_CHANGE_NAME:-}"
-    local env="${PG_ENV:-${PG_ENV_NAME:-unknown}}"
 
-    case "$skill" in
-        pg-build)
-            LOG_DIR="$project_root/.pg/changes/${change}/2-build/${env}/logs"
-            PID_DIR="$project_root/.pg/changes/${change}/2-build/${env}/pids"
-            ;;
-        pg-regression)
-            local suite="${change#regression-}"
-            LOG_DIR="$project_root/.pg/regression/${suite}/${env}/logs"
-            PID_DIR="$project_root/.pg/regression/${suite}/${env}/pids"
-            ;;
-        pg-fix-issue)
-            LOG_DIR="$project_root/.pg/fix-issue/${change}/${env}/logs"
-            PID_DIR="$project_root/.pg/fix-issue/${change}/${env}/pids"
-            ;;
-        "")
-            LOG_DIR="$project_root/scripts/logs"
-            PID_DIR="$project_root/scripts/pids"
-            ;;
-        *)
-            echo_color "33" "WARN: unknown PG_SKILL_NAME='$skill', falling back to scripts/logs" >&2
-            LOG_DIR="$project_root/scripts/logs"
-            PID_DIR="$project_root/scripts/pids"
-            ;;
-    esac
+    # === 优先路径：信任 PG_HOOK_LOG_DIR ===
+    if [[ -n "${PG_HOOK_LOG_DIR:-}" ]]; then
+        LOG_DIR="$PG_HOOK_LOG_DIR"
+        PID_DIR="$LOG_DIR"   # logs 与 pids 同目录 (PG_HOOK_LOG_DIR 指向 logs/)
+    else
+        # === 兜底路径：自拼 (老式手工调用 / 未走 pg-invoke-hook.py) ===
+        local skill="${PG_SKILL_NAME:-}"
+        local change="${PG_CHANGE_NAME:-}"
+        local env="${PG_ENV:-unknown}"
+
+        case "$skill" in
+            pg-build)
+                LOG_DIR="$project_root/.pg/changes/${change}/2-build/${env}/logs"
+                PID_DIR="$project_root/.pg/changes/${change}/2-build/${env}/pids"
+                ;;
+            pg-regression)
+                local suite="${change#regression-}"
+                LOG_DIR="$project_root/.pg/regression/${suite}/${env}/logs"
+                PID_DIR="$project_root/.pg/regression/${suite}/${env}/pids"
+                ;;
+            pg-fix-issue)
+                LOG_DIR="$project_root/.pg/fix-issue/${change}/${env}/logs"
+                PID_DIR="$project_root/.pg/fix-issue/${change}/${env}/pids"
+                ;;
+            "")
+                LOG_DIR="$project_root/scripts/logs"
+                PID_DIR="$project_root/scripts/pids"
+                ;;
+            *)
+                echo_color "33" "WARN: unknown PG_SKILL_NAME='$skill', falling back to scripts/logs" >&2
+                LOG_DIR="$project_root/scripts/logs"
+                PID_DIR="$project_root/scripts/pids"
+                ;;
+        esac
+    fi
 
     mkdir -p "$LOG_DIR" "$PID_DIR"
     BACKEND_LOG="$LOG_DIR/backend.log"

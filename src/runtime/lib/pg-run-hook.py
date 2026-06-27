@@ -86,6 +86,7 @@ _PG_ENV_MAP = {
     "instance_host": "PG_INSTANCE_HOST",
     "hook_type": "PG_HOOK_TYPE",
     "skill": "PG_SKILL_NAME",
+    "hook_log_dir": "PG_HOOK_LOG_DIR",
 }
 
 
