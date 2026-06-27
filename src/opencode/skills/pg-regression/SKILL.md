@@ -85,6 +85,11 @@ regression:
 │       ├── 1-prompt.md          # 发给 fix-prod agent 的提示词
 │       ├── 2-agent.log          # opencode run 的 stdout + stderr
 │       └── 3-result.json        # 修复结果（含 PR 链接）
+├── fix-test/                                      # Phase 2 fix-test 留痕（prompt + response + result）
+│   └── <idx>-<target-slug>/
+│       ├── 1-prompt.md          # 发给 fix-test agent 的提示词
+│       ├── 2-response.md        # fix-test agent 的完整回复
+│       └── 3-result.json        # 结构化结果
 ├── fix-issue-runner-summary.md                    # 人类可读汇总报告
 └── report.md                                      # 单次运行的人类可读汇总报告
 ```
@@ -401,6 +406,56 @@ pg-regression/fix-test，请诊断并修复以下测试失败：
 - 修复执行结果（fixed/skipped/reported）
 - 需要上报生产代码问题的清单
 
+#### 2.3a 留痕 fix-test 执行记录
+
+每个 `pg-regression/fix-test` agent 返回后、调度下一个 agent 前，将以下内容写入 `${RUN_DIR}/fix-test/<idx>-<target-slug>/`：
+
+- `1-prompt.md` — 编排器构造并发送给 agent 的完整提示词
+- `2-response.md` — agent 的完整回复（诊断 + 修复说明）
+- `3-result.json` — 从回复中解析出的结构化结果（与 `fix-results.json` 中该 agent 记录一致）
+
+`<idx>` 使用全局递增序号（与 `fix-issues/` 共享同一序号空间），`<target-slug>` 由 `<target>` 转换（保留字母数字，转换为 kebab-case）。
+
+**写入方式**：用 Python 脚本逐字段写入，避免多行/特殊字符在 heredoc 中转义困难。编排器收到 agent 响应后立即执行：
+
+```bash
+python3 <<TRACE_EOF
+import json, os, re
+
+idx = "<全局序号>"
+target = "<target>"
+run_dir = "<RUN_DIR>"
+
+slug = re.sub(r"[^a-z0-9-]+", "-", target.lower()).strip("-")[:40] or "unknown"
+base = os.path.join(run_dir, "fix-test", f"{idx}-{slug}")
+os.makedirs(base, exist_ok=True)
+
+# 提示词 — 编排器将实际发送的 prompt 嵌入到 PROMPT_TEXT
+PROMPT_TEXT = """<phase 2.1 构造的完整提示词>"""
+# 响应 — agent 完整回复文本
+RESPONSE_TEXT = """<agent 返回的完整文本>"""
+# 结构化结果 — 与 fix-results.json 中该 agent 记录保持一致
+RESULT = {
+    "target": "<target>",
+    "summary": {"total": ..., "passed": ..., "failed": ..., "fixed": ..., "cantFix": ...},
+    "fixes": [...],
+    "cantFixIssues": [...],
+    "modifiedFiles": [...],
+}
+
+with open(os.path.join(base, "1-prompt.md"), "w", encoding="utf-8") as f:
+    f.write(PROMPT_TEXT)
+with open(os.path.join(base, "2-response.md"), "w", encoding="utf-8") as f:
+    f.write(RESPONSE_TEXT)
+with open(os.path.join(base, "3-result.json"), "w", encoding="utf-8") as f:
+    json.dump(RESULT, f, ensure_ascii=False, indent=2)
+
+print(f"✅ 留痕: {base}")
+TRACE_EOF
+```
+
+> **说明**：上述模板中 `<...>` 占位符在编排器实际执行时被替换为真实值。Python 脚本内的三引号字符串能安全承载含换行、引号、JSON 片段的多行文本。
+
 ---
 
 ### Phase 3: 导出 JSON 问题清单 + 汇总报告
@@ -581,6 +636,7 @@ REPORT_EOF
 ✅ 问题清单已写入 .pg/regression/<suite>.json
 📋 汇总报告: ${RUN_DIR}/fix-issue-runner-summary.md
 📋 详细报告: ${RUN_DIR}/report.md
+📋 修复留痕: ${RUN_DIR}/fix-test/
 📁 Run 目录: ${RUN_DIR}
 ```
 
