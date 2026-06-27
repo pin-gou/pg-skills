@@ -55,7 +55,7 @@ metadata:
 
 | 字段 | 归属 | 为什么忽略 |
 |------|------|----------|
-| `apply_change_rules` | pg-build | pg-fix-issue 不派 dev/verify agent，无需 prompt 注入 |
+| `build_rules` | pg-build | pg-fix-issue 不派 dev/verify agent，无需 prompt 注入 |
 | `pipeline.order` | 已废弃 | v3.0 不再用 |
 | `verifyMerge` | pg-verify-and-merge | 与单 bug 修复无关 |
 | `flyway` | pg-verify-and-merge | pg-fix-issue 不动 schema |

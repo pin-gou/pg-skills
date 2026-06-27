@@ -16,8 +16,14 @@
   | `verifyMerge.skipTestsIfNoConflict` | `verify_merge.skip_tests_if_no_conflict` |
   | `flyway.migration-path` | `flyway.migration_path` |
   | `git.default-branch` | `git.default_branch` |
+  | `apply_change_rules` | `build_rules` |
 - **破坏性**：JSON Schema (`project.schema.json`) 同步更新为新字段名，YAML 不再接受旧名
-- **破坏性**：`pg-parse-config.py` 输出 JSON 段同步重命名（`verify_merge` / `flyway.migration_path` / `git.default_branch`）
+- **破坏性**：`pg-parse-config.py` 输出 JSON 段同步重命名（`verify_merge` / `flyway.migration_path` / `git.default_branch` / `build_rules`）
+- **破坏性**：`apply_change_rules` → `build_rules` 重命名（语义更准确：所有规则均注入 `pg-build/dev` 与 `pg-build/verify` prompt）。影响面：
+  - `pg-parse-config.py` 的 `WORKFLOW_KEYS["pg-build"]` 列表项
+  - `pg-pipeline-runner.py` 的 `config.get("build_rules")`、`_enrich_context_with_prompt_injection` 读取与 `_merge_prompt_injection` 拼接逻辑（行为不变）
+  - 测试套件 `test_pg_parse_config_rules.py` / `test_prompt_injection.py` 中的 SAMPLE_CONFIG、断言与方法名同步更新
+  - 文档：`pg-build/SKILL.md`、`pg-propose/references/config-fields.md`、`pg-fix-issue/SKILL.md` 全文字段引用同步
 - `pg-verify-and-merge/SKILL.md` 全文字段引用同步更新；CLI flag `--default-branch` 保持不变（与 YAML 字段是两套命名体系）
 
 ## [0.4.0] - 2026-06-27

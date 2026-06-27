@@ -48,7 +48,7 @@ pipeline:
       label: "Backend"
       root: <module-name>
 
-apply_change_rules:
+build_rules:
   - id: dev_check
     type: inject-prompt
     target_agent: pg-build/dev
@@ -139,7 +139,7 @@ class PromptInjectionAssemblyTest(unittest.TestCase):
 
     def test_empty_prepend_and_append_when_no_rules(self):
         import yaml
-        cfg = yaml.safe_load("schema: spec-driven\napply_change_rules: []\n")
+        cfg = yaml.safe_load("schema: spec-driven\nbuild_rules: []\n")
         ctx: dict = {}
         self.runner._enrich_context_with_prompt_injection(ctx, cfg, "backend", "dev")
         self.assertEqual(ctx["prompt_injection"]["prepend"], "")

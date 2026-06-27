@@ -1787,14 +1787,14 @@ def _enrich_context_with_tasks(ctx, change, item, sub):
 def _enrich_context_with_prompt_injection(ctx, config, item, sub):
     """Build the pre-assembled prompt injection for the dispatch action.
 
-    Reads `apply_change_rules` from config.yaml and, for the current
+    Reads `build_rules` from config.yaml and, for the current
     (item, sub), assembles the prepend / append fragments that the runner
     itself splices into the sub-agent prompt (via _merge_prompt_injection)
     before writing the dispatch file.
 
     The LLM orchestrator does NOT see the rendered prompt at all — it
     only receives the dispatch_file path. The LLM does NOT need to know
-    how apply_change_rules works:
+    how build_rules works:
 
         content = _merge_prompt_injection(rendered, ctx)
         # == prepend + "\n\n" + rendered + "\n\n" + append
@@ -1811,7 +1811,7 @@ def _enrich_context_with_prompt_injection(ctx, config, item, sub):
     concatenated in config order, separated by two newlines.
     """
     target = f"pg-build/{sub}"
-    rules = (config.get("apply_change_rules") or [])
+    rules = (config.get("build_rules") or [])
 
     prepend_parts = []
     append_parts = []
@@ -1859,7 +1859,7 @@ def dispatch_action(agent, item, sub, context, attempt, init_commit=None):
     report_seq = _format_seq(seq + 1)
     context["dispatch_seq"] = dispatch_seq
     context["report_seq"] = report_seq
-    # Render the prompt template, then merge apply_change_rules prepend/append
+    # Render the prompt template, then merge build_rules prepend/append
     # fragments. Both steps happen here in the runner so the LLM orchestrator
     # never sees the rendered prompt content — it only receives the path of
     # the dispatch file and tells the sub-agent to read it.
@@ -2651,7 +2651,7 @@ def _write_dispatch_file_with_seq(change, item, sub, content, seq, cycle=None, a
 
 
 def _merge_prompt_injection(content, context):
-    """Apply `apply_change_rules` prepend/append fragments to rendered prompt.
+    """Apply `build_rules` prepend/append fragments to rendered prompt.
 
     Replaces the orchestrator's old in-line merge. The runner now does this
     before writing the dispatch file, so the orchestrator never sees the
@@ -2779,7 +2779,7 @@ def _build_simple_dispatch(config, change, item_id):
             "reason": f"Simple track {item_id} 缺少 commands 配置",
         }
 
-    # Honor apply_change_rules targeting simple agent (previously hardcoded empty).
+    # Honor build_rules targeting simple agent (previously hardcoded empty).
     _enrich_context_with_prompt_injection(ctx, config, item_id, "simple")
 
     # Pre-allocate dispatch + report seq so the rendered prompt can include

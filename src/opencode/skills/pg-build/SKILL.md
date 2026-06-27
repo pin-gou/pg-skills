@@ -374,7 +374,7 @@ RUNNER="python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py"
 `next` 返回的 **`dispatch_file`** 字段是 sub-agent 完整任务指令的**文件路径**——runner 在写文件前已完成：
 
 1. Jinja 模板渲染（`{{context.*}}` 替换）
-2. `apply_change_rules` 的 prepend/append 合并（由 runner 内部 `_merge_prompt_injection` 完成）
+2. `build_rules` 的 prepend/append 合并（由 runner 内部 `_merge_prompt_injection` 完成）
 3. 全局 seq 编号分配与文件落盘
 4. `manifest.yaml` 追加
 
@@ -413,7 +413,7 @@ Task(
 
 | 字段 | 说明 |
 |------|------|
-| `dispatch_file` | 完整任务指令文件路径（含已合并的 `apply_change_rules` 内容），由 sub-agent 读取 |
+| `dispatch_file` | 完整任务指令文件路径（含已合并的 `build_rules` 内容），由 sub-agent 读取 |
 | `dispatch_seq` | 本次派遣的全局 seq 编号（3 位 0 填充，如 `005`） |
 | `report_seq` | 预分配给 sub-agent 报告的 seq 编号（`dispatch_seq + 1`），sub-agent 写报告时**必须**使用此值 |
 | `next_call_timeout_seconds` | bash 超时值（仅简单 track 返回） |
@@ -445,7 +445,7 @@ Task(
 
 ## 模板语法参考（runner 端 _render_prompt_template 支持）
 
-> 以下语法仅供开发调试参考。orchestrator 不需要手动使用；runner 在写 dispatch_file 前已完成渲染与 `apply_change_rules` 合并。
+> 以下语法仅供开发调试参考。orchestrator 不需要手动使用；runner 在写 dispatch_file 前已完成渲染与 `build_rules` 合并。
 
 - `{{var}}` / `{{context.field.sub}}` — 取值；`context.` 前缀会回退到 ctx 顶层 key
 - `{{var \| filter(arg=N)}}` — 过滤器（`tojson(indent=N)` / `toyaml` 支持；新模板默认用 `toyaml` 压缩 prompt 篇幅）

@@ -62,7 +62,7 @@ CONFIG_PATH = _resolve_config_path()
 # fix_issue 段仅 pg-fix-issue 工作流可见, 描述主 agent 整体修复迭代 (与 tracks.max_fix_retries 区分).
 WORKFLOW_KEYS = {
     "pg-build": ["modules", "environments", "tracks", "stages",
-                         "git", "apply_change_rules"],
+                         "git", "build_rules"],
     "pg-verify-and-merge": ["modules", "tracks", "stages",
                              "git", "flyway", "verify_merge"],
     "pg-propose": ["modules", "tracks", "stages", "rules", "test_strategy",

@@ -3,7 +3,7 @@
 
 Verifies that:
   - pg-propose workflow sees proposal_rules segment
-  - pg-build workflow sees apply_change_rules segment
+  - pg-build workflow sees build_rules segment
   - Both segments default to empty list when absent in config.yaml
   - Existing rules / test_strategy / coding_standards / pipeline remain
     intact (backward compatibility)
@@ -60,7 +60,7 @@ proposal_rules:
     template: |
       ## Capability 影响评估
 
-apply_change_rules:
+build_rules:
   - id: capability_checklist
     type: inject-prompt
     target_agent: pg-build/dev
@@ -86,13 +86,13 @@ class ParseConfigWorkflowKeysTest(unittest.TestCase):
         keys = self.mod.WORKFLOW_KEYS["pg-propose"]
         self.assertIn("proposal_rules", keys)
 
-    def test_pg_propose_workflow_does_not_expose_apply_change_rules(self):
+    def test_pg_propose_workflow_does_not_expose_build_rules(self):
         keys = self.mod.WORKFLOW_KEYS["pg-propose"]
-        self.assertNotIn("apply_change_rules", keys)
+        self.assertNotIn("build_rules", keys)
 
-    def test_pg_apply_change_workflow_exposes_apply_change_rules(self):
+    def test_pg_apply_change_workflow_exposes_build_rules(self):
         keys = self.mod.WORKFLOW_KEYS["pg-build"]
-        self.assertIn("apply_change_rules", keys)
+        self.assertIn("build_rules", keys)
 
     def test_pg_apply_change_workflow_does_not_expose_proposal_rules(self):
         keys = self.mod.WORKFLOW_KEYS["pg-build"]
@@ -102,7 +102,7 @@ class ParseConfigWorkflowKeysTest(unittest.TestCase):
         for wf in ("pg-verify-and-merge", "pg-regression",
                    "pg-fix-issue", "pg-quick-build"):
             self.assertNotIn("proposal_rules", self.mod.WORKFLOW_KEYS[wf])
-            self.assertNotIn("apply_change_rules", self.mod.WORKFLOW_KEYS[wf])
+            self.assertNotIn("build_rules", self.mod.WORKFLOW_KEYS[wf])
 
     def test_pg_regression_workflow_excludes_tracks_stages(self):
         """pg-regression 解耦 tracks/stages, 只读 modules/environments/regression."""
@@ -138,12 +138,12 @@ class ParseConfigFilterTest(unittest.TestCase):
         self.assertEqual(rule["after_section"], "风险和注意事项")
         self.assertIn("## Capability 影响评估", rule["template"])
 
-    def test_pg_apply_change_sees_apply_change_rules(self):
+    def test_pg_apply_change_sees_build_rules(self):
         data = self.mod.load()
         filtered = self.mod.filter_by_workflow(data, "pg-build")
-        self.assertIn("apply_change_rules", filtered)
-        self.assertEqual(len(filtered["apply_change_rules"]), 2)
-        targets = sorted(r["target_agent"] for r in filtered["apply_change_rules"])
+        self.assertIn("build_rules", filtered)
+        self.assertEqual(len(filtered["build_rules"]), 2)
+        targets = sorted(r["target_agent"] for r in filtered["build_rules"])
         self.assertEqual(
             targets,
             ["pg-build/dev", "pg-build/verify"],
@@ -162,7 +162,7 @@ class ParseConfigFilterTest(unittest.TestCase):
 
 
 class ParseConfigDefaultsTest(unittest.TestCase):
-    """When proposal_rules / apply_change_rules are absent, missing keys."""
+    """When proposal_rules / build_rules are absent, missing keys."""
 
     def setUp(self):
         self.mod = load_parser()
@@ -180,10 +180,10 @@ class ParseConfigDefaultsTest(unittest.TestCase):
         filtered = self.mod.filter_by_workflow(data, "pg-propose")
         self.assertNotIn("proposal_rules", filtered)
 
-    def test_absent_apply_change_rules_does_not_appear(self):
+    def test_absent_build_rules_does_not_appear(self):
         data = self.mod.load()
         filtered = self.mod.filter_by_workflow(data, "pg-build")
-        self.assertNotIn("apply_change_rules", filtered)
+        self.assertNotIn("build_rules", filtered)
 
 
 class RuleShapeTest(unittest.TestCase):
@@ -211,9 +211,9 @@ class RuleShapeTest(unittest.TestCase):
             self.assertTrue(self.PROPOSAL_RULE_KEYS.issuperset(r.keys()),
                             f"unexpected keys in proposal rule: {r.keys()}")
 
-    def test_apply_change_rule_has_expected_keys(self):
+    def test_build_rule_has_expected_keys(self):
         data = self.mod.load()
-        for r in data["apply_change_rules"]:
+        for r in data["build_rules"]:
             self.assertTrue(self.APPLY_RULE_KEYS.issuperset(r.keys()),
                             f"unexpected keys in apply_change rule: {r.keys()}")
             self.assertIn(r["type"], self.VALID_TYPES)

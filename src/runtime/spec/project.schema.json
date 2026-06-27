@@ -75,7 +75,7 @@
     },
     "rules":      { "type": "object", "additionalProperties": true },
     "proposal_rules":   { "type": "array", "items": { "type": "object" } },
-    "apply_change_rules": { "type": "array", "items": { "type": "object" } },
+    "build_rules": { "type": "array", "items": { "type": "object" } },
     "test_strategy":    { "type": "object", "additionalProperties": true },
     "coding_standards": { "type": "array", "items": { "type": "string" } },
     "fix_issue": { "$ref": "#/definitions/fix_issue" },
