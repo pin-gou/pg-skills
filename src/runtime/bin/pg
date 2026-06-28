@@ -478,7 +478,7 @@ def _upgrade_by_copy(project_root: Path, pg_skills_dir: Path, ref: str) -> int:
 
     # 2. Clone 到临时目录
     tmp_dir = Path(tempfile.mkdtemp(prefix='pg-upgrade-'))
-    clone_ref = _to_tag_ref(ref)
+    clone_ref = ref
     print(f'Cloning {remote_https} ({clone_ref}) ...')
     clone_result = subprocess.run(
         ['git', 'clone', '--depth=1', '--branch', clone_ref, remote_https, str(tmp_dir)],
