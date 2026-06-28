@@ -51,8 +51,29 @@ fi
 #   例 (vite dev):         tail -n "${1:-100}" .pg/logs/vite.log
 #   例 (远端 SSH):         ssh user@host 'journalctl -u my-app --no-pager -n "${1:-100}"'
 # $1 由 runner 注入 LLM 传的 --tail-lines N (缺省 100).
+#
+# 错误处理: 如果日志文件不存在或命令失败, 用 pg_fail 结构化报告:
+#     if [ ! -f "$LOG_DIR/${PG_ROLE:-unknown}.log" ]; then
+#         pg_fail --category=file_not_found --code=PG-E-0940 \
+#             --message="日志文件不存在" \
+#             --hint="服务可能未启动" \
+#             --agent-recoverable=true
+#     fi
+# 不要直接 exit 1.
+
 lines="${1:-100}"
-tail -n "$lines" "$LOG_DIR/${PG_ROLE:-unknown}.log"
+logfile="$LOG_DIR/${PG_ROLE:-unknown}.log"
+
+if [ ! -f "$logfile" ]; then
+    pg_fail \
+        --category=file_not_found \
+        --code=PG-E-0940 \
+        --message="日志文件 $logfile 不存在" \
+        --hint="服务可能未启动, 先执行 start action" \
+        --agent-recoverable=true
+fi
+
+tail -n "$lines" "$logfile"
 
 START=$(date +%s)
 DURATION=$(($(date +%s) - START))

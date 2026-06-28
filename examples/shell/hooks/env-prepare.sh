@@ -42,8 +42,35 @@ fi
 #         && sleep 5 && mvn -pl webvirt-bootstrap flyway:migrate
 #   例 (只跑 migration): mvn -pl webvirt-bootstrap flyway:migrate
 #   例 (启 redis + 预热): docker compose up -d redis && redis-cli FLUSHALL
-# 失败上报: 调用 `pg_fail --code=PG-E-1020` (dependency_not_ready).
-# 详细字段: --category / --code / --message / --hint / --related-log / --agent-recoverable.
+#
+# 错误处理: 如果准备命令失败, 用 pg_fail 结构化报告:
+#   例 (docker 失败):
+#     if ! docker compose up -d; then
+#         pg_fail --category=dependency_not_ready --code=PG-E-1020 \
+#             --message="启动 MariaDB 失败" \
+#             --hint="Check 'docker compose logs postgres'" \
+#             --agent-recoverable=true
+#     fi
+#
+# 成功: 用 pg_exit 报告.
+# 失败: 用 pg_fail 报告 (会 exit 1 并写结构化 result.json).
+# 不要直接 exit 1 — 会绕过结构化错误报告.
+
+prep_cmd=""
+# prep_cmd="cd db/db-mariadb && docker compose up -d && sleep 5 && mvn -pl webvirt-bootstrap flyway:migrate"
+
+if [ -n "$prep_cmd" ]; then
+    echo "Running: $prep_cmd"
+    if ! bash -c "$prep_cmd"; then
+        pg_fail \
+            --category=dependency_not_ready \
+            --code=PG-E-1020 \
+            --message="环境准备失败" \
+            --hint="Check prepare_env output above" \
+            --agent-recoverable=true
+    fi
+    echo_color "32" "环境准备完成"
+fi
 
 START=$(date +%s)
 DURATION=$(($(date +%s) - START))

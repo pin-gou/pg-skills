@@ -41,7 +41,35 @@ fi
 #   例 (组合):             pkill -f 'webvirt-bootstrap' || true \
 #                             && docker compose down -v
 # clean_env 必须幂等; 进程/容器不存在时不要 exit 非零 (用 '|| true').
-# 失败上报: 调用 `pg_fail --code=PG-E-1021` (health_check_fail).
+#
+# 错误处理: 如果清理命令失败, 用 pg_fail 结构化报告:
+#   例:
+#     if ! docker compose down -v; then
+#         pg_fail --category=health_check_fail --code=PG-E-1021 \
+#             --message="清理环境失败" \
+#             --hint="Check docker status" \
+#             --agent-recoverable=true
+#     fi
+#
+# 成功: 用 pg_exit 报告.
+# 失败: 用 pg_fail 报告 (会 exit 1 并写结构化 result.json).
+# 不要直接 exit 1 — 会绕过结构化错误报告.
+
+clean_cmd=""
+# clean_cmd="cd db/db-mariadb && docker compose down -v"
+
+if [ -n "$clean_cmd" ]; then
+    echo "Running: $clean_cmd"
+    if ! bash -c "$clean_cmd"; then
+        pg_fail \
+            --category=health_check_fail \
+            --code=PG-E-1021 \
+            --message="环境清理失败" \
+            --hint="Check clean_env output above" \
+            --agent-recoverable=true
+    fi
+    echo_color "32" "环境清理完成"
+fi
 
 START=$(date +%s)
 DURATION=$(($(date +%s) - START))

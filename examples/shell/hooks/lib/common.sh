@@ -199,3 +199,32 @@ kill_pid_file() {
     echo "WARN: kill_pid_file 已弃用, 请改用 pg_stop_bg (hook-helpers.sh)" >&2
     pg_stop_bg "$@"
 }
+
+# === wait_for_http: 等待 HTTP 服务就绪（确认收到 HTTP 响应，非仅端口 LISTEN） ===
+# 参数: url name max_wait log_file
+# TCP 端口 LISTEN 后还需等待应用层完成初始化 (如 Flyway migration),
+# 此函数通过 curl 探测直到收到任意 HTTP 状态码 (含 404/401), 确认服务可正常接收请求.
+wait_for_http() {
+    local url=$1
+    local name=$2
+    local max_wait=${3:-30}
+    local log_file=${4:-}
+    local count=0
+    echo "Waiting for $name to be serving HTTP at $url..."
+    while [ $count -lt $max_wait ]; do
+        local http_code
+        http_code=$(curl -s -o /dev/null -w "%{http_code}" "$url" 2>/dev/null || echo "000")
+        if [ "$http_code" != "000" ]; then
+            echo_color "32" "$name is serving HTTP ($http_code)"
+            return 0
+        fi
+        sleep 1
+        count=$((count + 1))
+    done
+    echo_color "31" "ERROR: $name not serving HTTP after ${max_wait}s: $url"
+    if [ -n "$log_file" ] && [ -f "$log_file" ]; then
+        echo_color "33" "Last 20 lines of $log_file:"
+        tail -20 "$log_file" | sed 's/^/  /'
+    fi
+    return 1
+}

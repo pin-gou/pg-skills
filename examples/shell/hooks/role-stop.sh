@@ -48,6 +48,26 @@ fi
 #
 # pg_stop_bg 行为: SIGTERM → 等 grace_seconds (默认 5s) → SIGKILL.
 # 取代 lib/common.sh:kill_pid_file (已弃用).
+#
+# 错误处理: 如果停服失败, 用 pg_fail 结构化报告:
+#   例 (docker):
+#     if ! docker compose down; then
+#         pg_fail --category=service_stop_failure --code=PG-E-0930 \
+#             --message="停止服务失败" \
+#             --hint="Check docker status" \
+#             --agent-recoverable=true
+#     fi
+#
+# 成功: 用 pg_exit 报告.
+# 失败: 用 pg_fail 报告 (会 exit 1 并写结构化 result.json).
+# 不要直接 exit 1.
+
+# ---- 占位示例 (替换为实际停止命令) ----
+# pg_stop_bg "$PID_DIR/backend.pid" "Backend" 2>&1 || \
+#     pg_fail --category=service_stop_failure --code=PG-E-0930 \
+#         --message="停止 Backend 失败" \
+#         --agent-recoverable=true
+echo_color "33" "TODO: 替换 role-stop.sh 为实际停止命令"
 
 START=$(date +%s)
 DURATION=$(($(date +%s) - START))

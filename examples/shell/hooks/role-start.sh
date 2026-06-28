@@ -31,9 +31,6 @@ source "$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"
 trap 'pg_fail_on_error $? $LINENO' ERR
 
 # === 路径派生 (per-skill 路由, 由 pg_resolve_paths 决定) ===
-# 若 .pg/hooks/lib/common.sh 存在, 调 pg_resolve_paths 把 LOG_DIR/PID_DIR
-# 按 PG_RUN_CALLER 路由到 .pg/changes/ / .pg/regression/ / .pg/fix-issue/ / .pg/ad-hoc/
-# 若 lib/ 缺失 (eg. 手工复制本模板但没带 lib/), 跳过派生, 输出走 $PG_LOG_FILE
 HOOK_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ -f "$HOOK_DIR/lib/common.sh" ]]; then
     source "$HOOK_DIR/lib/common.sh"
@@ -43,31 +40,43 @@ fi
 mkdir -p "$LOG_DIR" "$PID_DIR"
 
 # ---- TODO: 替换为本 role 的启动命令 ----
-# 模板默认实现: 空 body. 替换为你环境的实际命令.
-# 用 hook-helpers.sh:pg_start_bg 一行替代 setsid+redirect+PID 写入模板:
-#   pg_start_bg <log_file> <pid_file> [env_kv ...] -- <cmd ...>
-# 优势: (a) setsid 自动 detach, 父 shell 退出不影响 (b) env 走 argv, 无 shell
-# 注入风险 (c) PID 文件写入由框架保证 (d) setsid 不可用时降级 nohup+disown.
+# 模板默认实现: 空 body (下面 t0/t1/pg_exit 仅做占位).
+# 替换为你环境的实际命令, 遵循以下模式:
 #
-# 常见模式:
-#   # Java 后端:
-#   backend_pid=$(pg_start_bg "$LOG_DIR/backend.log" "$PID_DIR/backend.pid" \
-#       "WEBVIRT_KEY=xxx" "SPRING_PROFILE=grpc" -- \
-#       mvn spring-boot:run -pl webvirt-bootstrap)
-#   # 前端 vite:
-#   frontend_pid=$(pg_start_bg "$LOG_DIR/frontend.log" "$PID_DIR/frontend.pid" -- \
-#       pnpm dev)
-#   # 数据库 (docker 自带 detach, 不需要 pg_start_bg):
-#   docker compose up -d postgres
-#   # systemd 服务 (systemd 自管 lifecycle):
-#   sudo systemctl start my-app
+# 1) 用 pg_start_bg 替代 setsid+redirect+PID 写入模板:
+#      if ! pid=$(pg_start_bg "$LOG_DIR/backend.log" "$PID_DIR/backend.pid" \
+#              "KEY=VALUE" ... -- \
+#              mvn spring-boot:run ...); then
+#          pg_fail --category=service_start_failure ...
+#      fi
 #
-# 端口就绪检查 (后台服务启动后):
-#   wait_for_port_with_monitor $PORT "$PG_ROLE" 60 \
-#       "$PID_DIR/${PG_ROLE}.pid" "$LOG_DIR/${PG_ROLE}.log"
+# 2) 端口就绪检查 (后台服务启动后):
+#      if ! wait_for_port_with_monitor $PORT "$PG_ROLE" 60 \
+#              "$PID_DIR/${PG_ROLE}.pid" "$LOG_DIR/${PG_ROLE}.log"; then
+#          pg_fail --category=service_start_timeout ...
+#      fi
 #
-# 注意: invoke-hook CLI 对 start action 默认 fire-and-forget
-# (--no-wait-for-bg). hook 返回后后台服务继续运行, 不受 300s timeout 影响.
+# 3) HTTP 就绪检查 (依赖 SSOT lib/common.sh 的 wait_for_http):
+#      if ! wait_for_http "http://localhost:${PORT}/" "$PG_ROLE" 30 "$LOG_DIR/${PG_ROLE}.log"; then
+#          pg_fail --category=service_health_check ...
+#      fi
+#
+# 4) 成功 → pg_exit, 失败 → pg_fail (会 exit 1 并写 result.json).
+#    不要直接 exit 1 — 会绕过结构化错误报告.
+#
+# pg_start_bg 优势: (a) setsid 自动 detach (b) env 走 argv, 无 shell 注入
+# (c) PID 文件写入由框架保证 (d) setsid 不可用时降级 nohup+disown.
+#
+# 注意: invoke-hook CLI 对 start action 默认 wait_for_completion=true.
+# 如需 fire-and-forget, 在 project.yaml 加 wait_for_completion: false
+# 或传 --no-wait-for-bg.
+
+# ---- 占位示例 (替换为实际启动逻辑) ----
+t0=$(date +%s)
+# --- 在此处插入 pg_start_bg + wait_for_port + wait_for_http ---
+t1=$(date +%s)
+echo_color "33" "TODO: 替换 role-start.sh 为实际启动命令"
+echo "  elapsed: $(($t1 - $t0))s"
 
 START=$(date +%s)
 DURATION=$(($(date +%s) - START))
