@@ -15,9 +15,9 @@
 #   - **优先信任 PG_HOOK_LOG_DIR** (由 pg-invoke-hook.py 预拼的绝对路径); 自拼逻辑作为
 #     老式手工调用 (不走 pg-invoke-hook.py) 的兜底
 #
-# v4 协议:
-#   - 新增 PG_RUN_CALLER / PG_RUN_SESSION 取代 PG_SKILL_NAME / PG_CHANGE_NAME 的语义位置.
-#   - PG_SKILL_NAME / PG_CHANGE_NAME 仍可读 (作为 1 版本 alias), 兼容老 hook.
+# v5 协议 (current):
+#   - PG_RUN_CALLER / PG_RUN_SESSION 为唯一字段名.
+#   - PG_SKILL_NAME / PG_CHANGE_NAME 已删除 (v4 的 1 版本 alias 已退役).
 #   - 删除 caller="" (空) 分支的 silent fallback — 改用 caller=ad-hoc 显式声明.
 #   - unknown caller → fail-fast (不再降级到 scripts/logs).
 #
@@ -37,14 +37,13 @@ AGENT_PORT=9082
 # Fallback（老式手工调用 / 未走 pg-invoke-hook.py）：
 #   路由规则（与 .pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill 同步）：
 #     pg-build       -> .pg/changes/<session>/2-build/<env>/logs|pids
-#     pg-regression  -> .pg/regression/<session>/<env>/logs|pids   (session 含 regression- 前缀)
+#     pg-regression  -> .pg/regression/<session>/<env>/logs|pids   (session = <suite>-<date>-<seq>)
 #     pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs|pids    (session 含 fix- 前缀)
 #     ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs|pids       (新顶级目录, 不与 SKILL 命名空间混)
 #
 # 调用方必须在 source 此文件前 export:
 #   - PG_HOOK_LOG_DIR  (由 pg-run-hook.py 从 spec.hook_log_dir 注入, 推荐)
-#   - PG_RUN_CALLER / PG_RUN_SESSION / PG_ENV (v4 协议核心字段)
-#   - PG_SKILL_NAME / PG_CHANGE_NAME (1 版本 alias, 兼容老 hook)
+#   - PG_RUN_CALLER / PG_RUN_SESSION / PG_ENV (v5 协议核心字段)
 pg_resolve_paths() {
     local project_root="${PG_PROJECT_ROOT:-$PWD}"
 
@@ -54,9 +53,8 @@ pg_resolve_paths() {
         PID_DIR="$LOG_DIR"   # logs 与 pids 同目录 (PG_HOOK_LOG_DIR 指向 logs/)
     else
         # === 兜底路径：自拼 (老式手工调用 / 未走 pg-invoke-hook.py) ===
-        # v4 caller 优先 PG_RUN_CALLER, 否则 fallback 到 PG_SKILL_NAME (1 版本 alias)
-        local caller="${PG_RUN_CALLER:-${PG_SKILL_NAME:-ad-hoc}}"
-        local session="${PG_RUN_SESSION:-${PG_CHANGE_NAME:-}}"
+        local caller="${PG_RUN_CALLER:-ad-hoc}"
+        local session="${PG_RUN_SESSION:-}"
         local env="${PG_ENV:-unknown}"
 
         case "$caller" in
@@ -79,7 +77,7 @@ pg_resolve_paths() {
                 PID_DIR="$project_root/.pg/ad-hoc/${session}/${env}/pids"
                 ;;
             *)
-                echo_color "31" "ERROR: unknown PG_RUN_CALLER='$caller' (PG_SKILL_NAME='${PG_SKILL_NAME:-}')" >&2
+                echo_color "31" "ERROR: unknown PG_RUN_CALLER='$caller'" >&2
                 return 1
                 ;;
         esac
@@ -194,33 +192,10 @@ wait_for_port_with_monitor() {
 }
 
 # === kill_pid_file: 从 PID 文件停止进程 ===
+# === kill_pid_file: 已迁移到 hook-helpers.sh:pg_stop_bg ===
+# 旧函数已弃用 (v5+). 新代码请直接调 pg_stop_bg (由 hook-helpers.sh 提供).
+# 本函数保留为兼容垫片, 转发到 pg_stop_bg 并打 WARN.
 kill_pid_file() {
-    local pid_file=$1
-    local name=$2
-    if [ -f "$pid_file" ]; then
-        local pid
-        pid=$(cat "$pid_file")
-        if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
-            echo "Stopping $name (PID $pid)..."
-            kill "$pid" 2>/dev/null || true
-            local count=0
-            while kill -0 "$pid" 2>/dev/null; do
-                sleep 1
-                count=$((count + 1))
-                if [ $count -ge 5 ]; then
-                    echo "Force killing $name (PID $pid)..."
-                    kill -9 "$pid" 2>/dev/null || true
-                    break
-                fi
-            done
-            if ! kill -0 "$pid" 2>/dev/null; then
-                echo_color "32" "$name stopped"
-            fi
-        else
-            echo_color "33" "$name is not running (stale PID file)"
-        fi
-        rm -f "$pid_file"
-    else
-        echo_color "33" "$name is not running (no PID file)"
-    fi
+    echo "WARN: kill_pid_file 已弃用, 请改用 pg_stop_bg (hook-helpers.sh)" >&2
+    pg_stop_bg "$@"
 }

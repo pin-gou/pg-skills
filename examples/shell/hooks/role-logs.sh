@@ -9,7 +9,8 @@
 # 本模板对应 schema 节点:
 #   environments.<env>.roles.<r>.actions.logs.script
 #
-# 由 pg-run-hook.py 调起 (PG_HOOK_TYPE=logs), 注入 env vars 见 role-start.sh 头部.
+# 由 pg-run-hook.py 调起 (PG_HOOK_TYPE=logs), 注入 env vars 见 SSOT:
+#   .pg/skills/src/runtime/spec/hook-env-vars.yaml
 #
 # 注意: logs 命令通常是只读快照 (一次性 dump), 不是 tail. 如果要 tail 流,
 # 复制本文件改名 role-tail.sh 并把 PG_HOOK_TYPE 检测加进模板.

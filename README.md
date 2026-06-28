@@ -350,7 +350,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 
 ```bash
 #!/usr/bin/env bash
-set -euo pipefail
+set -uo pipefail  # 注意: 不加 -e, 由 hook-helpers.sh trap ERR 控制
 source "$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"
 trap 'pg_fail_on_error $? $LINENO' ERR
 
@@ -367,36 +367,124 @@ else
 fi
 ```
 
-#### 7.1.5 注入的环境变量（v4 SSOT）
+##### Start hook 模板（后台服务启动）
 
-| 变量 | 说明 | 适用范围 |
-|------|------|---------|
-| `PG_SKILLS_PATH` | pg-skills 仓库根路径 | 全部 |
-| `PG_PROJECT_ROOT` | 项目根路径 | 全部 |
-| `PG_RUN_CALLER` | 调用方身份（pg-build / pg-regression / pg-fix-issue / ad-hoc） | 全部 |
-| `PG_RUN_SESSION` | session 名（与 caller 正交） | 全部 |
-| `PG_RESULT_FILE` | 写 result.json 的路径 | 全部 |
-| `PG_LOG_FILE` | 写 stdout/stderr 的路径 | 全部 |
-| `PG_STAGE` | 当前 stage 名 | 全部 |
-| `PG_ENV` | 当前环境（dev-local / dev-3tier） | 全部 |
-| `PG_ROLE` | role 名 | role action 时 |
-| `PG_INSTANCE_NAME` | instance 名 | role action 时 |
-| `PG_INSTANCE_HOST` | instance host | role action 时 |
-| `PG_HOOK_TYPE` | hook 类型（start / stop / restart / logs / tail / prepare / clean） | 全部 |
-| `PG_HOOK_LOG_DIR` | 服务内部 stdout/PID 的目标目录（预拼绝对路径，hook 脚本直接信任） | 全部 |
+```bash
+#!/usr/bin/env bash
+set -uo pipefail
+source "$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"
+trap 'pg_fail_on_error $? $LINENO' ERR
 
-**1 版本 alias**（向下兼容老 hook，写新代码应改用上面的新名）：
+PROJECT_ROOT="${PG_PROJECT_ROOT:-$PWD}"
+source ".pg/hooks/lib/common.sh"
+pg_resolve_paths
 
-| Alias | 新名 |
-|-------|------|
-| `PG_SKILL_NAME` | `PG_RUN_CALLER` |
-| `PG_CHANGE_NAME` | `PG_RUN_SESSION` |
+# 端口冲突先清理
+if check_port $BACKEND_PORT; then
+    kill_port $BACKEND_PORT "Backend"
+    sleep 1
+fi
 
-> ~~`PG_MODULE` / `PG_MODULE_ROOT`~~ 已不再注入——module 维度不经过 hook 协议。
+# pg_start_bg: 一行替代 setsid+redirect+PID 写入
+# env_kv 走 argv 注入, 无 shell 解析; setsid 自动 detach;
+# hook 退出后服务仍存活 (避免 opencode 120s shell 超时杀掉)
+backend_pid=$(pg_start_bg \
+    "$LOG_DIR/backend.log" \
+    "$PID_DIR/backend.pid" \
+    "WEBVIRT_KEY=xxx" "SPRING_PROFILE=grpc" -- \
+    mvn spring-boot:run -pl webvirt-bootstrap -DskipTests)
 
-#### 7.1.6 `PG_HOOK_LOG_DIR` 的来源与用法
+# 端口就绪检查 (可选)
+wait_for_port_with_monitor $BACKEND_PORT "Backend" 60 \
+    "$PID_DIR/backend.pid" "$LOG_DIR/backend.log"
 
-`PG_HOOK_LOG_DIR` 由 `pg-invoke-hook.py` 在 spec 阶段通过 `pg_log_dir_for_caller(caller, session, env, project_root)` 计算，作为 spec 字段 `hook_log_dir` 注入到 `pg-run-hook.py`，再由 `pg-run-hook.py` 写入 ENV。
+pg_exit --status=pass
+```
+
+**Stop hook 模板**：
+
+```bash
+#!/usr/bin/env bash
+set -uo pipefail
+source "$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"
+trap 'pg_fail_on_error $? $LINENO' ERR
+
+PROJECT_ROOT="${PG_PROJECT_ROOT:-$PWD}"
+source ".pg/hooks/lib/common.sh"
+pg_resolve_paths
+
+# pg_stop_bg: SIGTERM → 5s 宽限 → SIGKILL, 幂等
+pg_stop_bg "$PID_DIR/backend.pid" "Backend"
+
+# 端口残留清理
+if check_port $BACKEND_PORT; then
+    kill_port $BACKEND_PORT "Backend (residual)"
+fi
+
+pg_exit --status=pass
+```
+
+#### 7.1.5 注入的环境变量（v5 SSOT）
+
+**机器可读 SSOT**：`.pg/skills/src/runtime/spec/hook-env-vars.yaml`。
+本节表格与 YAML 文件双向同步，一致性由 `tests/test_hook_env_vars_ssot.py` 校验。
+任何新增/删除 PG_* var 必须先改 YAML，再同步本表 + `_PG_ENV_MAP`。
+
+##### 硬注入（与 spec 无关，pg-run-hook.py 必填）
+
+| 变量 | 类型 | 说明 |
+|---|---|---|
+| `PG_PROJECT_ROOT` | path | 项目根路径 |
+| `PG_SKILLS_PATH` | path | pg-skills 仓库根 |
+| `PG_RUN_CALLER` | enum | 调用方身份（pg-build / pg-regression / pg-fix-issue / ad-hoc），硬缺省 `ad-hoc` |
+
+##### Spec 注入（pg-run-hook.py:_PG_ENV_MAP 由 spec 字段驱动）
+
+| 变量 | Spec key | 适用范围 | 说明 |
+|---|---|---|---|
+| `PG_RUN_SESSION` | `session` | 全部 | session 名（与 caller 正交） |
+| `PG_STAGE` | `stage` | 全部 | 当前 stage 名 |
+| `PG_ENV` | `env` | 全部 | 当前 environment（dev-local / dev-3tier） |
+| `PG_ROLE` | `role` | per-role | role 名 |
+| `PG_INSTANCE_NAME` | `instance_name` | per-role | instance 名 |
+| `PG_INSTANCE_HOST` | `instance_host` | per-role | instance host |
+| `PG_HOOK_TYPE` | `hook_type` | 全部 | hook 类型（start / stop / logs / tail / prepare_env / clean_env） |
+| `PG_HOOK_LOG_DIR` | `hook_log_dir` | 全部 | 预拼日志绝对目录（lib/common.sh:pg_resolve_paths 优先信任） |
+| `PG_LOG_FILE` | `log_path` | 全部 | hook stdout/stderr 目标路径 |
+| `PG_RESULT_FILE` | `hook_result_path` | 全部 | hook 写 result.json 的路径 |
+
+##### 已废弃（v4 → v5 移除，不再注入）
+
+| 变量 | 原语义 | 替代 |
+|---|---|---|
+| `PG_SKILL_NAME` | 1 版本 alias of PG_RUN_CALLER | `PG_RUN_CALLER` |
+| `PG_CHANGE_NAME` | 1 版本 alias of PG_RUN_SESSION | `PG_RUN_SESSION` |
+| `PG_RUNNER_ORIGIN` | legacy alias of PG_RUN_CALLER | `PG_RUN_CALLER` |
+| `PG_MODULE` | module 维度不进 hook 协议 | n/a（module 命令改 `pg-run --module X --action build`，`cwd=<project_root>/<module.root>`） |
+| `PG_MODULE_ROOT` | 同上 | 同上 |
+
+#### 7.1.6 `PG_HOOK_LOG_DIR` vs `PG_LOG_FILE` — 用途与区别
+
+这两个变量名字相近但承担完全不同的角色，hook 写代码前必须分清。
+
+| 维度 | `PG_HOOK_LOG_DIR` | `PG_LOG_FILE` |
+|---|---|---|
+| **类型** | 目录路径 | 文件路径 |
+| **谁写入** | hook 脚本自己 | `pg-run-hook.py` 用 tee 模式自动写入 |
+| **承载内容** | hook 派生的多份文件：`backend.log` / `frontend.log` / `agent.log` + PID 文件等 | hook 自身的 stdout/stderr |
+| **hook 端的职责** | 派生 `LOG_DIR` / `PID_DIR`，在目录下写**业务日志**（如启动的后台进程日志） | 业务命令输出重定向到这里（`mvn test > "$PG_LOG_FILE" 2>&1`） |
+| **依赖方** | `lib/common.sh:pg_resolve_paths` 优先信任 | `hook-helpers.sh:pg_fail_on_error` trap 用它 tail 诊断 |
+| **典型用法** | `LOG_DIR="$PG_HOOK_LOG_DIR"; mkdir -p "$LOG_DIR"; setsid mvn ... > "$LOG_DIR/backend.log" &` | `mvn test -q > "$PG_LOG_FILE" 2>&1` |
+
+**记忆口诀**：
+- `PG_HOOK_LOG_DIR` = **D**irectory，hook 自管的业务日志**目录**
+- `PG_LOG_FILE` = **F**ile，caller 给 hook 开的 stdout/stderr **单文件**
+
+---
+
+##### `PG_HOOK_LOG_DIR` 的来源
+
+由 `pg-invoke-hook.py` 在 spec 阶段通过 `pg_log_dir_for_caller(caller, session, env, project_root)` 计算，作为 spec 字段 `hook_log_dir` 注入到 `pg-run-hook.py`，再由 `pg-run-hook.py` 写入 ENV。
 
 **预计算逻辑**（与 `pg_log_dir_for_skill()` Python 实现保持一致）：
 
@@ -407,18 +495,40 @@ fi
 | `pg-fix-issue` | `fix-<date>-<slug>` | `<root>/.pg/fix-issue/<session>/<env>/logs` |
 | `ad-hoc` | `auto-<date>-<pid>` 或显式 | `<root>/.pg/ad-hoc/<session>/<env>/logs` |
 
-**hook 脚本使用约定**：
+##### `PG_LOG_FILE` 的来源
+
+由 `pg-invoke-hook.py` 在 spec 阶段根据 caller 路由到 `$PG_HOOK_LOG_DIR` 下，命名格式：
+
+- per-role action: `$PG_HOOK_LOG_DIR/role.<role>.<action>@<instance>.log`
+- env-level action: `$PG_HOOK_LOG_DIR/env.<action>.log`
+
+作为 spec 字段 `log_path` 注入到 `pg-run-hook.py`，`run_command()` 用 tee 模式边写边读 stdout/stderr。
+
+---
+
+##### hook 脚本使用约定
 
 ```bash
 PROJECT_ROOT="${PG_PROJECT_ROOT:-$PWD}"
+
+# 1. LOG_DIR: 优先用 caller 预拼的目录, 没有时兜底
 if [ -n "${PG_HOOK_LOG_DIR:-}" ]; then
     LOG_DIR="$PG_HOOK_LOG_DIR"
 else
-    # 老式手工调用兜底 (建议改走 pg-invoke-hook.py, 不再依赖此分支)
-    LOG_DIR="$PROJECT_ROOT/scripts/logs"
+    LOG_DIR="$PROJECT_ROOT/scripts/logs"   # 手工调用兜底
 fi
-PID_DIR="$LOG_DIR"   # logs 与 pids 同目录
+PID_DIR="$LOG_DIR"
 mkdir -p "$LOG_DIR"
+
+# 2. 启动后台进程: 业务日志写到 LOG_DIR 下 (PG_HOOK_LOG_DIR 派生)
+setsid mvn spring-boot:run > "$LOG_DIR/backend.log" 2>&1 &
+echo $! > "$PID_DIR/backend.pid"
+
+# 3. hook 自身 stdout/stderr: 重定向到 PG_LOG_FILE (caller 给的固定路径)
+#    若 hook 顶层没有自己的输出, 这步可省略 (pg-run-hook.py 会自动 tee)
+if [ -n "${PG_LOG_FILE:-}" ]; then
+    exec > "$PG_LOG_FILE" 2>&1
+fi
 ```
 
 #### 7.1.7 `pg-invoke-hook.py` CLI
@@ -488,8 +598,100 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py status \
 
 - `pg-pipeline-runner.py invoke-hook` 仍然可用（thin wrapper 转发到 `pg-invoke-hook.py`），但新代码统一走新路径。
 - `--change` 字段保留 1 版本作为 deprecated alias；SKILL / pg-run / agent 调用方应改为 `--session`。
-- `PG_SKILL_NAME` / `PG_CHANGE_NAME` env var 保留 1 版本作为 alias；hook 写新代码应改为 `PG_RUN_CALLER` / `PG_RUN_SESSION`。
 - 旧 `.pg/changes/manual/` 目录里的历史日志保留为只读归档，新调用**不再**追加。
+- v5 起 `PG_SKILL_NAME` / `PG_CHANGE_NAME` / `PG_RUNNER_ORIGIN` 已从注入实现移除，老 hook 须改用 `PG_RUN_CALLER` / `PG_RUN_SESSION`。
+- `lib/common.sh:kill_pid_file` 已弃用，迁移到 `hook-helpers.sh:pg_stop_bg`（保留 kill_pid_file 作为兼容垫片，打 WARN）。
+
+#### 7.1.9 后台服务生命周期（start / stop）
+
+##### 问题背景
+
+`opencode` 默认 shell 命令 120s 过期，**hook 进程超时被杀**会导致两种后果：
+
+1. 如果 hook 在前台跑业务命令（`mvn spring-boot:run`），超时 → hook 退出 → 业务进程**也挂掉**（无 detach）
+2. 如果 hook 用 `setsid ... &` 启动后台服务，hook 退出后服务**继续运行**，但 `pg-run-hook.py` 的 timeout 仍在等 hook 进程退出 → 误报"超时失败"
+
+第二种情况若 hook 内部 wait_for_port_with_monitor 通过但 hook 进程不退，300s timeout 一到，`pg-run-hook.py:run_command` 会 `proc.kill()`。**幸运的是**：`kill` 只杀 hook 进程本身，已 setsid detach 到新 session 的孙子进程不受影响。
+
+但更干净的做法是让 hook **spawn 后立刻返回**——这就是 fire-and-forget 模式。
+
+##### 协议层：`wait_for_completion`
+
+`pg-run-hook.py` spec 加 `wait_for_completion` 字段（bool，默认 True）：
+
+- `True`（默认）：标准模式。`pg-run-hook.py` `proc.wait(timeout=...)`，超时 `proc.kill()`。
+- `False`：fire-and-forget。`pg-run-hook.py` 等短时间（`min(timeout, 30)` 秒）让 hook 完成 spawn，然后立即 `proc.kill()` 释放 stdio，**不杀孙子进程**（setsid 后已 detach）。
+
+`pg-invoke-hook.py invoke-hook` 默认行为：
+
+| action | `wait_for_completion` | 备注 |
+|---|---|---|
+| `start` | `False`（默认 fire-and-forget） | 服务用 `pg_start_bg` detach 后立即返回 |
+| `stop` / `logs` / `tail` | `True`（强制等完） | 这些 action 必须看 hook 退出码才有意义 |
+| `prepare_env` / `clean_env` | `True`（环境级始终等） | env-level hook 不需要 detach |
+
+CLI override：`--no-wait-for-bg` / `--wait-for-completion`（调试时偶尔需要强制等 start hook）。
+
+##### 框架层：`pg_start_bg` / `pg_stop_bg`
+
+`hook-helpers.sh` 提供两个统一 API，**所有 role-start.sh / role-stop.sh 都应使用**：
+
+```bash
+# pg_start_bg: 后台启动命令, setsid detach, 安全 env 注入, 写 PID
+# 用法: pg_start_bg <log_file> <pid_file> [env_kv ...] -- <cmd ...>
+pg_start_bg() {
+    # 1. 解析 env_kv 与 cmd (-- 分隔符)
+    # 2. mkdir -p log/pid 父目录
+    # 3. setsid env -i "${env_args[@]}" PATH="$PATH" "${cmd[@]}" > log 2>&1 &
+    #    (env -i 清空继承, 只保留 env_kv + PATH; 无 shell 解析, 无注入)
+    #    setsid 不可用时降级 nohup + disown
+    # 4. echo $! > pid_file
+    # 5. sleep 0.1; kill -0 $! 检测立即 crash → return 1
+    # 6. echo PID 给调用方
+}
+```
+
+```bash
+# pg_stop_bg: 优雅关停 PID 文件指向的进程, 取代 lib/common.sh:kill_pid_file
+# 用法: pg_stop_bg <pid_file> <name> [<grace_seconds=5>]
+pg_stop_bg() {
+    # 1. PID 文件不存在 → 静默 skip (幂等)
+    # 2. PID 已死 → 清 stale PID, skip
+    # 3. SIGTERM → 等 grace → SIGKILL
+    # 4. rm -f pid_file
+}
+```
+
+##### hook 层：start / stop 最小骨架
+
+```bash
+# role-backend-start.sh
+backend_pid=$(pg_start_bg \
+    "$LOG_DIR/backend.log" \
+    "$PID_DIR/backend.pid" \
+    "WEBVIRT_KEY=xxx" "SPRING_PROFILE=grpc" -- \
+    mvn spring-boot:run -pl webvirt-bootstrap)
+wait_for_port_with_monitor $BACKEND_PORT "Backend" 60 \
+    "$PID_DIR/backend.pid" "$LOG_DIR/backend.log"
+pg_exit --status=pass
+```
+
+```bash
+# role-backend-stop.sh
+pg_stop_bg "$PID_DIR/backend.pid" "Backend"
+if check_port $BACKEND_PORT; then
+    kill_port $BACKEND_PORT "Backend (residual)"
+fi
+pg_exit --status=pass
+```
+
+##### 例外：systemd-managed 服务
+
+`role-agent-start.sh` / `role-agent-stop.sh` 用 `systemctl start/stop`，**不需要** `pg_start_bg`：
+
+- systemd 本身就把服务 detach 到独立 cgroup，**不可能被父 shell 退出杀掉**
+- `systemctl start` 是 fire-and-forget 命令，立刻返回；后续 `systemctl is-active` 检查状态
+- 这类 hook 应保持现有的 systemctl 调用，**不要**套 `pg_start_bg`
 
 #### 错误 Category 枚举
 

@@ -325,16 +325,14 @@ def _module_action_flow(name: str, cfg: dict, project_root: Path):
         env = {
             "PG_PROJECT_ROOT": str(project_root),
             "PG_SKILLS_PATH": str(find_pg_skills_root(project_root)),
-            "PG_MODULE_ROOT": str(module_root),
-            "PG_MODULE": name,
             "PG_HOOK_TYPE": action_name,
             "PG_LOG_FILE": str(log_dir / f"{name}-{action_name.replace('.', '-')}.log"),
             "PG_RESULT_FILE": str(log_dir / f"{name}-{action_name.replace('.', '-')}.json"),
         }
         print(f"\n--- 执行 {name} / {action_name} ---")
         print(f"    命令: {cmd}")
-        print(f"    workdir: {project_root}")
-        run_shell(cmd, cwd=project_root, timeout=timeout, extra_env=env)
+        print(f"    workdir: {module_root}")
+        run_shell(cmd, cwd=module_root, timeout=timeout, extra_env=env)
         pause()
 
 
@@ -887,13 +885,11 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
         env = {
             "PG_PROJECT_ROOT": str(project_root),
             "PG_SKILLS_PATH": str(find_pg_skills_root(project_root)),
-            "PG_MODULE_ROOT": str(module_root),
-            "PG_MODULE": args.module,
             "PG_HOOK_TYPE": args.action,
             "PG_LOG_FILE": str(log_dir / f"{args.module}-{args.action.replace('.', '-')}.log"),
             "PG_RESULT_FILE": str(log_dir / f"{args.module}-{args.action.replace('.', '-')}.json"),
         }
-        return run_shell(cmd, cwd=project_root, timeout=timeout, extra_env=env)
+        return run_shell(cmd, cwd=module_root, timeout=timeout, extra_env=env)
 
     if args.env and args.action in ("prepare_env", "clean_env"):
         hook = find_invoke_hook(project_root)

@@ -9,7 +9,8 @@
 # 本模板对应 schema 节点:
 #   environments.<env>.roles.<r>.actions.stop.script
 #
-# 由 pg-run-hook.py 调起, 注入 env vars 见 role-start.sh 头部注释.
+# 由 pg-run-hook.py 调起, 注入 env vars 见 SSOT:
+#   .pg/skills/src/runtime/spec/hook-env-vars.yaml
 #
 # 注意: stop 命令应当幂等 (第二次跑无副作用). 常见实现:
 #   pkill -f <process-pattern> || true
@@ -37,13 +38,16 @@ if [[ -f "$HOOK_DIR/lib/common.sh" ]]; then
 fi
 
 # ---- TODO: 替换为本 role 的停止命令 ----
-# 模板默认实现: 从 PID 文件优雅关停 (依赖 lib/common.sh:kill_pid_file, 已 source).
+# 模板默认实现: 从 PID 文件优雅关停 (用 hook-helpers.sh:pg_stop_bg, 已 source).
 # 替换为你环境的实际命令:
-#   例 (Java 后端):     pkill -f 'spring-boot:run|webvirt-bootstrap' || true
-#   例 (前端 vite):     pkill -f 'vite|node.*dev' || true
+#   例 (Java 后端):     pg_stop_bg "$PID_DIR/backend.pid" "Backend"
+#   例 (前端 vite):     pg_stop_bg "$PID_DIR/frontend.pid" "Frontend"
 #   例 (docker compose): docker compose down
 #   例 (远端 systemd):  ssh user@host 'systemctl stop my-app'
-# stop 必须幂等 — 进程不存在时不要 exit 非零.
+# stop 必须幂等 — 进程不存在时不要 exit 非零 (pg_stop_bg 已处理).
+#
+# pg_stop_bg 行为: SIGTERM → 等 grace_seconds (默认 5s) → SIGKILL.
+# 取代 lib/common.sh:kill_pid_file (已弃用).
 
 START=$(date +%s)
 DURATION=$(($(date +%s) - START))

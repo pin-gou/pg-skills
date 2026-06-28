@@ -11,6 +11,7 @@
 #
 # 由 pg-run-hook.py 在 stage 结束时调起 (PG_HOOK_TYPE=clean).
 # 与 prepare_env.sh 配对, 用于收回资源 (停 db / 清临时数据 / 卸容器).
+# 注入 env vars 见 SSOT: .pg/skills/src/runtime/spec/hook-env-vars.yaml
 #
 # 注意: clean_env 命令应当幂等; 跑两次不应当报错.
 #

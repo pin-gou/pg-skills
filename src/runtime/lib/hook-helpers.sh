@@ -10,6 +10,12 @@
 #   pg_exit <args...>      — 显式报告成功, 写 result.json 后 exit 0
 #   pg_fail_on_error <ec> <line>  — trap 兜底, 启发式推断 category
 #   pg_validate_category <name>   — 校验 category 在枚举中
+#   pg_start_bg <log> <pid> [env_kv ...] -- <cmd ...>
+#                             — 后台启动命令, setsid detach + 安全 env 注入
+#                             + 写 PID 文件. 适合 role-start.sh 等长驻服务.
+#   pg_stop_bg <pid_file> <name> [<timeout>]
+#                             — 优雅关停 PID 文件指向的进程 (SIGTERM → SIGKILL).
+#                             取代 lib/common.sh:kill_pid_file.
 
 set -euo pipefail
 
@@ -174,4 +180,122 @@ pg_fail_on_error() {
         --hint="Check ${PG_LOG_FILE:-runtime log} for context" \
         --related-log="${PG_LOG_FILE:-}" \
         --agent-recoverable=true
+}
+
+# ----- pg-start-bg: 后台启动命令, setsid detach -----
+#
+# 用法: pg_start_bg <log_file> <pid_file> [env_kv ...] -- <cmd ...>
+#
+#   log_file   业务日志路径 (pg-run-hook.py 注入的 $LOG_DIR/<role>.log)
+#   pid_file   PID 写出位置 (供 pg_stop_bg / health 复用)
+#   env_kv     KEY=VALUE 形式的 env, 作为 env argv 传递 (无 shell 解析, 无注入风险)
+#   --         分隔符
+#   cmd        要后台执行的命令及其参数
+#
+# 返回: 启动成功 → echo PID (stdout), exit 0
+#       启动失败 → stderr 报错, exit 1
+#
+# 副作用:
+#   - 子进程用 setsid 进入新 session, 父 shell 退出不影响其存活 (避免 opencode
+#     120s shell 超时杀掉服务)
+#   - 使用 env -i 清空所有环境变量, 仅保留 env_kv + PATH (避免泄漏)
+#   - 若 setsid 不可用 (eg. macOS), 降级 nohup + disown
+#   - 写 PID 到 pid_file, 调用方可读
+#   - 短暂 sleep 后检查子进程是否仍存活, 立即 crash 则报错
+#
+# 设计要点:
+#   - 不用 bash sub-shell `export X; export Y; exec cmd` 的写法, 因为 env_kv
+#     走 bash 解析会有空格/元字符注入风险. `env KEY=VALUE ...` argv 模式安全.
+#   - `env -i` 显式清空, 防止父 hook 的环境变量污染子进程. 业务需要的 PATH 必须
+#     在 env_kv 里或显式 PATH="$PATH" 续传 (本函数已保留 PATH).
+pg_start_bg() {
+    local log_file=$1 pid_file=$2
+    shift 2
+
+    local -a env_args=() cmd_args=()
+    while [[ $# -gt 0 && "$1" != "--" ]]; do
+        env_args+=("$1")
+        shift
+    done
+    if [[ "${1:-}" != "--" ]]; then
+        echo "pg_start_bg: missing '--' separator between env_kv and cmd" >&2
+        return 1
+    fi
+    shift
+    cmd_args=("$@")
+    if [[ ${#cmd_args[@]} -eq 0 ]]; then
+        echo "pg_start_bg: empty cmd" >&2
+        return 1
+    fi
+
+    mkdir -p "$(dirname "$log_file")" "$(dirname "$pid_file")"
+
+    local pid
+    if command -v setsid >/dev/null 2>&1; then
+        # setsid: 新 session, 父进程退出不影响.
+        setsid env -i "${env_args[@]}" PATH="$PATH" "${cmd_args[@]}" \
+            > "$log_file" 2>&1 &
+        pid=$!
+    else
+        # 兜底: macOS 等缺 setsid 的环境.
+        nohup env -i "${env_args[@]}" PATH="$PATH" "${cmd_args[@]}" \
+            > "$log_file" 2>&1 &
+        pid=$!
+        disown 2>/dev/null || true
+    fi
+
+    echo "$pid" > "$pid_file"
+
+    # 短暂确认子进程未立即 crash (eg. 命令找不到, 权限拒绝).
+    sleep 0.1
+    if ! kill -0 "$pid" 2>/dev/null; then
+        echo "pg_start_bg: child exited immediately (PID $pid); see $log_file" >&2
+        return 1
+    fi
+
+    echo "$pid"
+}
+
+# ----- pg-stop-bg: 优雅关停 PID 文件指向的进程 -----
+#
+# 用法: pg_stop_bg <pid_file> <name> [<grace_seconds>]
+#
+#   pid_file      PID 文件路径
+#   name          人类可读名 (日志输出用)
+#   grace_seconds SIGTERM 后等待秒数, 0 立即 SIGKILL, 默认 5
+#
+# 行为:
+#   1. PID 文件不存在 → 静默 skip, exit 0 (幂等)
+#   2. PID 文件存在但进程已死 → 清理 stale PID, exit 0
+#   3. 进程存活 → SIGTERM → 等 grace_seconds → SIGKILL
+#
+# 取代 lib/common.sh:kill_pid_file (该函数已弃用, 调用方改用 pg_stop_bg).
+pg_stop_bg() {
+    local pid_file=$1 name=$2
+    local grace_seconds=${3:-5}
+
+    if [[ ! -f "$pid_file" ]]; then
+        echo "$name: no PID file, skip" >&2
+        return 0
+    fi
+    local pid
+    pid=$(cat "$pid_file" 2>/dev/null || echo "")
+    if [[ -z "$pid" ]] || ! kill -0 "$pid" 2>/dev/null; then
+        echo "$name: not running (stale PID file)" >&2
+        rm -f "$pid_file"
+        return 0
+    fi
+    echo "Stopping $name (PID $pid)..."
+    kill "$pid" 2>/dev/null || true
+    local count=0
+    while kill -0 "$pid" 2>/dev/null; do
+        sleep 1
+        count=$((count + 1))
+        if [[ $count -ge "$grace_seconds" ]]; then
+            echo "Force killing $name (PID $pid)..."
+            kill -9 "$pid" 2>/dev/null || true
+            break
+        fi
+    done
+    rm -f "$pid_file"
 }

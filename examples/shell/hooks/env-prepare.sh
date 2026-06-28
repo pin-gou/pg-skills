@@ -10,8 +10,9 @@
 #   environments.<env>.prepare_env.script
 #
 # 由 pg-run-hook.py 在 stage 开始时调起 (PG_HOOK_TYPE=prepare),
-# 注入 env vars 见 role-start.sh 头部 (PG_RUN_CALLER / PG_RUN_SESSION 为环境级时
-# 仍注入; PG_ROLE / PG_INSTANCE_* 为环境级时未注入).
+# 注入 env vars 见 SSOT: .pg/skills/src/runtime/spec/hook-env-vars.yaml
+# (PG_RUN_CALLER / PG_RUN_SESSION 为环境级时仍注入;
+#  PG_ROLE / PG_INSTANCE_* 为环境级时未注入).
 #
 # 用途: 启 db / 跑 migration / 启 cache / 预热数据 —— 一次性准备工作,
 # 跑完 stage 后由 clean_env.sh 收回.

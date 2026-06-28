@@ -1,0 +1,81 @@
+# .pg/skills/src/runtime/spec/hook-env-vars.yaml
+# Hook 协议环境变量 SSOT (v5).
+#
+# 协议边界: 本 SSOT 仅覆盖 environments 维度 (env-level prepare_env/clean_env +
+# per-role start/stop/logs/tail). modules 维度的 build/lint/test 不走 hook 协议,
+# 由 pg-run 直接 cwd=module_root 调用, 不注入任何 PG_* var.
+#
+# 改动本文件前必须同步:
+#   1. .pg/skills/src/runtime/lib/pg-run-hook.py:_PG_ENV_MAP (注入实现)
+#   2. .pg/skills/README.md §7.1.5 (人类阅读版表格)
+#   3. 一致性测试: src/runtime/tests/test_hook_env_vars_ssot.py
+
+version: 5
+scope: environments
+
+# 硬注入: pg-run-hook.py:build_env 必填, 与 spec 无关
+always_injected:
+  - name: PG_PROJECT_ROOT
+    type: path
+    source: find_project_root()
+    description: 项目根路径
+  - name: PG_SKILLS_PATH
+    type: path
+    source: computed
+    description: pg-skills 仓库根
+  - name: PG_RUN_CALLER
+    type: enum
+    source: "$PG_RUNNER_ORIGIN -> 'ad-hoc' (历史 alias, 仍兼容读取)"
+    enum: [pg-build, pg-regression, pg-fix-issue, ad-hoc]
+    description: 调用方身份
+
+# spec 注入: pg-run-hook.py:_PG_ENV_MAP 由 spec.<key> 注入
+spec_injected:
+  - name: PG_RUN_SESSION
+    spec_key: session
+    description: session 名 (与 caller 正交)
+  - name: PG_STAGE
+    spec_key: stage
+    description: 当前 stage 名
+  - name: PG_ENV
+    spec_key: env
+    description: 当前 environment (dev-local / dev-3tier)
+  - name: PG_ROLE
+    spec_key: role
+    scope: per-role
+    description: role 名
+  - name: PG_INSTANCE_NAME
+    spec_key: instance_name
+    scope: per-role
+    description: instance 名
+  - name: PG_INSTANCE_HOST
+    spec_key: instance_host
+    scope: per-role
+    description: instance host
+  - name: PG_HOOK_TYPE
+    spec_key: hook_type
+    description: "hook 类型 (start / stop / logs / tail / prepare_env / clean_env)"
+  - name: PG_HOOK_LOG_DIR
+    spec_key: hook_log_dir
+    description: |
+      预拼日志**目录**(caller × session × env 路由结果, lib/common.sh:pg_resolve_paths 优先信任).
+      用途: hook 内部派生 LOG_DIR/PID_DIR, 写业务日志(如 backend.log / frontend.log)与 PID 文件.
+      区别于 PG_LOG_FILE: PG_HOOK_LOG_DIR 是**目录**,hook 自己决定在目录下放什么文件; PG_LOG_FILE 是**单个文件**,专门承载 hook 自身的 stdout/stderr.
+  - name: PG_LOG_FILE
+    spec_key: log_path
+    description: |
+      hook 自身的 stdout/stderr 目标**文件**路径. 由 pg-run-hook.py 用 tee 模式写.
+      用途: (a) hook 把业务命令输出重定向到这里 (mvn ... > "$PG_LOG_FILE");
+      (b) hook-helpers.sh:pg_fail_on_error trap 从这里 tail 尾部做错误诊断.
+      区别于 PG_HOOK_LOG_DIR: PG_LOG_FILE 是单个文件; PG_HOOK_LOG_DIR 是 hook 自己控制布局的目录.
+  - name: PG_RESULT_FILE
+    spec_key: hook_result_path
+    description: hook 写 result.json 的路径
+
+# 已废弃, 不再注入 (旧 hook 必须改为新名)
+removed:
+  - PG_SKILL_NAME       # 原 1 版本 alias of PG_RUN_CALLER
+  - PG_CHANGE_NAME      # 原 1 版本 alias of PG_RUN_SESSION
+  - PG_RUNNER_ORIGIN    # 原 alias of PG_RUN_CALLER (作为读取源仍存在)
+  - PG_MODULE           # module 维度不进 hook 协议
+  - PG_MODULE_ROOT      # 同上; backend-test.sh 等已废弃

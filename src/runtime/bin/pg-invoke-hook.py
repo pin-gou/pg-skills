@@ -12,7 +12,7 @@ ad-hoc 调用共享. pg-pipeline-runner.py 保留同名子命令 (thin wrapper) 
   * SKILL 之间不再互相依赖 runner 路径
   * 测试可走 subprocess.run 黑盒, 不需 mock sys.argv
 
-v4 协议改造:
+v5 协议 (current):
 - --change → --session (canonical). --change 保留 1 版本作为 deprecated alias.
 - --skill / --caller 硬缺省 'ad-hoc', 任何漏传 caller 的调用都落到 .pg/ad-hoc/.
 - 新增 --log-dir (调试覆盖), --timeout-override (ad-hoc 调试, 输出 WARN).
@@ -61,17 +61,24 @@ Args:
   --log-dir         显式覆盖日志目录 (优先级最高, 用于 agent 调试).
   --timeout-override 覆盖 project.yaml timeout_seconds (ad-hoc 调试, 输出 WARN).
 
-Spec 渲染 (v4):
+Spec 渲染 (v5):
   cmd             = "bash " + shlex.quote(act_cfg["script"]) + (args if any)
   env vars 注入    = PG_RUN_SESSION / PG_RUN_CALLER / PG_STAGE / PG_ENV /
-                    PG_ROLE / PG_INSTANCE_NAME / PG_INSTANCE_HOST / PG_HOOK_TYPE
-                    (PG_SKILL_NAME / PG_CHANGE_NAME 保留 1 版本作为 alias)
+                    PG_ROLE / PG_INSTANCE_NAME / PG_INSTANCE_HOST / PG_HOOK_TYPE /
+                    PG_HOOK_LOG_DIR / PG_LOG_FILE / PG_RESULT_FILE
+                    (完整 SSOT 见 src/runtime/spec/hook-env-vars.yaml)
   timeout_seconds  = act_cfg["timeout_seconds"] (可被 --timeout-override 覆盖)
   log_path        = per-caller 路由 (see pg_log_dir_for_skill):
                     pg-build       -> .pg/changes/<session>/2-build/<env>/logs
                     pg-regression  -> .pg/regression/<session>/<env>/logs
                     pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs
                     ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs
+  wait_for_completion (bool, 默认 start=False / 其他=True):
+                    start action 默认 fire-and-forget, hook 用 pg_start_bg
+                    setsid detach 服务后立即返回, 避免 pg-run-hook.py 的 timeout
+                    误杀 detached 后台服务. stop/logs/tail 强制 True, 必须等
+                    hook 跑完. CLI 可用 --wait-for-completion / --no-wait-for-bg
+                    显式覆盖.
 """
 from __future__ import annotations
 
@@ -134,6 +141,28 @@ CALLER_AD_HOC = "ad-hoc"
 KNOWN_CALLERS = (CALLER_PG_BUILD, CALLER_PG_REGRESSION, CALLER_PG_FIX_ISSUE, CALLER_AD_HOC)
 
 
+def _resolve_wait_for_completion(action: str, cli_value):
+    """Decide wait_for_completion for the spec.
+
+    规则:
+      cli_value is None (用户没传 --no-wait-for-bg / --wait-for-completion):
+          start  → False (默认 fire-and-forget, 服务需要 detach 不被 timeout 杀)
+          其他 → True  (stop/logs/tail 必须等 hook 跑完)
+      cli_value is True  → 强制 True  (用户显式要求等)
+      cli_value is False → 强制 False (用户显式 fire-and-forget)
+
+    Note: stop/logs/tail 即使用户传 --no-wait-for-bg 也按 True 处理 — 这些
+    action 必须等 hook 跑完才有意义 (eg. stop 后 hook 才能写 result.json 报告
+    成功/失败).
+    """
+    if action != "start":
+        # stop / logs / tail: 始终等 hook 完成 (cli_value 忽略)
+        return True
+    if cli_value is None:
+        return False  # start 默认 fire-and-forget
+    return bool(cli_value)
+
+
 def resolve_session(session: str, caller: str) -> str:
     """session 名解析 (v4 协议).
 
@@ -189,7 +218,7 @@ def build_env_level_hook_spec(
     it doesn't collide with role.* action logs.
 
     caller: 调用方身份 (pg-build / pg-regression / pg-fix-issue / ad-hoc).
-            注入为 PG_RUN_CALLER via pg-run-hook.py (PG_SKILL_NAME 作为 1 版本兼容 alias).
+            注入为 PG_RUN_CALLER via pg-run-hook.py.
     """
     rendered_args = []
     for raw in (act_cfg.get("args") or []):
@@ -218,6 +247,7 @@ def build_env_level_hook_spec(
         "hook_log_dir": str(hook_log_dir),
         "hook_result_path": result_path,
         "caller": caller,
+        "wait_for_completion": True,
     }
     return spec
 
@@ -234,8 +264,16 @@ def build_role_hook_spec(
     tail_lines,
     project_root: Path,
     caller: str = CALLER_AD_HOC,
+    wait_for_completion: bool = True,
 ) -> dict:
-    """Build pg-run-hook.py spec for per-role actions (start/stop/logs/tail)."""
+    """Build pg-run-hook.py spec for per-role actions (start/stop/logs/tail).
+
+    wait_for_completion:
+        True  (默认) — 等 hook 进程跑完, 超时则 proc.kill(). 适合 stop/logs/tail.
+        False — fire-and-forget. 适合 start action: hook 用 pg_start_bg 把
+                服务 detach 到新 session 后立即返回, 后台服务不受 pg-run-hook.py
+                timeout 影响. 调用方 (invoke-hook CLI) 对 start action 默认开.
+    """
     rendered_args = []
     for raw in (act_cfg.get("args") or []):
         a = str(raw)
@@ -271,6 +309,7 @@ def build_role_hook_spec(
         "hook_log_dir": str(hook_log_dir),
         "hook_result_path": result_path,
         "caller": caller,
+        "wait_for_completion": wait_for_completion,
     }
     return spec
 
@@ -374,6 +413,20 @@ def invoke_hook_main(argv=None) -> int:
                         help=(
                             "覆盖 project.yaml 的 timeout_seconds (ad-hoc 调试用). "
                             "CLI 显式传时会输出 WARN 提示覆盖值."
+                        ))
+    parser.add_argument("--no-wait-for-bg", dest="wait_for_completion",
+                        action="store_false", default=None,
+                        help=(
+                            "fire-and-forget 模式: hook 用 pg_start_bg setsid detach "
+                            "启动服务后立即返回, 不等子进程完成. start action 默认开, "
+                            "stop/logs/tail 显式 --no-wait-for-bg 无效 (会被忽略, "
+                            "这些 action 必须等 hook 跑完)."
+                        ))
+    parser.add_argument("--wait-for-completion", dest="wait_for_completion",
+                        action="store_true", default=None,
+                        help=(
+                            "强制等待 hook 跑完 (覆盖 start action 的 fire-and-forget 默认). "
+                            "调试时偶尔有用: 想看 hook 自己 exit 前的输出或耗时."
                         ))
 
     # argv layout: caller passes [program_name, "invoke-hook", *flags].
@@ -482,6 +535,7 @@ def invoke_hook_main(argv=None) -> int:
             tail_lines=args.tail_lines,
             project_root=project_root,
             caller=args.caller,
+            wait_for_completion=_resolve_wait_for_completion(args.action, args.wait_for_completion),
         )
 
     # --log-dir 覆盖: 透传 PG_HOOK_LOG_DIR 到 hook (pg-run-hook.py:_PG_ENV_MAP 已映射)

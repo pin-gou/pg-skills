@@ -220,7 +220,7 @@ fi
 
 `test_keys` 是 list，Phase 1 对每个 key 跑一轮（串行），每轮结果分别写入 `$RUN_DIR/temp/{suite}-{test_key}-test-output.log`。
 
-> **为何不通过 `pg-invoke-hook.py` 走 hook 协议**: 测试命令属于 module 维度, 按 `.pg/skills/README.md` §Hook 协议边界, **不**走 `pg-invoke-hook.py`, 直接走 `pg-run-hook.py`（裸 JSON spec 形式）。`pg-invoke-hook.py` 只服务于 environments 维度 (env-level prepare_env/clean_env + per-role start/stop/logs/tail). module 维度的 `modules.<m>.test.<key>` 直接以 `executable_command` 形式渲染为 `timeout N bash -c '<cmd>'`, 仍由 `pg-run-hook.py` 统一执行 + 注入 `PG_SUITE` / `PG_ENV` / `PG_MODULE` / `PG_SKILL_NAME` / `log_path`.
+> **为何不通过 `pg-invoke-hook.py` 走 hook 协议**: 测试命令属于 module 维度, 按 `.pg/skills/README.md` §Hook 协议边界, **不**走 `pg-invoke-hook.py`, 直接走 `pg-run-hook.py`（裸 JSON spec 形式）。`pg-invoke-hook.py` 只服务于 environments 维度 (env-level prepare_env/clean_env + per-role start/stop/logs/tail). module 维度的 `modules.<m>.test.<key>` 直接以 `executable_command` 形式渲染为 `timeout N bash -c '<cmd>'`, 由 `pg-run-hook.py` 统一执行, 注入 `PG_PROJECT_ROOT` / `PG_SKILLS_PATH` / `PG_RUN_CALLER` (硬注入) + `PG_ENV` / `log_path` (spec 注入); module 维度不依赖 `PG_MODULE` / `PG_MODULE_ROOT` 等 module-only 变量.
 
 **runAllCommand 推导规则**（per test_key）：
 
