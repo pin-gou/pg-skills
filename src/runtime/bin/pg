@@ -121,12 +121,26 @@ def create_opencode_symlinks(project_root: Path, pg_skills_root: Path) -> None:
             print(f'  WARN: {src_dir} not found, skip')
             continue
         target_dir.mkdir(parents=True, exist_ok=True)
+
+        current_names = {e.name for e in src_dir.iterdir()}
         for entry in sorted(src_dir.iterdir()):
             link = target_dir / entry.name
-            if link.exists() or link.is_symlink():
+            rel_target = os.path.relpath(entry, start=target_dir)
+            if link.is_symlink():
+                if os.readlink(link) == rel_target:
+                    continue
+                link.unlink()
+            elif link.exists():
                 continue
-            link.symlink_to(entry.resolve())
-            print(f'  - symlink: .opencode/{sub}/{entry.name} → .pg/skills/src/opencode/{sub}/{entry.name}')
+            link.symlink_to(rel_target)
+            print(f'  - symlink: .opencode/{sub}/{entry.name} → {rel_target}')
+
+        for entry in sorted(target_dir.iterdir()):
+            if entry.is_symlink() and entry.name not in current_names:
+                raw = os.readlink(entry)
+                if '.pg/skills' in raw:
+                    entry.unlink()
+                    print(f'  - removed stale: .opencode/{sub}/{entry.name}')
 
 
 def create_pg_run_symlink(project_root: Path) -> None:
