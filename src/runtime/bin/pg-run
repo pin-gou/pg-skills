@@ -359,7 +359,7 @@ def run_env_flow(config: dict, project_root: Path):
         _env_action_flow(env_name, envs[env_name], project_root)
 
 
-def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
+def _run_env_start_all(env_name: str, cfg: dict, project_root: Path, prep_duration: float = 0):
     roles = cfg.get("roles", {})
     if not roles:
         print(f"  {env_name} 没有定义 roles，没有实例可启动")
@@ -369,6 +369,7 @@ def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
     overall_start = time.time()
     results = []
     action_label = "启动"
+    output_prep = prep_duration > 0
 
     for role_name, role_cfg in roles.items():
         instances = role_cfg.get("instances", [])
@@ -422,7 +423,7 @@ def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
             results.append({"role": role_name, "instance": inst["name"],
                            "duration": elapsed, "ok": ok})
 
-    overall_elapsed = time.time() - overall_start
+    overall_elapsed = time.time() - overall_start + prep_duration
     succeeded = sum(1 for r in results if r["ok"])
     failed = len(results) - succeeded
     print()
@@ -433,6 +434,9 @@ def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
     print(_c("1", f"  成功: {succeeded}") + f" | 失败: {failed}")
     if results:
         print("  " + "-" * 40)
+        if output_prep:
+            prep_ok = all(r["ok"] for r in results)
+            print(_c("32", f"  Prepare Environment           {prep_duration:6.1f}s  {'✓' if prep_ok else '✗'}"))
         for r in results:
             color = "32" if r["ok"] else "31"
             sym = "✓" if r["ok"] else "✗"
@@ -573,6 +577,13 @@ def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
             elif orch_id == "prepare_env_and_start":
                 prepare_cfg = cfg.get("prepare_env", {})
                 hook = find_invoke_hook(project_root)
+
+                prep_start = time.time()
+                print()
+                print(_c("1;36", "=" * 60))
+                print(_c("1;33", f"  准备环境: {env_name}"))
+                print(_c("1;36", "=" * 60))
+
                 if hook.is_file():
                     cmd = (
                         f"python3 {shlex.quote(str(hook))} invoke-hook"
@@ -581,18 +592,17 @@ def _env_action_flow(env_name: str, cfg: dict, project_root: Path):
                         f" --session manual"
                     )
                     timeout = prepare_cfg.get("timeout_seconds", 300)
-                    print(f"\n--- 执行 {env_name} / prepare_env ---")
                     rc = run_shell(cmd, cwd=project_root, timeout=timeout)
                 else:
                     cmd, timeout = extract_command(prepare_cfg)
                     if cmd:
-                        print(f"\n--- 执行 {env_name} / prepare_env ---")
                         rc = run_shell(f"bash {shlex.quote(cmd)}", cwd=project_root, timeout=timeout)
                     else:
                         print(f"  {env_name} 没有定义 prepare_env")
                         rc = -1
+                prep_duration = time.time() - prep_start
                 if rc == 0:
-                    _run_env_start_all(env_name, cfg, project_root)
+                    _run_env_start_all(env_name, cfg, project_root, prep_duration=prep_duration)
                     sys.exit(0)
                 else:
                     print("  准备环境失败，跳过启动所有实例")
@@ -786,6 +796,13 @@ def _main_menu_prepare_and_start(config: dict, project_root: Path):
     cfg = config["environments"][env_name]
     prepare_cfg = cfg.get("prepare_env", {})
     hook = find_invoke_hook(project_root)
+
+    prep_start = time.time()
+    print()
+    print(_c("1;36", "=" * 60))
+    print(_c("1;33", f"  准备环境: {env_name}"))
+    print(_c("1;36", "=" * 60))
+
     if hook.is_file():
         cmd = (
             f"python3 {shlex.quote(str(hook))} invoke-hook"
@@ -794,18 +811,17 @@ def _main_menu_prepare_and_start(config: dict, project_root: Path):
             f" --session manual"
         )
         timeout = prepare_cfg.get("timeout_seconds", 300)
-        print(f"\n--- 执行 {env_name} / prepare_env ---")
         rc = run_shell(cmd, cwd=project_root, timeout=timeout)
     else:
         cmd, timeout = extract_command(prepare_cfg)
         if cmd:
-            print(f"\n--- 执行 {env_name} / prepare_env ---")
             rc = run_shell(f"bash {shlex.quote(cmd)}", cwd=project_root, timeout=timeout)
         else:
             print(f"  {env_name} 没有定义 prepare_env")
             rc = -1
+    prep_duration = time.time() - prep_start
     if rc == 0:
-        _run_env_start_all(env_name, cfg, project_root)
+        _run_env_start_all(env_name, cfg, project_root, prep_duration=prep_duration)
         sys.exit(0)
     else:
         print("  准备环境失败，跳过启动所有实例")
