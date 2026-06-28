@@ -154,15 +154,22 @@ def run_command(cmd, merged_env, timeout, log_path, wait_for_completion=True):
             )
 
             def _tee(stream, dest_f, label=""):
-                for line in iter(stream.readline, ""):
-                    if label:
-                        dest_f.write(f"[{label}] {line}")
-                    else:
-                        dest_f.write(line)
-                    dest_f.flush()
-                    sys.stdout.write(line)
-                    sys.stdout.flush()
-                stream.close()
+                try:
+                    for line in iter(stream.readline, ""):
+                        if label:
+                            dest_f.write(f"[{label}] {line}")
+                        else:
+                            dest_f.write(line)
+                        dest_f.flush()
+                        sys.stdout.write(line)
+                        sys.stdout.flush()
+                except ValueError:
+                    pass
+                finally:
+                    try:
+                        stream.close()
+                    except Exception:
+                        pass
 
             threads = []
             for s, label in [(proc.stdout, ""), (proc.stderr, "stderr")]:

@@ -141,26 +141,27 @@ CALLER_AD_HOC = "ad-hoc"
 KNOWN_CALLERS = (CALLER_PG_BUILD, CALLER_PG_REGRESSION, CALLER_PG_FIX_ISSUE, CALLER_AD_HOC)
 
 
-def _resolve_wait_for_completion(action: str, cli_value):
+def _resolve_wait_for_completion(action: str, cli_value, cfg_value=None):
     """Decide wait_for_completion for the spec.
 
-    规则:
-      cli_value is None (用户没传 --no-wait-for-bg / --wait-for-completion):
-          start  → False (默认 fire-and-forget, 服务需要 detach 不被 timeout 杀)
-          其他 → True  (stop/logs/tail 必须等 hook 跑完)
-      cli_value is True  → 强制 True  (用户显式要求等)
-      cli_value is False → 强制 False (用户显式 fire-and-forget)
+    优先级 (高→低):
+      1. cli_value is not None → 用户命令行显式指定 (最高优先)
+      2. cfg_value is not None → YAML 中 action 级的 wait_for_completion 字段
+      3. 默认规则:
+           start  → True (等待服务就绪, 需 fire-and-forget 的调用方显式传 --no-wait-for-bg)
+           其他   → True (stop/logs/tail 必须等 hook 跑完)
 
     Note: stop/logs/tail 即使用户传 --no-wait-for-bg 也按 True 处理 — 这些
     action 必须等 hook 跑完才有意义 (eg. stop 后 hook 才能写 result.json 报告
     成功/失败).
     """
     if action != "start":
-        # stop / logs / tail: 始终等 hook 完成 (cli_value 忽略)
         return True
-    if cli_value is None:
-        return False  # start 默认 fire-and-forget
-    return bool(cli_value)
+    if cli_value is not None:
+        return bool(cli_value)
+    if cfg_value is not None:
+        return bool(cfg_value)
+    return True
 
 
 def resolve_session(session: str, caller: str) -> str:
@@ -535,7 +536,7 @@ def invoke_hook_main(argv=None) -> int:
             tail_lines=args.tail_lines,
             project_root=project_root,
             caller=args.caller,
-            wait_for_completion=_resolve_wait_for_completion(args.action, args.wait_for_completion),
+            wait_for_completion=_resolve_wait_for_completion(args.action, args.wait_for_completion, act_cfg.get("wait_for_completion")),
         )
 
     # --log-dir 覆盖: 透传 PG_HOOK_LOG_DIR 到 hook (pg-run-hook.py:_PG_ENV_MAP 已映射)
