@@ -102,7 +102,7 @@ def print_menu(items: list, back_option: bool = True):
             continue
         label, desc = item
         desc_str = f" — {desc}" if desc else ""
-        print(f"  {num:2d}) {label}{desc_str}")
+        print(f"  {num:2d}) {_c('1;36', label)}{_c('2;37', desc_str) if desc else ''}")
         num += 1
     if back_option:
         print(f"  --------------------")
@@ -149,7 +149,7 @@ def _render_menu(title: str, items: list, current: int, back_option: bool) -> li
         label, desc = item
         desc_str = f" — {desc}" if desc else ""
         marker = ">" if sel_idx == current else " "
-        lines.append(f" {marker} {sel_idx + 1:2d}) {label}{desc_str}")
+        lines.append(f" {marker} {sel_idx + 1:2d}) {_c('1;36', label)}{_c('2;37', desc_str) if desc else ''}")
         sel_idx += 1
     if back_option:
         lines.append(f"  --------------------")
