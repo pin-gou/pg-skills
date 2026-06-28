@@ -207,7 +207,7 @@ def interactive_menu(title: str, items: list, back_option: bool = True) -> str:
             elif raw == b"b" and back_option:
                 return "b"
             elif raw == b"\x03":
-                raise KeyboardInterrupt
+                return "q"
     finally:
         termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
 
@@ -242,7 +242,6 @@ def run_shell(
         print(f"\n!!! 命令超时 (>{timeout}s)")
         return -9
     except KeyboardInterrupt:
-        print("\n!!! 命令被中断")
         return -1
     if proc.returncode == 0:
         print(f"\n✓ 成功 (exit=0)")
@@ -404,11 +403,13 @@ def _run_env_start_all(env_name: str, cfg: dict, project_root: Path):
                     continue
                 args = start_cfg.get("args", []) if isinstance(start_cfg, dict) else []
                 rendered = []
-                for a in args:
-                    a = str(a)
+                for raw_arg in args:
+                    a = str(raw_arg)
                     a = a.replace("{role}", role_name)
                     a = a.replace("{instance.name}", inst["name"])
                     a = a.replace("{instance.host}", inst.get("host", ""))
+                    if a.startswith("{lines:") and a.endswith("}"):
+                        a = a[7:-1]
                     rendered.append(a)
                 cmd = f"bash {shlex.quote(script)} {' '.join(shlex.quote(a) for a in rendered)}"
                 rc = run_shell(cmd, cwd=project_root)
@@ -484,11 +485,13 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path):
                     continue
                 args = stop_cfg.get("args", []) if isinstance(stop_cfg, dict) else []
                 rendered = []
-                for a in args:
-                    a = str(a)
+                for raw_arg in args:
+                    a = str(raw_arg)
                     a = a.replace("{role}", role_name)
                     a = a.replace("{instance.name}", inst["name"])
                     a = a.replace("{instance.host}", inst.get("host", ""))
+                    if a.startswith("{lines:") and a.endswith("}"):
+                        a = a[7:-1]
                     rendered.append(a)
                 cmd = f"bash {shlex.quote(script)} {' '.join(shlex.quote(a) for a in rendered)}"
                 rc = run_shell(cmd, cwd=project_root)
@@ -714,11 +717,13 @@ def _role_action_flow(env_name: str, role_name: str, inst: dict, role_cfg: dict,
             if script:
                 args = act_cfg.get("args", []) if isinstance(act_cfg, dict) else []
                 rendered = []
-                for a in args:
-                    a = str(a)
+                for raw_arg in args:
+                    a = str(raw_arg)
                     a = a.replace("{role}", role_name)
                     a = a.replace("{instance.name}", inst["name"])
                     a = a.replace("{instance.host}", inst.get("host", ""))
+                    if a.startswith("{lines:") and a.endswith("}"):
+                        a = a[7:-1]
                     rendered.append(a)
                 cmd = f"bash {shlex.quote(script)} {' '.join(shlex.quote(a) for a in rendered)}"
                 print(f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / {action_name} ---")

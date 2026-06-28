@@ -185,6 +185,11 @@ def run_command(cmd, merged_env, timeout, log_path, wait_for_completion=True):
                 except subprocess.TimeoutExpired:
                     proc.kill()
                     proc.wait()
+                except KeyboardInterrupt:
+                    proc.kill()
+                    proc.wait()
+                    log_f.write("--- interrupted by user ---\n")
+                    return True, 0
             else:
                 # fire-and-forget: 等 hook 进程完成 spawn 后立即返回
                 spawn_wait = min(timeout, 30)
@@ -234,6 +239,8 @@ def run_command(cmd, merged_env, timeout, log_path, wait_for_completion=True):
                 )
             except subprocess.TimeoutExpired:
                 return False, -9
+            except KeyboardInterrupt:
+                return True, 0
             return result.returncode == 0, result.returncode
         else:
             # fire-and-forget 无 log_path
@@ -292,10 +299,16 @@ def main():
         sys.exit(1)
 
     merged_env = build_env(spec)
-    ok, exit_code = run_command(
-        cmd, merged_env, timeout, log_path,
-        wait_for_completion=wait_for_completion,
-    )
+    try:
+        ok, exit_code = run_command(
+            cmd, merged_env, timeout, log_path,
+            wait_for_completion=wait_for_completion,
+        )
+    except KeyboardInterrupt:
+        result = {"ok": True, "exit_code": 0, "log_path": log_path or "",
+                  "wait_for_completion": wait_for_completion}
+        print(json.dumps(result))
+        sys.exit(0)
 
     # fire-and-forget: hook 被我们主动 kill (-9), 不算失败.
     # 转为 ok=true, exit_code=0 表示"成功 spawn, 后台服务继续运行".

@@ -281,10 +281,19 @@ def build_role_hook_spec(
         a = a.replace("{role}", role)
         a = a.replace("{instance.name}", instance)
         a = a.replace("{instance.host}", instance_host)
+        # Resolve {lines:N} template — use --tail-lines CLI value if given, else extract N
+        if a.startswith("{lines:") and a.endswith("}"):
+            default_lines = a[7:-1]
+            a = str(tail_lines if tail_lines is not None else default_lines)
         rendered_args.append(a)
 
     # Option Y: --tail-lines is appended to hook args list (logs/tail only).
-    if action in ("logs", "tail") and tail_lines is not None:
+    # Only append if we didn't already consume it above (i.e., there was no {lines:N}
+    # template in the YAML args).
+    has_lines_template = any(
+        str(raw).startswith("{lines:") for raw in (act_cfg.get("args") or [])
+    )
+    if action in ("logs", "tail") and tail_lines is not None and not has_lines_template:
         rendered_args.extend(["--tail-lines", str(tail_lines)])
 
     inner_cmd = "bash " + shlex.quote(act_cfg["script"])
@@ -563,12 +572,15 @@ def invoke_hook_main(argv=None) -> int:
         )
         return 2
 
-    proc = subprocess.run(
-        ["python3", str(pg_hook_runner)],
-        input=json.dumps(spec, indent=2),
-        text=True,
-        cwd=str(project_root),
-    )
+    try:
+        proc = subprocess.run(
+            ["python3", str(pg_hook_runner)],
+            input=json.dumps(spec, indent=2),
+            text=True,
+            cwd=str(project_root),
+        )
+    except KeyboardInterrupt:
+        return 0
     return proc.returncode
 
 
