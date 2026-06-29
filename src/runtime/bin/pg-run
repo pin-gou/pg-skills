@@ -151,13 +151,18 @@ def _set_menu_terminal():
     return old
 
 
-def _render_tab_bar(tab_names: list[str], current: int) -> str:
+def _render_tab_bar(
+    tab_names: list[str], current: int, keys: list[str] | None = None
+) -> str:
     parts = []
     for i, name in enumerate(tab_names):
+        label = f" {name} "
+        if keys and i < len(keys):
+            label = f" {keys[i]}){name} "
         if i == current:
-            parts.append(_c("1;7;37", f" {name} "))
+            parts.append(_c("1;7;37", label))
         else:
-            parts.append(f" {name} ")
+            parts.append(label)
     sep = _c("2;37", "│")
     return f" {sep.join(parts)} "
 
@@ -189,6 +194,7 @@ def _tab_menu_loop(
     title: str,
     tab_builders: list[Callable],
     tab_names: list[str] | None = None,
+    tab_keys: list[str] | None = None,
     initial_tab: int = 0,
 ) -> tuple[str, int, int]:
     has_tabs = tab_names is not None and len(tab_names) > 0
@@ -198,7 +204,7 @@ def _tab_menu_loop(
     if not sys.stdin.isatty():
         print_header(title)
         if has_tabs:
-            print(_render_tab_bar(tab_names, current_tab))
+            print(_render_tab_bar(tab_names, current_tab, tab_keys))
         print_menu(items, back_option=back_option)
         choice = get_choice(selectable)
         if choice == "c":
@@ -218,7 +224,7 @@ def _tab_menu_loop(
     try:
         if use_alt_screen:
             sys.stdout.write("\033[?1049h\033[H")
-        tab_bar = _render_tab_bar(tab_names, current_tab) if has_tabs else ""
+        tab_bar = _render_tab_bar(tab_names, current_tab, tab_keys) if has_tabs else ""
         lines = _render_menu(title, items, current, back_option)
         all_lines = ([tab_bar] + lines) if has_tabs else lines
         sys.stdout.write("\n".join(all_lines) + "\n")
@@ -229,6 +235,27 @@ def _tab_menu_loop(
             raw = os.read(fd, 1)
             if not raw:
                 return ("q", current_tab, 0)
+
+            if has_tabs and tab_keys and len(raw) == 1:
+                ch = raw.decode("ascii", errors="ignore").lower()
+                idx = next((i for i, k in enumerate(tab_keys) if k.lower() == ch), -1)
+                if 0 <= idx < len(tab_names):
+                    current_tab = idx
+                    items, back_option = tab_builders[current_tab]()
+                    selectable = sum(1 for item in items if not isinstance(item, str))
+                    current = 0
+                    sys.stdout.write("\033[H\033[J")
+                    tab_bar = (
+                        _render_tab_bar(tab_names, current_tab, tab_keys)
+                        if has_tabs
+                        else ""
+                    )
+                    lines = _render_menu(title, items, current, back_option)
+                    all_lines = ([tab_bar] + lines) if has_tabs else lines
+                    sys.stdout.write("\n".join(all_lines) + "\n")
+                    sys.stdout.flush()
+                    total_lines = len(all_lines) + (2 if has_tabs else 1)
+                    continue
 
             if raw == b"\x1b":
                 seq = b"\x1b"
@@ -255,7 +282,11 @@ def _tab_menu_loop(
                     continue
 
                 sys.stdout.write("\033[H\033[J")
-                tab_bar = _render_tab_bar(tab_names, current_tab) if has_tabs else ""
+                tab_bar = (
+                    _render_tab_bar(tab_names, current_tab, tab_keys)
+                    if has_tabs
+                    else ""
+                )
                 lines = _render_menu(title, items, current, back_option)
                 all_lines = ([tab_bar] + lines) if has_tabs else lines
                 sys.stdout.write("\n".join(all_lines) + "\n")
@@ -284,6 +315,45 @@ def pause():
         input("\n按 Enter 继续...")
     except (EOFError, KeyboardInterrupt):
         print()
+
+
+def _action_label(action_name: str) -> str:
+    mapping = {
+        "start": "启动",
+        "stop": "停止",
+        "logs": "查看日志",
+        "tail": "tail 日志",
+        "prepare_env": "准备环境",
+        "clean_env": "清理环境",
+        "build": "构建",
+        "lint": "静态检查",
+    }
+    if action_name in mapping:
+        return mapping[action_name]
+    if action_name.startswith("test."):
+        return f"测试 ({action_name})"
+    return action_name
+
+
+def _print_exec_stats(action_label: str, results: list[dict]) -> None:
+    if not results:
+        return
+    total = sum(r["duration"] for r in results)
+    succeeded = sum(1 for r in results if r["ok"])
+    failed = len(results) - succeeded
+    print()
+    print(_c("1;36", "=" * 60))
+    print(_c("1;36", f"  {action_label}统计"))
+    print(_c("1;36", "=" * 60))
+    print(f"  总计: {total:.1f}s")
+    print(_c("1", f"  成功: {succeeded}") + f" | 失败: {failed}")
+    print("  " + "-" * 40)
+    for r in results:
+        color = "32" if r["ok"] else "31"
+        sym = "✓" if r["ok"] else "✗"
+        print(_c(color, f"  {r['label']:40s}  {r['duration']:6.1f}s  {sym}"))
+    print(_c("1;36", "=" * 60))
+    print()
 
 
 # ----- 命令执行 -----
@@ -586,7 +656,8 @@ def _pick_env(config: dict) -> str | None:
 
 # ----- 顶栏菜单 -----
 
-TAB_NAMES = ["常用操作", "Environment", "Module", "Instance"]
+TAB_NAMES = ["常用操作", "Environment", "Instance", "Module"]
+TAB_KEYS = ["f", "e", "i", "m"]
 _ACTION_ORDER = ["start", "stop", "logs", "tail"]
 
 
@@ -694,17 +765,34 @@ def _exec_env_action(idx: int, env_name: str, config: dict, project_root: Path):
     action_name = env_actions[idx]
     action_cfg = cfg[action_name]
     hook = find_invoke_hook(project_root)
+    label = f"{env_name} / {action_name}"
+    a_label = _action_label(action_name)
+
+    print()
+    print(_c("1;36", "=" * 60))
+    print(_c("1;33", f"  {a_label}: {label}"))
+    print(_c("1;36", "=" * 60))
+
+    start = time.time()
     if hook.is_file():
         cmd = (
             f"python3 {shlex.quote(str(hook))} invoke-hook"
             f" --env {shlex.quote(env_name)}"
             f" --action {shlex.quote(action_name)} --session manual"
         )
-        run_shell(cmd, cwd=project_root, timeout=action_cfg.get("timeout_seconds", 300))
+        rc = run_shell(
+            cmd, cwd=project_root, timeout=action_cfg.get("timeout_seconds", 300)
+        )
     else:
         cmd, timeout = extract_command(action_cfg)
         if cmd:
-            run_shell(f"bash {shlex.quote(cmd)}", cwd=project_root, timeout=timeout)
+            rc = run_shell(
+                f"bash {shlex.quote(cmd)}", cwd=project_root, timeout=timeout
+            )
+        else:
+            rc = -1
+    elapsed = time.time() - start
+    _print_exec_stats(a_label, [{"label": label, "duration": elapsed, "ok": rc == 0}])
     pause()
 
 
@@ -741,10 +829,20 @@ def _exec_module_action(
             log_dir / f"{module_selected}-{action_name.replace('.', '-')}.json"
         ),
     }
-    print(f"\n--- 执行 {module_selected} / {action_name} ---")
+    label = f"{module_selected} / {action_name}"
+    a_label = _action_label(action_name)
+
+    print()
+    print(_c("1;36", "=" * 60))
+    print(_c("1;33", f"  {a_label}: {label}"))
+    print(_c("1;36", "=" * 60))
     print(f"    命令: {cmd}")
     print(f"    workdir: {module_root}")
-    run_shell(cmd, cwd=module_root, timeout=timeout, extra_env=env)
+
+    start = time.time()
+    rc = run_shell(cmd, cwd=module_root, timeout=timeout, extra_env=env)
+    elapsed = time.time() - start
+    _print_exec_stats(a_label, [{"label": label, "duration": elapsed, "ok": rc == 0}])
     pause()
 
 
@@ -808,6 +906,15 @@ def _run_single_action(
 ):
     actions = role_cfg.get("actions", {})
     hook = find_invoke_hook(project_root)
+    label = f"{env_name} / {role_name} / {inst['name']} / {action_name}"
+    a_label = _action_label(action_name)
+
+    print()
+    print(_c("1;36", "=" * 60))
+    print(_c("1;33", f"  {a_label}: {label}"))
+    print(_c("1;36", "=" * 60))
+
+    start = time.time()
     if hook.is_file():
         cmd = (
             f"python3 {shlex.quote(str(hook))} invoke-hook"
@@ -817,10 +924,7 @@ def _run_single_action(
             f" --action {shlex.quote(action_name)}"
             f" --skill ad-hoc --session manual"
         )
-        print(
-            f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / {action_name} ---"
-        )
-        run_shell(cmd, cwd=project_root)
+        rc = run_shell(cmd, cwd=project_root)
     else:
         act_cfg = actions.get(action_name, {})
         script = act_cfg.get("script") if isinstance(act_cfg, dict) else ""
@@ -836,10 +940,11 @@ def _run_single_action(
                     a = a[7:-1]
                 rendered.append(a)
             cmd = f"bash {shlex.quote(script)} {' '.join(shlex.quote(a) for a in rendered)}"
-            print(
-                f"\n--- 执行 {env_name} / {role_name} / {inst['name']} / {action_name} ---"
-            )
-            run_shell(cmd, cwd=project_root)
+            rc = run_shell(cmd, cwd=project_root)
+        else:
+            rc = -1
+    elapsed = time.time() - start
+    _print_exec_stats(a_label, [{"label": label, "duration": elapsed, "ok": rc == 0}])
     pause()
 
 
@@ -880,19 +985,20 @@ def tabbed_main_menu(config: dict, project_root: Path):
             lambda: (_build_quick_items(), False),
             lambda: (_build_env_items(env_name, config), False),
             lambda: (
-                _build_module_items(env_name, config, module_selected),
-                module_selected is not None,
-            ),
-            lambda: (
                 _build_instance_items(env_name, config, role_selected, inst_selected),
                 role_selected is not None,
+            ),
+            lambda: (
+                _build_module_items(env_name, config, module_selected),
+                module_selected is not None,
             ),
         ]
 
         action, tab_idx, val = _tab_menu_loop(
-            f"pg-run — {env_name}",
+            f"pg-run — {_c('1;33', env_name)}",
             builders,
             tab_names=TAB_NAMES,
+            tab_keys=TAB_KEYS,
             initial_tab=current_tab,
         )
 
@@ -908,9 +1014,9 @@ def tabbed_main_menu(config: dict, project_root: Path):
                 role_selected = None
                 inst_selected = None
         elif action == "b":
-            if current_tab == 2 and module_selected:
+            if current_tab == 3 and module_selected:
                 module_selected = None
-            elif current_tab == 3 and role_selected:
+            elif current_tab == 2 and role_selected:
                 if inst_selected:
                     inst_selected = None
                 else:
@@ -921,14 +1027,6 @@ def tabbed_main_menu(config: dict, project_root: Path):
             elif current_tab == 1:
                 _exec_env_action(val, env_name, config, project_root)
             elif current_tab == 2:
-                if module_selected is None:
-                    names = sorted(module_items(config).keys())
-                    module_selected = names[val]
-                else:
-                    _exec_module_action(
-                        val, env_name, config, project_root, module_selected
-                    )
-            elif current_tab == 3:
                 roles = sorted(
                     config.get("environments", {})
                     .get(env_name, {})
@@ -952,8 +1050,14 @@ def tabbed_main_menu(config: dict, project_root: Path):
                             role_selected,
                             inst_selected,
                         )
-                        inst_selected = None
-                        role_selected = None
+            elif current_tab == 3:
+                if module_selected is None:
+                    names = sorted(module_items(config).keys())
+                    module_selected = names[val]
+                else:
+                    _exec_module_action(
+                        val, env_name, config, project_root, module_selected
+                    )
 
 
 # ----- 非交互模式（CLI flags 直达） -----
