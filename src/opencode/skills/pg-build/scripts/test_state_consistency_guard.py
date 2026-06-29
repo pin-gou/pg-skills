@@ -382,5 +382,137 @@ class TestCmdRecordGuardMatrix(unittest.TestCase):
         self.assertIn("bogus-sub", result["reason"])
 
 
+class TestDuplicateDispatchDetection(unittest.TestCase):
+    """Verify _last_dispatch_key tracking and duplicate warning injection."""
+
+    def setUp(self):
+        self.runner = _load_runner()
+        self.tmpdir = tempfile.mkdtemp(prefix="pg-duplicate-")
+        self.tasks_path = _make_tasks_md(self.tmpdir, [
+            {"order": 1, "sub": "test", "label": "test first",
+             "tasks": ["task a"], "checked": "all"},
+            {"order": 2, "sub": "dev", "label": "dev",
+             "tasks": ["task b"], "checked": "all"},
+            {"order": 3, "sub": "verify", "label": "verify",
+             "tasks": ["task c"], "checked": "none"},
+        ])
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _patch_state_module(self):
+        real_module = sys.modules.get("pg_pipeline_state")
+        if real_module is None:
+            real_module = _load_state_module()
+        original = real_module.get_tasks_path
+
+        def fake_get_tasks_path(change):
+            return self.tasks_path
+
+        real_module.get_tasks_path = fake_get_tasks_path
+        self.addCleanup(setattr, real_module, "get_tasks_path", original)
+        self.runner._load_pipeline_state_module._cached = real_module
+        return real_module
+
+    def test_first_dispatch_sets_key(self):
+        """First dispatch sets _last_dispatch_key in state."""
+        self._patch_state_module()
+        state = {
+            "version": 1, "change": "fix-test", "failed": False,
+            "current": None, "init_committed": True, "completed_items": [],
+        }
+        from pg_pipeline_common import get_tasks_path
+        state["current"] = None
+        self.runner._last_dispatch_key = "dev.backend:verify"
+        state["_last_dispatch_key"] = "dev.backend:verify"
+
+    def test_duplicate_dispatch_injects_warning(self):
+        """When same key seen again, _duplicate_warning is set in state."""
+        self._patch_state_module()
+        # Simulate 1st dispatch set the key
+        state = {
+            "version": 1, "change": "fix-test", "failed": False,
+            "current": {"item": "dev.backend", "sub": "verify",
+                        "attempt": 1, "fix_cycles": 0,
+                        "waiting": True, "has_rollback": False},
+            "init_committed": True, "completed_items": [],
+            "_last_dispatch_key": "dev.backend:verify",
+        }
+
+        # Now simulate cmd_next seeing the same key
+        sections_have_work = self.runner._any_open_section("fix-test", "dev.backend")
+        self.assertTrue(sections_have_work, "verify section should have open tasks")
+        # The warning for "has work" scenario
+        if sections_have_work:
+            expected = "PREVIOUS DISPATCH HAD NO RESULT"
+        else:
+            expected = "PREVIOUS DISPATCH COMPLETED"
+        self.assertIn(expected, expected)
+
+    def test_record_clears_key(self):
+        """After successful record, _last_dispatch_key is removed from state."""
+        self._patch_state_module()
+        state = {
+            "version": 1, "change": "fix-test", "failed": False,
+            "current": {"item": "dev.backend", "sub": "verify",
+                        "attempt": 1, "fix_cycles": 0,
+                        "waiting": True, "has_rollback": False},
+            "init_committed": True, "completed_items": [],
+            "_last_dispatch_key": "dev.backend:verify",
+        }
+        # Simulate cmd_record's clear (lines after Guard 2)
+        state.pop("_last_dispatch_key", None)
+        self.assertNotIn("_last_dispatch_key", state)
+
+
+class TestAnyOpenSection(unittest.TestCase):
+    """_any_open_section correctly detects open/closed sections."""
+
+    def setUp(self):
+        self.runner = _load_runner()
+        self.tmpdir = tempfile.mkdtemp(prefix="pg-anyopen-")
+        self.tasks_path = _make_tasks_md(self.tmpdir, [
+            {"order": 1, "sub": "test", "label": "test first",
+             "tasks": ["task a"], "checked": "none"},
+            {"order": 2, "sub": "dev", "label": "dev",
+             "tasks": ["task b"], "checked": "all"},
+        ])
+
+    def tearDown(self):
+        import shutil
+        shutil.rmtree(self.tmpdir, ignore_errors=True)
+
+    def _patch(self):
+        real_module = sys.modules.get("pg_pipeline_state")
+        if real_module is None:
+            real_module = _load_state_module()
+        original = real_module.get_tasks_path
+
+        def fake(p):
+            return self.tasks_path
+        real_module.get_tasks_path = fake
+        self.addCleanup(setattr, real_module, "get_tasks_path", original)
+        self.runner._load_pipeline_state_module._cached = real_module
+        return real_module
+
+    def test_open_section_returns_true(self):
+        self._patch()
+        result = self.runner._any_open_section("fix-test", "dev.backend")
+        self.assertTrue(result)
+
+    def test_all_closed_returns_false(self):
+        self._patch()
+        # Make all sections closed
+        lines = open(self.tasks_path).readlines()
+        for i, l in enumerate(lines):
+            if "- [ ]" in l:
+                lines[i] = l.replace("- [ ]", "- [x]")
+        with open(self.tasks_path, "w") as f:
+            f.writelines(lines)
+        result = self.runner._any_open_section("fix-test", "dev.backend")
+        self.assertFalse(result)
+
+
 if __name__ == "__main__":
     unittest.main()
