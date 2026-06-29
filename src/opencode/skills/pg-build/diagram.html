@@ -20,6 +20,12 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 #container svg { display: block; margin: 0 auto; }
 #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #7f8c8d; background: #f5f6fa; z-index: 10; transition: opacity .4s; }
 #loading.hidden { opacity: 0; pointer-events: none; }
+#notes { background: #fef9e7; border-top: 2px solid #f39c12; padding: 14px 20px; font-size: 13px; line-height: 1.7; flex-shrink: 0; max-height: 260px; overflow-y: auto; }
+#notes h2 { font-size: 14px; color: #e67e22; margin-bottom: 6px; }
+#notes code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+#notes table { border-collapse: collapse; margin: 4px 0; font-size: 12px; }
+#notes th, #notes td { border: 1px solid #ddd; padding: 4px 10px; text-align: left; }
+#notes th { background: #f5f0e1; }
 </style>
 </head>
 <body>
@@ -39,139 +45,87 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 <div id="container">
   <div id="loading">渲染中…</div>
   <pre id="mermaidSrc" style="display:none;">
+%%{init: {'flowchart': {'htmlLabels': true, 'useMaxWidth': false}}}%%
 flowchart TB
-    classDef stage fill:#e8f4f8,stroke:#2980b9,stroke-width:2px
-    classDef dispatch fill:#d5f5e3,stroke:#27ae60,stroke-width:1px
-    classDef deploy fill:#fef9e7,stroke:#f39c12,stroke-width:1px
+    classDef init fill:#e8f4f8,stroke:#2980b9,stroke-width:2px
+    classDef phase fill:#fef9e7,stroke:#f39c12,stroke-width:1px
+    classDef track fill:#d5f5e3,stroke:#27ae60,stroke-width:1px
+    classDef sub fill:#eaf2f8,stroke:#5dade2,stroke-width:1px
     classDef gate fill:#fdedec,stroke:#e74c3c,stroke-width:1px
     classDef loop fill:#f4ecf7,stroke:#8e44ad,stroke-width:1px
     classDef done fill:#d5f5e3,stroke:#1e8449,stroke-width:3px
     classDef fail fill:#fadbd8,stroke:#c0392b,stroke-width:3px
 
-    START([Start]) --> INIT[Feature Branch + Init Commit]
-    INIT --> DETECT{any active change?}
-    DETECT -->|no| EXIT([Exit])
-    DETECT -->|yes| NEXT($RUNNER next)
+    START([Start]) --> BOOT["Init Bootstrap"]:::init
+    BOOT --> S1["migrate_legacy_state: 创建 2-build/ 目录"]:::init
+    S1 --> S2["_ensure_context_chain: 写 context-chain.md"]:::init
+    S2 --> S3["_ensure_feature_branch: 切到 feat/pg/{change}"]:::init
+    S3 --> S4["_maybe_bootstrap_init_commit: git add -A + commit"]:::init
+    S4 --> DETECT{"pipeline_detect<br/>按 pipeline.order 扫描 tasks.md"}
 
-    NEXT --> STAGE1_B
+    DETECT -->|"ALL_COMPLETED"| FINAL_GATE_ENTRY
+    DETECT -->|"phase: 环境hook/simple"| EXEC_PHASE["execute_phase<br/>直接运行/派 simple agent"]:::phase
+    DETECT -->|"track: 首个未完成sub"| TDVG_ENTRY
 
-    subgraph STAGE1[Stage 1: dev-isolated - 顺序执行]
-        STAGE1_H[requires_deployment: false]:::stage
+    EXEC_PHASE --> PHASE_OK{"成功?"}
+    PHASE_OK -->|"yes"| MARK_PHASE["mark completed<br/>更新 completed_items"]:::phase
+    PHASE_OK -->|"no + prepare_env"| TERMINATE(["workflow_failed"]):::fail
+    PHASE_OK -->|"no + clean_env"| WARN_ADVANCE["print warn + 继续"]:::phase
+    PHASE_OK -->|"no + simple fail"| TERMINATE
+    PHASE_OK -->|"no + simple continue_all"| WARN_ADVANCE
+    MARK_PHASE --> DETECT
+    WARN_ADVANCE --> DETECT
 
-        STAGE1_B[Track: backend]:::dispatch --> S1_B_TD[test -> dev]:::dispatch
-        S1_B_TD --> S1_B_V{verify}:::dispatch
-        S1_B_V -->|PROCEED| S1_B_G[gate]:::gate
-        S1_B_V -->|ESCALATE| S1_B_F[fix]:::dispatch
-        S1_B_F --> S1_B_TD
-        S1_B_G -->|PASS| STAGE1_A
-        S1_B_G -->|FAIL| S1_B_GF[gate-fix]:::loop
-        S1_B_GF --> S1_B_TD
-        S1_B_F -.->|over max_fix_retries| S1_B_G
+    subgraph TDVG["Track: 四阶段 TDVG 循环"]
+        TDVG_ENTRY --> SUB_TEST["sub=test<br/>agent: pg-build/test"]:::sub
+        SUB_TEST -->|"record completed"| SUB_DEV["sub=dev<br/>agent: pg-build/dev"]:::sub
+        SUB_TEST -->|"record failed"| RETRY_TEST["未超 max_fail_retries?"]:::loop
+        RETRY_TEST -->|"是"| SUB_TEST
+        RETRY_TEST -->|"否"| TERMINATE
 
-        STAGE1_A[Track: agent]:::dispatch --> S1_A_TD[test -> dev]:::dispatch
-        S1_A_TD --> S1_A_V{verify}:::dispatch
-        S1_A_V -->|PROCEED| S1_A_G[gate]:::gate
-        S1_A_V -->|ESCALATE| S1_A_F[fix]:::dispatch
-        S1_A_F --> S1_A_TD
-        S1_A_G -->|PASS| STAGE1_F
-        S1_A_G -->|FAIL| S1_A_GF[gate-fix]:::loop
-        S1_A_GF --> S1_A_TD
-        S1_A_F -.->|over max_fix_retries| S1_A_G
+        SUB_DEV -->|"record completed"| SUB_VERIFY["sub=verify<br/>agent: pg-build/verify"]:::sub
+        SUB_DEV -->|"record failed"| RETRY_DEV["未超 max_fail_retries?"]:::loop
+        RETRY_DEV -->|"是"| SUB_DEV
+        RETRY_DEV -->|"否"| TERMINATE
 
-        STAGE1_F[Track: frontend]:::dispatch --> S1_F_TD[test -> dev]:::dispatch
-        S1_F_TD --> S1_F_V{verify}:::dispatch
-        S1_F_V -->|PROCEED| S1_F_G[gate]:::gate
-        S1_F_V -->|ESCALATE| S1_F_F[fix]:::dispatch
-        S1_F_F --> S1_F_TD
-        S1_F_G -->|PASS| S1_ALL{all PASS?}
-        S1_F_G -->|FAIL| S1_F_GF[gate-fix]:::loop
-        S1_F_GF --> S1_F_TD
-        S1_F_F -.->|over max_fix_retries| S1_F_G
+        SUB_VERIFY -->|"record completed (PROCEED)"| SUB_GATE["sub=gate<br/>agent: pg-build/gate"]:::sub
+        SUB_VERIFY -->|"record escalate"| FIX_CYCLE["fix_cycles 未超<br/>MAX_FIX_CYCLES (4)?"]:::loop
+        FIX_CYCLE -->|"是"| SUB_FIX["sub=fix<br/>agent: pg-build/fix"]:::sub
+        SUB_FIX -->|"record completed"| SUB_VERIFY
+        SUB_FIX -->|"record failed"| RETRY_FIX["未超 max_fail_retries?"]:::loop
+        RETRY_FIX -->|"是"| SUB_FIX
+        RETRY_FIX -->|"否"| TERMINATE
+        FIX_CYCLE -->|"否 (耗尽)"| SUB_GATE
 
-        S1_ALL -->|yes| S1_NEXT[to Stage 2]
+        SUB_GATE -->|"record pass"| TRACK_DONE{{"track 完成<br/>加入 completed_items"}}:::done
+        SUB_GATE -->|"record fail"| GATE_FIX["gate_cycles 未超<br/>max_gate_fix_retries?"]:::loop
+        GATE_FIX -->|"yes"| SUB_FIX_GATE["sub=fix-gate<br/>agent: pg-build/fix-gate"]:::sub
+        SUB_FIX_GATE -->|"record completed"| SUB_VERIFY
+        SUB_FIX_GATE -->|"record failed"| RETRY_FIX_GATE["未超 max_fail_retries?"]:::loop
+        RETRY_FIX_GATE -->|"yes"| SUB_FIX_GATE
+        RETRY_FIX_GATE -->|"no"| TERMINATE
+        GATE_FIX -->|"no (耗尽)"| GAP_ACCEPT["接受 gap 到 known-issues.md<br/>继续推进 pipeline"]:::loop
+        GAP_ACCEPT --> TRACK_DONE
     end
 
-    S1_NEXT --> STAGE2
+    TRACK_DONE --> DETECT
 
-    subgraph STAGE2[Stage 2: dev-mock-integration - 顺序执行]
-        STAGE2_H[requires_deployment: true]:::stage
-
-        S2_D[deploy backend role<br/>backend.start + health]:::deploy
-
-        S2_B[Track: backend]:::dispatch --> S2_B_TD[test -> dev<br/>+ mock test]:::dispatch
-        S2_B_TD --> S2_B_V{verify}:::dispatch
-        S2_B_V -->|PROCEED| S2_B_G[gate]:::gate
-        S2_B_V -->|ESCALATE| S2_B_F[fix]:::dispatch
-        S2_B_F --> S2_B_TD
-        S2_B_G -->|PASS| S2_D2
-        S2_B_G -->|FAIL| S2_B_GF[gate-fix]:::loop
-        S2_B_GF --> S2_B_TD
-        S2_B_F -.->|over max_fix_retries| S2_B_G
-
-        S2_D2[deploy agent role<br/>agent.start + health]:::deploy
-
-        S2_A[Track: agent]:::dispatch --> S2_A_TD[test -> dev<br/>+ mock test]:::dispatch
-        S2_A_TD --> S2_A_V{verify}:::dispatch
-        S2_A_V -->|PROCEED| S2_A_G[gate]:::gate
-        S2_A_V -->|ESCALATE| S2_A_F[fix]:::dispatch
-        S2_A_F --> S2_A_TD
-        S2_A_G -->|PASS| S2_D3
-        S2_A_G -->|FAIL| S2_A_GF[gate-fix]:::loop
-        S2_A_GF --> S2_A_TD
-        S2_A_F -.->|over max_fix_retries| S2_A_G
-
-        S2_D3[deploy frontend role<br/>frontend.start + health]:::deploy
-
-        S2_F[Track: frontend]:::dispatch --> S2_F_TD[test -> dev<br/>+ mock test]:::dispatch
-        S2_F_TD --> S2_F_V{verify}:::dispatch
-        S2_F_V -->|PROCEED| S2_F_G[gate]:::gate
-        S2_F_V -->|ESCALATE| S2_F_F[fix]:::dispatch
-        S2_F_F --> S2_F_TD
-        S2_F_G -->|PASS| S2_ALL{all PASS?}
-        S2_F_G -->|FAIL| S2_F_GF[gate-fix]:::loop
-        S2_F_GF --> S2_F_TD
-        S2_F_F -.->|over max_fix_retries| S2_F_G
-
-        S2_ALL -->|yes| S2_STOP[stop roles]:::deploy
-    end
-
-    S2_STOP --> S3_NEXT[to Stage 3]
-
-    subgraph STAGE3[Stage 3: real-integration]
-        STAGE3_H[requires_deployment: true<br/>environment: dev-3tier]:::stage
-
-        S3_D[deploy all roles<br/>backend.start frontend.start agent.start]:::deploy
-
-        S3_V{verify<br/>E2E test}:::dispatch
-
-        S3_D --> S3_V
-        S3_V -->|PROCEED| S3_G[gate]:::gate
-        S3_V -->|ESCALATE| S3_F[fix]:::dispatch
-        S3_F --> S3_V
-        S3_G -->|PASS| S3_OK(( ))
-        S3_G -->|FAIL| S3_GF[gate-fix]:::loop
-        S3_GF --> S3_V
-        S3_F -.->|over max_fix_retries| S3_G
-    end
-
-    S3_OK --> S3_STOP[stop all roles + cleanup]:::deploy
-
-    S3_STOP --> FG[final-gate<br/>cross-track review]:::gate
-    FG -->|PASS| ARC[auto archive<br/>changes -> archive/]:::done
-    FG -->|FAIL| KI[known-issues.md<br/>manual intervention]:::fail
-    ARC --> DONE([DONE]):::done
-    KI --> WFF([workflow_failed]):::fail
-
-    subgraph LEGEND[图例]
-        L1[stage box]:::stage
-        L2[agent dispatch]:::dispatch
-        L3[deploy action]:::deploy
-        L4[gate review]:::gate
-        L5[fix loop]:::loop
-        L6[success]:::done
-        L7[failure]:::fail
-    end
+    FINAL_GATE_ENTRY["进入 final-gate"]:::gate
+    FINAL_GATE_ENTRY --> FG_DISPATCH["dispatch_final_gate<br/>agent: pg-build/gate"]:::gate
+    FG_DISPATCH -->|"record pass"| FG_PASS{"archive 成功?"}:::gate
+    FG_PASS -->|"yes"| ARCHIVE_OK["auto-archive<br/>changes/archive/ + git commit"]:::done
+    FG_PASS -->|"no"| ARCHIVE_FAIL["auto-archive 失败<br/>done 仍返回 (archive.failed=true)"]:::done
+    ARCHIVE_OK --> DONE(["DONE"]):::done
+    ARCHIVE_FAIL --> DONE
+    FG_DISPATCH -->|"record fail"| WFF(["workflow_failed"]):::fail
   </pre>
+</div>
+
+<div id="notes">
+  <h2>判定条件说明（基于实际代码实现）</h2>
+  <p><strong>Pipeline 顺序</strong>：由 <code>get_pipeline_order()</code> 从 config.yaml <code>stages[].tracks</code> 生成。当前配置只有 <code>dev</code> stage（tracks: backend → agent → openapi-gen → frontend 顺序执行）。每个 track 内按 test → dev → verify → gate 依次推进。</p>
+  <p><strong>Phase 项</strong>：<code>prepare_env</code>/<code>clean_env</code> 环境生命周期 hook + <code>type: simple</code> track 不走 TDVG，由 <code>_execute_phase()</code> 直接运行命令或派 <code>pg-build/simple</code> agent 执行。</p>
+  <p><strong>Final Gate</strong>：所有 pipeline item 完成后进入，agent 检查跨 track 依赖项（design.md 🆕 标记）→ PASS 则 auto-archive + done，FAIL 则 <code>workflow_failed</code>。</p>
 </div>
 
 <script>
