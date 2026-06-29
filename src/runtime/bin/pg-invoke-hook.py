@@ -23,7 +23,7 @@ v5 协议 (current):
     ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs
 
 顶级 subcommands:
-- invoke-hook — 触发 role action (start/stop/logs/tail) 或 env-level hook
+- invoke-hook — 触发 role action (start/stop/restart/logs/tail/health_check) 或 env-level hook
   (prepare_env/clean_env). 内部反查 project.yaml, 渲染 spec, 调 pg-run-hook.py.
 - status     — 透传 prepare_env 状态查询到 pg-pipeline-runner.py
   prepare-env-status 子命令 (stdout JSON 透传, exit code 透传).
@@ -31,7 +31,7 @@ v5 协议 (current):
 
 支持的动作 (仅 invoke-hook):
 - per-role (需 --role + --instance):
-  * start / stop / logs / tail
+  * start / stop / restart / logs / tail / health_check
 - env-level (忽略 --role/--instance):
   * prepare_env / clean_env
 
@@ -271,7 +271,7 @@ def build_role_hook_spec(
     caller: str = CALLER_AD_HOC,
     wait_for_completion: bool = True,
 ) -> dict:
-    """Build pg-run-hook.py spec for per-role actions (start/stop/logs/tail).
+    """Build pg-run-hook.py spec for per-role actions (start/stop/restart/logs/tail/health_check).
 
     wait_for_completion:
         True  (默认) — 等 hook 进程跑完, 超时则 proc.kill(). 适合 stop/logs/tail.
@@ -343,7 +343,7 @@ def _load_yaml():
 
 
 def invoke_hook_main(argv=None) -> int:
-    """LLM-facing entry point for triggering role actions (start/stop/logs/tail)
+    """LLM-facing entry point for triggering role actions (start/stop/restart/logs/tail/health_check)
     and environment-level hooks (prepare_env/clean_env).
 
     Resolves the action in project.yaml, renders args (with
@@ -361,7 +361,7 @@ def invoke_hook_main(argv=None) -> int:
     parser = argparse.ArgumentParser(
         prog="pg-invoke-hook.py invoke-hook",
         description=(
-            "Trigger a role action (start/stop/logs/tail) or env-level hook "
+            "Trigger a role action (start/stop/restart/logs/tail/health_check) or env-level hook "
             "(prepare_env/clean_env) via pg-run-hook.py. Used by SKILL "
             "orchestrators (pg-build / pg-fix-issue / pg-regression) and by "
             "agent ad-hoc / pg-run manual calls. NOT part of any pipeline state "
@@ -387,7 +387,7 @@ def invoke_hook_main(argv=None) -> int:
     parser.add_argument("--role", required=False,
                         help=(
                             "role name (backend/frontend/agent). Required "
-                            "for per-role actions (start/stop/logs/tail); "
+                            "for per-role actions (start/stop/restart/logs/tail/health_check); "
                             "ignored for environment-level actions "
                             "(prepare_env/clean_env)."
                         ))
@@ -399,10 +399,11 @@ def invoke_hook_main(argv=None) -> int:
                             "environment-level actions."
                         ))
     parser.add_argument("--action", required=True,
-                        choices=["start", "stop", "logs", "tail",
+                        choices=["start", "stop", "restart", "logs", "tail",
+                                 "health_check",
                                  "prepare_env", "clean_env"],
                         help=(
-                            "action to trigger. start/stop/logs/tail are "
+                            "action to trigger. start/stop/restart/logs/tail/health_check are "
                             "per-role lifecycle actions (require --role and "
                             "--instance); prepare_env/clean_env are "
                             "environment-level lifecycle hooks (ignore "
@@ -509,7 +510,7 @@ def invoke_hook_main(argv=None) -> int:
             caller=args.caller,
         )
     else:
-        # Per-role lifecycle action (start / stop / logs / tail).
+        # Per-role lifecycle action (start / stop / restart / logs / tail / health_check).
         if args.role not in (env_cfg.get("roles") or {}):
             sys.stderr.write(
                 f"Error: role '{args.role}' not defined in environments.{args.env}.roles\n"

@@ -156,14 +156,15 @@ metadata:
 
 **生成步骤**：
 
-1. 遍历 `environments.<env>.roles`，对每个 role 的 `actions.start` / `actions.stop` / `actions.restart`（含其它 lifecycle action），生成 `.pg/hooks/<role>-<action>.sh`。
+1. 遍历 `environments.<env>.roles`，对每个 role 的 `actions.start` / `actions.stop` / `actions.restart` / `actions.health_check`（声明才生成，含其它 lifecycle action），生成 `.pg/hooks/<role>-<action>.sh`。
+   - **health_check 是 opt-in**：仅当 `environments.<env>.roles.<r>.actions.health_check` 字段存在时才生成 `.pg/hooks/role-<r>-health-check.sh`，避免项目没有健康检查需求时被强加。
 2. 遍历 `environments.<env>.prepare_env` / `clean_env`，生成 `.pg/hooks/prepare_env.sh` / `.pg/hooks/clean_env.sh`（如声明）。
 2.5. 复制 SSOT 公共库（与模板同源）：
    - 源：`.pg/skills/examples/shell/hooks/lib/common.sh`
    - 目标：`.pg/hooks/lib/common.sh`
    - 作用：模板头部条件 `source lib/common.sh` + `pg_resolve_paths` 才能找到目标；`pg_resolve_paths` 优先信任 `PG_HOOK_LOG_DIR`（由 `pg-invoke-hook.py` 预拼），fallback 时按 `PG_RUN_CALLER + PG_RUN_SESSION + PG_ENV` 自拼（v5 caller × session 双维度路由）
        - 跳过此步：生成的 hook 仍能工作（走 `$PG_LOG_FILE`），但 pg-regression / pg-fix-issue 日志会回落到 `scripts/logs`，不写到预期的 `.pg/regression/` / `.pg/fix-issue/` 目录
-3. 模板来源：从 `.pg/skills/examples/shell/hooks/role-<action>.sh` 复制并替换 TODO 块；env 级模板从 `env-prepare.sh` / `env-clean.sh` 复制。模板依赖 `pg-run-hook.py` 注入的 PG_* env vars（v5 SSOT 见 `.pg/skills/src/runtime/spec/hook-env-vars.yaml`）。
+3. 模板来源：从 `.pg/skills/examples/shell/hooks/role-<action>.sh` 复制并替换 TODO 块；env 级模板从 `env-prepare.sh` / `env-clean.sh` 复制。health_check 模板从 `role-health-check.sh` 复制（**不含 TODO 块，是已实例化的最终形态**），仅在 §1 检测到 `actions.health_check` 字段时生成。模板依赖 `pg-run-hook.py` 注入的 PG_* env vars（v5 SSOT 见 `.pg/skills/src/runtime/spec/hook-env-vars.yaml`）。
 4. chmod 755。
 5. **不**改 trap / `pg_fail` / `pg_exit` 调用——hook 协议是 SSOT。
 

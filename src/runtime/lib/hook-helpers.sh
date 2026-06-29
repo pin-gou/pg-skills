@@ -299,3 +299,70 @@ pg_stop_bg() {
     done
     rm -f "$pid_file"
 }
+
+# ----- pg-http-health-check: HTTP 探针 (用于 backend / frontend) -----
+#
+# 用法: pg_http_health_check <role> <instance_name> <host> <port> <path>
+#
+#   role           角色名 (仅用于日志)
+#   instance_name  实例名 (仅用于日志)
+#   host           目标 host
+#   port           目标端口
+#   path           HTTP path (e.g. /actuator/health, /)
+#
+# 行为:
+#   用 curl 探测 http://${host}:${port}${path}, 期望收到任意 HTTP 状态码
+#   (含 404/401, 只要不是 000=连接失败).
+#
+# 返回:
+#   0 → 探针成功 (收到 HTTP 响应)
+#   1 → 探针失败 (连接失败 / 超时 / DNS 错误)
+#
+# 注意:
+#   - 不强制要求 200 OK, 因为 /actuator/health 可能因为权限/认证返回 401/403,
+#     但只要服务进程在响应就算"就绪". 业务级健康检查由 backend 自己暴露.
+#   - timeout 10s, 不挂起 health_check hook (hook 默认 30s 超时).
+pg_http_health_check() {
+    local role="$1" instance_name="$2" host="$3" port="$4" path="${5:-/}"
+    local url="http://${host}:${port}${path}"
+    local http_code
+
+    echo "pg_http_health_check: probing $url (role=$role instance=$instance_name)" >&2
+    http_code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 10 "$url" 2>/dev/null || echo "000")
+    # curl 在连不上时会输出 "000" 到 stdout, 但 || echo "000" 又叠加一次导致 "000000".
+    # 取最后 3 位即可 (避免 OR-fallback 副作用).
+    http_code="${http_code: -3}"
+    if [[ "$http_code" == "000" ]]; then
+        echo "pg_http_health_check: FAILED — cannot connect to $url" >&2
+        return 1
+    fi
+    echo "pg_http_health_check: OK — $url returned HTTP $http_code" >&2
+    return 0
+}
+
+# ----- pg-tcp-health-check: TCP 端口探针 (用于 agent / gRPC 服务) -----
+#
+# 用法: pg_tcp_health_check <role> <instance_name> <host> <port>
+#
+# 行为:
+#   用 /dev/tcp 直接 connect, 不发任何 payload (适合 gRPC binary protocol).
+#
+# 返回:
+#   0 → 端口 LISTEN
+#   1 → 连接失败
+#
+# 注意:
+#   - 仅检查 TCP 层可达, 不验证 gRPC 业务层. 业务级就绪由 agent 自行
+#     通过 handshake 上报到 backend.
+#   - timeout 5s (bash /dev/tcp 不支持原生 timeout, 用 timeout wrapper)
+pg_tcp_health_check() {
+    local role="$1" instance_name="$2" host="$3" port="$4"
+
+    echo "pg_tcp_health_check: probing ${host}:${port} (role=$role instance=$instance_name)" >&2
+    if timeout 5 bash -c "exec 3<>/dev/tcp/${host}/${port}" 2>/dev/null; then
+        echo "pg_tcp_health_check: OK — ${host}:${port} is listening" >&2
+        return 0
+    fi
+    echo "pg_tcp_health_check: FAILED — cannot connect to ${host}:${port}" >&2
+    return 1
+}

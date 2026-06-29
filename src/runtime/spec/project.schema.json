@@ -189,7 +189,7 @@
         },
         "actions": {
           "type": "object",
-          "description": "per-role lifecycle actions: start / stop / restart / deploy. runner 在 environment.required=true 的阶段调用.",
+          "description": "per-role lifecycle actions: start / stop / restart / deploy / health_check / logs / tail. runner 在 environment.required=true 的阶段调用, agent 通过 pg-invoke-hook.py --caller pg-agent 触发.",
           "additionalProperties": { "$ref": "#/definitions/action" }
         }
       }
