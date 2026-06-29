@@ -164,6 +164,7 @@ while true; do
     "dispatch")         → 传 dispatch_file 路径给 sub-agent（见「派送 sub-agent」节）→ record
     "dispatch_fix")     → 同上（runner 已把 `context.verify_report_path` 注入 dispatch_file，fix agent 自行读源 verify 报告）
     "dispatch_final_gate") → 同上（runner 已把 final-gate 审计上下文写进 dispatch_file）
+    "error") → 打印 ACTION.reason 和 ACTION.fix_hint 给用户 → 询问如何处理（手动修复 / 删除 state.json 从头开始 / 终止）→ 不自动重试
     "phase_result")
       缓存 ACTION.environment 信息（name / config / instances）
       if $ACTION.terminate == true:
@@ -426,6 +427,7 @@ Task(
 | done | 输出摘要报告 → 加载 pg-verify-and-merge SKILL 继续执行（自动合并验证） |
 | workflow_failed | 输出失败报告 → break |
 | phase_result | 缓存环境信息；如 `terminate==true` 则输出失败报告 → break；否则 `$RUNNER record completed` |
+| **error** (新) | 输出 `reason` + `fix_hint` 给用户，询问如何处理（手动修复 state / 跳过 / 终止）；不自动重试 |
 
 > record 命令调用 `$RUNNER record ...` 时，bash tool timeout 必须使用最近一次 `next` 或 `record` 响应中的 `next_call_timeout_seconds` 值，防止长时间运行的 phase 脚本被默认 120s 超时提前杀死。
 
@@ -440,6 +442,44 @@ Task(
 | fix 完成 | `$RUNNER record <change> completed "" "<summary>"` |
 
 注意：summary/outputs/issues 字段用双引号包裹，换行符用空格替代，确保作为单个 CLI 参数传递。
+
+#### record status 与 sub 强制对应表（runner 入口会拒绝越界调用）
+
+**从 v3.4 起**，runner 在 `cmd_record` 入口加了 sub-status 语义守卫：LLM 用错 record status（比如 verify 完成后调 `record pass`）会**立即**返回 `action: error, fatal: false`，并附带 `reason` + `fix_hint`，**不会污染 state**。
+
+| 当前 sub | 允许的 record status | 拒绝调用的 status |
+|----------|---------------------|-------------------|
+| test     | completed, failed   | pass, fail, escalate |
+| dev      | completed, failed   | pass, fail, escalate |
+| verify   | completed, escalate, failed | pass, fail |
+| fix      | completed, failed   | pass, fail, escalate |
+| fix-gate | completed, failed   | pass, fail, escalate |
+| gate     | pass, fail          | completed, failed, escalate |
+| simple   | completed, failed   | pass, fail, escalate |
+
+**常见错误**（regression: 2026-06-29 `fix-upgrade-download-url-libvirt-missing` 教训）：
+
+- ❌ verify 报告 PROCEED → `record pass`（会让 runner 把 tasks.md §4 gate 误勾为完成，导致 §3 verify 永远不被 mark → 无限循环派遣 verify）
+- ✅ verify 报告 PROCEED → `record completed`
+- ❌ gate 报告通过 → `record completed`
+- ✅ gate 报告通过 → `record pass`
+- ❌ verify 报告需要 fix → `record failed`
+- ✅ verify 报告需要 fix → `record escalate`
+
+#### state ↔ tasks.md 一致性守卫（v3.4+）
+
+runner 在 `cmd_record` 和 `cmd_next` 入口都会校验 **state vs tasks.md 一致性**。如果检测到漂移（如 state 说 sub=verify 但 tasks.md §4 gate 才是第一个未完成 section），返回 `action: error` + `drift_kind`：
+
+| drift_kind | 含义 | 推荐处理 |
+|------------|------|---------|
+| `sub_drift` | state["current"]["sub"] 与 tasks.md 第一个未完成 section 不一致 | 检查是否上一步用错 record 命令；用 `pg-pipeline-state.py rollback <track>` 回滚错误勾选 |
+| `track_in_completed_but_section_open` | state 标记 track 完成但 tasks.md 仍有未勾 section | 同上，回滚后重跑 next |
+| `all_sections_marked_but_track_not_completed` | tasks.md 全勾但 state 未标 track 完成 | 手动 `pg-pipeline-state.py mark <track>` 补登 |
+
+LLM 主循环看到 `error` action 后应：
+1. 打印 `reason` 和 `fix_hint` 给用户
+2. **不**自动重试
+3. 询问用户处理方式（手动修复 / 删除 `.pipeline-state.json` 从头开始 / 终止流程）
 
 ---
 
