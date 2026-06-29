@@ -812,31 +812,229 @@ class PipelineState:
 # Convenience: load + main CLI for debug
 # =============================================================================
 
+USAGE = """Usage:
+  pg_pipeline_state_v2.py <change> [--show]                 # dump state.json
+  pg_pipeline_state_v2.py <change> --next                  # show next pending dispatch
+  pg_pipeline_state_v2.py <change> mark-task <track> <phase> <task_id>
+                                                          # CLI-driven task marking (Step 5)
+  pg_pipeline_state_v2.py <change> render-tasks-md         # render derived tasks.md
+
+mark-task writes:
+  - state.json: phases.<phase>.tasks_marked appends <task_id>
+  - tasks.md:   the matching `- [ ] X.Y` becomes `- [x] X.Y` (write-through)
+The state.json is the SSOT; tasks.md is a derived view from Step 5 onwards.
+"""
+
+
+def _find_cwd_project_root() -> str:
+    """Walk up from CWD looking for .pg/project.yaml (used when CLI is
+    invoked from a consumer project, not from the scripts/ directory).
+    """
+    cur = os.path.abspath(os.getcwd())
+    for _ in range(8):
+        if os.path.isfile(os.path.join(cur, ".pg", "project.yaml")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    raise FileNotFoundError(
+        f"pg_pipeline_state_v2: no .pg/project.yaml found above {os.getcwd()}"
+    )
+
+
+def _find_tasks_md_path(change: str, project_root: str) -> str:
+    """Return tasks.md path for a change (used by mark-task write-through)."""
+    return os.path.join(project_root, ".pg", "changes", change, "tasks.md")
+
+
+def _write_through_tasks_md(change: str, project_root: str,
+                              track: str, phase: str, task_id: int) -> bool:
+    """Update tasks.md checkbox for the matching X.Y task. Returns True if
+    a line was changed.
+
+    The line must look like `- [ ] X.Y <description>` and belong to the
+    section matching `track:phase` (e.g. `## 3. dev.backend:verify`).
+
+    Bails out silently (returns False) if tasks.md does not exist or the
+    task / section is not found. The state.json write is the SSOT — this
+    is just a derived view kept in sync for human audit.
+    """
+    import re
+
+    tasks_path = _find_tasks_md_path(change, project_root)
+    if not os.path.isfile(tasks_path):
+        return False
+
+    with open(tasks_path, encoding="utf-8") as f:
+        content = f.read()
+
+    lines = content.splitlines(keepends=True)
+
+    # Find the section heading for (track, phase). Section heading pattern:
+    #   ## N. <track>:<phase> - <label>
+    heading_pat = re.compile(
+        rf"^##\s+\d+\.\s+{re.escape(track)}:{re.escape(phase)}\b",
+        re.MULTILINE,
+    )
+    m = heading_pat.search(content)
+    if not m:
+        return False
+
+    # Find the next `## ` or `---` line to bound the section
+    start = m.end()
+    end = len(content)
+    next_heading = re.search(r"^##\s+", content[start:], re.MULTILINE)
+    if next_heading:
+        end = start + next_heading.start()
+    section_text = content[start:end]
+
+    # Within section, find `- [ ] X.Y` and pick the line whose Y == task_id.
+    # Note: X is the section number (which we don't care about — the heading
+    # already matched track:phase); Y is the sub-task index, which is what
+    # mark-task's `task_id` argument refers to.
+    task_pat = re.compile(
+        r"^(\s*)-\s*\[\s\]\s*(\d+)\.(\d+)(.*)$",
+        re.MULTILINE,
+    )
+    tm = None
+    for candidate in task_pat.finditer(section_text):
+        if int(candidate.group(3)) == task_id:
+            tm = candidate
+            break
+    if tm is None:
+        return False
+
+    # Compute byte offsets in the full file content
+    line_start_in_file = start + tm.start()
+    line_end_in_file = start + tm.end()
+
+    # Replace `[ ]` with `[x]` in the matched substring
+    original_line = content[line_start_in_file:line_end_in_file]
+    new_line = original_line.replace("[ ]", "[x]", 1)
+    if new_line == original_line:
+        return False
+
+    new_content = content[:line_start_in_file] + new_line + content[line_end_in_file:]
+    if new_content == content:
+        return False
+
+    with open(tasks_path, "w", encoding="utf-8") as f:
+        f.write(new_content)
+    return True
+
+
+def _cmd_mark_task(argv: list) -> int:
+    """CLI: pg_pipeline_state_v2.py <change> mark-task <track> <phase> <task_id>
+
+    Writes state.json (SSOT) and tasks.md (derived view).
+    """
+    # argv after the `mark-task` token: <track> <phase> <task_id>
+    if len(argv) < 3:
+        print("Usage: pg_pipeline_state_v2.py <change> mark-task "
+              "<track> <phase> <task_id>", file=sys.stderr)
+        return 2
+    track, phase, task_id_s = argv[0], argv[1], argv[2]
+    try:
+        task_id = int(task_id_s)
+    except ValueError:
+        print(f"mark-task: task_id must be integer, got {task_id_s!r}",
+              file=sys.stderr)
+        return 2
+
+    project_root = _find_cwd_project_root()
+    change = _RESOLVED_CHANGE
+    if change is None:
+        print("internal: _RESOLVED_CHANGE not set", file=sys.stderr)
+        return 2
+    ps = PipelineState(change=change, project_root=project_root)
+    ps.record_task_marked(track=track, phase=phase, task_id=task_id)
+    ps.commit()
+
+    wrote_tasks_md = _write_through_tasks_md(
+        change=change,
+        project_root=project_root,
+        track=track, phase=phase, task_id=task_id,
+    )
+
+    print(json.dumps({
+        "ok": True,
+        "track": track,
+        "phase": phase,
+        "task_id": task_id,
+        "tasks_marked": ps.data["tracks"].get(track, {})
+                          .get("phases", {}).get(phase, {})
+                          .get("tasks_marked", []),
+        "tasks_md_updated": wrote_tasks_md,
+    }, ensure_ascii=False, indent=2))
+    return 0
+
+
+# Cache the change name across argv-walking helpers
+_RESOLVED_CHANGE = None
+
+
 def _main():
-    """Tiny CLI: load state, print summary, optionally commit."""
+    """Tiny CLI dispatcher.
+
+    Supports:
+      --show                      dump state.json
+      --next                      show next pending dispatch decision
+      mark-task <track> <phase> <task_id>
+      render-tasks-md             write derived tasks.md to stdout
+    """
     if len(sys.argv) < 2:
-        print("Usage: pg_pipeline_state_v2.py <change> [--next|--show]", file=sys.stderr)
+        print(USAGE, file=sys.stderr)
         sys.exit(2)
 
     change = sys.argv[1]
-    flag = sys.argv[2] if len(sys.argv) > 2 else "--show"
+    global _RESOLVED_CHANGE
+    _RESOLVED_CHANGE = change
 
-    ps = PipelineState(change)
-
-    if flag == "--next":
-        nd = ps.next_pending()
-        print(json.dumps(
-            {"kind": nd.kind if nd else None,
-             "track": nd.track if nd else None,
-             "phase": nd.phase if nd else None,
-             "cycle": nd.cycle if nd else None,
-             "agent": nd.agent if nd else None,
-             "is_resume": nd.is_resume if nd else False},
-            ensure_ascii=False, indent=2,
-        ))
+    if len(sys.argv) < 3:
+        # Default: --show
+        subcommand = "--show"
     else:
+        subcommand = sys.argv[2]
+
+    try:
+        project_root = _find_cwd_project_root()
+    except FileNotFoundError as e:
+        print(str(e), file=sys.stderr)
+        sys.exit(2)
+
+    ps = PipelineState(change=change, project_root=project_root)
+
+    if subcommand == "--show":
         print(json.dumps(ps.data, ensure_ascii=False, indent=2))
+        return 0
+
+    if subcommand == "--next":
+        nd = ps.next_pending()
+        if nd is None:
+            print(json.dumps({"kind": None}, ensure_ascii=False, indent=2))
+        else:
+            print(json.dumps({
+                "kind": nd.kind,
+                "track": nd.track,
+                "phase": nd.phase,
+                "cycle": nd.cycle,
+                "agent": nd.agent,
+                "is_resume": nd.is_resume,
+            }, ensure_ascii=False, indent=2))
+        return 0
+
+    if subcommand == "mark-task":
+        # sys.argv: <script> <change> mark-task <track> <phase> <task_id>
+        sys.exit(_cmd_mark_task(sys.argv[3:]))
+
+    if subcommand == "render-tasks-md":
+        print(ps.render_tasks_checkboxes(), end="")
+        return 0
+
+    print(f"Unknown subcommand: {subcommand}\n\n{USAGE}", file=sys.stderr)
+    sys.exit(2)
 
 
 if __name__ == "__main__":
-    _main()
+    sys.exit(_main())

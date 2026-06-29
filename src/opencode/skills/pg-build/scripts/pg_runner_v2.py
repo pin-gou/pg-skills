@@ -364,6 +364,16 @@ def cmd_record_v2(change: str, status: str, report_path: str = "",
             )
 
         # Normal completion: mark phase complete, advance.
+        # Auto-mark兜底 (Step 5 §3 plan): if `outputs` is empty but
+        # tasks.md shows all boxes unchecked, treat every open task
+        # as auto-marked. This handles the regression where the sub-agent
+        # completed work but forgot to call mark-task CLI.
+        if not tasks_marked and phase not in ("fix", "fix-gate"):
+            auto_marked = _auto_mark_open_tasks_in_phase(
+                change, track, phase)
+            if auto_marked:
+                tasks_marked = auto_marked
+
         ps.record_completed(track, phase, summary=summary,
                             report_path=report_path or None,
                             tasks_marked=tasks_marked or None)
@@ -519,6 +529,73 @@ def _parse_tasks_from_outputs(outputs: str, track: str, phase: str) -> list:
     for m in re.finditer(r"(\d+)\.(\d+)", outputs):
         ids.append(int(m.group(2)))
     return sorted(set(ids))
+
+
+def _auto_mark_open_tasks_in_phase(change: str, track: str,
+                                     phase: str) -> list:
+    """Step 5 auto-mark兜底: if sub-agent didn't call mark-task CLI,
+    scan tasks.md for the (track, phase) section and return the task_ids
+    of any unchecked boxes — assuming sub-agent's "completed" status
+    means "I did all the work".
+
+    Returns empty list if tasks.md has no section or no unchecked boxes.
+    """
+    import re
+
+    # Lazy-load pg-pipeline-state (the v1 module) which exposes parse_tasks.
+    try:
+        state_module = _load_pipeline_state_module()
+    except Exception:
+        return []
+    if state_module is None:
+        return []
+
+    try:
+        tasks_path = state_module.get_tasks_path(change)
+        sections, _lines = state_module.parse_tasks(tasks_path)
+    except Exception:
+        return []
+
+    # Find the section for (track, phase)
+    target_section = None
+    for sec in sections:
+        if sec.get("item") == track and sec.get("sub") == phase:
+            target_section = sec
+            break
+    if target_section is None:
+        return []
+
+    # Walk the section lines, find unchecked task_ids
+    unchecked = []
+    for line in target_section.get("lines", []):
+        # Match `- [ ] X.Y` (skip - [x] and - 无)
+        m = re.match(r"\s*-\s*\[\s\]\s*(\d+)\.(\d+)", line)
+        if m:
+            unchecked.append(int(m.group(2)))
+    return sorted(set(unchecked))
+
+
+def _load_pipeline_state_module():
+    """Lazy-load pg-pipeline-state.py via importlib (file has a hyphen)."""
+    import importlib.util
+    import sys as _sys
+    cached = getattr(_load_pipeline_state_module, "_cached", None)
+    if cached is not None:
+        return cached
+    spec = importlib.util.spec_from_file_location(
+        "pg_pipeline_state_legacy",
+        os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                     "pg-pipeline-state.py"),
+    )
+    if spec is None or spec.loader is None:
+        return None
+    mod = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(mod)
+    except Exception:
+        return None
+    _load_pipeline_state_module._cached = mod
+    return mod
 
 
 def _parse_accepted_gaps_from_report(report_path: str) -> list:
