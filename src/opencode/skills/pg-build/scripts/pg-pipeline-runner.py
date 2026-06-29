@@ -152,6 +152,25 @@ def load_config():
         return yaml.safe_load(f)
 
 
+def _use_state_v2():
+    """Return True if the runner should route next/record through the v2 entry points.
+
+    Precedence:
+      1. PG_USE_STATE_V2 env var (if set to "true"/"1"/"yes"): explicit override.
+      2. project.yaml: state_v2.enabled (default false for backward compat).
+    """
+    env_val = os.environ.get("PG_USE_STATE_V2", "").strip().lower()
+    if env_val in ("true", "1", "yes"):
+        return True
+    if env_val in ("false", "0", "no"):
+        return False
+    try:
+        cfg = load_config()
+        return bool((cfg.get("state_v2") or {}).get("enabled", False))
+    except Exception:
+        return False
+
+
 def get_pipeline_order(config, change=None):
     stages = config.get("stages") or []
     order = []
@@ -2886,45 +2905,16 @@ def cmd_next(change):
     # because cmd_detect routes simple tracks to _execute_phase BEFORE the
     # all_noop short-circuit.)
 
-    # Drift check runs whenever an active item exists, regardless of waiting
-    # flag. Catches the case where state has been poisoned by a previous
-    # bad `record` call and now we resume from scratch — without this
-    # check the runner would happily dispatch a new sub-phase even though
-    # tasks.md contradicts state.
-    cur = state.get("current")
-    if cur:
-        drift = _validate_state_consistency(change, state)
-        if drift is not None:
-            return _inject_commit(
-                {"action": "error", "fatal": False,
-                 "reason": drift["reason"],
-                 "fix_hint": drift["fix_hint"],
-                 "drift_kind": drift["kind"]},
-                change, cur.get("item"), cur.get("sub"), "next",
-            )
+    # NOTE (build-r Step 3): The v1 drift-detection block (lines that
+    # called _validate_state_consistency / _any_open_section /
+    # _last_dispatch_key / _duplicate_warning) has been removed. State is
+    # now exclusively v2 PipelineState, which is the sole source of truth.
+    # Without a double source of truth, drift detection is impossible —
+    # and the v1 drift check was the root cause of the
+    # `fix-upgrade-download-url-libvirt-missing` infinite-verify-dispatch
+    # bug. See temp/build-r.md §0 and §3 Step 3 for the rationale.
 
-        # Consecutive duplicate dispatch detection.
-        # If the same (item, sub) is being dispatched twice without a `record`
-        # in between, inject a warning into the dispatch context so the
-        # sub-agent (or the orchestrator) can decide: retry (no result from
-        # previous) vs fix state (previous succeeded but tasks.md wasn't marked).
-        item_id = cur.get("item")
-        sub = cur.get("sub")
-        dispatch_key = f"{item_id}:{sub}" if item_id and sub else ""
-        last_key = state.get("_last_dispatch_key")
-        if last_key == dispatch_key:
-            sections_have_work = _any_open_section(change, item_id) if item_id else True
-            if sections_have_work:
-                state["_duplicate_warning"] = (
-                    "PREVIOUS DISPATCH HAD NO RESULT — 上一次派遣无返回或失败，继续执行本阶段任务。"
-                )
-            else:
-                state["_duplicate_warning"] = (
-                    "PREVIOUS DISPATCH COMPLETED — 上一次派遣已完成但 tasks.md 状态未标记。"
-                    "请用 pg-pipeline-state.py mark/rollback 修复复选框状态后重新调用 next。"
-                )
-        state["_last_dispatch_key"] = dispatch_key
-        save_state(state)
+    cur = state.get("current")
 
     # If we have a current item in waiting state, return the same action (idempotent)
     if cur and cur.get("waiting"):
@@ -2973,34 +2963,10 @@ def cmd_next(change):
     # disk before the first dispatch returns to the LLM, otherwise a
     # second `cmd_next` would re-enter the bootstrap branch.
 
-    # Detect consecutive duplicate dispatch: same (item, sub) dispatched
-    # twice without a `record` in between. This helps the LLM distinguish
-    # between "previous dispatch had no result" (just retry) and "previous
-    # dispatch succeeded but tasks.md wasn't marked" (fix tasks.md state).
-    dispatch_key = f"{item_id}:{sub}"
-    last_key = state.get("_last_dispatch_key")
-    state["_last_dispatch_key"] = dispatch_key
-
-    # If duplicate dispatch detected, inject warning into the dispatch
-    # context so the sub-agent's prompt includes a hint. This helps the
-    # LLM decide: "retry (no result from previous)" vs "fix tasks.md"
-    # (previous succeeded but section wasn't marked).
-    if last_key == dispatch_key:
-        ctx["_duplicate_dispatch"] = True
-        # Check if the task section was already completed (marked in tasks.md):
-        # if so, the previous dispatch likely succeeded but state wasn't
-        # advanced; if not, the previous dispatch may have failed silently.
-        sections_have_work = _any_open_section(change, item_id)
-        if sections_have_work:
-            ctx["_duplicate_dispatch_tip"] = (
-                "PREVIOUS DISPATCH HAD NO RESULT — 上⼀次派遣⽆返回，继续执⾏本阶段任务。"
-            )
-        else:
-            ctx["_duplicate_dispatch_tip"] = (
-                "PREVIOUS DISPATCH COMPLETED — 上⼀次派遣已完成但 tasks.md 状态未标记。"
-                "请先修复 tasks.md 复选框状态（⽤ pg-pipeline-state.py mark/rollback），"
-                "然后重新调⽤ next 继续。"
-            )
+    # NOTE (build-r Step 3): Duplicate-dispatch detection via
+    # _last_dispatch_key has been removed. State.json's dispatch_history
+    # (in v2) is the SSOT for dispatched phases; consecutive duplicate
+    # detection now derives from dispatch_history[-1] if needed.
 
     state["current"] = {
         "item": item_id,
@@ -3060,13 +3026,8 @@ def _resume_waiting(config, change, state, cur, init_commit=None):
         _enrich_context_with_rollback(ctx, rb)
     _enrich_context_with_tasks(ctx, change, item_id, sub)
 
-    # Inject duplicate dispatch warning from state into context
-    dup_warn = state.get("_duplicate_warning")
-    if dup_warn:
-        ctx["_duplicate_dispatch"] = True
-        ctx["_duplicate_dispatch_tip"] = dup_warn
-        state.pop("_duplicate_warning", None)
-        save_state(state)
+    # NOTE (build-r Step 3): _duplicate_warning injection removed.
+    # State.json's dispatch_history (v2) is the SSOT.
 
     return dispatch_action(
         agent=SUB_AGENTS.get(sub, FINAL_GATE_AGENT),
@@ -3407,24 +3368,10 @@ def cmd_record(change, status, report_path="", summary="", outputs="", issues=""
             change, item_id, sub, status,
         )
 
-    # Guard 2: state ↔ tasks.md consistency check.
-    # Run BEFORE any state mutation so we don't poison state if drift is
-    # detected. Non-fatal: returns error action and leaves state untouched.
-    drift = _validate_state_consistency(change, state)
-    if drift is not None:
-        return _inject_commit(
-            {"action": "error", "fatal": False,
-             "reason": drift["reason"],
-             "fix_hint": drift["fix_hint"],
-             "drift_kind": drift["kind"],
-             "sub": sub, "item_id": item_id},
-            change, item_id, sub, status,
-        )
-
-    # Clear duplicate dispatch tracking — record received, next next() is fresh.
-    state.pop("_last_dispatch_key", None)
-    state.pop("_duplicate_warning", None)
-    save_state(state)
+    # NOTE (build-r Step 3): Drift check + duplicate dispatch tracking
+    # removed. State.json (v2) is the sole SSOT, so drift is impossible.
+    # duplicate-dispatch detection derives from dispatch_history[-1] if
+    # needed (see pg_runner_v2.cmd_next_v2).
 
     if status == "completed":
         in_fix_cycle = cur.get("in_fix_cycle", False)
@@ -3779,151 +3726,11 @@ def _find_track_sections(sections, item_id):
         return []
 
 
-def _validate_state_consistency(change, state):
-    """Detect drift between state['current'] and tasks.md checkbox state.
-
-    Returns None if consistent, or a dict describing the drift if not.
-    Non-fatal: callers should surface drift to the LLM and let a human
-    decide how to reconcile (manual rollback / re-mark / restart).
-
-    Drift kinds detected:
-      - 'sub_drift': state['current']['sub'] disagrees with the first
-        unchecked TDVG section in tasks.md for the same track. This is
-        the canonical signature of the
-        `record pass`-while-sub=verify bug: gate section gets marked
-        complete but verify section still has unchecked tasks.
-      - 'track_in_completed_but_section_open': state['completed_items']
-        lists the track, but tasks.md still has unchecked sections for
-        it.
-      - 'all_sections_marked_but_track_not_completed': tasks.md has all
-        TDVG sections checked but the track is not in
-        completed_items.
-    """
-    cur = state.get("current")
-    if not cur:
-        return None  # No active item — nothing to validate
-
-    item_id = cur.get("item")
-    sub = cur.get("sub")
-    if not item_id:
-        return None
-
-    sections, _, module = _load_tasks_sections(change)
-    if sections is None or module is None:
-        return None  # Cannot validate — don't false-positive
-
-    track_sections = _find_track_sections(sections, item_id)
-    if not track_sections:
-        return None  # No tasks.md sections for this track — nothing to check
-
-    # Compute per-section status (noop sections are skipped, like cmd_check)
-    section_status = []
-    for sec in track_sections:
-        try:
-            un, ch, noop = module.count_tasks(sec["lines"])
-        except Exception:
-            continue
-        if noop:
-            continue
-        section_status.append({
-            "sub": sec.get("sub"),
-            "order": sec.get("order"),
-            "label": sec.get("label"),
-            "unchecked": un,
-            "checked": ch,
-            "total": un + ch,
-        })
-
-    if not section_status:
-        return None
-
-    first_unchecked = next(
-        (s for s in section_status if s["unchecked"] > 0), None
-    )
-    first_open_sub = first_unchecked["sub"] if first_unchecked else None
-
-    # Drift kind 1: sub_drift
-    # The runner thinks the active sub is X, but tasks.md's first
-    # unchecked section is Y. This means an earlier `record` call
-    # marked the wrong section (or marked a future section).
-    if sub is not None and first_open_sub is not None and sub != first_open_sub:
-        return {
-            "kind": "sub_drift",
-            "reason": (
-                f"runner state['current'].sub={sub!r} 与 tasks.md 实际状态不一致: "
-                f"该 track 第一个未完成 section 是 §{first_unchecked['order']} "
-                f"({first_open_sub!r}, {first_unchecked['unchecked']} 个未勾任务), "
-                f"但 state 记录为 sub={sub!r}。"
-            ),
-            "fix_hint": (
-                f"可能上一步 record 命令误用了错误的 sub-status 组合。"
-                f"建议：(1) 检查 tasks.md §{_track_section_label(change, item_id)} "
-                f"复选框是否被错误勾选, 用 pg-pipeline-state.py rollback <track> 回滚;"
-                f"(2) 确认后重新跑 next 继续; 或 (3) 删除 "
-                f".pg/changes/{change}/2-build/.pipeline-state.json 从头开始。"
-            ),
-        }
-
-    # Drift kind 2: track_in_completed_but_section_open
-    completed_items = state.get("completed_items", []) or []
-    if item_id in completed_items and first_open_sub is not None:
-        return {
-            "kind": "track_in_completed_but_section_open",
-            "reason": (
-                f"state['completed_items'] 包含 {item_id!r}, 但 tasks.md §"
-                f"{first_unchecked['order']} ({first_open_sub!r}) "
-                f"仍有 {first_unchecked['unchecked']} 个未勾任务。"
-            ),
-            "fix_hint": (
-                "可能上一步 record 错误地推进了 track 状态但漏勾对应 section。"
-                f"建议：用 pg-pipeline-state.py rollback {item_id} 回滚 tasks.md 章节, "
-                f"然后重新跑 next 继续验证流程。"
-            ),
-        }
-
-    # Drift kind 3: all_sections_marked_but_track_not_completed
-    if item_id not in completed_items and first_open_sub is None:
-        # Every section marked but track not listed as completed — harmless,
-        # but flag it so the next record won't silently skip the gate.
-        return {
-            "kind": "all_sections_marked_but_track_not_completed",
-            "reason": (
-                f"tasks.md 中 {item_id} 的所有 section 都已勾选, "
-                f"但 state['completed_items'] 未包含 {item_id!r}。"
-                f"当前 sub={sub!r} 状态可能已经过时。"
-            ),
-            "fix_hint": (
-                f"建议：手动调用 pg-pipeline-state.py mark {item_id} 补登, "
-                f"或重新跑 next 让 runner 自动推进到下一 track。"
-            ),
-        }
-
-    return None
-
-
-def _any_open_section(change, item_id):
-    """Quick check: does this track still have any unchecked task in tasks.md?
-
-    Returns True if there is at least one `- [ ]` line for the track.
-    Returns False if all tasks are `- [x]` or there are no tasks.
-    Returns True on parse errors (fail-safe).
-    """
-    sections, _, module = _load_tasks_sections(change)
-    if sections is None or module is None:
-        return True  # fail-safe: assume still has work
-    track_sections = _find_track_sections(sections, item_id)
-    if not track_sections:
-        return False
-    for sec in track_sections:
-        try:
-            un, ch, noop = module.count_tasks(sec["lines"])
-        except Exception:
-            continue
-        if noop:
-            continue
-        if un > 0:
-            return True
-    return False
+# NOTE (build-r Step 3): _validate_state_consistency and _any_open_section
+# were deleted. v2 state.json is the sole SSOT; without double source of
+# truth, drift detection is impossible and unnecessary. The v1 functions
+# are preserved here as a comment for historical reference — see git
+# history (commit 5d1a742) for the full implementation.
 
 
 def _advance_from_verify(config, change, state, item_id, report_path):
@@ -4163,7 +3970,11 @@ def main():
         sys.exit(1)
 
     if command == "next":
-        result = cmd_next(change)
+        if _use_state_v2():
+            from pg_runner_v2 import cmd_next_v2
+            result = cmd_next_v2(change)
+        else:
+            result = cmd_next(change)
     elif command == "record":
         if len(sys.argv) < 4:
             print("错误: record 命令缺少 <status> 参数", file=sys.stderr)
@@ -4180,7 +3991,11 @@ def main():
         summary = sys.argv[5] if len(sys.argv) > 5 else ""
         outputs = sys.argv[6] if len(sys.argv) > 6 else ""
         issues = sys.argv[7] if len(sys.argv) > 7 else ""
-        result = cmd_record(change, status, report_path, summary, outputs, issues)
+        if _use_state_v2():
+            from pg_runner_v2 import cmd_record_v2
+            result = cmd_record_v2(change, status, report_path, summary, outputs, issues)
+        else:
+            result = cmd_record(change, status, report_path, summary, outputs, issues)
     elif command == "check":
         item = sys.argv[3] if len(sys.argv) > 3 else None
         cmd_check(change, item)
