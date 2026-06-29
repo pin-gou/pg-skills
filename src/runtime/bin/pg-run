@@ -16,14 +16,17 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import select
 import shlex
 import subprocess
 import sys
-import termios
 import time
 from pathlib import Path
 from typing import Any, Callable
+
+_SKILLS_LIB = Path(__file__).resolve().parent.parent / "lib"
+if _SKILLS_LIB.exists():
+    sys.path.insert(0, str(_SKILLS_LIB))
+from tui import Term, render_tab_bar, render_menu
 
 
 def _c(code: str, text: str) -> str:
@@ -135,59 +138,6 @@ def get_choice(max_num: int) -> str:
         print(f"  请输入 1-{max_num}, b 或 q")
 
 
-def _set_menu_terminal():
-    fd = sys.stdin.fileno()
-    old = termios.tcgetattr(fd)
-    new = termios.tcgetattr(fd)
-    new[0] = new[0] & ~(
-        termios.BRKINT | termios.ICRNL | termios.INPCK | termios.ISTRIP | termios.IXON
-    )
-    new[2] = new[2] & ~(termios.CSIZE | termios.PARENB)
-    new[2] = new[2] | termios.CS8
-    new[3] = new[3] & ~(
-        termios.ECHO | termios.ECHONL | termios.ICANON | termios.IEXTEN | termios.ISIG
-    )
-    termios.tcsetattr(fd, termios.TCSADRAIN, new)
-    return old
-
-
-def _render_tab_bar(
-    tab_names: list[str], current: int, keys: list[str] | None = None
-) -> str:
-    parts = []
-    for i, name in enumerate(tab_names):
-        label = f" {name} "
-        if keys and i < len(keys):
-            label = f" {keys[i]}){name} "
-        if i == current:
-            parts.append(_c("1;7;37", label))
-        else:
-            parts.append(label)
-    sep = _c("2;37", "│")
-    return f" {sep.join(parts)} "
-
-
-def _render_menu(title: str, items: list, current: int, back_option: bool) -> list[str]:
-    width = 60
-    lines = [f"\n{'=' * width}", f"  {title}", "=" * width]
-    sel_idx = 0
-    for item in items:
-        if isinstance(item, str):
-            lines.append(f"  {item}")
-            continue
-        label, desc = item
-        desc_str = f" — {desc}" if desc else ""
-        marker = ">" if sel_idx == current else " "
-        lines.append(
-            f" {marker} {sel_idx + 1:2d}) {_c('1;36', label)}{_c('2;37', desc_str) if desc else ''}"
-        )
-        sel_idx += 1
-    if back_option:
-        lines.append(f"  --------------------")
-        lines.append(f" {' '}  b) 上级")
-    lines.append(f"  --------------------")
-    lines.append(f" {' '}  c) 切换环境  q) 退出")
-    return lines
 
 
 def _tab_menu_loop(
@@ -196,7 +146,12 @@ def _tab_menu_loop(
     tab_names: list[str] | None = None,
     tab_keys: list[str] | None = None,
     initial_tab: int = 0,
-) -> tuple[str, int, int]:
+) -> tuple[str, int, int, int]:
+    """Returns (action, tab_index, selection_index, menu_height).
+
+    menu_height = len(all_lines) + 1 = number of terminal lines the menu occupies.
+    0 for non-interactive path.
+    """
     has_tabs = tab_names is not None and len(tab_names) > 0
     current_tab = initial_tab
     items, back_option = tab_builders[current_tab]()
@@ -204,39 +159,35 @@ def _tab_menu_loop(
     if not sys.stdin.isatty():
         print_header(title)
         if has_tabs:
-            print(_render_tab_bar(tab_names, current_tab, tab_keys))
+            print(render_tab_bar(tab_names, current_tab, tab_keys))
         print_menu(items, back_option=back_option)
         choice = get_choice(selectable)
         if choice == "c":
-            return ("c", current_tab, 0)
+            return ("c", current_tab, 0, 0)
         elif choice == "q":
-            return ("q", current_tab, 0)
+            return ("q", current_tab, 0, 0)
         elif choice == "b":
-            return ("b", current_tab, 0)
+            return ("b", current_tab, 0, 0)
         else:
-            return ("select", current_tab, int(choice) - 1)
+            return ("select", current_tab, int(choice) - 1, 0)
 
-    fd = sys.stdin.fileno()
-    old_settings = _set_menu_terminal()
     current = 0
 
-    use_alt_screen = has_tabs
-    try:
-        if use_alt_screen:
-            sys.stdout.write("\033[?1049h\033[H")
-        else:
-            sys.stdout.write("\033[H\033[J")
-        tab_bar = _render_tab_bar(tab_names, current_tab, tab_keys) if has_tabs else ""
-        lines = _render_menu(title, items, current, back_option)
-        all_lines = ([tab_bar] + lines) if has_tabs else lines
-        sys.stdout.write("\n".join(all_lines) + "\n")
-        sys.stdout.flush()
-        total_lines = len(all_lines) + (2 if has_tabs else 1)
+    with Term() as t:
+        tab_bar = render_tab_bar(tab_names, current_tab, tab_keys) if has_tabs else ""
+        lines = render_menu(title, items, current, back_option)
+        all_lines = (lines[:3] + [tab_bar, ""] + lines[3:]) if has_tabs else lines
+        t.write("\n".join(all_lines) + "\n")
+        t.flush()
+        total_lines = len(all_lines) + 1
 
         while True:
-            raw = os.read(fd, 1)
+            try:
+                raw = t.getch()
+            except KeyboardInterrupt:
+                return ("q", current_tab, 0, total_lines)
             if not raw:
-                return ("q", current_tab, 0)
+                return ("q", current_tab, 0, total_lines)
 
             if has_tabs and tab_keys and len(raw) == 1:
                 ch = raw.decode("ascii", errors="ignore").lower()
@@ -246,26 +197,21 @@ def _tab_menu_loop(
                     items, back_option = tab_builders[current_tab]()
                     selectable = sum(1 for item in items if not isinstance(item, str))
                     current = 0
-                    sys.stdout.write("\033[H\033[J")
+                    t.up_and_clear(total_lines)
                     tab_bar = (
-                        _render_tab_bar(tab_names, current_tab, tab_keys)
+                        render_tab_bar(tab_names, current_tab, tab_keys)
                         if has_tabs
                         else ""
                     )
-                    lines = _render_menu(title, items, current, back_option)
-                    all_lines = ([tab_bar] + lines) if has_tabs else lines
-                    sys.stdout.write("\n".join(all_lines) + "\n")
-                    sys.stdout.flush()
-                    total_lines = len(all_lines) + (2 if has_tabs else 1)
+                    lines = render_menu(title, items, current, back_option)
+                    all_lines = (lines[:3] + [tab_bar, ""] + lines[3:]) if has_tabs else lines
+                    t.write("\n".join(all_lines) + "\n")
+                    t.flush()
+                    total_lines = len(all_lines) + 1
                     continue
 
             if raw == b"\x1b":
-                seq = b"\x1b"
-                if select.select([fd], [], [], 0.15)[0]:
-                    seq += os.read(fd, 1)
-                    if select.select([fd], [], [], 0.05)[0]:
-                        seq += os.read(fd, 1)
-
+                seq = t.get_escape()
                 if seq == b"\x1b[A" and current > 0:
                     current -= 1
                 elif seq == b"\x1b[B" and current < selectable - 1:
@@ -283,40 +229,38 @@ def _tab_menu_loop(
                 else:
                     continue
 
-                sys.stdout.write("\033[H\033[J")
+                t.up_and_clear(total_lines)
                 tab_bar = (
-                    _render_tab_bar(tab_names, current_tab, tab_keys)
+                    render_tab_bar(tab_names, current_tab, tab_keys)
                     if has_tabs
                     else ""
                 )
-                lines = _render_menu(title, items, current, back_option)
-                all_lines = ([tab_bar] + lines) if has_tabs else lines
-                sys.stdout.write("\n".join(all_lines) + "\n")
-                sys.stdout.flush()
-                total_lines = len(all_lines) + (2 if has_tabs else 1)
+                lines = render_menu(title, items, current, back_option)
+                all_lines = (lines[:3] + [tab_bar, ""] + lines[3:]) if has_tabs else lines
+                t.write("\n".join(all_lines) + "\n")
+                t.flush()
+                total_lines = len(all_lines) + 1
 
             elif raw in (b"\r", b"\n"):
-                return ("select", current_tab, current)
+                return ("select", current_tab, current, total_lines)
             elif raw == b"q":
-                return ("q", current_tab, 0)
+                return ("q", current_tab, 0, total_lines)
             elif raw == b"c":
-                return ("c", current_tab, 0)
+                return ("c", current_tab, 0, total_lines)
             elif raw == b"b" and back_option:
-                return ("b", current_tab, 0)
-            elif raw == b"\x03":
-                return ("q", current_tab, 0)
-    finally:
-        if use_alt_screen:
-            sys.stdout.write("\033[?1049l")
-            sys.stdout.flush()
-        termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+                return ("b", current_tab, 0, total_lines)
 
 
 def pause():
     try:
-        input("\n按 Enter 继续...")
+        sys.stdout.write("\n按 Enter 继续...")
+        sys.stdout.flush()
+        while os.read(0, 1) not in (b"\r", b"\n", b""):
+            pass
     except (EOFError, KeyboardInterrupt):
         print()
+    except OSError:
+        pass
 
 
 def _action_label(action_name: str) -> str:
@@ -382,6 +326,7 @@ def run_shell(
         print(f"\n!!! 命令超时 (>{timeout}s)")
         return -9
     except KeyboardInterrupt:
+        print(f"\n!!! 被用户中断")
         return -1
     if proc.returncode == 0:
         print(f"\n✓ 成功 (exit=0)")
@@ -641,19 +586,19 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path):
 # ----- 主菜单快捷函数 -----
 
 
-def _pick_env(config: dict) -> str | None:
+def _pick_env(config: dict) -> tuple:
     envs = env_items(config)
     names = sorted(envs.keys())
     if not names:
         print("  没有定义 environments")
-        return None
+        return None, 0
     if len(names) == 1:
-        return names[0]
+        return names[0], 0
     items = [(n, envs[n].get("description", "")) for n in names]
-    choice = _tab_menu_loop("选择 Environment", [lambda: (items, True)])
-    if choice[0] in ("q", "b"):
-        return None
-    return names[choice[2]]
+    action, tab_idx, val, height = _tab_menu_loop("选择 Environment", [lambda: (items, True)])
+    if action in ("q", "b"):
+        return None, height
+    return names[val], height
 
 
 # ----- 顶栏菜单 -----
@@ -967,19 +912,19 @@ def _run_role_instance_actions(
         (a, actions[a].get("description", "") if isinstance(actions[a], dict) else "")
         for a in act_names
     ]
-    choice = _tab_menu_loop(
+    action, tab_idx, val, _ = _tab_menu_loop(
         f"{env_name} / {role_name} / {inst['name']} — 选择 Action",
         [lambda: (items, True)],
     )
-    if choice[0] == "select":
-        action_name = act_names[choice[2]]
+    if action == "select":
+        action_name = act_names[val]
         _run_single_action(
             env_name, role_name, inst, action_name, role_cfg, project_root
         )
 
 
 def tabbed_main_menu(config: dict, project_root: Path):
-    env_name = _pick_env(config)
+    env_name, env_height = _pick_env(config)
     if env_name is None:
         return
 
@@ -987,85 +932,114 @@ def tabbed_main_menu(config: dict, project_root: Path):
     module_selected: str | None = None
     role_selected: str | None = None
     inst_selected: str | None = None
+    executed_action = False
+    prev_height = env_height
 
-    while True:
-        builders = [
-            lambda: (_build_quick_items(), False),
-            lambda: (_build_env_items(env_name, config), False),
-            lambda: (
-                _build_instance_items(env_name, config, role_selected, inst_selected),
-                role_selected is not None,
-            ),
-            lambda: (
-                _build_module_items(env_name, config, module_selected),
-                module_selected is not None,
-            ),
-        ]
+    with Term() as t:
+        t.write("\n")
+        t.flush()
 
-        action, tab_idx, val = _tab_menu_loop(
-            f"pg-run — {_c('1;33', env_name)}",
-            builders,
-            tab_names=TAB_NAMES,
-            tab_keys=TAB_KEYS,
-            initial_tab=current_tab,
-        )
+        while True:
+            if prev_height > 0 and not executed_action:
+                t.up_and_clear(prev_height)
+                t.flush()
+            executed_action = False
+            builders = [
+                lambda: (_build_quick_items(), False),
+                lambda: (_build_env_items(env_name, config), False),
+                lambda: (
+                    _build_instance_items(env_name, config, role_selected, inst_selected),
+                    role_selected is not None,
+                ),
+                lambda: (
+                    _build_module_items(env_name, config, module_selected),
+                    module_selected is not None,
+                ),
+            ]
+            action, tab_idx, val, height = _tab_menu_loop(
+                f"pg-run — {t.yellow(env_name)}",
+                builders,
+                tab_names=TAB_NAMES,
+                tab_keys=TAB_KEYS,
+                initial_tab=current_tab,
+            )
 
-        current_tab = tab_idx
+            current_tab = tab_idx
+            prev_height = height
 
-        if action == "q":
-            break
-        elif action == "c":
-            new_env = _pick_env(config)
-            if new_env:
-                env_name = new_env
-                module_selected = None
-                role_selected = None
-                inst_selected = None
-        elif action == "b":
-            if current_tab == 3 and module_selected:
-                module_selected = None
-            elif current_tab == 2 and role_selected:
-                if inst_selected:
-                    inst_selected = None
-                else:
+            if action == "q":
+                break
+            elif action == "c":
+                t.up_and_clear(height)
+                t.flush()
+                new_env, env_height = _pick_env(config)
+                if new_env:
+                    env_name = new_env
+                    module_selected = None
                     role_selected = None
-        elif action == "select":
-            if current_tab == 0:
-                _exec_quick_action(val, env_name, config, project_root)
-            elif current_tab == 1:
-                _exec_env_action(val, env_name, config, project_root)
-            elif current_tab == 2:
-                roles = sorted(
-                    config.get("environments", {})
-                    .get(env_name, {})
-                    .get("roles", {})
-                    .keys()
-                )
-                if role_selected is None:
-                    role_selected = roles[val]
-                else:
-                    cfg = config["environments"][env_name]
-                    role_cfg = cfg["roles"][role_selected]
-                    instances = role_cfg.get("instances", [])
-                    if inst_selected is None and len(instances) > 3:
-                        inst_selected = instances[val]["name"]
+                    inst_selected = None
+                prev_height = env_height
+            elif action == "b":
+                if current_tab == 3 and module_selected:
+                    module_selected = None
+                elif current_tab == 2 and role_selected:
+                    if inst_selected:
+                        inst_selected = None
                     else:
-                        _exec_instance_action(
-                            val,
-                            env_name,
-                            config,
-                            project_root,
-                            role_selected,
-                            inst_selected,
-                        )
-            elif current_tab == 3:
-                if module_selected is None:
-                    names = sorted(module_items(config).keys())
-                    module_selected = names[val]
-                else:
-                    _exec_module_action(
-                        val, env_name, config, project_root, module_selected
+                        role_selected = None
+            elif action == "select":
+                if current_tab == 0:
+                    _exec_quick_action(val, env_name, config, project_root)
+                    t.write("\n")
+                    t.save()
+                    t.flush()
+                    executed_action = True
+                elif current_tab == 1:
+                    _exec_env_action(val, env_name, config, project_root)
+                    t.write("\n")
+                    t.save()
+                    t.flush()
+                    executed_action = True
+                elif current_tab == 2:
+                    roles = sorted(
+                        config.get("environments", {})
+                        .get(env_name, {})
+                        .get("roles", {})
+                        .keys()
                     )
+                    if role_selected is None:
+                        role_selected = roles[val]
+                    else:
+                        cfg = config["environments"][env_name]
+                        role_cfg = cfg["roles"][role_selected]
+                        instances = role_cfg.get("instances", [])
+                        if inst_selected is None and len(instances) > 3:
+                            inst_selected = instances[val]["name"]
+                        else:
+                            _exec_instance_action(
+                                val,
+                                env_name,
+                                config,
+                                project_root,
+                                role_selected,
+                                inst_selected,
+                            )
+                            t.write("\n")
+                            t.save()
+                            t.flush()
+                            executed_action = True
+                elif current_tab == 3:
+                    if module_selected is None:
+                        names = sorted(module_items(config).keys())
+                        module_selected = names[val]
+                    else:
+                        _exec_module_action(
+                            val, env_name, config, project_root, module_selected
+                        )
+                        t.write("\n")
+                        t.save()
+                        t.flush()
+                        executed_action = True
 
 
 # ----- 非交互模式（CLI flags 直达） -----
