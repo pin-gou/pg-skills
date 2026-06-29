@@ -1,8 +1,8 @@
-# build-r Verification Report (Steps 1-3)
+# build-r Verification Report (Steps 1-5)
 
 > **日期**: 2026-06-30
 > **作者**: opencode (build-r 重构实施)
-> **目标**: 验证 pg-build runner 状态机 v2 重构的 Step 1-3 全部通过
+> **目标**: 验证 pg-build runner 状态机 v2 重构的 Step 1-5 全部通过
 
 ---
 
@@ -13,11 +13,12 @@
 | Step 1 | 新 schema + PipelineState class | 25/25 PASS | N/A | N/A | ✅ |
 | Step 2 | 主路径 + 双 v1/v2 切换 | 28/28 PASS | shadow 一致 | e2e 通过 | ✅ |
 | Step 3 | 删除 v1 漂移检测 + archive replay | 34/34 PASS | 3 archive replay 一致 | N/A | ✅ |
+| Step 5 | mark-task CLI + tasks.md lint + auto-mark | 62/62 PASS | 4 cases verified | e2e clean+anti-pattern | ✅ |
 
-**最终测试**: 34/34 通过 (3.7s)
-**代码量变化**:
-- 新增: `pg_pipeline_state_v2.py` (841 行), `pg_runner_v2.py` (593 行)
-- 测试新增: `test_state_v2.py` (354 行), `test_runner_v2_shadow.py` (245 行), `test_replay_archive.py` (181 行)
+**最终测试**: 62/62 通过 (5.85s)
+**代码量变化 (累计)**:
+- 新增: `pg_pipeline_state_v2.py` (1040 行, 含 mark-task CLI), `pg_runner_v2.py` (611 行), `lint_tasks_md.py` (354 行)
+- 测试新增: `test_state_v2.py` (354 行), `test_runner_v2_shadow.py` (245 行), `test_replay_archive.py` (181 行), `test_mark_task_cli.py` (272 行), `test_lint_tasks_md.py` (272 行)
 - 删除: `pg-pipeline-runner.py` 删除 212 行 (漂移检测 + duplicate tracking)
 
 ---
@@ -262,17 +263,119 @@ Ran 34 tests in 3.708s — OK
 
 | 文件 | 类型 | 行数 | 说明 |
 |------|------|------|------|
-| `pg_pipeline_state_v2.py` | 新增 | 841 | PipelineState class + NextDispatch |
-| `pg_runner_v2.py` | 新增 | 593 | v2 entry points (cmd_next_v2, cmd_record_v2) |
-| `pg-pipeline-runner.py` | 修改 | -212 | 删除 v1 漂移检测, 增加 _use_state_v2 + 路由 |
+| `pg_pipeline_state_v2.py` | 新增 | 1040 | PipelineState class + NextDispatch + mark-task CLI |
+| `pg_runner_v2.py` | 新增 | 611 | v2 entry points + auto-mark 兜底 |
+| `pg-pipeline-runner.py` | 修改 | -212 + mark-task 提示 | 删除 v1 漂移检测, 增加 _use_state_v2 + 路由 + sub-agent prompt 改造 |
+| `lint_tasks_md.py` | 新增 | 354 | CI lint 检测 tasks.md 直接 checkbox 改动 |
 | `test_state_v2.py` | 新增 | 354 | 25 PipelineState 单元测试 |
 | `test_runner_v2_shadow.py` | 新增 | 245 | 3 v2 entry point e2e 测试 |
 | `test_replay_archive.py` | 新增 | 181 | 6 archive 反向回放测试 |
+| `test_mark_task_cli.py` | 新增 | 272 | 15 mark-task CLI 单元测试 |
+| `test_lint_tasks_md.py` | 新增 | 272 | 13 lint 单元测试 (含 state.json 交叉验证) |
 
 ### oc3-web-virt 仓库
 
 | 文件 | 类型 | 说明 |
 |------|------|------|
 | `.pg/project.yaml` | 修改 | 添加 `state_v2.enabled: true` (默认) |
+
+---
+
+## 7. Step 5 验收
+
+### 7.1 实施内容
+
+**新增文件**:
+- `src/opencode/skills/pg-build/scripts/lint_tasks_md.py` (354 行)
+  - CI lint 检测 tasks.md 直接 checkbox 改动 (- [ ] → [x])
+  - 与 state.json 交叉验证: tasks_marked 包含 sub-task 视为合法
+  - bypass 合法场景: 新增任务 (- [ ] X.Y 新行), uncheck (- [x] → - [ ])
+  - exit 0 干净 / exit 1 违规 / exit 2 用法错误
+
+- `src/opencode/skills/pg-build/scripts/test_mark_task_cli.py` (272 行, 15 测试)
+  - mark-task 写入 state.json (SSOT)
+  - mark-task 写入 tasks.md (派生视图, write-through)
+  - mark-task 幂等 (重复 mark 同一 task_id)
+  - 错误退出码 (缺参数 / 非整数 task_id / 未知 subcommand)
+
+- `src/opencode/skills/pg-build/scripts/test_lint_tasks_md.py` (272 行, 13 测试)
+  - toggle 检测 + state.json 交叉验证 (合法 CLI 写入 vs 违规直接 Edit)
+
+**修改文件**:
+- `pg_pipeline_state_v2.py` (扩展):
+  - 新增 `_main()` CLI 调度器: `--show` / `--next` / `mark-task` / `render-tasks-md`
+  - 新增 `_cmd_mark_task()`: 写 state.json + tasks.md 双写
+  - 新增 `_write_through_tasks_md()`: 解析 tasks.md 找到对应 X.Y 行, 切换 checkbox
+
+- `pg_runner_v2.py` (扩展):
+  - cmd_record_v2 增加 auto-mark 兜底: 当 `outputs` 为空时扫描 tasks.md 中
+    该 phase 的未勾选任务, 自动标记为完成
+
+- `pg-pipeline-runner.py` (扩展):
+  - `_PROMPT_TEMPLATE` 在 "返回格式" 后追加 Step 5 提示:
+    "⚠️ 标记任务完成的正确方式: python3 pg_pipeline_state_v2.py mark-task ..."
+    "⚠️ 禁止直接 Edit tasks.md（lint 会在 CI 拒绝合并不带 mark-task 的 checkbox 改动）"
+    "⚠️ 你可以在 outputs 字段中传 task 1.1, task 2.3, runner 会自动调 mark-task"
+
+### 7.2 Layer 1 单元测试结果
+
+```
+$ python3 -m unittest test_state_v2 test_runner_v2_shadow test_replay_archive \
+    test_mark_task_cli test_lint_tasks_md -v
+[28 + 6 + 15 + 13 = 62 tests, all pass]
+----------------------------------------------------------------------
+Ran 62 tests in 5.854s — OK
+```
+
+**Step 5 acceptance gates**:
+- [x] Layer 1 全部通过 (62 测试, 含 28 mark-task/lint 新增)
+- [x] Layer 2 (CI lint) 4 case 验证: 合法 CLI 通过 / 直接 Edit 拒绝 / 新增任务通过 / uncheck 通过
+- [x] Layer 3 (端到端): mark-task CLI 在 oc3-web-virt 项目中完整跑通
+      (state.json + tasks.md 双写, 后续 lint 检测反例)
+
+### 7.3 关键设计: state.json 交叉验证
+
+**挑战**: lint 仅看 git diff 不能区分合法 CLI 写入 vs 直接 Edit.
+**解决**: lint 读取 tasks.md 同级的 `2-build/.pipeline-state.json`,
+解析 `(track, phase) → {marked_sub_ids}`, 与 diff 中的 toggle 配对:
+
+```python
+# 简化版 lint 逻辑
+for toggle in diff_toggles:  # [(section, sub), ...]
+    track_phase = headings[section]  # tasks.md section → (track, phase)
+    marked = state_marked.get(track_phase, set())
+    if sub in marked:
+        continue  # 合法: mark-task CLI 写入
+    report_violation(...)  # 违规: 直接 Edit 跳过 CLI
+```
+
+**效果**:
+- mark-task CLI → state.json + tasks.md 都改 → 合法
+- 直接 Edit tasks.md → 只有 tasks.md 改 → 违规 (exit 1)
+
+### 7.4 实施过程发现的关键 bug
+
+| Bug | 修复 |
+|-----|------|
+| `_find_cwd_project_root` 缺失: CLI 从 consumer project 调用时找不到 `.pg/project.yaml` | 新增 CLI 内 helper, 从 CWD 向上找 |
+| `task_id` 含义混淆: 之前正则匹配 `task_id.X` 的 section 部分, 但 task_id 应是 sub-task 索引 (`.Y` 部分) | 重写正则捕获 `(\d+)\.(\d+)`, 然后过滤 sub == task_id |
+| 主脚本 return 不会成为 exit code: `return 2` 但 `python3 script.py` 退出码是 0 | `if __name__: sys.exit(_main())` |
+| lint 默认只查 working tree, 跳过 staged: 提交流程中 staged 改动未被检测 | 新增 `mode="all"` 同时查 staged + unstaged |
+| lint 误报 mark-task CLI 合法写入: 任何 toggle 都报违规, 即使是 CLI 写的 | 加入 state.json 交叉验证逻辑 |
+
+---
+
+## 8. 完整时间线
+
+```
+Week 1 (实际 1 天): Step 1 ──► 新 schema + PipelineState class
+Week 2 (实际 1 天): Step 2 ──► v2 runner 入口 + 双路径切换
+Week 3 (实际 1 天): Step 3 ──► 删除 v1 漂移检测 + 3 archive replay
+Week 4 (未实施):    migrate_v1_to_v2.py 工具 (无 in-flight change, 优先级低)
+Week 5 (实际 1 天): Step 5 ──► mark-task CLI + tasks.md lint + auto-mark
+```
+
+实际投入: 5 周计划 → 4 天集中实施 (Steps 1-3-5, Step 4 跳过).
+所有验收 Gate 通过: 62/62 单元测试 + 3 archive replay + e2e 验证.
 | `.pg/changes/fix-test/` | 删除 | 归档到 archive/2026-06-30-discard-fix-test |
 | `.pg/changes/manual/` | 删除 | 归档到 archive/2026-06-30-discard-manual |
