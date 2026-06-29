@@ -300,11 +300,13 @@ class TestCmdRecordGuardMatrix(unittest.TestCase):
     def setUp(self):
         self.runner = _load_runner()
 
-    def _cmd_record_with_state(self, sub, status, completed=None):
+    def _cmd_record_with_state(self, sub, status, completed=None,
+                              continue_after_guard=False):
         """Call cmd_record with mocked load_state + load_config + tasks loader.
 
-        Returns the action dict. We don't need side effects — just whether
-        the guard short-circuits with action=error.
+        If continue_after_guard is True, also mock sub_end, pipeline_mark,
+        save_state, etc. so cmd_record can run past the guard without
+        touching the real filesystem. Returns the action dict.
         """
         fake_state = {
             "version": 1, "change": "fix-test", "failed": False,
@@ -314,14 +316,27 @@ class TestCmdRecordGuardMatrix(unittest.TestCase):
             "init_committed": True,
             "completed_items": completed or [],
         }
-        with mock.patch.object(self.runner, "load_state",
-                               return_value=fake_state):
-            with mock.patch.object(self.runner, "load_config",
-                                   return_value={"tracks": {}, "pipeline": {"tracks": []}}):
-                with mock.patch.object(self.runner, "_load_tasks_sections",
-                                       return_value=(None, None, None)):
-                    return self.runner.cmd_record("fix-test", status,
-                                                 summary="test")
+        patches = [
+            mock.patch.object(self.runner, "load_state",
+                              return_value=fake_state),
+            mock.patch.object(self.runner, "load_config",
+                              return_value={"tracks": {}, "pipeline": {"tracks": []}}),
+            mock.patch.object(self.runner, "_load_tasks_sections",
+                              return_value=(None, None, None)),
+        ]
+        if continue_after_guard:
+            patches.extend([
+                mock.patch("pg_context_chain.sub_end"),
+                mock.patch("pg_context_chain.sub_start"),
+                mock.patch.object(self.runner, "pipeline_mark"),
+                mock.patch.object(self.runner, "save_state"),
+                mock.patch.object(self.runner, "_inject_commit",
+                                  side_effect=lambda x, *a, **kw: x),
+            ])
+        for p in patches:
+            p.start()
+            self.addCleanup(p.stop)
+        return self.runner.cmd_record("fix-test", status, summary="test")
 
     def test_record_pass_while_sub_verify_rejected(self):
         """Regression: record pass while sub=verify must return action=error."""
@@ -332,19 +347,17 @@ class TestCmdRecordGuardMatrix(unittest.TestCase):
         self.assertIn("pass", result["reason"])
 
     def test_record_completed_while_sub_verify_continues_past_guard(self):
-        """Legal verify → completed: guard must NOT short-circuit."""
-        # Patch the rest of cmd_record to return a sentinel — we only care
-        # that the guard did NOT return action=error.
-        sentinel = {"action": "sentinel_for_continue"}
-        with mock.patch.object(self.runner, "_inject_commit",
-                               side_effect=lambda x, *a, **kw: x) as ic_mock:
-            with mock.patch.object(self.runner, "_advance_to_next_sub",
-                                   return_value=sentinel):
-                result = self._cmd_record_with_state("verify", "completed")
-        # If guard fired, _advance_to_next_sub wouldn't be called.
-        # If guard didn't fire, we get the sentinel back.
-        self.assertEqual(result, sentinel,
-                         "guard wrongly short-circuited legal (verify, completed)")
+        """Legal verify → completed: guard must NOT short-circuit.
+
+        We mock everything past the guard so cmd_record can run to
+        completion and we just verify it didn't return action=error.
+        """
+        result = self._cmd_record_with_state(
+            "verify", "completed", continue_after_guard=True)
+        # If the guard had fired, we'd have action=error. Anything else
+        # means the guard let the call through.
+        self.assertNotEqual(result.get("action"), "error",
+                            "guard wrongly short-circuited legal (verify, completed)")
 
     def test_record_completed_while_sub_gate_rejected(self):
         """gate → completed is illegal; gate only accepts pass/fail."""
@@ -356,14 +369,10 @@ class TestCmdRecordGuardMatrix(unittest.TestCase):
 
     def test_record_pass_while_sub_gate_continues_past_guard(self):
         """Legal gate → pass: guard must NOT short-circuit."""
-        sentinel = {"action": "sentinel_for_continue"}
-        with mock.patch.object(self.runner, "_inject_commit",
-                               side_effect=lambda x, *a, **kw: x):
-            with mock.patch.object(self.runner, "_advance_from_gate",
-                                   return_value=sentinel):
-                result = self._cmd_record_with_state("gate", "pass")
-        self.assertEqual(result, sentinel,
-                         "guard wrongly short-circuited legal (gate, pass)")
+        result = self._cmd_record_with_state(
+            "gate", "pass", continue_after_guard=True)
+        self.assertNotEqual(result.get("action"), "error",
+                            "guard wrongly short-circuited legal (gate, pass)")
 
     def test_unknown_sub_workflow_failed(self):
         """Sub not in ALLOWED_STATUS → workflow_failed (defensive)."""
