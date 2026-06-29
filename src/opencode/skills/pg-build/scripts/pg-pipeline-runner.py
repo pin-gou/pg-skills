@@ -480,6 +480,24 @@ SUB_AGENTS = {
     "gate": "pg-build/gate",
     "simple": "pg-build/simple",
 }
+
+# Per-sub allowed record status set. Enforced at cmd_record entry to prevent
+# LLM from using the wrong status for the current sub-phase (e.g. calling
+# `record pass` while sub=verify, which would silently advance to gate and
+# mark the wrong tasks.md section complete — see _advance_from_gate).
+ALLOWED_STATUS = {
+    "test":      {"completed", "failed"},
+    "dev":       {"completed", "failed"},
+    "verify":    {"completed", "escalate", "failed"},
+    "fix":       {"completed", "failed"},
+    "fix-gate":  {"completed", "failed"},
+    "gate":      {"pass", "fail"},
+    "simple":    {"completed", "failed"},
+    "final-gate": {"pass", "fail"},
+}
+
+# Statuses that mean "this sub-phase is done, advance to the next sub".
+ADVANCING_STATUSES = {"completed", "escalate", "pass"}
 FIX_AGENT = "pg-build/fix"
 FIX_GATE_AGENT = "pg-build/fix-gate"
 FINAL_GATE_AGENT = "pg-build/gate"
@@ -2862,8 +2880,24 @@ def cmd_next(change):
     # because cmd_detect routes simple tracks to _execute_phase BEFORE the
     # all_noop short-circuit.)
 
-    # If we have a current item in waiting state, return the same action (idempotent)
+    # Drift check runs whenever an active item exists, regardless of waiting
+    # flag. Catches the case where state has been poisoned by a previous
+    # bad `record` call and now we resume from scratch — without this
+    # check the runner would happily dispatch a new sub-phase even though
+    # tasks.md contradicts state.
     cur = state.get("current")
+    if cur:
+        drift = _validate_state_consistency(change, state)
+        if drift is not None:
+            return _inject_commit(
+                {"action": "error", "fatal": False,
+                 "reason": drift["reason"],
+                 "fix_hint": drift["fix_hint"],
+                 "drift_kind": drift["kind"]},
+                change, cur.get("item"), cur.get("sub"), "next",
+            )
+
+    # If we have a current item in waiting state, return the same action (idempotent)
     if cur and cur.get("waiting"):
         return _resume_waiting(config, change, state, cur, init_commit=init_commit)
 
@@ -3306,6 +3340,48 @@ def cmd_record(change, status, report_path="", summary="", outputs="", issues=""
     sub = cur.get("sub")
     attempt = cur.get("attempt", 1)
 
+    # Guard 1: sub-status semantic compatibility.
+    # Prevents LLM from using the wrong record command for the current
+    # sub-phase (e.g. `record pass` while sub=verify would silently advance
+    # to gate and mark the wrong tasks.md section complete — see the
+    # `fix-upgrade-download-url-libvirt-missing` regression where this
+    # caused an infinite verify dispatch loop).
+    if sub is not None and sub not in ALLOWED_STATUS:
+        return _inject_commit(
+            {"action": "workflow_failed", "fatal": True,
+             "reason": f"未知 sub={sub!r}, 期望 {sorted(ALLOWED_STATUS.keys())}"},
+            change, item_id, sub, status,
+        )
+    if sub is not None and status not in ALLOWED_STATUS.get(sub, set()):
+        valid = " | ".join(sorted(ALLOWED_STATUS.get(sub, set())))
+        # final-gate has no sub, use item id in message
+        label = sub if sub is not None else item_id
+        return _inject_commit(
+            {"action": "error", "fatal": False,
+             "reason": (f"record status 与 sub 不匹配: sub={label!r} 不允许 status={status!r}。"
+                        f"该 sub 仅支持: {valid}。"),
+             "fix_hint": (f"请检查 tasks.md §{_track_section_label(change, item_id, sub)} "
+                         f"({sub!r}) 当前状态——可能上一步用了错误的 record 命令。"
+                         f"verify 子阶段完成后应使用 'record completed', "
+                         f"gate 子阶段完成后应使用 'record pass'。"),
+             "sub": sub, "item_id": item_id},
+            change, item_id, sub, status,
+        )
+
+    # Guard 2: state ↔ tasks.md consistency check.
+    # Run BEFORE any state mutation so we don't poison state if drift is
+    # detected. Non-fatal: returns error action and leaves state untouched.
+    drift = _validate_state_consistency(change, state)
+    if drift is not None:
+        return _inject_commit(
+            {"action": "error", "fatal": False,
+             "reason": drift["reason"],
+             "fix_hint": drift["fix_hint"],
+             "drift_kind": drift["kind"],
+             "sub": sub, "item_id": item_id},
+            change, item_id, sub, status,
+        )
+
     if status == "completed":
         in_fix_cycle = cur.get("in_fix_cycle", False)
 
@@ -3587,6 +3663,198 @@ def _advance_to_next_sub(config, change, state, item_id, current_sub):
         context=ctx,
         attempt=1,
     )
+
+
+def _track_section_label(change, item_id, sub=None):
+    """Return a human-friendly label for a tasks.md section.
+
+    If `sub` is given, return that sub's label (e.g. '3 (verify)').
+    Otherwise return the first section's label. Falls back to bare track id
+    if parse fails.
+    """
+    sections, _, module = _load_tasks_sections(change)
+    if sections:
+        secs = _find_track_sections(sections, item_id)
+        if secs:
+            target = secs[0]
+            if sub is not None:
+                for s in secs:
+                    if s.get("sub") == sub:
+                        target = s
+                        break
+            return f"{target.get('order', '?')} ({target.get('sub', '?')})"
+    return _bare_track(item_id)
+
+
+def _load_pipeline_state_module():
+    """Lazy-load pg-pipeline-state.py via importlib (file has a hyphen).
+
+    Returns the loaded module, or None if it can't be loaded.
+    """
+    if getattr(_load_pipeline_state_module, "_cached", None) is not None:
+        return _load_pipeline_state_module._cached
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "pg_pipeline_state", PIPELINE_STATE_PY
+    )
+    if spec is None or spec.loader is None:
+        return None
+    module = importlib.util.module_from_spec(spec)
+    try:
+        spec.loader.exec_module(module)
+    except Exception:
+        return None
+    _load_pipeline_state_module._cached = module
+    return module
+
+
+def _load_tasks_sections(change):
+    """Wrapper around pg_pipeline_state.parse_tasks with error suppression.
+
+    Returns (sections, lines, module) or (None, None, None) on error.
+    """
+    module = _load_pipeline_state_module()
+    if module is None:
+        return None, None, None
+    try:
+        tasks_path = module.get_tasks_path(change)
+        sections, lines = module.parse_tasks(tasks_path)
+        return sections, lines, module
+    except Exception:
+        return None, None, None
+
+
+def _find_track_sections(sections, item_id):
+    """Wrapper around pg_pipeline_state.find_sections_for_item."""
+    module = _load_pipeline_state_module()
+    if module is None:
+        return []
+    try:
+        return module.find_sections_for_item(sections, item_id)
+    except Exception:
+        return []
+
+
+def _validate_state_consistency(change, state):
+    """Detect drift between state['current'] and tasks.md checkbox state.
+
+    Returns None if consistent, or a dict describing the drift if not.
+    Non-fatal: callers should surface drift to the LLM and let a human
+    decide how to reconcile (manual rollback / re-mark / restart).
+
+    Drift kinds detected:
+      - 'sub_drift': state['current']['sub'] disagrees with the first
+        unchecked TDVG section in tasks.md for the same track. This is
+        the canonical signature of the
+        `record pass`-while-sub=verify bug: gate section gets marked
+        complete but verify section still has unchecked tasks.
+      - 'track_in_completed_but_section_open': state['completed_items']
+        lists the track, but tasks.md still has unchecked sections for
+        it.
+      - 'all_sections_marked_but_track_not_completed': tasks.md has all
+        TDVG sections checked but the track is not in
+        completed_items.
+    """
+    cur = state.get("current")
+    if not cur:
+        return None  # No active item — nothing to validate
+
+    item_id = cur.get("item")
+    sub = cur.get("sub")
+    if not item_id:
+        return None
+
+    sections, _, module = _load_tasks_sections(change)
+    if sections is None or module is None:
+        return None  # Cannot validate — don't false-positive
+
+    track_sections = _find_track_sections(sections, item_id)
+    if not track_sections:
+        return None  # No tasks.md sections for this track — nothing to check
+
+    # Compute per-section status (noop sections are skipped, like cmd_check)
+    section_status = []
+    for sec in track_sections:
+        try:
+            un, ch, noop = module.count_tasks(sec["lines"])
+        except Exception:
+            continue
+        if noop:
+            continue
+        section_status.append({
+            "sub": sec.get("sub"),
+            "order": sec.get("order"),
+            "label": sec.get("label"),
+            "unchecked": un,
+            "checked": ch,
+            "total": un + ch,
+        })
+
+    if not section_status:
+        return None
+
+    first_unchecked = next(
+        (s for s in section_status if s["unchecked"] > 0), None
+    )
+    first_open_sub = first_unchecked["sub"] if first_unchecked else None
+
+    # Drift kind 1: sub_drift
+    # The runner thinks the active sub is X, but tasks.md's first
+    # unchecked section is Y. This means an earlier `record` call
+    # marked the wrong section (or marked a future section).
+    if sub is not None and first_open_sub is not None and sub != first_open_sub:
+        return {
+            "kind": "sub_drift",
+            "reason": (
+                f"runner state['current'].sub={sub!r} 与 tasks.md 实际状态不一致: "
+                f"该 track 第一个未完成 section 是 §{first_unchecked['order']} "
+                f"({first_open_sub!r}, {first_unchecked['unchecked']} 个未勾任务), "
+                f"但 state 记录为 sub={sub!r}。"
+            ),
+            "fix_hint": (
+                f"可能上一步 record 命令误用了错误的 sub-status 组合。"
+                f"建议：(1) 检查 tasks.md §{_track_section_label(change, item_id)} "
+                f"复选框是否被错误勾选, 用 pg-pipeline-state.py rollback <track> 回滚;"
+                f"(2) 确认后重新跑 next 继续; 或 (3) 删除 "
+                f".pg/changes/{change}/2-build/.pipeline-state.json 从头开始。"
+            ),
+        }
+
+    # Drift kind 2: track_in_completed_but_section_open
+    completed_items = state.get("completed_items", []) or []
+    if item_id in completed_items and first_open_sub is not None:
+        return {
+            "kind": "track_in_completed_but_section_open",
+            "reason": (
+                f"state['completed_items'] 包含 {item_id!r}, 但 tasks.md §"
+                f"{first_unchecked['order']} ({first_open_sub!r}) "
+                f"仍有 {first_unchecked['unchecked']} 个未勾任务。"
+            ),
+            "fix_hint": (
+                "可能上一步 record 错误地推进了 track 状态但漏勾对应 section。"
+                f"建议：用 pg-pipeline-state.py rollback {item_id} 回滚 tasks.md 章节, "
+                f"然后重新跑 next 继续验证流程。"
+            ),
+        }
+
+    # Drift kind 3: all_sections_marked_but_track_not_completed
+    if item_id not in completed_items and first_open_sub is None:
+        # Every section marked but track not listed as completed — harmless,
+        # but flag it so the next record won't silently skip the gate.
+        return {
+            "kind": "all_sections_marked_but_track_not_completed",
+            "reason": (
+                f"tasks.md 中 {item_id} 的所有 section 都已勾选, "
+                f"但 state['completed_items'] 未包含 {item_id!r}。"
+                f"当前 sub={sub!r} 状态可能已经过时。"
+            ),
+            "fix_hint": (
+                f"建议：手动调用 pg-pipeline-state.py mark {item_id} 补登, "
+                f"或重新跑 next 让 runner 自动推进到下一 track。"
+            ),
+        }
+
+    return None
 
 
 def _advance_from_verify(config, change, state, item_id, report_path):
