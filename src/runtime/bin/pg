@@ -295,6 +295,40 @@ def cmd_doctor(args) -> int:
             except Exception as e:
                 warnings.append(f'.pg/hooks/lib/common.sh 读失败: {e}')
 
+    # 7. .pg/context/agent-protocol.md 存在? (pg-init-project Phase 5 产出)
+    #    agent 拿 SSOT / 调 hook / 找日志的速查文件. 缺失说明 Phase 5 未跑,
+    #    agent 可能用错入口 (如直接 bash .pg/hooks/... 而非 pg-invoke-hook.py).
+    agent_protocol = pg_dir / 'context' / 'agent-protocol.md'
+    if not agent_protocol.is_file():
+        warnings.append(
+            '.pg/context/agent-protocol.md 不存在. LLM agent 拿到任务时无 SSOT 速查, '
+            '可能直接 bash .pg/hooks/... (审计不可见). 修复: 跑 pg-init-project (Phase 5 '
+            '会自动生成), 或手动 cp .pg/skills/examples/shell/agent-protocol.md '
+            '.pg/context/agent-protocol.md'
+        )
+    else:
+        ok_count += 1
+        print('✓ .pg/context/agent-protocol.md 存在 (agent SSOT 速查已就位)')
+
+    # 8. 根 AGENTS.md 含 agent-protocol 引用? (pg-init-project Phase 5 联动检查)
+    #    Phase 5 生成 agent-protocol.md 后, 必须有 AGENTS.md 引用它, 否则 agent 找不到.
+    #    仅检查根 AGENTS.md (sub-module 的引用由各自维护, 不强制).
+    root_agents_md = project_root / 'AGENTS.md'
+    if root_agents_md.is_file():
+        try:
+            root_content = root_agents_md.read_text(encoding='utf-8')
+            if 'agent-protocol' not in root_content:
+                warnings.append(
+                    '根 AGENTS.md 未引用 .pg/context/agent-protocol.md. LLM agent 看不到 '
+                    'agent-protocol.md, 会回到"读 project.yaml / 直接 bash hook"的反模式. '
+                    '修复: 在根 AGENTS.md 加一行"构建/启动/日志: 见 .pg/context/agent-protocol.md"'
+                )
+            else:
+                ok_count += 1
+                print('✓ 根 AGENTS.md 含 agent-protocol 引用 (Phase 5 双 SSOT 联动通过)')
+        except Exception as e:
+            warnings.append(f'根 AGENTS.md 读失败: {e}')
+
     # 输出
     print()
     if errors:

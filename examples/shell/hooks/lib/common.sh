@@ -39,6 +39,7 @@ AGENT_PORT=9082
 #     pg-build       -> .pg/changes/<session>/2-build/<env>/logs|pids
 #     pg-regression  -> .pg/regression/<session>/<env>/logs|pids   (session = <suite>-<date>-<seq>)
 #     pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs|pids    (session 含 fix- 前缀)
+#     pg-agent       -> .pg/agent/<session>/<env>/logs|pids        (LLM agent 通用入口, session = <iso-date>-<keyword>)
 #     ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs|pids       (新顶级目录, 不与 SKILL 命名空间混)
 #
 # 调用方必须在 source 此文件前 export:
@@ -70,6 +71,11 @@ pg_resolve_paths() {
             pg-fix-issue)
                 LOG_DIR="$project_root/.pg/fix-issue/${session}/${env}/logs"
                 PID_DIR="$project_root/.pg/fix-issue/${session}/${env}/pids"
+                ;;
+            pg-agent)
+                [[ -z "$session" ]] && session="manual"
+                LOG_DIR="$project_root/.pg/agent/${session}/${env}/logs"
+                PID_DIR="$project_root/.pg/agent/${session}/${env}/pids"
                 ;;
             ad-hoc)
                 [[ -z "$session" ]] && session="ad-hoc-unknown"

@@ -137,8 +137,9 @@ ENV_LEVEL_ACTIONS = ("prepare_env", "clean_env")
 CALLER_PG_BUILD = "pg-build"
 CALLER_PG_REGRESSION = "pg-regression"
 CALLER_PG_FIX_ISSUE = "pg-fix-issue"
+CALLER_PG_AGENT = "pg-agent"
 CALLER_AD_HOC = "ad-hoc"
-KNOWN_CALLERS = (CALLER_PG_BUILD, CALLER_PG_REGRESSION, CALLER_PG_FIX_ISSUE, CALLER_AD_HOC)
+KNOWN_CALLERS = (CALLER_PG_BUILD, CALLER_PG_REGRESSION, CALLER_PG_FIX_ISSUE, CALLER_PG_AGENT, CALLER_AD_HOC)
 
 
 def _resolve_wait_for_completion(action: str, cli_value, cfg_value=None):
@@ -188,6 +189,7 @@ def pg_log_dir_for_skill(caller: str, session: str, env: str, project_root: Path
       pg-build       -> .pg/changes/<session>/2-build/<env>/logs
       pg-regression  -> .pg/regression/<session>/<env>/logs   (session = <suite>-<date>-<seq>)
       pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs    (session 已含 fix- 前缀)
+      pg-agent       -> .pg/agent/<session>/<env>/logs        (LLM agent 通用入口, session = <iso-date>-<keyword>)
       ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs       (独立顶级目录, 不与 SKILL 命名空间混)
     """
     base = project_root / ".pg"
@@ -197,6 +199,8 @@ def pg_log_dir_for_skill(caller: str, session: str, env: str, project_root: Path
         return base / "regression" / session / env / "logs"
     if caller == CALLER_PG_FIX_ISSUE:
         return base / "fix-issue" / session / env / "logs"
+    if caller == CALLER_PG_AGENT:
+        return base / "agent" / session / env / "logs"
     # ad-hoc
     return base / "ad-hoc" / session / env / "logs"
 

@@ -74,6 +74,11 @@ WORKFLOW_KEYS = {
     "pg-fix-issue": ["modules", "environments", "tracks", "stages", "fix_issue"],
     "pg-quick-build": ["modules", "environments", "tracks", "stages", "git"],
     "pg-regression": ["modules", "environments", "regression"],
+    # pg-agent: LLM agent 通用的 SSOT 查询入口. 只暴露 modules + environments,
+    # 不暴露 tracks / stages / fix_issue 等 skill 内部状态. agent 走 --resolve-* /
+    # --key / --prefix 取细粒度值, 不要用带 skill 名的 workflow (那是给 skill
+    # 编排器用的, agent 用会被迫看到噪声).
+    "pg-agent": ["modules", "environments"],
 }
 
 

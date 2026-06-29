@@ -185,6 +185,116 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 
 **产出**：doctor 输出 0 / 0 / 4。
 
+### Phase 5: AGENTS.md drift 检测 + agent 协议注入
+
+**目标**：解决 "项目已有 AGENTS.md 描述启动/构建命令 → 但 .pg/hooks/ 接管了 SSOT → AGENTS.md 与 hooks 协议 drift" 的历史遗留问题。Phase 5 不直接修改用户的 AGENTS.md，而是产出 drift 报告 + 生成 `.pg/context/agent-protocol.md`（agent 通用的 SSOT 发现机制文档），让 agent 一眼就知道该用什么入口。
+
+**MUST**：如果 `PG_SKIP_AGENTS_MD_MIGRATION=1`（env），跳过整个 Phase 5，便于用户拒绝该自动化。
+
+#### Step 5.1: 扫描仓库里所有 AGENTS.md
+
+```bash
+# 用 glob 列出所有 AGENTS.md, 包括 root 和 sub-module
+files=$(git ls-files '**/AGENTS.md' 'AGENTS.md' 2>/dev/null || \
+        find . -name AGENTS.md -not -path './.git/*' -not -path './node_modules/*')
+```
+
+对每个文件：
+- 读取全文
+- 提取命令关键字命中行（行号 + 命中关键字）：
+  - 模块命令关键字：`mvn | pnpm | make | go test | go build | go vet | npx`
+  - Hook / 脚本路径关键字：`bash .pg/hooks/` / `pg-spec/scripts/` / `scripts/`
+- 分类文件：
+  - **root**: 项目根目录的 AGENTS.md
+  - **sub-module**: 路径匹配 `modules.<m>.root`（如 `webvirt-backend/AGENTS.md`）
+  - **tests**: 路径含 `tests/` 或 `test/`
+
+#### Step 5.2: drift 分类（3 类）
+
+| 类别 | 判定 | 严重度 |
+|---|---|---|
+| **a. 重复** | sub-module/tests AGENTS.md 出现模块命令关键字，且文件内容没说"见 .pg/context/agent-protocol.md" | low（提醒统一） |
+| **b. 硬编码** | 命令关键字后紧跟具体子命令（如 `pnpm openapi` / `mvn clean install` / `make build-all`），而非通用占位符（如 `<module-cmd>`） | medium（drift 风险） |
+| **c. 旧路径** | 引用 `pg-spec/scripts/` / `scripts/` / `scripts/logs/` 等非 `.pg/hooks/` 路径 | **high**（agent 跑就会失败） |
+
+#### Step 5.3: 生成 `.pg/context/agent-protocol.md`
+
+**模板来源**：`pg-skills/examples/shell/agent-protocol.md`（已写好的最终形态）。
+
+复制到 `.pg/context/agent-protocol.md`，**不做内容改写**——模板是 SSOT。
+
+模板结构：
+```
+§1   SSOT 查询（pg-parse-config.py pg-agent）
+§2   Hook 调用（仅 pg-invoke-hook.py 入口）
+§2.5 session-id 约定
+§3   日志路径（按 caller × session × env）
+§5   常见错误
+```
+
+#### Step 5.4: 生成 drift patch 清单 `.pg/context/agents-md-patches.md`
+
+**不直接修改 AGENTS.md**，产出 markdown 表格：
+
+```markdown
+# AGENTS.md Drift Patches
+
+Generated: <ISO timestamp>
+Scanner: pg-init-project Phase 5 v1
+
+## Drift 总览
+
+| 文件 | 类别 a | 类别 b | 类别 c | 总计 |
+|---|---|---|---|---|
+| webvirt-agent/AGENTS.md | 0 | 5 | 0 | 5 |
+| webvirt-frontend/AGENTS.md | 2 | 3 | 0 | 5 |
+| AGENTS.md (root) | 0 | 0 | 2 | 2 |
+
+## Patch 清单
+
+| # | 文件 | 行号 | 当前内容（节选） | 类别 | 建议改法 |
+|---|------|------|------------------|------|----------|
+| 1 | webvirt-agent/AGENTS.md | 60-95 | `make build` / `make proto` 等硬编码 | b | 替换为"模块构建命令: 见 .pg/context/agent-protocol.md §1" |
+| 2 | AGENTS.md (root) | 166-168 | `scripts/logs/backend.log` | c | 替换为"日志路径: 按 §3 路由 (e.g. .pg/agent/<session>/dev-local/logs/)" |
+```
+
+**关键约束**：
+- 必须按"先 c 后 b 后 a"排序（最严重的先列）
+- 每条 patch 必须给出**具体的修改模板字符串**（不是模糊描述）
+- 表格列数固定 6 列，方便用户复制到 issue tracker
+
+#### Step 5.5: 提示用户 review + 应用
+
+在终态汇报里**显式提示**：
+
+```
+✓ Phase 5 完成
+  生成:
+    - .pg/context/agent-protocol.md (agent 协议速查, SSOT)
+    - .pg/context/agents-md-patches.md (drift 清单, 待 review)
+  不修改: 任何 AGENTS.md
+
+下一步:
+  1. cat .pg/context/agents-md-patches.md  review patch 清单
+  2. 按 patch 手动修改 4 个 AGENTS.md (或写脚本批量应用)
+  3. 跑 pg doctor 验证 agents_md_protocol_link_present + context_protocol_present
+```
+
+**MUST**：不静默修改用户的 AGENTS.md——这违反 LLM agent 与用户文件的边界。
+
+#### 跳过 Phase 5 的方式
+
+```bash
+PG_SKIP_AGENTS_MD_MIGRATION=1 python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-init-project
+# 或者
+PG_SKIP_AGENTS_MD_MIGRATION=1 bash .pg/skills/src/opencode/skills/pg-init-project/...
+```
+
+适用场景：
+- 用户明确表示不需要 agent-protocol 注入
+- 已有自己的 AGENTS.md 规范，不希望被报告打扰
+- 在 CI / 自动化里跑 pg-init-project（避免生成 patch 清单污染 artifacts）
+
 ---
 
 ## 输出格式
@@ -288,6 +398,8 @@ Next steps:
 5. **把 placeholder 留着** —— 在 `project.yaml` 顶部保留 `placeholder` module 不删。**反例**：schema 允许 `minProperties: 1` 但实际项目有 4 个 module，placeholder 残留污染 tracks/stages。
 6. **混淆 module hook 与 environment hook 的边界** —— 把 `modules.<m>.build` 写成 `bash .pg/hooks/kuboard-server-build.sh`，期望它走 hook 协议。**错**：`modules.<m>.build` 是 `executable_command` 字段，runner 直接渲染为 `timeout N bash -c '<cmd>'` 执行，**不**调用 `.pg/hooks/<m>-<action>.sh`。`pg-run-hook.py` 只服务于 `environments.<env>.{prepare_env,clean_env}` 与 `environments.<env>.roles.<r>.{start,stop,...}`。项目里如果残留 `<module>-{build,test,lint}.sh`，是历史模板的产物，删除即可。
 7. **忘记复制 `lib/common.sh`** —— 只复制 5 个 role/env 模板但漏掉 `lib/common.sh`。**反例**：新项目跑 `pg-regression` 时日志写到 `scripts/logs` 而非 `.pg/regression/<suite>/<env>/logs`，排错时找不到日志。`pg doctor` 会有 `hooks_lib_common_present` warning 提示。
+8. **Phase 5 直接修改 AGENTS.md** —— 不允许！必须只产 drift 清单，让用户 review 后手动应用。**反例**：pg-init-project 静默改用户的 AGENTS.md，导致用户信任破裂。
+9. **Phase 5 跳过 PG_SKIP_AGENTS_MD_MIGRATION 兜底** —— 用户拒绝时仍强行生成 patch 清单。**反例**：CI 跑 pg-init-project 时 .pg/context/ 下出现污染 artifacts，diff 噪音。
 
 ---
 
@@ -298,9 +410,12 @@ Next steps:
 - **MUST**：所有 `TBD:` 项集中在 `description` 字段，**不**污染 `root` / `language` / `cmd` 等结构化字段。
 - **MUST**：跑 `pg doctor` 且输出 0 错误才视为完成。
 - **MUST**：复制 `.pg/skills/examples/shell/hooks/lib/common.sh` 到 `.pg/hooks/lib/common.sh`，让生成的 role-* / env-* hook 能调 `pg_resolve_paths` 做 per-skill 路径路由。
+- **MUST**：Phase 5 不直接修改任何 AGENTS.md——只产 drift 清单。
+- **MUST**：Phase 5 必须在 `PG_SKIP_AGENTS_MD_MIGRATION=1` 时完全跳过。
 - **MUST NOT**：引入 `additionalProperties: false` 之外的 schema 字段。
 - **MUST NOT**：从 `examples/<lang>/hooks/module-*.sh` 之外的地方抄 module hook——module 命令应在 `project.yaml` 里以 `executable_command` 形态声明，**不进 hook 协议**。
 - **MUST NOT**：把 `modules.<m>.build` 写成 `bash .pg/hooks/<m>-build.sh`——那是双重封装 + 双重 timeout，runner 不识别。
 - **MUST NOT**：动 `pg-version` / `pg` CLI / `hook-helpers.sh` / `error-categories.yaml`。
 - **SHOULD**：每个 module 至少生成 `build` 和 `test` 两个 hook；`lint` 仅在 language 习惯上有独立命令时（go: `go vet`）才生成。
 - **SHOULD**：在最终汇报里把所有 TBD 项用清单列出来，让用户一次性 review 完。
+- **SHOULD**：Phase 5 的 patch 清单按严重度排序（c → b → a），让用户优先看最严重的。
