@@ -224,6 +224,8 @@ def _tab_menu_loop(
     try:
         if use_alt_screen:
             sys.stdout.write("\033[?1049h\033[H")
+        else:
+            sys.stdout.write("\033[H\033[J")
         tab_bar = _render_tab_bar(tab_names, current_tab, tab_keys) if has_tabs else ""
         lines = _render_menu(title, items, current, back_option)
         all_lines = ([tab_bar] + lines) if has_tabs else lines
@@ -685,7 +687,9 @@ def _build_module_items(
             for n in sorted(mods.keys())
         ]
     actions = resolve_module_actions(module_selected, mods[module_selected])
-    return [(f"  {a[0]}", a[1]) for a in actions]
+    items = [_c("33", f"  ── {module_selected} ──")]
+    items += [(f"  {a[0]}", a[1]) for a in actions]
+    return items
 
 
 def _build_instance_items(
@@ -699,24 +703,28 @@ def _build_instance_items(
     instances = role_cfg.get("instances", [])
     actions = role_cfg.get("actions", {})
     if inst_selected is None and len(instances) <= 3:
-        items = []
+        items = [_c("33", f"  ── {role_selected} ──")]
         for inst in instances:
             act_names = [a for a in _ACTION_ORDER if a in actions]
             for a in act_names:
                 items.append((f"  {inst['name']} / {a}", ""))
         return items
     if inst_selected is None:
-        return [(inst["name"], "") for inst in instances]
+        items = [_c("33", f"  ── {role_selected} ──")]
+        items += [(inst["name"], "") for inst in instances]
+        return items
     inst = next((i for i in instances if i["name"] == inst_selected), None)
     if not inst:
         return []
     act_names = [a for a in _ACTION_ORDER if a in actions] + sorted(
         a for a in actions if a not in _ACTION_ORDER
     )
-    return [
+    items = [_c("33", f"  ── {role_selected} / {inst_selected} ──")]
+    items += [
         (a, actions[a].get("description", "") if isinstance(actions[a], dict) else "")
         for a in act_names
     ]
+    return items
 
 
 def _exec_quick_action(idx: int, env_name: str, config: dict, project_root: Path):
@@ -840,7 +848,7 @@ def _exec_module_action(
     print(f"    workdir: {module_root}")
 
     start = time.time()
-    rc = run_shell(cmd, cwd=module_root, timeout=timeout, extra_env=env)
+    rc = run_shell(cmd, cwd=project_root, timeout=timeout, extra_env=env)
     elapsed = time.time() - start
     _print_exec_stats(a_label, [{"label": label, "duration": elapsed, "ok": rc == 0}])
     pause()
@@ -1120,7 +1128,7 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
                 log_dir / f"{args.module}-{args.action.replace('.', '-')}.json"
             ),
         }
-        return run_shell(cmd, cwd=module_root, timeout=timeout, extra_env=env)
+        return run_shell(cmd, cwd=project_root, timeout=timeout, extra_env=env)
 
     if args.env and args.action in ("prepare_env", "clean_env"):
         hook = find_invoke_hook(project_root)
