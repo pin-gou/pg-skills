@@ -180,12 +180,49 @@ def cmd_next_v2(change: str) -> dict:
         _execute_phase = runner._execute_phase
         _last_fail_reason = runner._last_fail_reason
         migrate_legacy_state_files = runner.migrate_legacy_state_files
+        # Shared bootstrap helper (v1/v2 共用, 防止 v2 再次丢函数)
+        pg_build_bootstrap = runner.pg_build_bootstrap
+        pg_build_dispatch_context = runner.pg_build_dispatch_context
     except Exception as e:
         return {
             "action": "error",
             "fatal": True,
             "reason": f"pg_runner_v2: failed to import runner helpers: {e}",
         }
+
+    # ===== Build bootstrap (mirrors v1 cmd_next:2862-2885) =====
+    # build-r Step 3 切到 v2 时丢失了 4 个关键副作用, 导致 v2 路径下:
+    #   - 不创建 feat/pg/<change> 分支, 所有 commit 直接落 master
+    #   - 不跑 init commit, 启动基线 git 节点丢失
+    #   - 不创建 2-build/context-chain.md, final-gate 审计缺依据
+    #   - 不迁移 legacy state file
+    # 现在通过共享 helper pg_build_bootstrap 补回, 与 v1 走同一份逻辑.
+    init_commit = pg_build_bootstrap(change, ps)
+
+    # Manifest consistency guard (mirrors v1 cmd_next:2845-2849).
+    # build-r Step 3 切到 v2 时丢了这个守卫, 导致 manifest.yaml ↔ tasks.md
+    # 不一致时静默通过. 现在补回, 与 v1 行为一致.
+    try:
+        valid, msg = runner._validate_manifest(change)
+        if not valid:
+            return {
+                "action": "error",
+                "fatal": True,
+                "reason": f"manifest 校验失败: {msg}",
+                "fix_hint": "请先修复 manifest 一致性后重试",
+            }
+    except Exception as e:
+        # manifest 不存在/校验脚本失败时, 与 v1 一样不阻塞 (manifest 在
+        # 老项目可能不存在). 仅当 _validate_manifest 显式返回 invalid
+        # 时才返回 error.
+        if "manifest 校验失败" not in str(e):
+            pass  # 静默放过
+        else:
+            return {
+                "action": "error",
+                "fatal": True,
+                "reason": f"manifest 校验失败: {e}",
+            }
 
     config = load_config()
     order = get_pipeline_order(config, change)
@@ -225,10 +262,12 @@ def cmd_next_v2(change: str) -> dict:
 
     # Resume path: same dispatch already in flight
     if nd.is_resume:
-        ctx = filter_track_context(config, nd.track, nd.phase, change=change)
-        ctx["_change"] = change
-        _enrich_context_with_tasks(ctx, change, nd.track, nd.phase)
-        return _build_dispatch_response(config, change, nd, ctx)
+        # Use shared dispatch context helper (mirrors v1 cmd_next:2935-2941)
+        # to inject rollback_context / environment.hooks / build_rules.
+        ctx, _has_rollback = pg_build_dispatch_context(
+            change, nd.track, nd.phase, config)
+        return _build_dispatch_response(config, change, nd, ctx,
+                                        init_commit=init_commit)
 
     # Fresh dispatch: record_dispatch_started marks state.
     # For phase items we wouldn't get here, but for tracks:
@@ -240,10 +279,11 @@ def cmd_next_v2(change: str) -> dict:
     )
     ps.commit()
 
-    ctx = filter_track_context(config, nd.track, nd.phase, change=change)
-    ctx["_change"] = change
-    _enrich_context_with_tasks(ctx, change, nd.track, nd.phase)
-    return _build_dispatch_response(config, change, nd, ctx)
+    # Use shared dispatch context helper (mirrors v1 cmd_next:2935-2941).
+    ctx, _has_rollback = pg_build_dispatch_context(
+        change, nd.track, nd.phase, config)
+    return _build_dispatch_response(config, change, nd, ctx,
+                                    init_commit=init_commit)
 
 
 def _is_phase_item(config: dict, item: str) -> bool:
@@ -256,8 +296,17 @@ def _is_phase_item(config: dict, item: str) -> bool:
 
 
 def _build_dispatch_response(config: dict, change: str,
-                              nd: NextDispatch, ctx: dict) -> dict:
-    """Build the dispatch action dict (same protocol as v1 dispatch_action)."""
+                              nd: NextDispatch, ctx: dict,
+                              init_commit=None) -> dict:
+    """Build the dispatch action dict (same protocol as v1 dispatch_action).
+
+    Args:
+        init_commit: optional init_commit dict from pg_build_bootstrap (only
+            set on the first dispatch of a fresh change). When set, it's
+            attached to the action JSON so the LLM orchestrator can show
+            "bootstrap committed on branch X" in its terminal summary.
+            Mirrors v1 cmd_next:2970-2977 behavior.
+    """
     from pg_pipeline_runner import dispatch_action, dispatch_fix_action
     if nd.kind == "dispatch_fix":
         if nd.phase == "fix-gate":
@@ -276,6 +325,7 @@ def _build_dispatch_response(config: dict, change: str,
         sub=nd.phase,
         context=ctx,
         attempt=1,
+        init_commit=init_commit,
     )
 
 
