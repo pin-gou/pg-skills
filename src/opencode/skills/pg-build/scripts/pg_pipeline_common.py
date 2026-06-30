@@ -550,3 +550,315 @@ def _section_status(unchecked, checked, noop):
     if checked > 0:
         return "in_progress"
     return "pending"
+
+
+# ============================================================
+# Build bootstrap shared helpers
+# ============================================================
+#
+# 这些 helper 抽取自 pg-pipeline-runner.py (v1 cmd_next/cmd_record) 与
+# pg_runner_v2.py (v2 cmd_next_v2/cmd_record_v2) 的共有副作用逻辑,
+# 解决 v2 重构时丢函数的回归问题 (build-r Step 3 漂移).
+#
+# 设计要点:
+#   - pg_build_bootstrap / pg_build_dispatch_context: v1 与 v2 都调用同一份
+#   - pg_build_record_log: 仅 v2 调用 (v1 保留原 17 处散落调用, 按用户决定)
+#   - state 参数 type-dispatch: 同时支持 v1 state dict 与 v2 PipelineState
+#   - 失败语义: 全部容错, 任何 helper 异常不阻塞 dispatch
+
+import subprocess as _subprocess
+import sys as _sys
+
+
+def _import_runner_helpers():
+    """Lazy import of pg-pipeline-runner.py module-level functions.
+
+    Returns the module object so callers can call its functions
+    (e.g. runner.migrate_legacy_state_files, runner._ensure_context_chain, etc.).
+    Raises ImportError if the runner module is not on sys.path.
+    """
+    scripts_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)))
+    if scripts_dir not in _sys.path:
+        _sys.path.insert(0, scripts_dir)
+    if scripts_dir not in _sys.path:
+        _sys.path.insert(0, scripts_dir)
+    import importlib
+    return importlib.import_module("pg_pipeline_runner")
+
+
+def _normalize_state_for_bootstrap(state):
+    """Return a v1-style state dict from either a v1 dict or v2 PipelineState.
+
+    v1 state: {init_committed: bool, ...}
+    v2 PipelineState: instance with .data["context"] = {...}
+
+    Returns the v1-style dict (mutations to it may be persisted by caller
+    using _persist_state_mutation).
+    """
+    if hasattr(state, "data") and isinstance(state.data, dict):
+        ctx = state.data.get("context") or {}
+        return ctx
+    if isinstance(state, dict):
+        return state
+    raise TypeError(
+        f"state must be a dict (v1) or PipelineState (v2); got {type(state).__name__}")
+
+
+def _persist_state_mutation(state, key, value):
+    """Persist a state mutation back to the original state container.
+
+    For v1 dict: write directly into the dict. Caller is responsible for
+    save_state() to disk after the helper returns (cmd_next / cmd_record do
+    this in their normal flow).
+    For v2 PipelineState: write into data["context"][key] and commit to disk
+    via .commit() — this is the v2 equivalent of save_state.
+    """
+    if hasattr(state, "data") and isinstance(state.data, dict):
+        ctx = state.data.setdefault("context", {})
+        ctx[key] = value
+        if hasattr(state, "commit"):
+            try:
+                state.commit()
+            except Exception:
+                pass
+        return
+    if isinstance(state, dict):
+        state[key] = value
+        return
+
+
+def pg_build_bootstrap(change, state):
+    """Run the 4 environment-init side effects required before the first dispatch.
+
+    Encapsulates what v1 cmd_next:2862-2885 used to do inline:
+      1. migrate_legacy_state_files(change) — pull legacy state.json from change root
+      2. _ensure_context_chain(change) — create 2-build/context-chain.md
+      3. _ensure_feature_branch(change) — git checkout -b feat/pg/<change>
+      4. _maybe_bootstrap_init_commit(change, state) — initial git commit
+
+    Args:
+        change: change name.
+        state: v1 state dict (with init_committed key) OR v2 PipelineState instance.
+
+    Returns:
+        dict | None — the init_commit result dict (with branch/sha/message keys)
+        when this call actually ran the bootstrap; None when skipped (already done).
+
+    Side effects:
+        - Migrates legacy state files at .pg/changes/<change>/* → 2-build/
+        - Creates .pg/changes/<change>/2-build/context-chain.md (idempotent)
+        - git checkout -b feat/pg/<change> (idempotent, only if not already on it)
+        - git add -A + git commit "chore(<change>): bootstrap pg-build" (idempotent
+          via state.init_committed marker)
+        - Persists init_committed=True back to state (v2 commits to disk; v1
+          caller is responsible for save_state)
+
+    Note:
+        All four side effects are best-effort: failures are caught and logged
+        (printed to stderr) but never raised, so dispatch always proceeds.
+    """
+    state_dict = _normalize_state_for_bootstrap(state)
+
+    runner = None
+    try:
+        runner = _import_runner_helpers()
+    except Exception as e:
+        print(f"[pg_build_bootstrap] import runner failed: {e}", file=_sys.stderr)
+        return None
+
+    # 1. migrate_legacy_state_files
+    try:
+        moved = runner.migrate_legacy_state_files(change)
+        if moved:
+            print(f"[pg_build_bootstrap] migrated legacy state: {moved}", file=_sys.stderr)
+    except Exception as e:
+        print(f"[pg_build_bootstrap] migrate failed: {e}", file=_sys.stderr)
+
+    # 2. _ensure_context_chain
+    try:
+        runner._ensure_context_chain(change)
+    except Exception as e:
+        print(f"[pg_build_bootstrap] ensure_context_chain failed: {e}", file=_sys.stderr)
+
+    # 3. _ensure_feature_branch
+    try:
+        runner._ensure_feature_branch(change)
+    except Exception as e:
+        print(f"[pg_build_bootstrap] ensure_feature_branch failed: {e}", file=_sys.stderr)
+
+    # 4. _maybe_bootstrap_init_commit
+    init_commit = None
+    try:
+        init_commit = runner._maybe_bootstrap_init_commit(change, state_dict)
+    except Exception as e:
+        print(f"[pg_build_bootstrap] init_commit failed: {e}", file=_sys.stderr)
+
+    # Persist init_committed marker back to the original state container.
+    if init_commit is not None:
+        _persist_state_mutation(state, "init_committed", True)
+
+    return init_commit
+
+
+def pg_build_dispatch_context(change, item_id, sub, config):
+    """Assemble the dispatch ctx for a track sub-phase.
+
+    Encapsulates what v1 cmd_next:2932-2941 used to do inline:
+      1. filter_track_context(config, item_id, sub, change=change) — track config slice
+      2. _enrich_context_with_rollback — populate ctx["rollback_context"] from
+         pg_context_chain.rollback_get (only when a rollback is pending)
+      3. _enrich_context_with_stage — populate ctx["stage"] with environment.hooks
+         so sub-agents know how to start/stop services
+      4. _enrich_context_with_tasks — populate ctx["tasks_preformatted"] from
+         tasks.md checkbox state
+      5. _enrich_context_with_prompt_injection — splice build_rules into prompt
+
+    Args:
+        change: change name.
+        item_id: track id (e.g. "backend", "openapi-gen").
+        sub: sub-phase ("test" / "dev" / "verify" / "gate" / "fix" / "fix-gate" / "simple").
+        config: full project.yaml dict (from load_config()).
+
+    Returns:
+        (ctx, has_rollback) — ctx is a dict ready to pass to dispatch_action;
+        has_rollback is True when ctx["rollback_context"] is populated (used by
+        v1 to set state["current"]["has_rollback"]).
+
+    Note:
+        Failures in individual enrich_* calls are caught and logged so that
+        a broken rollback get / tasks parse doesn't block dispatch.
+    """
+    try:
+        runner = _import_runner_helpers()
+    except Exception as e:
+        print(f"[pg_build_dispatch_context] import runner failed: {e}", file=_sys.stderr)
+        # Fall back to bare ctx; sub-agent won't have hooks/tasks but dispatch proceeds.
+        return {"_change": change}, False
+
+    # 1. filter_track_context — get the track config slice
+    try:
+        ctx = runner.filter_track_context(config, item_id, sub, change=change)
+    except Exception as e:
+        print(f"[pg_build_dispatch_context] filter_track_context failed: {e}", file=_sys.stderr)
+        ctx = {}
+    ctx["_change"] = change
+
+    # 2. rollback — read pending rollback context if any
+    has_rollback = False
+    try:
+        # Reuse the runner's already-imported pg_context_chain module so
+        # tests that mock `runner.pg_context_chain` work transparently.
+        pgcc = getattr(runner, "pg_context_chain", None)
+        if pgcc is None:
+            import pg_context_chain as pgcc
+        rb = pgcc.rollback_get(change, item_id)
+        runner._enrich_context_with_rollback(ctx, rb)
+        has_rollback = bool(rb and rb.get("found"))
+    except Exception as e:
+        print(f"[pg_build_dispatch_context] rollback failed: {e}", file=_sys.stderr)
+
+    # 3. stage / environment hooks
+    try:
+        runner._enrich_context_with_stage(ctx, config, item_id, change=change)
+    except Exception as e:
+        print(f"[pg_build_dispatch_context] stage failed: {e}", file=_sys.stderr)
+
+    # 4. tasks.md preformatted
+    try:
+        runner._enrich_context_with_tasks(ctx, change, item_id, sub)
+    except Exception as e:
+        print(f"[pg_build_dispatch_context] tasks failed: {e}", file=_sys.stderr)
+
+    # 5. build_rules prompt injection
+    try:
+        runner._enrich_context_with_prompt_injection(ctx, config, item_id, sub)
+    except Exception as e:
+        print(f"[pg_build_dispatch_context] prompt_injection failed: {e}", file=_sys.stderr)
+
+    return ctx, has_rollback
+
+
+def pg_build_record_log(change, item, sub, status, summary="", outputs="", issues=""):
+    """Record sub-agent outcome in context-chain.md (v2 path only).
+
+    Encapsulates the 17 pg_context_chain.* call sites scattered through v1
+    cmd_record (lines 3055/3140/3228/3374/3377/3399/3423/3434/3455/3480/3502/
+    3521/3535/3628/3730/3755/3777/3791/3804) into a single dispatch-by-(sub,status)
+    function. v1 still calls the original 17 sites (per user decision); v2
+    cmd_record_v2 calls this function once at the entry point.
+
+    Mappings (mirrors v1 cmd_record behavior):
+      - completed (test/dev/verify/simple)  → sub_end('COMPLETED')
+      - completed (fix/fix-gate)            → sub_end('COMPLETED', fix_cycle) +
+                                                sub_start(parent_phase, fix_cycle)
+      - failed                              → sub_end('FAILED', issues)
+      - escalate                            → sub_end('COMPLETED') +
+                                                sub_start('fix', fix_cycle=1)
+      - pass (track)                        → sub_end('PASS') +
+                                                sub_start(next_sub) — caller
+                                                drives the next dispatch
+      - pass (final-gate)                   → sub_end('PASS')
+      - fail (track)                        → sub_end('FAIL') +
+                                                rollback_set(reason, source) +
+                                                sub_start('fix-gate', fix_cycle=1)
+      - fail (final-gate)                   → (no context-chain write; workflow
+                                                failure is recorded elsewhere)
+
+    Args:
+        change: change name.
+        item: track id (or "final-gate").
+        sub: sub-phase ("test" / "dev" / "verify" / "gate" / "fix" /
+            "fix-gate" / "simple" / None for final-gate).
+        status: one of ALLOWED_STATUS values (completed/failed/escalate/pass/fail).
+        summary: sub-agent summary text.
+        outputs: sub-agent outputs (comma-separated task IDs).
+        issues: failure details (for sub_end issues field).
+
+    Note:
+        Always best-effort: failures are caught and logged, never raised.
+    """
+    try:
+        import pg_context_chain as _pgcc
+    except Exception as e:
+        print(f"[pg_build_record_log] import pg_context_chain failed: {e}", file=_sys.stderr)
+        return
+
+    try:
+        if status == "completed":
+            if sub in ("fix", "fix-gate"):
+                _pgcc.sub_end(change, item, sub, "COMPLETED",
+                              summary=summary, outputs=outputs, issues=issues,
+                              fix_cycle=1)
+                parent = "verify" if sub == "fix" else "gate"
+                _pgcc.sub_start(change, item, parent, fix_cycle=1)
+            else:
+                _pgcc.sub_end(change, item, sub, "COMPLETED",
+                              summary=summary, outputs=outputs, issues=issues)
+        elif status == "failed":
+            _pgcc.sub_end(change, item, sub, "FAILED", "", "", issues)
+        elif status == "escalate":
+            # verify → fix cycle
+            _pgcc.sub_end(change, item, "verify", "COMPLETED",
+                          summary=summary or "ESCALATE",
+                          outputs=outputs, issues=issues)
+            _pgcc.sub_start(change, item, "fix", fix_cycle=1)
+        elif status == "pass":
+            if item == "final-gate":
+                _pgcc.sub_end(change, "final-gate", "gate", "PASS", summary=summary)
+            else:
+                _pgcc.sub_end(change, item, "gate", "PASS", summary=summary)
+                # The next sub dispatch (e.g. next track) is driven by the caller;
+                # we only record the gate pass here.
+        elif status == "fail":
+            if item == "final-gate":
+                # final-gate fail is a workflow-level failure; no context-chain
+                # entry — caller handles it.
+                return
+            _pgcc.sub_end(change, item, "gate", "FAIL",
+                          summary=summary, outputs=outputs, issues=issues)
+            _pgcc.rollback_set(change, item,
+                               reason=summary or "gate FAIL",
+                               source=f"{item}:gate")
+            _pgcc.sub_start(change, item, "fix-gate", fix_cycle=1)
+    except Exception as e:
+        print(f"[pg_build_record_log] ({sub},{status}) failed: {e}", file=_sys.stderr)
