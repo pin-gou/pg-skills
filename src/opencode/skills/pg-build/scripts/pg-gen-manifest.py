@@ -116,10 +116,11 @@ def build_manifest(change: str) -> dict:
             stage_tracks[stage] = {}
 
         if track not in stage_tracks[stage]:
+            raw_type = get_track_type(config, track)
             stage_tracks[stage][track] = {
                 "phases": {},
                 "all_noop": True,
-                "type": get_track_type(config, track),
+                "type": "standard" if raw_type == "track" else "simple",
             }
 
         stage_tracks[stage][track]["phases"][sub] = sec["section_key"]

@@ -392,7 +392,7 @@ def parse_tasks_sections(tasks_path):
             sections[-1]["end_line"] = i
         sections.append(dict(
             heading=line.rstrip("\n"),
-            section_key=m.group(0).strip(),
+            section_key=f"{m.group(1)}. {m.group(2).strip()}",
             body="",
             start_line=i,
             end_line=len(all_lines),
@@ -475,11 +475,12 @@ def count_tasks(lines):
     """Count checkbox states in a list of lines.
 
     Returns (unchecked, checked, all_noop).
-    all_noop is True when every task line is literally "- 无".
+    all_noop is True when every task line is literally "- 无" or starts with "- 无" (comment allowed).
     """
     unchecked = 0
     checked = 0
     noop_lines = 0
+    noop_re = re.compile(r'^\s*-\s*无')
 
     for line in lines:
         s = line.strip()
@@ -487,7 +488,7 @@ def count_tasks(lines):
             unchecked += 1
         elif s.startswith("- [x]"):
             checked += 1
-        elif s == "- 无":
+        elif noop_re.match(s):
             noop_lines += 1
 
     has_any_task = unchecked + checked > 0
