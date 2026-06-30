@@ -1,0 +1,44 @@
+# final-gate.yaml — final-gate 完整提示词
+
+prompt: |
+  ## 任务：Final Gate — 跨 track 依赖审查
+
+  ### 变更名称
+  {_change}
+
+  ### Track 配置
+  - track.id: final（特殊标记）
+  - track.review_level: standard
+
+  ### 产物路径
+  - proposal: {proposal_path}
+  - tasks: {tasks_path}
+  - design_doc_paths: {design_doc_paths}
+  - report_paths: {report_paths}
+
+  ### 必读上下文清单
+
+  final-gate agent 必须读取以下 4 类文件：
+
+  1. **所有 design.md**（{design_doc_paths}）— 找 🆕 标记的跨 track 验证项
+  2. **所有 track 的 gate assessment 报告**（{report_paths}）
+  3. **context-chain.md** — 了解 sub-agent 执行历史与已知问题
+  4. **known-issues.md**（如存在）— 累积的 gate-fix 兜底问题
+
+  ### 审计步骤
+
+  1. 遍历所有 design.md，提取所有 🆕 标记的跨 track 验证项
+  2. 对每条 🆕 项，确认目标 track 的 gate-assessment.md 里有对应实现证据
+  3. 检查所有 report_paths 都是 PASS 状态
+  4. 检查 context-chain.md 没有未解决的 error
+  5. 列出跨 track 不一致/缺失项（如有）
+
+  ### 判定
+
+  - PASS：所有跨 track 依赖满足，返回 pass
+  - FAIL：存在未满足的跨 track 依赖，返回 fail
+
+  ### 写盘要求
+
+  完成审计后，自行用 cat > 写盘到 2-build/final-gate-assessment.md。
+  不要将 markdown 全文塞进返回里。

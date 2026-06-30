@@ -1,0 +1,20 @@
+# verify.yaml — sub=verify 完整提示词
+
+prompt: |
+  ### 验证要求
+
+  按 tasks.md V-* 验证项逐项检查。
+  必须对所有 V-* 项覆盖验证，不能跳过。
+
+  ### 写盘要求
+
+  完成验证后，自行用 cat > 写盘到 2-build/{report_filename}。
+  格式：Markdown，包含每项验证的结论（PASS / FAIL）及证据。
+
+  ### 运行时环境
+
+  如果环境可用，启动服务后验证：
+  1. 启动服务：invoke-hook --action start
+  2. 跑验证：curl 等命令
+  3. 查看日志：invoke-hook --action logs --tail-lines 100
+  4. 停止服务：invoke-hook --action stop

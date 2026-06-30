@@ -20,7 +20,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 #container svg { display: block; margin: 0 auto; }
 #loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #7f8c8d; background: #f5f6fa; z-index: 10; transition: opacity .4s; }
 #loading.hidden { opacity: 0; pointer-events: none; }
-#notes { background: #fef9e7; border-top: 2px solid #f39c12; padding: 14px 20px; font-size: 13px; line-height: 1.7; flex-shrink: 0; max-height: 260px; overflow-y: auto; }
+#notes { background: #fef9e7; border-top: 2px solid #f39c12; padding: 14px 20px; font-size: 13px; line-height: 1.7; flex-shrink: 0; max-height: 280px; overflow-y: auto; }
 #notes h2 { font-size: 14px; color: #e67e22; margin-bottom: 6px; }
 #notes code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
 #notes table { border-collapse: collapse; margin: 4px 0; font-size: 12px; }
@@ -31,7 +31,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 <body>
 
 <div id="toolbar">
-  <h1>pg-build 流程图</h1>
+  <h1>pg-build 流程图 (v3.4+)</h1>
   <button class="btn" onclick="zoomIn()">+ 放大</button>
   <span class="zoom-info" id="zoomLevel">100%</span>
   <button class="btn" onclick="zoomOut()">− 缩小</button>
@@ -56,76 +56,148 @@ flowchart TB
     classDef done fill:#d5f5e3,stroke:#1e8449,stroke-width:3px
     classDef fail fill:#fadbd8,stroke:#c0392b,stroke-width:3px
 
-    START([Start]) --> BOOT["Init Bootstrap"]:::init
-    BOOT --> S1["migrate_legacy_state: 创建 2-build/ 目录"]:::init
-    S1 --> S2["_ensure_context_chain: 写 context-chain.md"]:::init
-    S2 --> S3["_ensure_feature_branch: 切到 feat/pg/{change}"]:::init
-    S3 --> S4["_maybe_bootstrap_init_commit: git add -A + commit"]:::init
-    S4 --> DETECT{"pipeline_detect<br/>按 pipeline.order 扫描 tasks.md"}
+    START(["pg-build 入口 main()"]) --> ROUTE{use_state_v2?}
+    ROUTE -->|v1 false| V1_NEXT["cmd_next(change) v1 state.json + tasks.md"]
+    ROUTE -->|v2 true| V2_NEXT["cmd_next_v2(change) v2 PipelineState SSOT"]
 
-    DETECT -->|"ALL_COMPLETED"| FINAL_GATE_ENTRY
-    DETECT -->|"phase: 环境hook/simple"| EXEC_PHASE["execute_phase<br/>直接运行/派 simple agent"]:::phase
-    DETECT -->|"track: 首个未完成sub"| TDVG_ENTRY
+    V1_NEXT --> BOOT1["pg_build_bootstrap(change,state) shared helper"]
+    V2_NEXT --> BOOT2["pg_build_bootstrap(change,ps) shared helper + inline prepare_env"]
 
-    EXEC_PHASE --> PHASE_OK{"成功?"}
-    PHASE_OK -->|"yes"| MARK_PHASE["mark completed<br/>更新 completed_items"]:::phase
-    PHASE_OK -->|"no + prepare_env"| TERMINATE(["workflow_failed"]):::fail
-    PHASE_OK -->|"no + clean_env"| WARN_ADVANCE["print warn + 继续"]:::phase
-    PHASE_OK -->|"no + simple fail"| TERMINATE
-    PHASE_OK -->|"no + simple continue_all"| WARN_ADVANCE
-    MARK_PHASE --> DETECT
-    WARN_ADVANCE --> DETECT
+    subgraph BOOTSTRAP["pg_build_bootstrap 5 side effects"]
+        MIGRATE["1. migrate_legacy_state_files create 2-build dir"]:::init
+        ENS_CC["2. _ensure_context_chain write context-chain.md"]:::init
+        ENS_FB["3. _ensure_feature_branch git checkout -b feat/pg/{change}"]:::init
+        INIT_C["4. _maybe_bootstrap_init_commit git add -A + commit (once)"]:::init
+        ENV_PREP["5. execute_env_hook_inline prepare_env v2 only fail = env_hook_failed"]:::init
+    end
 
-    subgraph TDVG["Track: 四阶段 TDVG 循环"]
-        TDVG_ENTRY --> SUB_TEST["sub=test<br/>agent: pg-build/test"]:::sub
-        SUB_TEST -->|"record completed"| SUB_DEV["sub=dev<br/>agent: pg-build/dev"]:::sub
-        SUB_TEST -->|"record failed"| RETRY_TEST["未超 max_fail_retries?"]:::loop
-        RETRY_TEST -->|"是"| SUB_TEST
-        RETRY_TEST -->|"否"| TERMINATE
+    BOOT1 --> MIGRATE
+    BOOT2 --> MIGRATE
+    MIGRATE --> ENS_CC
+    ENS_CC --> ENS_FB
+    ENS_FB --> INIT_C
+    INIT_C --> ENV_PREP
 
-        SUB_DEV -->|"record completed"| SUB_VERIFY["sub=verify<br/>agent: pg-build/verify"]:::sub
-        SUB_DEV -->|"record failed"| RETRY_DEV["未超 max_fail_retries?"]:::loop
-        RETRY_DEV -->|"是"| SUB_DEV
-        RETRY_DEV -->|"否"| TERMINATE
+    ENV_PREP -->|v2 prepare_env fail| ENV_HOOK_FAILED["action: env_hook_failed fatal true log_path exit_code"]:::fail
+    ENV_HOOK_FAILED --> BREAK_EHF(["workflow terminated check logs and retry"])
 
-        SUB_VERIFY -->|"record completed (PROCEED)"| SUB_GATE["sub=gate<br/>agent: pg-build/gate"]:::sub
-        SUB_VERIFY -->|"record escalate"| FIX_CYCLE["fix_cycles 未超<br/>MAX_FIX_CYCLES (4)?"]:::loop
-        FIX_CYCLE -->|"是"| SUB_FIX["sub=fix<br/>agent: pg-build/fix"]:::sub
-        SUB_FIX -->|"record completed"| SUB_VERIFY
-        SUB_FIX -->|"record failed"| RETRY_FIX["未超 max_fail_retries?"]:::loop
-        RETRY_FIX -->|"是"| SUB_FIX
-        RETRY_FIX -->|"否"| TERMINATE
-        FIX_CYCLE -->|"否 (耗尽)"| SUB_GATE
+    ENV_PREP -->|v2 success or skip| V2_DETECT["manifest check load config PipelineState.next_pending"]:::init
+    ENV_PREP -->|v1 skip env inline| V1_DETECT["manifest check load config pipeline_detect"]:::init
 
-        SUB_GATE -->|"record pass"| TRACK_DONE{{"track 完成<br/>加入 completed_items"}}:::done
-        SUB_GATE -->|"record fail"| GATE_FIX["gate_cycles 未超<br/>max_gate_fix_retries?"]:::loop
-        GATE_FIX -->|"yes"| SUB_FIX_GATE["sub=fix-gate<br/>agent: pg-build/fix-gate"]:::sub
-        SUB_FIX_GATE -->|"record completed"| SUB_VERIFY
-        SUB_FIX_GATE -->|"record failed"| RETRY_FIX_GATE["未超 max_fail_retries?"]:::loop
-        RETRY_FIX_GATE -->|"yes"| SUB_FIX_GATE
-        RETRY_FIX_GATE -->|"no"| TERMINATE
-        GATE_FIX -->|"no (耗尽)"| GAP_ACCEPT["接受 gap 到 known-issues.md<br/>继续推进 pipeline"]:::loop
+    V1_DETECT --> V1_DECISION{"pipeline_detect result"}
+    V2_DETECT --> V2_DECISION{"next_pending.kind"}
+
+    V1_DECISION -->|all completed| V1_FG["_enter_final_gate"]
+    V2_DECISION -->|dispatch_final_gate| V2_FG["_enter_final_gate"]
+
+    V1_DECISION -->|phase prepare_env clean_env| V1_PHASE["_execute_phase run env-hook script v1 inline"]:::phase
+    V1_PHASE --> P_RESULT{"phase_result terminate?"}
+    P_RESULT -->|false prepare ok| V1_RECORD_PHASE["LLM record completed advance"]
+    P_RESULT -->|true| WFF(["workflow_failed"]):::fail
+
+    V1_DECISION -->|phase simple track| V1_SIMPLE["_build_simple_dispatch pg-build/simple agent"]:::phase
+    V2_DECISION -->|not final-gate| V2_PHASE_CHECK{"_is_phase_item?"}
+    V2_PHASE_CHECK -->|prepare_env already done| AUTO_ADVANCE["mark completed recurse cmd_next_v2"]
+    V2_PHASE_CHECK -->|simple track| V2_SIMPLE["_build_simple_dispatch pg-build/simple agent"]:::phase
+
+    V1_DECISION -->|track next sub| V1_TDVG["TDVG entry dispatch"]
+    V2_DECISION -->|track next phase| V2_TDVG["TDVG entry dispatch"]
+
+    subgraph TDVG_LOOP["Track: TDVG test-dev-verify-gate loop"]
+        TDVG_ENTRY["dispatch_action test|dev|verify|gate"]:::sub
+
+        SUB_TEST["sub=test agent: pg-build/test"]:::sub
+        SUB_DEV["sub=dev agent: pg-build/dev"]:::sub
+        SUB_VERIFY["sub=verify agent: pg-build/verify"]:::sub
+        SUB_GATE["sub=gate agent: pg-build/gate"]:::sub
+
+        SUB_TEST -->|record completed| SUB_DEV
+        SUB_TEST -->|record failed| RETRY_TEST{"max_fail_retries exceeded?"}:::loop
+        RETRY_TEST -->|no retry| SUB_TEST
+        RETRY_TEST -->|yes| WFF
+
+        SUB_DEV -->|record completed| SUB_VERIFY
+        SUB_DEV -->|record failed| RETRY_DEV{"max_fail_retries exceeded?"}:::loop
+        RETRY_DEV -->|no retry| SUB_DEV
+        RETRY_DEV -->|yes| WFF
+
+        SUB_VERIFY -->|record completed PROCEED| SUB_GATE
+        SUB_VERIFY -->|record escalate| FIX_CYCLE{"fix_cycles >= MAX_FIX_CYCLES 4?"}:::loop
+        FIX_CYCLE -->|no| SUB_FIX["sub=fix agent: pg-build/fix"]:::sub
+        SUB_FIX -->|record completed| SUB_VERIFY
+        SUB_FIX -->|record failed| RETRY_FIX{"max_fail_retries exceeded?"}:::loop
+        RETRY_FIX -->|no retry| SUB_FIX
+        RETRY_FIX -->|yes| WFF
+        FIX_CYCLE -->|yes exhausted force gate| SUB_GATE
+
+        SUB_GATE -->|record pass| TRACK_DONE{{"track completed add to completed_items"}}:::done
+        SUB_GATE -->|record fail| GATE_FIX{"gate_cycles >= max_gate_fix_retries?"}:::loop
+        GATE_FIX -->|no| SUB_FIX_GATE["sub=fix-gate agent: pg-build/fix-gate"]:::sub
+        SUB_FIX_GATE -->|record completed| SUB_VERIFY
+        SUB_FIX_GATE -->|record failed| RETRY_FIX_GATE{"max_fail_retries exceeded?"}:::loop
+        RETRY_FIX_GATE -->|no retry| SUB_FIX_GATE
+        RETRY_FIX_GATE -->|yes| WFF
+        GATE_FIX -->|yes exhausted| GAP_ACCEPT["accept gaps to known-issues.md advance pipeline"]:::loop
         GAP_ACCEPT --> TRACK_DONE
     end
 
-    TRACK_DONE --> DETECT
+    V1_TDVG --> TDVG_LOOP
+    V2_TDVG --> TDVG_LOOP
 
-    FINAL_GATE_ENTRY["进入 final-gate"]:::gate
-    FINAL_GATE_ENTRY --> FG_DISPATCH["dispatch_final_gate<br/>agent: pg-build/gate"]:::gate
-    FG_DISPATCH -->|"record pass"| FG_PASS{"archive 成功?"}:::gate
-    FG_PASS -->|"yes"| ARCHIVE_OK["auto-archive<br/>changes/archive/ + git commit"]:::done
-    FG_PASS -->|"no"| ARCHIVE_FAIL["auto-archive 失败<br/>done 仍返回 (archive.failed=true)"]:::done
-    ARCHIVE_OK --> DONE(["DONE"]):::done
-    ARCHIVE_FAIL --> DONE
-    FG_DISPATCH -->|"record fail"| WFF(["workflow_failed"]):::fail
+    TRACK_DONE --> V1_DECISION
+    TRACK_DONE --> V2_DECISION
+
+    V1_RECORD_PHASE --> V1_DECISION
+
+    V1_SIMPLE --> SIMPLE_EXEC["pg-build/simple agent execute commands auto-fix"]:::phase
+    V2_SIMPLE --> SIMPLE_EXEC
+    SIMPLE_EXEC -->|SUCCESS| TRACK_DONE
+    SIMPLE_EXEC -->|FAILED on_failure=continue_all| WARN_ADV["warn and advance mark completed"]:::phase
+    SIMPLE_EXEC -->|FAILED on_failure=fail| WFF
+    WARN_ADV --> V1_DECISION
+
+    V1_FG --> FG_DISPATCH
+    V2_FG --> FG_DISPATCH
+
+    subgraph FINAL_GATE["Final Gate and Archive"]
+        FG_DISPATCH["dispatch_final_gate agent: pg-build/gate"]:::gate
+        FG_DISPATCH --> FG_RECORD{"record?"}
+        FG_RECORD -->|pass| ARCHIVE["_auto_archive move to archive/YYYY-MM-DD-{change}"]:::done
+        FG_RECORD -->|fail| WFF2(["workflow_failed"]):::fail
+        ARCHIVE --> ARCHIVE_OK{"archive OK?"}
+        ARCHIVE_OK -->|yes| ARCH_COMMIT["_git_commit_archive git add + commit feat/pg/{change}"]:::done
+        ARCHIVE_OK -->|no| ARCH_FAIL["archive fail done still returned archive.failed=true"]:::done
+        ARCH_COMMIT --> DONE(["DONE action=done status=completed"]):::done
+        ARCH_FAIL --> DONE
+    end
+
+    SUB_TEST -.-> R1["test: completed or failed | not pass fail escalate"]
+    SUB_DEV -.-> R2["dev: completed or failed | not pass fail escalate"]
+    SUB_VERIFY -.-> R3["verify: completed escalate or failed | not pass fail"]
+    SUB_FIX -.-> R4["fix: completed or failed | not pass fail escalate"]
+    SUB_FIX_GATE -.-> R5["fix-gate: completed or failed | not pass fail escalate"]
+    SUB_GATE -.-> R6["gate: pass or fail | not completed failed escalate"]
+
+    SUB_TEST -.-> AC1["auto git commit chore: auto-record X:test completed"]
+    SUB_DEV -.-> AC2["auto git commit on record"]
+    SUB_VERIFY -.-> AC3["auto git commit on record"]
+    SUB_FIX -.-> AC4["auto git commit on record"]
+    SUB_FIX_GATE -.-> AC5["auto git commit on record"]
   </pre>
 </div>
 
 <div id="notes">
-  <h2>判定条件说明（基于实际代码实现）</h2>
-  <p><strong>Pipeline 顺序</strong>：由 <code>get_pipeline_order()</code> 从 config.yaml <code>stages[].tracks</code> 生成。当前配置只有 <code>dev</code> stage（tracks: backend → agent → openapi-gen → frontend 顺序执行）。每个 track 内按 test → dev → verify → gate 依次推进。</p>
-  <p><strong>Phase 项</strong>：<code>prepare_env</code>/<code>clean_env</code> 环境生命周期 hook + <code>type: simple</code> track 不走 TDVG，由 <code>_execute_phase()</code> 直接运行命令或派 <code>pg-build/simple</code> agent 执行。</p>
-  <p><strong>Final Gate</strong>：所有 pipeline item 完成后进入，agent 检查跨 track 依赖项（design.md 🆕 标记）→ PASS 则 auto-archive + done，FAIL 则 <code>workflow_failed</code>。</p>
+  <h2>判定条件与术语说明（基于实际代码）</h2>
+  <p><strong>v1 / v2 双状态机</strong>：由 <code>_use_state_v2()</code> 决定——环境变量 <code>PG_USE_STATE_V2=true</code> 或 <code>project.yaml state_v2.enabled=true</code> 时走 v2。v1 用 <code>tasks.md checkbox</code> 推断状态；v2 用 <code>PipelineState</code>（state.json 为唯一 SSOT，<code>next_pending()</code> 驱动 dispatch）。</p>
+  <p><strong>Pipeline 顺序</strong>：由 <code>get_pipeline_order()</code> 从 <code>execution-manifest.yaml staging</code> 或 config.yaml <code>stages[].tracks</code> 生成。当前配置只有 <code>dev</code> stage（tracks: backend → agent → openapi-gen → frontend 顺序执行）。每个 track 内按 test → dev → verify → gate 依次推进。</p>
+  <p><strong>v2 prepare_env 内联</strong>：v2 路径下 <code>pg_build_bootstrap</code> 的第 5 步同步执行 <code>execute_env_hook_inline("prepare_env")</code>，失败时直接返回 <code>env_hook_failed</code> action（不再走 v1 的 <code>phase_result</code> → LLM record 路径）。</p>
+  <p><strong>v1 prepare_env/clean_env</strong>：v1 路径仍通过 <code>_execute_phase</code> 执行，返回 <code>phase_result</code> → LLM 调用 <code>record completed</code> 推进。</p>
+  <p><strong>记录号体系</strong>：所有子 agent 报告文件（<code>2-build/{track}-{N}-verify.md</code> 等）由 runner 预分配全局递增 3 位 seq（<code>dispatch_seq / report_seq</code>）。SEQ 从 <code>dispatch_history</code> 自增，与 manifest 中 execution-seq 对应。</p>
+  <p><strong>Gate-Fix 耗尽</strong>：当 gate-fix 循环达到 <code>max_gate_fix_retries</code>（默认 2）仍未修复时，未修复的 gap 追加到 <code>known-issues.md</code>，track 标记为 completed（接受 gap 继续推进，不阻塞 pipeline）。</p>
+  <p><strong>Fix 循环耗尽</strong>：当 verify-fix 循环达到 <code>MAX_FIX_CYCLES = 4</code> 时，强制进入 gate 阶段（不再继续 fix）。此时 gate 仍然可以 pass/fail。</p>
+  <p><strong>Record 状态守卫</strong>：LLM 用错 record status（如 verify 完成后调 <code>record pass</code>）返回 <code>action: error, fatal: false</code> 并附带 <code>fix_hint</code>，<strong>不污染 state</strong>。各 sub 允许的 status 集见图中虚线标注。</p>
+  <p><strong>Auto-commit</strong>：每次 <code>record</code> 后 runner 同步执行 <code>git add -A + git commit</code>，message 格式 <code>chore({change}): auto-record {item}:{sub} {status}</code>。不 push。init commit 格式 <code>chore({change}): bootstrap pg-build</code>。</p>
+  <p><strong>Final Gate + 归档</strong>：所有 track 完成后进入 final-gate，agent 检查跨 track 依赖项（design.md 🆕 标记）→ PASS 则 <code>_auto_archive</code> 将 change 目录移到 <code>archive/YYYY-MM-DD-{change}/</code> + git commit → done。</p>
 </div>
 
 <script>
@@ -151,8 +223,8 @@ async function render() {
   const svg = document.querySelector('#container svg');
   svg.style.width = '100%';
   svg.style.height = '100%';
-  svg.style.minWidth = '1400px';
-  svg.style.minHeight = '900px';
+  svg.style.minWidth = '1600px';
+  svg.style.minHeight = '1100px';
 
   panZoomInstance = svgPanZoom(svg, {
     zoomEnabled: true,
@@ -173,10 +245,6 @@ async function render() {
       },
       destroy: function (options) {
         const {svgElement} = options;
-        svgElement.removeEventListener('wheel', options.onZoom);
-        svgElement.removeEventListener('mousedown', options.onPanStart);
-        svgElement.removeEventListener('mousemove', options.onPan);
-        svgElement.removeEventListener('mouseup', options.onPanEnd);
         svgElement.removeEventListener('mouseleave', options.onPanEnd);
       }
     }

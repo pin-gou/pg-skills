@@ -1,0 +1,33 @@
+# fix.yaml — sub=fix 完整提示词
+
+prompt: |
+  ### 必读源报告（verify ESCALATE 派发）
+
+  - **源 verify 报告**: {verify_report_path}
+
+  请用 Read 工具逐字读取该文件。报告包含 verify agent 记录的
+  ESCALATE Issue 详情、失败证据（HTTP 响应/日志片段/stack trace）、
+  V-* 验证项的逐项结果等完整上下文。
+
+  ### 修复范围
+
+  - fix_cycle: {fix_cycle}
+  - 只修复 source verify 报告中列出的问题
+  - 不要引入超出修复范围的新功能
+
+  ### 修复后必跑流程
+
+  1. 修改源码
+  2. 跑 {test_commands} 单元测试（必须通过）
+  3. 跑模块 lint（必须 0 警告）
+  4. 启动 invoke-hook --action start 服务（如需）
+  5. 跑 tasks.md verify 章节的所有 V-* 验证项
+  6. 抓日志确认无 ERROR
+  7. 停止 invoke-hook --action stop 服务（如启动过）
+  8. 用 cat > 写盘到 2-build/{fix_report_filename}
+
+  ### 返回格式
+
+  - summary: 修复摘要
+  - outputs: 修改的文件清单
+  - status: SUCCESS / FAILED

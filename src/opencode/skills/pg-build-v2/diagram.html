@@ -1,0 +1,483 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>pg-build-v2 架构图</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; background: #f5f6fa; overflow: hidden; height: 100vh; display: flex; flex-direction: column; }
+
+#toolbar { background: #2c3e50; color: #fff; padding: 10px 20px; display: flex; align-items: center; gap: 12px; flex-shrink: 0; user-select: none; flex-wrap: wrap; }
+#toolbar h1 { font-size: 16px; font-weight: 600; margin-right: auto; }
+#toolbar .btn { background: #34495e; border: none; color: #fff; padding: 6px 14px; border-radius: 4px; cursor: pointer; font-size: 13px; transition: background .15s; }
+#toolbar .btn:hover { background: #4a6a8a; }
+#toolbar .btn:active { background: #1a252f; }
+#toolbar .sep { width: 1px; height: 24px; background: #4a6a8a; }
+#toolbar .zoom-info { font-size: 12px; color: #bdc3c7; min-width: 50px; text-align: center; }
+#toolbar .fullscreen-btn { margin-left: auto; background: #27ae60; }
+#toolbar .fullscreen-btn:hover { background: #2ecc71; }
+
+#container { flex: 1; overflow: hidden; position: relative; background: #f5f6fa; }
+#container svg { display: block; margin: 0 auto; }
+
+#loading { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; font-size: 18px; color: #7f8c8d; background: #f5f6fa; z-index: 10; transition: opacity .4s; }
+#loading.hidden { opacity: 0; pointer-events: none; }
+#loading .spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top-color: #2980b9; border-radius: 50%; animation: spin .8s linear infinite; margin-right: 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+
+#notes { background: #fef9e7; border-top: 2px solid #f39c12; padding: 0; font-size: 13px; line-height: 1.7; flex-shrink: 0; max-height: 55vh; overflow-y: auto; }
+#notes details { padding: 10px 20px; }
+#notes details[open] { background: #fef9e7; }
+#notes summary { cursor: pointer; font-weight: 600; color: #e67e22; font-size: 14px; padding: 4px 0; user-select: none; }
+#notes summary:hover { color: #d35400; }
+#notes h2 { font-size: 14px; color: #e67e22; margin-bottom: 6px; }
+#notes h3 { font-size: 13px; color: #2c3e50; margin: 12px 0 6px; }
+#notes code { background: #f0f0f0; padding: 1px 5px; border-radius: 3px; font-size: 12px; }
+#notes table { border-collapse: collapse; margin: 8px 0; font-size: 12px; width: 100%; }
+#notes th, #notes td { border: 1px solid #ddd; padding: 6px 10px; text-align: left; }
+#notes th { background: #f5f0e1; }
+#notes .improvement-badge { display: inline-block; background: #27ae60; color: #fff; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+#notes .regression-badge { display: inline-block; background: #e74c3c; color: #fff; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+
+#tab-bar { display: flex; gap: 0; background: #ecf0f1; border-bottom: 2px solid #bdc3c7; flex-shrink: 0; }
+#tab-bar .tab { padding: 8px 20px; cursor: pointer; font-size: 13px; color: #7f8c8d; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .15s; user-select: none; }
+#tab-bar .tab.active { color: #2c3e50; border-bottom-color: #2980b9; font-weight: 600; background: #fff; }
+#tab-bar .tab:hover { color: #2c3e50; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+</style>
+</head>
+<body>
+
+<div id="toolbar">
+  <h1>pg-build-v2 架构图</h1>
+  <button class="btn" onclick="zoomIn()">+ 放大</button>
+  <span class="zoom-info" id="zoomLevel">100%</span>
+  <button class="btn" onclick="zoomOut()">− 缩小</button>
+  <span class="sep"></span>
+  <button class="btn" onclick="fit()">适应窗口</button>
+  <button class="btn" onclick="reset()">重置</button>
+  <span class="sep"></span>
+  <button class="btn" onclick="toggleDark()">🌙 暗色</button>
+  <button class="btn fullscreen-btn" onclick="toggleFullscreen()">⛶ 全屏</button>
+  <span class="sep"></span>
+  <span style="font-size:12px;color:#bdc3c7;">拖拽平移 | 滚轮缩放 | 点击节点在 Notes 中查看详情</span>
+</div>
+
+<div id="tab-bar">
+  <div class="tab active" data-tab="diagram" onclick="switchTab('diagram')">📊 架构图</div>
+  <div class="tab" data-tab="comparison" onclick="switchTab('comparison')">📋 对比表</div>
+  <div class="tab" data-tab="event-schema" onclick="switchTab('event-schema')">📄 Event Schema</div>
+</div>
+
+<div id="container">
+  <div id="loading"><div class="spinner"></div>渲染中…</div>
+  <div class="tab-content active" id="tab-diagram-content">
+  <pre id="mermaidSrc" style="display:none;">
+%%{init: {'flowchart': {'htmlLabels': true, 'useMaxWidth': false, 'nodeSpacing': 50, 'rankSpacing': 60}}}%%
+flowchart TB
+    classDef input fill:#e8f4f8,stroke:#2980b9,stroke-width:1px
+    classDef core fill:#d5f5e3,stroke:#27ae60,stroke-width:2px
+    classDef sub fill:#eaf2f8,stroke:#5dade2,stroke-width:1px
+    classDef gate fill:#fdedec,stroke:#e74c3c,stroke-width:1px
+    classDef persist fill:#fef9e7,stroke:#f39c12,stroke-width:1px
+    classDef done fill:#d5f5e3,stroke:#1e8449,stroke-width:3px
+    classDef fail fill:#fadbd8,stroke:#c0392b,stroke-width:3px
+    classDef future fill:#f4ecf7,stroke:#8e44ad,stroke-width:1px
+
+    subgraph INPUT["输入层（与 pg-propose 衔接不变）"]
+        PY["project.yaml"]:::input
+        EM["execution-manifest.yaml"]:::input
+    end
+
+    subgraph CLI["编排入口 ~60 LOC"]
+        CLI_MAIN["pg-pipeline-runner.py main()"]:::core
+        CLI_MAIN --> CMD{"command?"}
+        CMD -->|"next"| N["orchestrator.next()"]:::core
+        CMD -->|"record"| R["orchestrator.record()"]:::core
+    end
+
+    subgraph BOOT["Bootstrap 启动"]
+        BT["bootstrap.py"]:::core
+        BT --> M1["1. migrate_legacy_state"]
+        BT --> M2["2. ensure_context_chain"]
+        BT --> M3["3. feature branch: feat/pg/{change}"]
+        BT --> M4["4. init commit (once)"]
+        BT --> M5["5. prepare_env inline"]
+    end
+
+    subgraph REDUCER["纯函数 Reducer 层"]
+        RED["reducer.py"]:::core
+        RED --> MATCH{"reduce_state()<br/>match (phase, status)"}
+        MATCH -->|"(test,completed)"| A1["→ dev"]
+        MATCH -->|"(verify,escalate)"| A2["→ 子 pipeline: fix→verify"]
+        MATCH -->|"(gate,fail)"| A3["→ 子 pipeline: fix-gate→verify→gate"]
+        MATCH -->|"(gate,pass)"| A4["→ track completed"]
+        MATCH -->|"(final-gate,pass)"| A5["→ pipeline done"]
+        MATCH -->|"(x,failed)"| A6["→ retry or workflow_failed"]
+    end
+
+    subgraph EVENT_LOG["Persistence 层（唯一 I/O 点）"]
+        EL["event_log.py"]:::persist
+        EL --> APPEND["event_log.append(event)<br/>JSONL ← 唯一写点"]:::persist
+        EL --> REPLAY["event_log.replay()<br/>全量回放审计"]:::persist
+        SNAP["snapshot.py<br/>最新快照（回放重建）"]:::persist
+    end
+
+    subgraph DISPATCH["Dispatch 构建层"]
+        DET["detect.py<br/>next_pending(state) → action"]:::sub
+        DP["dispatch.py<br/>action JSON + dispatch_file"]:::sub
+        TE["template-engine/renderer.py<br/>YAML → Jinja2 渲染"]:::sub
+        TPL["prompt-templates/*.yaml<br/>11 个模板文件"]:::sub
+    end
+
+    subgraph SUB_AGENTS["Sub-Agent 层（复用旧 agent 定义）"]
+        T_SUB["pg-build/test"]:::sub
+        D_SUB["pg-build/dev"]:::sub
+        V_SUB["pg-build/verify"]:::sub
+        G_SUB["pg-build/gate"]:::sub
+        F_SUB["pg-build/fix"]:::sub
+        FG_SUB["pg-build/fix-gate"]:::sub
+    end
+
+    subgraph SUB_PIPELINE["子 Pipeline 递归"]
+        SP_MECH["SubPipeline 机制<br/>fix / gate-fix 循环<br/>递归复用 reducer"]:::sub
+        SP_MECH --> SP1["SubPipeline(fix, verify)<br/>或 SubPipeline(fix-gate, verify, gate)"]
+        SP1 --> SP2["子 pipeline 完成 → 回到主 pipeline"]
+    end
+
+    subgraph FUTURE["未来：流程查看器"]
+        VIEWER["Viewer UI"]:::future
+        VIEWER -->|"实时 tail"| EL
+        VIEWER -->|"Gantt 图"| GANTT["track × phase 时间线"]:::future
+        VIEWER -->|"中间产物"| ART["dispatch_file / report / log / 路径"]:::future
+        VIEWER -->|"SSE/WebSocket"| SSE["Event Stream"]:::future
+    end
+
+    PY --> CLI_MAIN
+    EM --> CLI_MAIN
+    CLI_MAIN --> BT
+
+    N -->|"event: dispatch_started"| EL
+    R -->|"event: PipelineRecord"| RED
+    RED -->|"(new_state, action)"| DET
+    RED -->|"snapshot"| SNAP
+
+    DET -->|PipelineAction| DP
+    DP --> TE
+    TE --> TPL
+    DP -->|"dispatch action"| CLI_MAIN
+
+    CLI_MAIN -->|"Task tool"| SUB_AGENTS
+    SUB_AGENTS -->|"结果"| R
+
+    SUB_PIPELINE -.->|递归| REDUCER
+  </pre>
+  </div>
+  <div class="tab-content" id="tab-comparison-content">
+    <div id="comparison-mermaid" style="padding:20px;height:100%;">
+    </div>
+  </div>
+  <div class="tab-content" id="tab-event-schema-content">
+    <div id="events-mermaid" style="padding:20px;height:100%;">
+    </div>
+  </div>
+</div>
+
+<div id="notes">
+  <details open>
+    <summary>📋 与旧 pg-build 的主要改进 click to toggle</summary>
+    <table>
+      <tr>
+        <th>维度</th>
+        <th>旧 pg-build</th>
+        <th>pg-build-v2</th>
+        <th>改进</th>
+      </tr>
+      <tr>
+        <td>状态管理</td>
+        <td>mutable dict + 51 处 save_state 散落代码</td>
+        <td>PipelineState frozen dataclass + reducer 纯函数</td>
+        <td><span class="improvement-badge">不可变</span></td>
+      </tr>
+      <tr>
+        <td>持久化</td>
+        <td>`.pipeline-state.json` 覆盖写入（丢失历史）</td>
+        <td>`pipeline.events` append-only JSONL（完整回放）</td>
+        <td><span class="improvement-badge">可审计</span></td>
+      </tr>
+      <tr>
+        <td>代码量</td>
+        <td>~7800 LOC（v1+v2 双轨 + 共享 helper）</td>
+        <td>~3000 LOC（单轨，无 dual path）</td>
+        <td><span class="improvement-badge">−62%</span></td>
+      </tr>
+      <tr>
+        <td>模板</td>
+        <td>484 行嵌入 .py 字符串常量</td>
+        <td>11 个独立 YAML 文件</td>
+        <td><span class="improvement-badge">解耦</span></td>
+      </tr>
+      <tr>
+        <td>子循环</td>
+        <td>`in_fix_cycle` 状态 flag + 散落计数</td>
+        <td>SubPipeline 递归复用 reducer</td>
+        <td><span class="improvement-badge">统一</span></td>
+      </tr>
+      <tr>
+        <td>状态守卫</td>
+        <td>ALLOWED_STATUS dict + 显式守卫函数</td>
+        <td>reducer match 穷举所有组合</td>
+        <td><span class="improvement-badge">编译保证</span></td>
+      </tr>
+      <tr>
+        <td>查看器</td>
+        <td>无接口（只能 grep 日志）</td>
+        <td>event log 天然 SSE/WebSocket 数据源</td>
+        <td><span class="improvement-badge">预备</span></td>
+      </tr>
+      <tr>
+        <td>审计</td>
+        <td>context-chain.md 人读（松散格式）</td>
+        <td>event log 可编程回放（JSONL 结构化）</td>
+        <td><span class="improvement-badge">结构化</span></td>
+      </tr>
+      <tr>
+        <td>测试</td>
+        <td>19 文件 ~8900 LOC（含 v1/v2 回归测试）</td>
+        <td>9 文件 ~3200 LOC（纯功能测试）</td>
+        <td><span class="improvement-badge">−64%</span></td>
+      </tr>
+      <tr>
+        <td>启动</td>
+        <td>6 步（含循环 import runner 自身）</td>
+        <td>5 步（无循环依赖）</td>
+        <td><span class="improvement-badge">干净</span></td>
+      </tr>
+    </table>
+  </details>
+</div>
+
+<script>
+let panZoomInstance = null;
+let dark = false;
+let isFullscreen = false;
+
+mermaid.initialize({
+  startOnLoad: false,
+  theme: 'default',
+  flowchart: { useMaxWidth: false, htmlLabels: true, padding: 20 }
+});
+
+async function render() {
+  const src = document.getElementById('mermaidSrc').textContent.trim();
+  const container = document.getElementById('container');
+  const loading = document.getElementById('loading');
+
+  // 渲染主架构图
+  const { svg: svgText } = await mermaid.render('mermaidChart', src);
+  const tabDiagram = document.getElementById('tab-diagram-content');
+  tabDiagram.insertAdjacentHTML('beforeend', svgText);
+
+  // 渲染对比图
+  const comparisonSrc = [
+    'flowchart LR',
+    '    classDef old fill:#fdedec,stroke:#e74c3c,stroke-width:2px',
+    '    classDef new fill:#d5f5e3,stroke:#27ae60,stroke-width:2px',
+    '',
+    '    subgraph OLD["旧 pg-build ~7800 LOC"]',
+    '        direction TB',
+    '        V1["pg-pipeline-runner.py 4637 LOC"]:::old',
+    '        V2["pg_runner_v2.py 891 LOC"]:::old',
+    '        COMMON["pg_pipeline_common.py 1234 LOC"]:::old',
+        '        STATE["pg_pipeline_state_v2.py 1054 LOC"]:::old',
+    '        V1 -.->|"dual path"| V2',
+    '        V2 -.->|"shared helpers"| COMMON',
+    '        COMMON -.->|"circular import"| V1',
+    '    end',
+    '',
+    '    NEW("pg-build-v2 ~3000 LOC"):::new',
+    '',
+    '    OLD ===>|"重构"| NEW',
+    '',
+    '    NEW --> EVENTS["pipeline/events.py"]',
+    '    NEW --> STATE2["pipeline/state.py"]',
+    '    NEW --> REDUCER["pipeline/reducer.py"]',
+    '    NEW --> EL["pipeline/event_log.py"]',
+    '    NEW --> SNAP["pipeline/snapshot.py"]',
+  ].join('\n');
+
+  const { svg: svgCmp } = await mermaid.render('mermaidComparison', comparisonSrc);
+  const tabCmp = document.getElementById('tab-comparison-content');
+  tabCmp.innerHTML = '';
+  tabCmp.appendChild(svgCmp);
+
+  // 渲染 Event Schema 图
+  const eventSrc = [
+    'flowchart LR',
+    '    classDef ev fill:#e8f4f8,stroke:#2980b9,stroke-width:1px',
+    '    classDef term fill:#fdedec,stroke:#e74c3c,stroke-width:1px',
+    '',
+    '    P["pipeline_started<br/>change, pipeline_order"]:::ev',
+    '    B["bootstrap_step_completed<br/>step, detail"]:::ev',
+    '    PE["prepare_env_completed<br/>env, exit_code, log_path"]:::ev',
+    '    D["dispatch_started<br/>track, phase, agent"]:::ev',
+    '    R["record_received<br/>track, phase, status"]:::ev',
+    '    FC["fix_cycle_started<br/>track, cycle"]:::ev',
+    '    GC["gate_cycle_started<br/>track, cycles_remaining"]:::ev',
+    '    TC["track_completed<br/>track"]:::ev',
+    '    PC["pipeline_completed<br/>final_status"]:::ev',
+    '    WF["workflow_failed<br/>reason"]:::term',
+    '',
+    '    P --> D --> R --> FC --> D',
+    '    R --> GC --> D',
+    '    R --> TC--> PC',
+    '    R --> WF',
+  ].join('\n');
+
+  const { svg: svgEv } = await mermaid.render('mermaidEvents', eventSrc);
+  const tabEv = document.getElementById('tab-event-schema-content');
+  tabEv.innerHTML = '';
+  tabEv.appendChild(svgEv);
+
+  loading.classList.add('hidden');
+
+  // 初始化 panZoom（主图）
+  const svg = document.querySelector('#tab-diagram-content svg');
+  if (svg) {
+    svg.style.width = '100%';
+    svg.style.height = '100%';
+    svg.style.minWidth = '1200px';
+    svg.style.minHeight = '800px';
+
+    panZoomInstance = svgPanZoom(svg, {
+      zoomEnabled: true,
+      controlIconsEnabled: false,
+      fit: true,
+      center: true,
+      minZoom: 0.3,
+      maxZoom: 8,
+      customEventsHandler: {
+        haltEventListeners: [],
+        init: function (options) {
+          const {svgElement} = options;
+          svgElement.addEventListener('wheel', options.onZoom);
+          svgElement.addEventListener('mousedown', options.onPanStart);
+          svgElement.addEventListener('mousemove', options.onPan);
+          svgElement.addEventListener('mouseup', options.onPanEnd);
+          svgElement.addEventListener('mouseleave', options.onPanEnd);
+          svgElement.addEventListener('dblclick', function(e) {
+            if (panZoomInstance) reset();
+          });
+        },
+        destroy: function (options) {
+          const {svgElement} = options;
+          svgElement.removeEventListener('wheel', options.onZoom);
+          svgElement.removeEventListener('mousedown', options.onPanStart);
+          svgElement.removeEventListener('mousemove', options.onPan);
+          svgElement.removeEventListener('mouseup', options.onPanEnd);
+          svgElement.removeEventListener('mouseleave', options.onPanEnd);
+        }
+      }
+    });
+
+    updateZoomInfo();
+    panZoomInstance.setOnZoom(updateZoomInfo);
+
+    // 点击节点显示详情
+    svg.querySelectorAll('.node').forEach(node => {
+      node.style.cursor = 'pointer';
+    });
+  }
+
+  // 初始化 svg-pan-zoom on 对比图和 event 图
+  document.querySelectorAll('#tab-comparison-content svg, #tab-event-schema-content svg').forEach(svg2 => {
+    svg2.style.width = '100%';
+    svg2.style.maxHeight = '70vh';
+    try {
+      svgPanZoom(svg2, {
+        zoomEnabled: true,
+        controlIconsEnabled: false,
+        fit: true,
+        center: true,
+        minZoom: 0.3,
+        maxZoom: 5,
+      });
+    } catch(e) { /* ignore */ }
+  });
+}
+
+function zoomIn() { if (panZoomInstance) panZoomInstance.zoomIn(); }
+function zoomOut() { if (panZoomInstance) panZoomInstance.zoomOut(); }
+function fit() { if (panZoomInstance) { panZoomInstance.fit(); panZoomInstance.center(); } }
+function reset() { if (panZoomInstance) { panZoomInstance.reset(); panZoomInstance.center(); } }
+function updateZoomInfo() {
+  if (!panZoomInstance) return;
+  const pct = Math.round(panZoomInstance.getZoom() * 100);
+  document.getElementById('zoomLevel').textContent = pct + '%';
+}
+
+function toggleDark() {
+  dark = !dark;
+  const c = document.getElementById('container');
+  const tb = document.getElementById('toolbar');
+  const notes = document.getElementById('notes');
+  const tabBar = document.getElementById('tab-bar');
+  if (dark) {
+    document.body.style.background = '#1a1a2e';
+    c.style.background = '#1a1a2e';
+    tb.style.background = '#0f0f23';
+    notes.style.background = '#16213e';
+    notes.style.borderTopColor = '#e67e22';
+    tabBar.style.background = '#0f3460';
+    document.querySelectorAll('#container svg').forEach(s => s.style.filter = 'invert(0.85) hue-rotate(180deg)');
+    document.querySelectorAll('#notes *').forEach(el => { if (el.tagName !== 'svg') el.style.color = '#e0e0e0'; });
+    document.querySelectorAll('#tab-bar .tab').forEach(t => t.style.color = '#95a5a6');
+    document.querySelectorAll('#tab-bar .tab.active').forEach(t => t.style.color = '#fff');
+  } else {
+    document.body.style.background = '#f5f6fa';
+    c.style.background = '#f5f6fa';
+    tb.style.background = '#2c3e50';
+    notes.style.background = '#fef9e7';
+    notes.style.borderTopColor = '#f39c12';
+    tabBar.style.background = '#ecf0f1';
+    document.querySelectorAll('#container svg').forEach(s => s.style.filter = '');
+    document.querySelectorAll('#notes *').forEach(el => { if (el.tagName !== 'svg') el.style.removeProperty('color'); });
+    document.querySelectorAll('#tab-bar .tab').forEach(t => t.style.color = '#7f8c8d');
+    document.querySelectorAll('#tab-bar .tab.active').forEach(t => t.style.color = '#2c3e50');
+  }
+}
+
+function toggleFullscreen() {
+  if (!document.fullscreenElement) {
+    document.documentElement.requestFullscreen();
+    isFullscreen = true;
+  } else {
+    document.exitFullscreen();
+    isFullscreen = false;
+  }
+}
+
+function switchTab(tabId) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+  document.querySelector(`.tab[data-tab="${tabId}"]`).classList.add('active');
+  document.getElementById(`tab-${tabId}-content`).classList.add('active');
+
+  // 适配 svg 大小
+  setTimeout(() => {
+    document.querySelectorAll('#container svg').forEach(s => {
+      try {
+        if (s.__svgPanZoomInstance) s.__svgPanZoomInstance.fit();
+      } catch(e) {}
+    });
+  }, 100);
+}
+
+render();
+</script>
+</body>
+</html>

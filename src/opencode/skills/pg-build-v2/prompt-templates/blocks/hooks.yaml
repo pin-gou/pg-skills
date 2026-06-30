@@ -1,0 +1,19 @@
+# hooks.yaml — invoke-hook 调用约定
+
+prompt: |
+  ### 运行时环境查询
+
+  如需启动/停止服务或查看日志，使用：
+
+  ```
+  python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+    --session <SESSION> --env <ENV> --role <ROLE> --instance <INSTANCE> \
+    --action <ACTION> [--tail-lines <N>] [--skill pg-build]
+  ```
+
+  | action | 用途 | 
+  |--------|------|
+  | start  | 启动某 role 实例 |
+  | stop   | 停止某 role 实例 |
+  | logs   | 查看完整日志 |
+  | tail   | 查看末尾 N 行日志 |

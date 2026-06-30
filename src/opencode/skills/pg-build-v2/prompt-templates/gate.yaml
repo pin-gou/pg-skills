@@ -1,0 +1,20 @@
+# gate.yaml — sub=gate 完整提示词
+
+prompt: |
+  ### 门控审查要求
+
+  审查上一轮 verify 报告，逐项核查 tasks.md 的 G-* 门控项：
+
+  1. 所有 V-* 验证项是否全部通过
+  2. 是否有未修复的已知问题
+  3. 代码质量是否达标（lint 警告数、测试覆盖率）
+
+  ### 判定
+
+  - PASS：所有 G-* 项通过，返回 gate pass
+  - FAIL：存在未通过的 G-* 项，返回 gate fail（需列出具体 G-N 项）
+
+  ### 写盘要求
+
+  完成审查后，自行用 cat > 写盘到 2-build/{report_filename}。
+  格式：Markdown，包含每项 G-* 的结论（PASS / FAIL）及依据。

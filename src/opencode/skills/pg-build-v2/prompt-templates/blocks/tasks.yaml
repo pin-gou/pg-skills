@@ -1,0 +1,16 @@
+# tasks.yaml — tasks.md 预格式化
+
+prompt: |
+  ### 执行要求
+
+  **任务清单**：
+  {tasks_preformatted}
+
+  **验证要求**：{tasks_validation}
+
+  ### 返回格式
+
+  - summary: 一句话总结执行结果
+  - outputs: 产物文件列表（逗号分隔）
+  - tasks_updated: 是否已更新 tasks.md 复选框
+  - status: SUCCESS / FAILED

@@ -1,0 +1,28 @@
+# base.yaml — 所有 dispatch 提示词的公共头部
+# 使用 {var} 格式，由 Python str.format() 替换
+
+header: |
+  ## 任务：{id} - {label}
+
+  ### 变更名称
+  {_change}
+
+  ### Track 配置
+  - track.id: {id}
+  - track.review_level: {review_level}
+  - track.modules: {modules}
+  - track.max_fix_retries: {max_fix_retries}
+  - track.fix_routing: {fix_routing}
+
+  ### Module 配置
+  {module_details}
+
+  ### Stage 配置
+  - stage.name: {stage_name}
+  - stage.test_key: {test_key}
+  - stage.gate: {gate}
+  - stage.environment.required: {env_required}
+  - stage.environment.name: {env_name}
+  - stage.environment.prepare.status: {prepare_status}
+  - stage.environment.prepare.log_path: {prepare_log_path}
+  - stage.test_commands: {test_commands}

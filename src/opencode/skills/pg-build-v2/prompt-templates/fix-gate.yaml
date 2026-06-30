@@ -1,0 +1,26 @@
+# fix-gate.yaml — sub=fix-gate 完整提示词
+
+prompt: |
+  ### 必读源报告（gate FAIL 派发）
+
+  - **源 gate 报告**: {gate_report_path}
+
+  请用 Read 工具逐字读取该文件。报告中可能包含多个 ### track:G-N 章节，
+  需通读整份报告识别全部未修复的 gap 一次性修复。
+
+  ### 修复范围
+
+  - gate_cycle: {gate_cycles}
+  - cycles_remaining: {cycles_remaining}
+  - 只修复 gate 报告中列出的 G-N gap
+
+  ### 修复后必跑流程
+
+  1. 修改源码
+  2. 跑 {test_commands} 单元测试（必须通过）
+  3. 跑模块 lint（必须 0 警告）
+  4. 启动 invoke-hook --action start 服务（如需）
+  5. 跑 gate 报告中对应的 G-N 验证项
+  6. 抓日志确认无 ERROR
+  7. 停止 invoke-hook --action stop 服务（如启动过）
+  8. 用 cat > 写盘到 2-build/{fix_report_filename}

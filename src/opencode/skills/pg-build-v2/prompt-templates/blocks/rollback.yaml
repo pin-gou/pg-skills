@@ -1,0 +1,9 @@
+# rollback.yaml — [ROLLBACK CONTEXT] 块
+
+prompt: |
+  [ROLLBACK CONTEXT]
+  - failed_at: {failed_at}
+  - reason: {reason}
+  - source: {source}
+
+  你必须优先审查该根因是否已修复，再执行本阶段的正常任务。
