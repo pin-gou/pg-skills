@@ -387,8 +387,25 @@ def cmd_record_v2(change: str, status: str, report_path: str = "",
         return {"action": "error", "fatal": True,
                 "reason": f"pg_runner_v2: failed to import runner helpers: {e}"}
 
+    # Shared context-chain logging helper lives in pg_pipeline_common (not
+    # in pg-pipeline-runner). Import lazily to keep the v2 module decoupled
+    # from runner's private imports.
+    try:
+        from pg_pipeline_common import pg_build_record_log
+    except Exception as e:
+        return {"action": "error", "fatal": True,
+                "reason": f"pg_runner_v2: failed to import pg_build_record_log: {e}"}
+
     config = load_config()
     tasks_marked = _parse_tasks_from_outputs(outputs, track, phase)
+
+    # ===== Context-chain logging (v1 parity) =====
+    # build-r Step 3 切到 v2 时, 17 处 pg_context_chain.sub_start/sub_end
+    # 调用全部丢失, 导致 2-build/context-chain.md 永远空白, final-gate
+    # 审计与 fix agent 根因追溯都失去依据. 现在通过共享 helper
+    # pg_build_record_log 统一补回.
+    pg_build_record_log(change, track, phase, status,
+                        summary=summary, outputs=outputs, issues=issues)
 
     # === Status dispatch ===
     if status == "completed":
@@ -436,9 +453,13 @@ def cmd_record_v2(change: str, status: str, report_path: str = "",
 
         # Advance: call cmd_next_v2 to decide what comes next
         result = cmd_next_v2(change)
-        # Auto-commit on record (matches v1 behavior for git integration)
+        # Auto-commit on record (matches v1 behavior for git integration).
+        # Mount commit metadata on result so LLM orchestrator can show it
+        # in the terminal summary (mirrors v1 _inject_commit).
         try:
-            _auto_commit_on_record(change, track, phase, status)
+            commit_meta = _auto_commit_on_record(change, track, phase, status)
+            if commit_meta and isinstance(result, dict):
+                result["commit"] = commit_meta
         except Exception:
             pass
         return result
