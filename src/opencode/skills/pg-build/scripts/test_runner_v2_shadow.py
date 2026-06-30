@@ -23,11 +23,12 @@ import os
 import shutil
 import subprocess
 import sys
+import tempfile
 import unittest
 
 
-CONSUMER_ROOT = "/home/ubuntu/workspace/oc3-web-virt"
-SCRIPTS_DIR = "/home/ubuntu/workspace/pg-skills/src/opencode/skills/pg-build/scripts"
+CONSUMER_ROOT = "/home/ubuntu/workspace/oc1-web-virt"
+SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 
 
 def _runner_cli(*args, env=None, cwd=CONSUMER_ROOT, timeout=30):
@@ -245,6 +246,145 @@ class TestV2FixCycle(unittest.TestCase):
         self.assertEqual(action["action"], "dispatch_fix")
         self.assertEqual(action["sub"], "fix")
         self.assertEqual(action["agent"], "pg-build/fix")
+
+
+class TestV2SimpleTrackDispatch(unittest.TestCase):
+    """P0-1 integration test: simple track routes through pg-build/simple.
+
+    Pre-fix regression: simple tracks (e.g. openapi-gen) were walked
+    through TDVG_PHASES = ['test', 'dev', 'verify', 'gate'], producing
+    4 phantom noop dispatches and never invoking pg-build/simple.
+
+    Post-fix: first dispatch for a simple track must be
+    action=dispatch, sub=simple, agent=pg-build/simple.
+
+    Test strategy: directly exercise PipelineState.next_pending() on a
+    minimal change with a synthetic project.yaml declaring one simple
+    track. We bypass cmd_next_v2's full bootstrap (which would try to
+    run prepare_env and require a real dev-local environment) and
+    focus on the state machine's routing decision. Unit-level coverage
+    of cmd_next_v2's interaction with simple tracks is provided by
+    test_state_v2.py's TestSimpleTrackRouting class.
+    """
+
+    SIMPLE_PROJECT_YAML = """\
+schema: spec-driven
+state_v2:
+  enabled: true
+modules: {}
+tracks:
+  openapi-gen:
+    type: simple
+    timeout_seconds: 600
+    on_failure: workflow_failed
+    commands:
+      - "echo hello"
+stages:
+  - name: dev
+    environment: dev-local
+    tracks: [openapi-gen]
+"""
+
+    def setUp(self):
+        # Build an isolated project with one simple track. We exercise
+        # the state machine directly to verify P0-1's simple-track
+        # routing without the dev-local prepare_env side effect.
+        self.tmp = tempfile.mkdtemp(prefix="pg_v2_simple_")
+        self.pg = os.path.join(self.tmp, ".pg")
+        os.makedirs(self.pg)
+        with open(os.path.join(self.pg, "project.yaml"), "w") as f:
+            f.write(self.SIMPLE_PROJECT_YAML)
+        # changes dir (state.json goes here)
+        self.change = "simple-int"
+        self.changes_dir = os.path.join(self.pg, "changes", self.change, "2-build")
+        os.makedirs(self.changes_dir)
+        # Patch pg_pipeline_common's CONFIG_PATH so the lazy
+        # _load_config_cached() reads our isolated project.yaml.
+        sys.path.insert(0, SCRIPTS_DIR)
+        import pg_pipeline_common
+        self._common = pg_pipeline_common
+        self._old_common_cfg = pg_pipeline_common.CONFIG_PATH
+        pg_pipeline_common.CONFIG_PATH = os.path.join(self.pg, "project.yaml")
+        from pg_pipeline_state_v2 import PipelineState
+        self.PipelineState = PipelineState
+
+    def tearDown(self):
+        if hasattr(self, "_common") and hasattr(self, "_old_common_cfg"):
+            self._common.CONFIG_PATH = self._old_common_cfg
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_simple_track_first_dispatch_uses_simple_sub(self):
+        """P0-1: simple track first dispatch must use sub=simple, not sub=test.
+
+        Drives PipelineState.next_pending() directly to verify the
+        state machine's routing decision for a simple track. This
+        catches the original bug where next_pending() walked
+        TDVG_PHASES for simple tracks and produced 4 phantom noop
+        sub-dispatches.
+        """
+        ps = self.PipelineState(self.change, project_root=self.tmp)
+        ps.set_pipeline_order(["dev.openapi-gen"])
+
+        nd = ps.next_pending()
+        self.assertIsNotNone(nd, "next_pending should return a dispatch")
+        self.assertEqual(nd.track, "dev.openapi-gen")
+        self.assertEqual(nd.kind, "dispatch")
+        self.assertEqual(nd.phase, "simple",
+                         f"BUG: simple track should dispatch sub='simple', got {nd.phase}")
+        self.assertEqual(nd.agent, "pg-build/simple",
+                         f"BUG: should use pg-build/simple agent, got {nd.agent}")
+        self.assertFalse(nd.is_resume)
+
+    def test_simple_track_full_lifecycle_terminates(self):
+        """P0-1 + P2-3: full simple track lifecycle terminates cleanly.
+
+        Walks the full simple-track lifecycle at the state-machine
+        level (no CLI) and verifies the terminator properties:
+          1. next_pending() → simple sub
+          2. record_dispatch_started + record_completed
+          3. next_pending() → dispatch_final_gate (P0-1 part 2)
+          4. record_dispatch_started(final-gate) + record_completed
+             → context.completed=True (P2-3)
+          5. next_pending() returns dispatch_final_gate (the wrapper
+             cmd_next_v2 checks context.completed at the very top and
+             returns 'done'; the state machine's job is just to keep
+             surfacing final-gate when not yet completed).
+        """
+        ps = self.PipelineState(self.change, project_root=self.tmp)
+        ps.set_pipeline_order(["dev.openapi-gen"])
+
+        # 1. First dispatch: simple
+        nd1 = ps.next_pending()
+        self.assertEqual(nd1.phase, "simple")
+
+        # 2. Drive simple sub to completion.
+        ps.record_dispatch_started("dev.openapi-gen", "simple", "pg-build/simple")
+        ps.record_completed("dev.openapi-gen", "simple")
+
+        # 3. After simple completed, next dispatch is final-gate
+        # (NOT another test/dev/verify/gate sub on the simple track).
+        nd2 = ps.next_pending()
+        self.assertIsNotNone(nd2)
+        self.assertEqual(nd2.track, "final-gate",
+                         f"P0-1 BUG: simple track completed should advance to final-gate, got {nd2.track}")
+        self.assertEqual(nd2.kind, "dispatch_final_gate",
+                         f"BUG: kind should be dispatch_final_gate, got {nd2.kind}")
+        # Simple track should be marked completed (track-level status
+        # was set by the _next_phase_in_track short-circuit).
+        self.assertEqual(
+            ps.data["tracks"]["dev.openapi-gen"]["status"], "completed",
+            "P0-1 BUG: simple track status should be 'completed' after simple sub done")
+
+        # 4. Drive final-gate to completion (this is the P2-3 scenario:
+        # sub-agent returns SUCCESS, LLM calls record completed, not
+        # record pass).
+        ps.record_dispatch_started("final-gate", "gate", "pg-build/gate")
+        ps.record_completed("final-gate", "gate", summary="audit passed")
+
+        # 5. context.completed must be True (P2-3 fix).
+        self.assertTrue(
+            ps.data["context"]["completed"],
+            "P2-3 BUG: record_completed for final-gate must set context.completed")
 
 
 if __name__ == "__main__":

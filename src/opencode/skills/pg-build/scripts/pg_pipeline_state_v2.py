@@ -86,6 +86,11 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Optional
 
+# Local helpers (lazy-loaded; see _load_config_cached).
+# Imported lazily to avoid an import cycle: pg_pipeline_common imports from
+# this module via its own helper signatures. We resolve get_track_type at
+# first use to break the cycle.
+
 
 SCHEMA_VERSION = "2026-06-29"
 
@@ -173,6 +178,10 @@ class PipelineState:
         self.state_path = os.path.join(self.apply_dir, ".pipeline-state.json")
         self._data = self._load_or_init()
         self._dirty = False
+        # Cached project.yaml config — loaded lazily on first simple-track
+        # check to avoid slowing down the hot path of every cmd_next.
+        # None means "not loaded yet".
+        self._config_cache: Optional[dict] = None
 
     def _load_or_init(self) -> dict:
         if os.path.isfile(self.state_path):
@@ -313,6 +322,50 @@ class PipelineState:
     def is_track_completed(self, track: str) -> bool:
         return self._data["tracks"].get(track, {}).get("status") == "completed"
 
+    def _load_config_cached(self) -> dict:
+        """Load project.yaml once and cache it (lazy + memoized).
+
+        Avoids repeated disk reads on every _next_phase_in_track call.
+        Returns empty dict on load failure (treated as 'no simple tracks
+        defined' — fallback to standard TDVG walk).
+        """
+        if self._config_cache is not None:
+            return self._config_cache
+        # Lazy import: pg_pipeline_common imports nothing from this module,
+        # so a top-level import is safe — but we keep it lazy for symmetry
+        # with the runner's helper-loading pattern and to keep import graph
+        # surface small in unit tests.
+        try:
+            from pg_pipeline_common import load_config as _load_config
+            self._config_cache = _load_config()
+        except Exception:
+            self._config_cache = {}
+        return self._config_cache
+
+    def is_simple_track(self, track: str) -> bool:
+        """True if `track` is configured as a simple track (type='simple').
+
+        Delegates to get_track_type which classifies 'simple' as 'phase'
+        — same routing decision used by v1's _is_phase_item and v2's
+        _is_phase_item helper. The v2 state machine previously did not
+        honor this classification: _next_phase_in_track walked TDVG_PHASES
+        regardless of track type, causing simple tracks to be dispatched
+        as test/dev/verify/gate instead of a single 'simple' sub. This
+        helper lets _next_phase_in_track short-circuit correctly.
+
+        Env hooks (prepare_env/clean_env) are NOT simple tracks — they're
+        handled inline by _execute_phase, not by this code path.
+        """
+        bare = track.rsplit(".", 1)[-1] if "." in track else track
+        if bare in ("prepare_env", "clean_env"):
+            return False
+        # Lazy import to avoid a top-level cycle.
+        try:
+            from pg_pipeline_common import get_track_type
+        except ImportError:
+            return False
+        return get_track_type(self._load_config_cached(), bare) == "phase"
+
     def has_open_phase(self, track: str, phase: str) -> bool:
         return (
             self._data["tracks"]
@@ -437,6 +490,39 @@ class PipelineState:
     def _next_phase_in_track(self, track: str) -> Optional[NextDispatch]:
         """Find the next dispatchable phase within `track`."""
         phases = self._data["tracks"][track]["phases"]
+
+        # Simple track short-circuit (P0-1 fix): simple tracks have type
+        # 'simple' in project.yaml and run a single 'simple' sub-agent
+        # (pg-build/simple) that executes the track's commands. They do
+        # NOT walk TDVG_PHASES. Previously the state machine ignored track
+        # type and dispatched test/dev/verify/gate for simple tracks,
+        # producing 4 phantom noop sub-dispatches and breaking the chain.
+        if self.is_simple_track(track):
+            ph_simple = phases.get("simple")
+            if ph_simple is None:
+                return NextDispatch(
+                    track=track, phase="simple", cycle=1,
+                    agent=PHASE_AGENTS["simple"], kind="dispatch",
+                )
+            status = ph_simple.get("status")
+            if status == "completed":
+                # simple already ran — mark track completed and return
+                # None so the caller moves to the next track in
+                # pipeline_order.
+                self._data["tracks"][track]["status"] = "completed"
+                self._data["tracks"][track]["completed_at"] = _now_iso()
+                return None
+            if status == "running":
+                return NextDispatch(
+                    track=track, phase="simple", cycle=1,
+                    agent=PHASE_AGENTS["simple"], kind="dispatch",
+                    is_resume=True,
+                )
+            # status == "pending" or absent — first attempt (re-dispatch)
+            return NextDispatch(
+                track=track, phase="simple", cycle=1,
+                agent=PHASE_AGENTS["simple"], kind="dispatch",
+            )
 
         # If there's an open verify-fix (phases["fix"] running), return it.
         if phases.get("fix", {}).get("status") == "running":
@@ -579,7 +665,25 @@ class PipelineState:
         For verify: also clears current_dispatch so next_pending advances.
         For gate: equivalent to record_pass (kept distinct for API stability).
         For fix/fix-gate: caller should use record_fix_completed instead.
+
+        Special case (P2-3 fix): when track='final-gate', the sub-agent
+        returns SUCCESS (which LLM orchestrator surfaces as 'completed'),
+        not 'pass'. Without this short-circuit, context.completed stays
+        False and next_pending() walks final-gate through TDVG_PHASES,
+        producing 4 phantom dispatches (test/dev/verify/gate) that the
+        orchestrator has to manually skip. Delegating to record_pass()
+        ensures context.completed=True on first completion, terminating
+        the pipeline cleanly via cmd_record_v2 status='pass' branch.
         """
+        if track == "final-gate":
+            # Delegate to record_pass for final-gate. The sub-agent's
+            # successful report IS the final-gate's pass signal — there
+            # is no separate 'failed' path because final-gate is an
+            # end-to-end audit (record_fail is the right way to mark
+            # a FAIL via cmd_record_v2 status='fail').
+            self.record_pass(track, summary=summary, report_path=report_path)
+            return
+
         phase_data = self.get_phase(track, phase)
         phase_data["status"] = "completed"
         phase_data["completed_at"] = _now_iso()

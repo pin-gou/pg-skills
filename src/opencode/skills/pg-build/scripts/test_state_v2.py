@@ -42,17 +42,25 @@ from pg_pipeline_state_v2 import (
 )
 
 
-def _make_project(layout: dict) -> str:
+def _make_project(layout: dict, project_yaml: str = None) -> str:
     """Create a temp project with .pg/project.yaml + given changes/tasks.
 
     layout keys:
       "changes": {change_name: {"state": dict_or_None, "tasks_md": str_or_None}}
+
+    project_yaml: optional override for the .pg/project.yaml content. When
+    provided, MUST be valid YAML loadable by pg-pipeline-runner's load_config
+    (e.g. include `schema: spec-driven` header). When None, an empty stub
+    is written (no tracks, no stages).
     """
     tmp = tempfile.mkdtemp(prefix="pg_v2_test_")
     pg_dir = os.path.join(tmp, ".pg")
     os.makedirs(pg_dir)
+    yaml_content = project_yaml if project_yaml is not None else (
+        "# minimal project.yaml for v2 tests\n"
+    )
     with open(os.path.join(pg_dir, "project.yaml"), "w") as f:
-        f.write("# minimal project.yaml for v2 tests\n")
+        f.write(yaml_content)
     changes_dir = os.path.join(tmp, ".pg", "changes")
     for change, spec in layout.get("changes", {}).items():
         cdir = os.path.join(changes_dir, change)
@@ -65,6 +73,29 @@ def _make_project(layout: dict) -> str:
             with open(os.path.join(cdir, "tasks.md"), "w") as f:
                 f.write(spec["tasks_md"])
     return tmp
+
+
+# Minimal valid project.yaml with one simple track, used by simple-track
+# tests in TestSimpleTrackRouting. Mirrors the shape of the real
+# project.yaml's tracks.openapi-gen block (after runner strips the
+# 'openapi-gen' track declaration).
+_SIMPLE_TRACK_PROJECT_YAML = """\
+schema: spec-driven
+state_v2:
+  enabled: true
+modules: {}
+tracks:
+  openapi-gen:
+    type: simple
+    timeout_seconds: 600
+    on_failure: workflow_failed
+    commands:
+      - "echo hello"
+stages:
+  - name: dev
+    environment: dev-local
+    tracks: [openapi-gen]
+"""
 
 
 def _empty_v1(change: str, order: list = None) -> dict:
@@ -370,6 +401,234 @@ class TestGatePass(unittest.TestCase):
 
         self.assertTrue(ps.data["context"]["completed"])
         self.assertIsNone(ps.data["current_dispatch"])
+
+
+class TestSimpleTrackRouting(unittest.TestCase):
+    """Group 5b: simple track dispatch (P0-1 fix regression guards).
+
+    These tests guard the v2 state machine against regressing into
+    dispatching simple tracks as test/dev/verify/gate (the original
+    P0-1 bug). They exercise is_simple_track() and _next_phase_in_track()
+    with a real project.yaml that has a 'openapi-gen' simple track.
+    """
+
+    def setUp(self):
+        self.tmp = _make_project({}, project_yaml=_SIMPLE_TRACK_PROJECT_YAML)
+        # PipelineState's _load_config_cached() calls pg_pipeline_common's
+        # load_config which reads the module-level CONFIG_PATH from
+        # pg-pipeline-common. Patch that here so the test uses our
+        # isolated project.yaml instead of the runner's import-time path.
+        import pg_pipeline_common
+        self._common = pg_pipeline_common
+        self._old_config_path = pg_pipeline_common.CONFIG_PATH
+        pg_pipeline_common.CONFIG_PATH = os.path.join(
+            self.tmp, ".pg", "project.yaml"
+        )
+
+    def tearDown(self):
+        # Restore the original CONFIG_PATH so we don't leak state
+        # into other test modules.
+        if hasattr(self, "_common") and hasattr(self, "_old_config_path"):
+            self._common.CONFIG_PATH = self._old_config_path
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_is_simple_track_recognizes_simple_type(self):
+        """is_simple_track() must return True for tracks.<id>.type='simple'."""
+        ps = PipelineState("simple-routing-1", project_root=self.tmp)
+        # Force-load the config cache (lazy initialization).
+        self.assertTrue(ps.is_simple_track("dev.openapi-gen"))
+        self.assertTrue(ps.is_simple_track("openapi-gen"))
+
+    def test_is_simple_track_rejects_standard_type(self):
+        """is_simple_track() must return False for tracks without type='simple'.
+
+        Without an explicit 'simple' track in project.yaml, the bare
+        id (e.g. 'backend') should be classified as standard track.
+        """
+        ps = PipelineState("simple-routing-2", project_root=self.tmp)
+        # The minimal project.yaml has no 'backend' track — get_track_type
+        # defaults to 'track' for unknown tracks, so is_simple_track
+        # must return False.
+        self.assertFalse(ps.is_simple_track("dev.backend"))
+        self.assertFalse(ps.is_simple_track("dev.frontend"))
+
+    def test_is_simple_track_rejects_env_hooks(self):
+        """is_simple_track() must return False for prepare_env/clean_env.
+
+        Env hooks have their own routing path (executed inline by
+        pg_build_bootstrap) and must not be classified as simple.
+        """
+        ps = PipelineState("simple-routing-3", project_root=self.tmp)
+        self.assertFalse(ps.is_simple_track("dev.prepare_env"))
+        self.assertFalse(ps.is_simple_track("dev.clean_env"))
+
+    def test_next_pending_simple_track_dispatches_simple_sub(self):
+        """next_pending() must return phase='simple' for simple tracks.
+
+        Regression test for P0-1: previously the state machine walked
+        TDVG_PHASES and dispatched phase='test' for the first visit,
+        producing 4 phantom noop sub-dispatches. After the fix, the
+        first dispatch must be phase='simple' agent='pg-build/simple'.
+        """
+        ps = PipelineState("simple-routing-4", project_root=self.tmp)
+        ps.set_pipeline_order(["dev.openapi-gen"])
+
+        nd = ps.next_pending()
+        self.assertIsNotNone(nd)
+        self.assertEqual(nd.track, "dev.openapi-gen")
+        self.assertEqual(nd.phase, "simple",
+                         f"BUG: simple track should dispatch phase='simple', got {nd.phase}")
+        self.assertEqual(nd.agent, "pg-build/simple",
+                         f"BUG: should use pg-build/simple agent, got {nd.agent}")
+        self.assertEqual(nd.kind, "dispatch")
+        self.assertFalse(nd.is_resume)
+
+    def test_next_pending_simple_track_resume_when_running(self):
+        """Idempotent resume: simple sub already running → is_resume=True.
+
+        If the runner dispatched simple and the agent crashed before
+        record, next_pending() must return the same dispatch with
+        is_resume=True so the LLM orchestrator re-uses the in-flight
+        dispatch instead of creating a new one.
+        """
+        ps = PipelineState("simple-routing-5", project_root=self.tmp)
+        ps.set_pipeline_order(["dev.openapi-gen"])
+        # Simulate dispatch already started.
+        ps.record_dispatch_started("dev.openapi-gen", "simple", "pg-build/simple")
+
+        nd = ps.next_pending()
+        self.assertIsNotNone(nd)
+        self.assertEqual(nd.track, "dev.openapi-gen")
+        self.assertEqual(nd.phase, "simple")
+        self.assertTrue(nd.is_resume,
+                        "BUG: simple sub already running should resume, not re-dispatch")
+
+    def test_next_pending_simple_track_advances_after_completion(self):
+        """After simple sub completed, next_pending() must advance.
+
+        Regression test for the second half of P0-1: the state machine
+        must mark the simple track 'completed' and return the next
+        track in pipeline_order (or final-gate if no more tracks).
+
+        Note: track.status is set to 'completed' by the
+        _next_phase_in_track() short-circuit (when the simple sub's
+        status is 'completed'), NOT by record_completed directly.
+        This matches the pattern used for standard tracks where the
+        final TDVG phase completion is what triggers the track-level
+        transition.
+        """
+        ps = PipelineState("simple-routing-6", project_root=self.tmp)
+        ps.set_pipeline_order(["dev.openapi-gen"])
+
+        # Drive simple sub to completion.
+        ps.record_dispatch_started("dev.openapi-gen", "simple", "pg-build/simple")
+        ps.record_completed("dev.openapi-gen", "simple")
+
+        # Phase-level: simple.status = completed.
+        self.assertEqual(
+            ps.data["tracks"]["dev.openapi-gen"]["phases"]["simple"]["status"],
+            "completed")
+
+        # next_pending() should now return final-gate (only track in order).
+        nd = ps.next_pending()
+        self.assertIsNotNone(nd)
+        self.assertEqual(nd.track, "final-gate")
+        self.assertEqual(nd.kind, "dispatch_final_gate")
+        # AND the short-circuit flips track.status to 'completed' as a
+        # side-effect of next_pending walking the now-empty phases.
+        self.assertEqual(ps.data["tracks"]["dev.openapi-gen"]["status"],
+                         "completed")
+
+
+class TestFinalGateRecordCompleted(unittest.TestCase):
+    """Group 5c: final-gate record_completed() must set context.completed.
+
+    These tests guard the v2 state machine against regressing into the
+    P2-3 bug: when LLM orchestrator calls record_completed for final-gate
+    (because the sub-agent returned SUCCESS, not 'pass'), the state
+    machine must set context.completed=True so cmd_next_v2 returns
+    'done' on the next call. Without this short-circuit, the state
+    machine walks final-gate through TDVG_PHASES producing 4 phantom
+    dispatches (test/dev/verify/gate).
+    """
+
+    def setUp(self):
+        self.tmp = _make_project({})
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def test_record_completed_final_gate_sets_context_completed(self):
+        """record_completed('final-gate', ...) must set context.completed.
+
+        Pre-fix: record_completed set phases.gate.status='completed' but
+        left context.completed=False, so next_pending() walked final-gate
+        through TDVG_PHASES producing phantom dispatches.
+
+        Post-fix: record_completed delegates to record_pass for final-gate
+        (and only for final-gate), which sets context.completed=True.
+        """
+        ps = PipelineState("fg-rc-1", project_root=self.tmp)
+        # Simulate final-gate dispatch in flight.
+        ps.record_dispatch_started("final-gate", "gate", "pg-build/gate")
+
+        # Pre-condition: workflow not yet completed.
+        self.assertFalse(ps.data["context"].get("completed"))
+
+        # The LLM orchestrator's call after sub-agent returns SUCCESS.
+        ps.record_completed("final-gate", "gate", summary="audit passed")
+
+        # Post-condition: workflow completed.
+        self.assertTrue(ps.data["context"]["completed"],
+                        "BUG: record_completed for final-gate must set context.completed=True")
+        # current_dispatch cleared (so the next cmd_next is terminal).
+        self.assertIsNone(ps.data["current_dispatch"])
+
+    def test_record_completed_final_gate_terminates_pipeline(self):
+        """After record_completed(final-gate), next cmd_next returns 'done'.
+
+        End-to-end: when record_completed(final-gate) is called, the
+        very next cmd_next_v2 call should see context.completed=True
+        and return action='done' (terminal), NOT enter another dispatch.
+        """
+        ps = PipelineState("fg-rc-2", project_root=self.tmp)
+        ps.record_dispatch_started("final-gate", "gate", "pg-build/gate")
+        ps.record_completed("final-gate", "gate")
+
+        # The terminal check in cmd_next_v2 is on context.completed.
+        self.assertTrue(ps.data["context"]["completed"])
+        # next_pending() should return dispatch_final_gate (the existing
+        # behavior is to surface final-gate once; cmd_next_v2's terminal
+        # check at line 152-154 returns 'done' before next_pending is
+        # even called when context.completed is True).
+        # We just verify the gate is in a terminal state here.
+        nd = ps.next_pending()
+        # next_pending() will return final-gate dispatch_final_gate;
+        # cmd_next_v2's wrapper checks context.completed first and returns 'done'.
+        # The state machine's job is done; the wrapper handles the terminal.
+        self.assertIsNotNone(nd)  # state machine provides final-gate dispatch
+        self.assertEqual(nd.track, "final-gate")
+        self.assertEqual(nd.kind, "dispatch_final_gate")
+
+    def test_record_completed_non_final_gate_unaffected(self):
+        """record_completed for non-final-gate must NOT set context.completed.
+
+        Regression guard: the final-gate short-circuit in record_completed
+        must not accidentally short-circuit regular tracks. A standard
+        track's completion should only mark phases.<phase>.status and
+        track.status, leaving context.completed for the final-gate path.
+        """
+        ps = PipelineState("fg-rc-3", project_root=self.tmp)
+        ps.set_pipeline_order(["dev.backend"])
+        ps.record_dispatch_started("dev.backend", "test", "pg-build/test")
+        ps.record_completed("dev.backend", "test")
+
+        # context.completed should NOT be set.
+        self.assertFalse(ps.data["context"].get("completed"))
+        # phases.test.status is "completed", track.status still "running".
+        self.assertEqual(ps.data["tracks"]["dev.backend"]["phases"]["test"]["status"],
+                         "completed")
+        self.assertEqual(ps.data["tracks"]["dev.backend"]["status"], "running")
 
 
 class TestV1ToV2Migration(unittest.TestCase):

@@ -41,6 +41,7 @@ from pg_pipeline_state_v2 import (
     PHASE_AGENTS,
     SCHEMA_VERSION,
 )
+from pg_pipeline_common import get_track_type
 
 
 # Sub-agents dispatched by phase. Mirrors runner.SUB_AGENTS.
@@ -371,12 +372,17 @@ def _consume_environment_summary(ps) -> dict | None:
 
 
 def _is_phase_item(config: dict, item: str) -> bool:
-    """Return True if item is a phase (prepare_env/clean_env/simple) — not a track."""
+    """Return True if item is a phase (prepare_env/clean_env/simple) — not a track.
+
+    Simple tracks have track type string 'simple' (per project.yaml schema).
+    get_track_type() classifies them as 'phase' for routing purposes; we
+    delegate to that helper to avoid string drift if the classification
+    evolves (e.g. a new 'wrapper' track type introduced in the future).
+    """
     bare = item.rsplit(".", 1)[-1] if "." in item else item
     if bare in ("prepare_env", "clean_env"):
         return True
-    track_cfg = (config.get("tracks") or {}).get(bare, {})
-    return track_cfg.get("type") == "phase"
+    return get_track_type(config, bare) == "phase"
 
 
 def _build_dispatch_response(config: dict, change: str,
