@@ -556,6 +556,12 @@ ALLOWED_STATUS = {
     "gate":      {"pass", "fail"},
     "simple":    {"completed", "failed"},
     "final-gate": {"pass", "fail"},
+    # Env-hook phase items (prepare_env / clean_env) leave current.sub=None
+    # because they are executed inline by _execute_phase rather than
+    # dispatched to a sub-agent. The "phase" key is consulted only when
+    # _is_env_hook_phase() short-circuits the guard; the values are also
+    # referenced by the record/sub-forced-table in SKILL.md.
+    "phase":     {"completed", "failed"},
 }
 
 # Statuses that mean "this sub-phase is done, advance to the next sub".
@@ -564,6 +570,33 @@ FIX_AGENT = "pg-build/fix"
 FIX_GATE_AGENT = "pg-build/fix-gate"
 FINAL_GATE_AGENT = "pg-build/gate"
 SIMPLE_AGENT = "pg-build/simple"
+
+
+def _is_env_hook_phase(state):
+    """Return True iff current points to an env-hook phase item (prepare_env/clean_env).
+
+    Env-hook phases (prepare_env / clean_env) are executed inline by
+    `_execute_phase` rather than dispatched to a sub-agent. After a
+    successful run, the runner returns `{action: "phase_result", ...}` and
+    the orchestrator (LLM) is expected to call `record completed` to
+    advance. At that point `state["current"]["sub"]` is None — which the
+    `ALLOWED_STATUS` guard at line 3318 would otherwise reject.
+
+    This helper is consulted at the top of `cmd_record` (Guard 0) to
+    short-circuit the sub-status guard and route to `_handle_env_hook_record`.
+
+    Args:
+      state: loaded state dict (v1 schema — keys: `current`, `completed`).
+
+    Returns:
+      bool — True if `state["current"]` represents an env-hook phase.
+    """
+    cur = state.get("current") or {}
+    if cur.get("sub") is not None:
+        return False
+    item = cur.get("item", "")
+    bare = item.rsplit(".", 1)[-1] if "." in item else item
+    return bare in ("prepare_env", "clean_env")
 
 
 def _bare_track(qualified):
@@ -3219,6 +3252,42 @@ def _execute_phase(config, change, state, item_id):
 
     if ok:
         pipeline_mark(change, item_id)
+        # env-hook phase_result: keep `state["current"]` populated so
+        # the orchestrator's subsequent `record completed` (handled by
+        # `_handle_env_hook_record`) can identify the env-hook via
+        # `_is_env_hook_phase(state)` and advance the pipeline.
+        #
+        # We DO also write `state["completed_items"]` and
+        # `state["tracks"][item_id].status = "completed"` here so that:
+        #   1) If the orchestrator skips `record` and calls `next`
+        #      directly, `_resume_waiting` returns the same phase_result
+        #      and the next record attempt still finds the env-hook via
+        #      `_is_env_hook_phase(state)` (current.waiting=True is the
+        #      resume signal).
+        #   2) v2's `is_track_completed(item_id)` returns True for the
+        #      walk that `cmd_next` does after `_handle_env_hook_record`
+        #      recurses.
+        if is_env_hook:
+            completed = state.get("completed_items") or []
+            if item_id not in completed:
+                state["completed_items"] = completed + [item_id]
+            # v2 schema: also mark the v2 tracks entry as completed.
+            tracks = state.get("tracks") or {}
+            track_data = tracks.get(item_id)
+            if track_data is None:
+                tracks[item_id] = {
+                    "track_id": item_id,
+                    "bare": (item_id.rsplit(".", 1)[-1]
+                             if "." in item_id else item_id),
+                    "label": None,
+                    "status": "completed",
+                    "modules": [],
+                    "config_snapshot": {},
+                    "phases": {},
+                }
+            else:
+                track_data["status"] = "completed"
+            state["tracks"] = tracks
         state["current"]["waiting"] = True
         save_state(state)
     else:
@@ -3294,6 +3363,79 @@ def _enter_final_gate(config, change, state):
 # Core logic — record
 # ============================================================
 
+def _handle_env_hook_record(config, change, state, status, summary, outputs, issues):
+    """Handle `record` for an env-hook phase item (prepare_env/clean_env).
+
+    Env-hook phases are executed inline by `_execute_phase` and leave
+    `state["current"]` populated with `sub=None` after a successful run.
+    The orchestrator (LLM) responds to `{action: "phase_result"}` by
+    calling `record completed` (or `record failed`); this handler
+    advances the pipeline from that point.
+
+    Behavior:
+      - prepare_env completed  → release current, recurse cmd_next
+      - prepare_env failed     → terminal workflow_failed
+      - clean_env completed    → release current, recurse cmd_next
+      - clean_env failed       → warn, recurse cmd_next (non-blocking,
+                                 matches `_execute_phase` is_cleanup path)
+
+    The phase's `state["completed_items"]` and v2
+    `state["tracks"][item_id].status` are written by `_execute_phase`'s
+    `if ok:` branch, BEFORE this handler runs. This handler therefore
+    only needs to:
+      1. release `state["current"]` (so cmd_next doesn't re-execute)
+      2. recurse into cmd_next(change) to fetch the next dispatch.
+         The recursion honors `_use_state_v2()` so the same handler
+         works under both v1 and v2 state machines.
+
+    State writes:
+      - `state["current"] = None`     (releases the in-flight slot)
+      - `state["context"]["current_stage_idx"]` is advanced by cmd_next
+        recursion, not here.
+    """
+    cur = state["current"]
+    item_id = cur["item"]
+    bare = item_id.rsplit(".", 1)[-1] if "." in item_id else item_id
+    try:
+        pg_context_chain.phase_end(
+            change, item_id, f"env-hook record: {status} ({summary or ''})")
+    except Exception:
+        # phase_end is best-effort; don't block on logging failure.
+        pass
+
+    state["current"] = None
+
+    if status == "failed":
+        if bare == "prepare_env":
+            state["failed"] = True
+            state["fail_reason"] = (
+                f"Phase {item_id} failed: {summary or 'unknown'}")
+            save_state(state)
+            return {"action": "workflow_failed", "fatal": True,
+                    "reason": state["fail_reason"]}
+        # clean_env failed: non-blocking, advance
+        save_state(state)
+        return _dispatch_next_for_active_state(change)
+
+    # status == "completed"
+    save_state(state)
+    return _dispatch_next_for_active_state(change)
+
+
+def _dispatch_next_for_active_state(change):
+    """Invoke cmd_next for the active state machine (v1 or v2).
+
+    Centralizes the v1/v2 routing decision so that all internal
+    recursion points (env-hook record, simple track, etc.) call the
+    right next-dispatch function. Mirrors `main()`'s routing at
+    line 3941-3946.
+    """
+    if _use_state_v2():
+        from pg_runner_v2 import cmd_next_v2
+        return cmd_next_v2(change)
+    return cmd_next(change)
+
+
 def cmd_record(change, status, report_path="", summary="", outputs="", issues=""):
     config = load_config()
     state = load_state(change)
@@ -3308,6 +3450,29 @@ def cmd_record(change, status, report_path="", summary="", outputs="", issues=""
     item_id = cur["item"]
     sub = cur.get("sub")
     attempt = cur.get("attempt", 1)
+
+    # Guard 0: env-hook phase (prepare_env/clean_env).
+    # Must be checked BEFORE the sub-status guard at line 3351/3357,
+    # because env-hook phases leave cur.sub=None after _execute_phase and
+    # would otherwise be rejected by `sub not in ALLOWED_STATUS`.
+    if _is_env_hook_phase(state):
+        if status not in ALLOWED_STATUS["phase"]:
+            return _inject_commit(
+                {"action": "error", "fatal": False,
+                 "reason": (f"record status 与 env-hook phase 不匹配: "
+                            f"item={item_id!r} 不允许 status={status!r}。"
+                            f"env-hook phase 仅支持: completed | failed。"),
+                 "fix_hint": ("env-hook phase_result 后, 编排器应使用 "
+                              "`record <change> completed` 或 "
+                              "`record <change> failed`。"),
+                 "sub": "phase", "item_id": item_id},
+                change, item_id, "phase", status,
+            )
+        return _inject_commit(
+            _handle_env_hook_record(config, change, state, status,
+                                    summary, outputs, issues),
+            change, item_id, "phase", status,
+        )
 
     # Guard 1: sub-status semantic compatibility.
     # Prevents LLM from using the wrong record command for the current

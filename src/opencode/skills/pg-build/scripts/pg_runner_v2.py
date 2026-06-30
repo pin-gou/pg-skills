@@ -333,6 +333,76 @@ def _build_dispatch_response(config: dict, change: str,
 # cmd_record_v2
 # =============================================================================
 
+
+def _try_handle_env_hook_record_v2(ps, change, status, summary, outputs, issues):
+    """V2 env-hook record handler.
+
+    Triggered when `cmd_record_v2` sees `current_dispatch=None` AND the
+    state shows that an env-hook phase (prepare_env/clean_env) just
+    completed via `_execute_phase`. We detect this by looking at the
+    v1-style `state["current"]` field — `_execute_phase` (v1 code)
+    populates it before returning `phase_result`, even when invoked
+    from `cmd_next_v2`. The marker is:
+        state["current"]["sub"] is None
+        AND
+        state["current"]["item"] ends in ".prepare_env" or ".clean_env"
+
+    If matched, this function:
+      - verifies status is in ALLOWED_STATUS["phase"]
+      - releases state["current"]
+      - recurses into cmd_next_v2 to fetch the next dispatch
+
+    Returns:
+      None   — env-hook signal not detected; caller should fall through
+               to the standard "No active item to record" path.
+      dict   — the result of handling the env-hook record; caller
+               returns this directly.
+    """
+    cur = (ps.data.get("current") or {})
+    if cur.get("sub") is not None:
+        return None
+    item = cur.get("item", "")
+    bare = item.rsplit(".", 1)[-1] if "." in item else item
+    if bare not in ("prepare_env", "clean_env"):
+        return None
+
+    # env-hook detected. Validate status.
+    if status not in ALLOWED_STATUS.get("phase", set()):
+        return {"action": "error", "fatal": False,
+                "reason": (f"record status 与 env-hook phase 不匹配: "
+                           f"item={item!r} 不允许 status={status!r}。"
+                           f"env-hook phase 仅支持: completed | failed。"),
+                "fix_hint": ("env-hook phase_result 后, 编排器应使用 "
+                             "`record <change> completed` 或 "
+                             "`record <change> failed`。"),
+                "sub": "phase", "item_id": item}
+
+    # Context-chain logging (best-effort).
+    try:
+        from pg_context_chain import phase_end
+        phase_end(change, item, f"v2 env-hook record: {status} ({summary or ''})")
+    except Exception:
+        pass
+
+    # Release the v1 current slot.
+    ps._data["current"] = None
+    ps._dirty = True
+
+    if status == "failed" and bare == "prepare_env":
+        ps._data["context"]["failed"] = True
+        ps._data["context"]["failed_reason"] = (
+            f"Phase {item} failed: {summary or 'unknown'}")
+        ps._data["current_dispatch"] = None
+        ps.commit()
+        return {"action": "workflow_failed", "fatal": True,
+                "reason": ps._data["context"]["failed_reason"]}
+
+    # completed, or clean_env failed: advance
+    ps._data["current_dispatch"] = None
+    ps.commit()
+    return cmd_next_v2(change)
+
+
 def cmd_record_v2(change: str, status: str, report_path: str = "",
                   summary: str = "", outputs: str = "",
                   issues: str = "") -> dict:
@@ -349,7 +419,21 @@ def cmd_record_v2(change: str, status: str, report_path: str = "",
     project_root = _find_cwd_project_root()
     ps = PipelineState(change, project_root=project_root)
     cd = ps.data.get("current_dispatch")
+
+    # Guard 0: env-hook phase (prepare_env/clean_env).
+    # v2's cmd_next_v2 clears `current_dispatch` before calling
+    # `_execute_phase`, so on a phase_result the record call sees
+    # `current_dispatch=None`. We detect env-hook completion by looking
+    # at the last dispatch_history entry (which _execute_phase appends
+    # via pg_context_chain.phase_start) — but the simpler, more
+    # reliable signal is: `state["current"]` is set by v1
+    # `_execute_phase` (sub=None) AND v2's tracks entry has just been
+    # marked completed.
     if not cd:
+        env_result = _try_handle_env_hook_record_v2(
+            ps, change, status, summary, outputs, issues)
+        if env_result is not None:
+            return env_result
         return {"action": "workflow_failed", "fatal": True,
                 "reason": "No active item to record"}
 
