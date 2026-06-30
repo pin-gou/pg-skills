@@ -72,7 +72,7 @@ except ImportError:
 
 import pg_context_chain
 from pg_pipeline_common import (
-    get_track_type, parse_tasks, load_config,
+    get_track_type, parse_tasks, parse_tasks_sections, load_config,
     normalize_simple_command,
 )
 
@@ -105,6 +105,7 @@ PROJECT_ROOT = find_project_root()
 CONFIG_PATH = os.path.join(PROJECT_ROOT, ".pg/project.yaml")
 SCRIPTS_DIR = os.path.join(PROJECT_ROOT, ".opencode", "skills", "pg-build", "scripts")
 PIPELINE_STATE_PY = os.path.join(SCRIPTS_DIR, "pg-pipeline-state.py")
+VALIDATE_PROPOSAL_PY = os.path.join(SCRIPTS_DIR, "pg-validate-proposal.py")
 
 
 def _pg_log_dir_for_skill(skill, change, env):
@@ -142,6 +143,55 @@ DEFAULT_FAIL_RETRIES = 3
 MAX_FIX_CYCLES = 4
 DEFAULT_GATE_FIX_RETRIES = 2
 
+SUPPORTED_MANIFEST_VERSIONS = {"2026-06-30"}
+
+
+def _read_manifest(change):
+    """Read execution-manifest.yaml for the given change.
+
+    Raises:
+        FileNotFoundError: if manifest does not exist (hard fail).
+        ValueError: if schema_version is not supported.
+    """
+    path = os.path.join(CHANGES_DIR, change, "execution-manifest.yaml")
+    if not os.path.isfile(path):
+        raise FileNotFoundError(
+            f"{path} 不存在. "
+            f"请先执行 pg-propose 阶段生成: "
+            f"python3 .opencode/skills/pg-build/scripts/pg-gen-manifest.py {change}"
+        )
+    with open(path, encoding="utf-8") as f:
+        data = yaml.safe_load(f)
+    if data is None:
+        raise ValueError(f"{path} 为空或格式错误")
+    sv = data.get("schema_version", "")
+    if sv not in SUPPORTED_MANIFEST_VERSIONS:
+        raise ValueError(
+            f"manifest schema_version={sv!r} 不被支持. "
+            f"支持: {sorted(SUPPORTED_MANIFEST_VERSIONS)}"
+        )
+    return data
+
+
+def _validate_manifest(change):
+    """Run pg-validate-proposal.py manifest against the given change.
+
+    Returns (True, "") on success.
+    Returns (False, stderr_output) on failure (validation issues found).
+    """
+    try:
+        r = subprocess.run(
+            [sys.executable, VALIDATE_PROPOSAL_PY, "manifest", change],
+            capture_output=True, text=True, timeout=60,
+        )
+    except subprocess.TimeoutExpired:
+        return False, "manifest 校验超时 (60s)"
+    except Exception as e:
+        return False, f"manifest 校验调用失败: {e}"
+    if r.returncode != 0:
+        return False, r.stderr.strip() or r.stdout.strip()
+    return True, ""
+
 
 # ============================================================
 # Helpers
@@ -170,46 +220,38 @@ def _use_state_v2():
     except Exception:
         return False
 
-
 def get_pipeline_order(config, change=None):
+    if change:
+        return get_pipeline_order_from_manifest(change)
     stages = config.get("stages") or []
     order = []
-    env_map = {}
-    if change:
-        try:
-            env_map = _read_environment_yaml(change)
-        except FileNotFoundError:
-            pass  # No environment.yaml → caller decides whether to fail
     for stage in stages:
         stage_name = stage.get("name", "")
-        requires_environment = bool((stage.get("environment") or {}).get("required", False))
-        stage_tracks = stage.get("tracks") or []
-
-        # Resolve stage environment from environment.yaml (SSOT).
-        # prepare_env / clean_env are stage-level lifecycle hooks tied to the
-        # environment; injecting them as phase items lets the runner execute
-        # them deterministically once per stage deployment cycle.
-        prepare_env_item = None
-        clean_env_item = None
-        stage_env_name = env_map.get(stage_name)
-        if requires_environment and stage_env_name and stage_env_name != "skip":
-            env_cfg = (config.get("environments") or {}).get(stage_env_name, {})
-            if env_cfg.get("prepare_env"):
-                prepare_env_item = f"{stage_name}.prepare_env"
-            if env_cfg.get("clean_env"):
-                clean_env_item = f"{stage_name}.clean_env"
-
-        if prepare_env_item:
-            order.append(prepare_env_item)
-
-        for t in stage_tracks:
+        for t in (stage.get("tracks") or []):
             qualified = f"{stage_name}.{t}" if stage_name else t
-            if stage_env_name == "skip":
-                continue
             order.append(qualified)
+    return order
 
-        if clean_env_item:
-            order.append(clean_env_item)
+
+def get_pipeline_order_from_manifest(change):
+    manifest = _read_manifest(change)
+    order = []
+    config = load_config()
+    for stage in manifest.get("stages", []):
+        stage_name = stage["name"]
+        env_name = stage.get("environment", "")
+        if env_name:
+            env_cfg = (config.get("environments") or {}).get(env_name, {})
+            if env_cfg.get("prepare_env"):
+                order.append(f"{stage_name}.prepare_env")
+        for track in stage.get("tracks", []):
+            order.append(f"{stage_name}.{track['id']}")
+        if env_name:
+            env_cfg = (config.get("environments") or {}).get(env_name, {})
+            if env_cfg.get("clean_env"):
+                order.append(f"{stage_name}.clean_env")
+    if "final_gate" in manifest:
+        order.append("final-gate")
     return order
 
 
@@ -1521,35 +1563,11 @@ def _build_stage_context(config, item, change=None):
 
 
 def _resolve_stage_env(change, stage_name):
-    """Resolve the environment for a single stage from environment.yaml.
-
-    Raises:
-        FileNotFoundError: environment.yaml missing for the change.
-        KeyError: stage_name not declared in environment.yaml.
-        ValueError: stage value is not a valid environment name (not in
-                    config.yaml's environments list).
-
-    Returns:
-        "__skip__"        — stage marked as skip
-        "<env-name>"      — resolved environment name
-    """
-    env_map = _read_environment_yaml(change)
-    if stage_name not in env_map:
-        raise KeyError(
-            f"environment.yaml 未声明 stage '{stage_name}'. "
-            f"已声明: {list(env_map.keys())}. "
-            f"请用 pg-propose 重新生成 environment.yaml, 或手工编辑补上."
-        )
-    candidate = env_map[stage_name]
-    if candidate == "skip":
-        return "__skip__"
-    if candidate in (load_config().get("environments") or {}):
-        return candidate
-    raise ValueError(
-        f"environment.yaml 中 stage '{stage_name}' 的值 '{candidate}' "
-        f"不在 config.yaml 的 environments 列表中. "
-        f"有效值: {list((load_config().get('environments') or {}).keys())}"
-    )
+    manifest = _read_manifest(change)
+    for stage in manifest.get("stages", []):
+        if stage["name"] == stage_name:
+            return stage.get("environment", "__skip__")
+    return "__skip__"
 
 
 def filter_track_context(config, track_id, sub=None, change=None):
@@ -1684,59 +1702,6 @@ def _extract_task_prompt(change, item, sub):
         "validation_block": validation_block,
         "noop": all_noop and len(tasks) == 0,
     }
-
-
-def _read_environment_yaml(change):
-    """Read .pg/changes/<change>/environment.yaml.
-
-    Returns a dict mapping stage-name to environment-name (or "skip").
-    Each environment.required=true stage in config.yaml should have an entry.
-
-    Raises:
-        FileNotFoundError: if environment.yaml does not exist for the change.
-        yaml.YAMLError / ValueError: on parse errors (caller decides severity).
-    """
-    yaml_path = os.path.join(CHANGES_DIR, change, "environment.yaml")
-    if not os.path.isfile(yaml_path):
-        raise FileNotFoundError(
-            f".pg/changes/{change}/environment.yaml 不存在, "
-            f"必须由 pg-propose 生成. 请先跑 pg-propose 创建该文件."
-        )
-    with open(yaml_path, encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    if data is None:
-        return {}
-    if not isinstance(data, dict):
-        raise ValueError(
-            f"environment.yaml 顶层必须是 per-stage map (dict), 实际: {type(data).__name__}"
-        )
-    result = {}
-    for stage_name, env_value in data.items():
-        if not isinstance(stage_name, str):
-            raise ValueError(
-                f"environment.yaml 的 stage key 必须是 string, 实际: {type(stage_name).__name__}"
-            )
-        result[stage_name] = str(env_value)
-    return result
-
-
-def _get_deployment_override(change, stage_name):
-    """Resolve environment for a single stage from environment.yaml.
-
-    Args:
-        change: change name
-        stage_name: stage name (e.g. "dev-mock-integration", "real-integration")
-
-    Returns:
-      None           — yaml exists but stage not declared (caller may treat as error)
-      "skip"         — stage explicitly marked as skip
-      "<env-name>"   — chosen environment name from yaml
-
-    Raises:
-        FileNotFoundError: environment.yaml missing for the change.
-    """
-    env_map = _read_environment_yaml(change)
-    return env_map.get(stage_name)
 
 
 def _enrich_context_with_rollback(ctx, rb):
@@ -2876,6 +2841,14 @@ ALWAYS_ITEMS = ["final-gate"]
 
 
 def cmd_next(change):
+    # Defensive: validate manifest ↔ tasks.md consistency at every entry
+    valid, msg = _validate_manifest(change)
+    if not valid:
+        return {"action": "error", "fatal": True,
+                "reason": f"manifest 校验失败: {msg}",
+                "fix_hint": f"请先修复 manifest 一致性后重试: "
+                            f"python3 {VALIDATE_PROPOSAL_PY} manifest {change}"}
+
     config = load_config()
     order = get_pipeline_order(config, change)
     state = load_state(change)

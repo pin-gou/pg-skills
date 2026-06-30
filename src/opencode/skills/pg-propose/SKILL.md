@@ -12,10 +12,10 @@ metadata:
 
 生成变更提案——创建变更目录并一次性产出所有产物：
 - `proposal.md`（做什么、为什么做）
- - `design.md`（怎么做、验证标准）
- - `environment.yaml`（per-change environment 选择 SSOT）
- - `tasks.md`（按 stages × tracks 划分的实现步骤 + 验证描述）
- - `1-propose-review/review-notes.md`（单文档评审）
+- `design.md`（怎么做、验证标准）
+- `tasks.md`（按 stages × tracks 划分的实现步骤 + 验证描述）
+- `execution-manifest.yaml`（按 tasks.md 结构化生成的 pipeline 编排清单）
+- `1-propose-review/review-notes.md`（单文档评审）
 
 产物就绪后，可执行 `/2.1-pg-propose-refine` 进一步评审。
 
@@ -44,18 +44,17 @@ metadata:
 
 ### 1a. TodoWrite
 
-立即创建 9 项 TodoWrite：
+立即创建 8 项 TodoWrite：
 
 ```
 1. [待开始] 创建变更目录
 2. [待开始] 加载项目上下文（AGENTS.md → context-summary.yaml）
 3. [待开始] 生成 proposal.md
 4. [待开始] 生成 design.md
-5. [待开始] 判定变更类型
-6. [待开始] 生成 environment.yaml
-7. [待开始] 生成 tasks.md
-8. [待开始] tasks.md 可消费性验证循环
-9. [待开始] 自审产物，写入单文档 review-notes.md
+5. [待开始] 判定变更类型 & on_conditions 评估
+6. [待开始] 生成 tasks.md
+7. [待开始] 生成 execution-manifest.yaml + 校验
+8. [待开始] 自审产物，写入单文档 review-notes.md
 ```
 
 ### 1b. 确认变更名称
@@ -126,7 +125,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
 
 ## 阶段二：生成产物
 
-按顺序生成：proposal.md → design.md → 判定类型 → environment.yaml → tasks.md。每个产物依赖前一个产物的内容。
+按顺序生成：proposal.md → design.md → 判定类型 → tasks.md → execution-manifest.yaml。每个产物依赖前一个产物的内容。
 每生成一个产物后，更新 TodoWrite 对应项。
 
 ### 2a. proposal.md
@@ -214,47 +213,9 @@ enabled_stages:
 
 **关联文档**：见 [./references/orchestration-model.md](./references/orchestration-model.md)「on_conditions & stage 动态启用」段。
 
-### 2d. environment.yaml
-
-更新 TodoWrite 第 6 项（必须在 tasks.md 之前生成）。
-路径：`.pg/changes/<change-name>/environment.yaml`
-
-**这是 per-change environment 选择的 SSOT**（runner 直接读取此文件决定每个 `environment.required: true` 的 stage 使用哪个 environment）。
-
-**生成算法**：
-1. 读取 `.pg/project.yaml` 的 `stages` 段，过滤出所有 `environment.required: true` 的 stage
-2. 对每个这样的 stage，读取其 `environment.selection_rules`（自然语言规则数组）
-3. 根据本 change 的 `affected_tracks`，按规则逐条匹配，给出该 stage 选定的 environment 名称
-4. 写出 YAML（per-stage map）：
-   ```yaml
-   # Per-change environment selection — SSOT
-# 由 pg-propose 根据 config.yaml 中各 stage 的 environment.selection_rules 生成
-    # runner 在每个 environment.required=true 的 stage 读取对应 stage 字段
-   # value 可为: <env-name> | skip
-   
-   dev-mock-integration: dev-local       # 或 dev-3tier / skip
-   real-integration: dev-local            # 或 dev-3tier / skip
-   ```
-5. 校验：每个选定的 environment 名称必须存在于 `config.yaml.environments` 的 keys 中，否则抛错
-
-**关键约束**：
-- **必须严格按 `environment.selection_rules` 的顺序匹配**——这些规则是项目级定义，pg-propose 不应"自作主张"覆盖
-- **若某 stage 无规则匹配**，pg-propose 应使用该规则列表的最后一条作为兜底；如仍无明确默认，向用户请求决策
-- **runner 行为**：environment.yaml 缺失 → 报错终止；yaml 中某 stage 未声明 → 报错终止；yaml 中 env 值不在 config.yaml.environments 中 → 报错终止
-
-**on_conditions 触发的 stage 处理**（与 2c.5 联动）：
-- 若 enabled_stages 包含 prepare-env-scripts 等被 on_conditions 触发的 stage，
-  且该 stage 的 `environment.required=true`，则需按其 `selection_rules` 选择 env 并追加到 environment.yaml
-- 若该 stage 的 `environment.required=false`，environment.yaml 不追加该 stage
-- 示例（prepare-env-scripts 被触发且 required=false 时，environment.yaml 不追加该 stage）：
-
-```yaml
-dev-backend-and-agent: dev-local
-```
-
 ### 2e. tasks.md
 
-更新 TodoWrite 第 7 项。
+更新 TodoWrite 第 6 项。
 路径：`.pg/changes/<change-name>/tasks.md`
 
 > **重要**：生成前先读 [./references/orchestration-model.md](./references/orchestration-model.md)「Track 类型」段确认每个 track 是 standard 还是 simple。**simple track 只生成 1 个章节**（canonical form heading 含 `(simple track: 派遣 pg-build/simple agent 执行 commands)` + body 单 `- 无` 行），不走 4 子章节（test/dev/verify/gate）模板。
@@ -262,7 +223,7 @@ dev-backend-and-agent: dev-local
 **生成算法**（stages × tracks 二维展开 + track 类型分流）：见 [./references/tasks-templates.md](./references/tasks-templates.md)。
 
 核心规则摘要：
-- **environment 选择已由 environment.yaml 决定**，tasks.md 不再生成 `## Deployments` 段
+- **environment 选择**：LLM 根据 project.yaml 中 stage 的 `environment.selection_rules` 选择环境后在顶部 block quote 留一行 `> - **environment 选择**：{stage} → {env}`（仅人类参考，CLI 工具 pg-gen-manifest.py 会解析此行的 stage 到 env 映射）
 - 章节编号 N 从 1 开始顺序递增
 - **standard track** 生成 4 个子章节：`test` / `dev` / `verify` / `gate`
 - **simple track**（`tracks.<id>.type == "simple"`）生成 1 个章节（派遣 pg-build/simple agent 执行 commands）
@@ -287,69 +248,33 @@ dev-backend-and-agent: dev-local
 - 详细算法见 [./references/tasks-templates.md](./references/tasks-templates.md)「生成算法」段
 
 
-### 2e.5 tasks.md 可消费性验证循环
+### 2f. execution-manifest.yaml
 
-更新 TodoWrite 第 8 项。
+更新 TodoWrite 第 7 项。
+路径：
 
-**循环**（MAX_FIX_RETRIES = 2）：
+**说明**：LLM **不直接写** execution-manifest.yaml，而是通过 CLI 工具基于 tasks.md 自动生成。
 
-```
-2e.5.1  运行 python3 .opencode/skills/pg-build/scripts/pg-validate-tasks.py validate <change>
-        从 stdout 读取 JSON 报告
-2e.5.2  若 valid == true → 更新 TodoWrite，进入阶段三
-2e.5.3  若 valid == false → 遍历 JSON.issues 中 severity == "error" 的项：
-        - missing_track → 判断是 on_conditions 跳过的 stage 还是真正漏写
-            * on_conditions 跳过 → 传 --skip-stages <stage> 重新跑 validator
-            * 真正漏写    → 在 tasks.md 补充缺失的 4 个子章节（test/dev/verify/gate）
-        - invalid_sub  → 修正 section heading 中的 sub 命名
-        - missing_final_gate → 追加 final-gate 章节
-        warning/info 级的 issues 不阻断循环，LLM 可自主决定是否一并修正
-2e.5.4  fix_counter 自增
-        若 fix_counter < 2 → 回到 2e.5.1
-2e.5.5  若 fix_counter >= 2 后仍 valid == false →
-        将仍有 error 的 issue 记录到 review-notes.md 的「阻塞」段
-        强制前进到阶段三
-```
+**步骤**：
+1. 调用生成 CLI：
+   ```bash
+   python3 .opencode/skills/pg-build/scripts/pg-gen-manifest.py CHANGE_NAME
+   ```
+2. 调用校验 CLI（校验 manifest ↔ tasks.md 一致性）：
+   ```bash
+   python3 .opencode/skills/pg-build/scripts/pg-validate-proposal.py manifest CHANGE_NAME
+   ```
+3. 失败处理（最多 2 轮）：
+   - 若校验不通过，根据错误类型修正 tasks.md：
+     - manifest_section_missing → 修正 tasks.md 章节 heading，使 manifest 引用的 section 存在
+     - manifest_track_no_phases → 补充 tasks.md 中 standard track 缺少的 phase 章节
+     - manifest_track_type_mismatch → 确认 project.yaml 中 track type 正确
+     - manifest_environment_invalid → 确认环境名称存在于 project.yaml environments 中
+   - 修正后回到步骤 1 重跑（最多 2 轮）
+   - 第 3 轮仍失败 → 将残留问题记录到 review-notes.md 的「阻塞」段
+4. 成功：产物 `.pg/changes/CHANGE_NAME/execution-manifest.yaml` 自动生成
 
-**on_conditions 跳过的 stage：使用 `--skip-stages` 参数**
-
-当 `enabled_stages` 不包含某 stage（如 `prepare-env-scripts` 因 affected_paths 不命中 `pg-spec-deprecated/scripts/**` 而被跳过），
-tasks.md 不生成该 stage 章节。调用 validator 时**必须**显式传 `--skip-stages`：
-
-```bash
-python3 .opencode/skills/pg-build/scripts/pg-validate-tasks.py \
-    validate <change> \
-    --skip-stages prepare-env-scripts
-```
-
-**对比：补占位章节（不推荐）**：
-
-- 在 tasks.md 写 4 个 `## N. <stage>.<track>:*` 章节，每节一行 `- 无` —— 也能让 validator 通过
-- 副作用：tasks.md 编号偏移（如 1-4 留给占位章节），实施者读起来困惑
-- **不推荐** —— 优先用 `--skip-stages`
-
-**`--skip-stages` 行为契约**：
-
-- 逗号分隔多值，可重复传：`--skip-stages a --skip-stages b,c` 等价 `--skip-stages a,b,c`
-- 严格按 `stage.name` 整词匹配（不是前缀）：传 `dev-backend-and-agent` 不会顺带跳过 `dev-backend-and-agent-extra`
-- 被跳过的 item 不出现在 `summary.errors`，但会出现在 `summary.skipped_items` 与 human report 的 `## Skipped Items` 段
-- review-notes.md「on_conditions 评估记录」是 LLM 评估结果的**可追溯凭据**，与 `--skip-stages` 互为补充
-
-**2e.5.1 调用模板**（推荐）：
-
-```bash
-# 默认必传 on_conditions 评估的 skipped stages
-SKIP_STAGES="prepare-env-scripts"  # 按需修改
-python3 .opencode/skills/pg-build/scripts/pg-validate-tasks.py \
-    validate <change> \
-    --skip-stages "$SKIP_STAGES"
-```
-
-**验证范围与约束**：
-- 仅检查**结构可消费性**（章节存在性、heading 格式、sub 命名、编号连续性）
-- 不检查内容语义（属于阶段三自审的范畴）
-- 不修改 tasks.md 以外的任何文件
-- warning/info 不阻断循环，但应在 review-notes.md 中留痕（信息性备注）
+**产物依赖关系**：manifest 依赖 tasks.md（heading 格式 + 章节完整性），在 2e 完成后方可调用。
 
 
 ---
@@ -358,7 +283,7 @@ python3 .opencode/skills/pg-build/scripts/pg-validate-tasks.py \
 
 **本阶段不修改 proposal/design/tasks 本身**，只读产物 + AGENTS.md 规则 + context-summary.yaml，对以下 6 类问题做系统化检查，把发现写入 `.pg/changes/<change-name>/1-propose-review/review-notes.md`（新文件）。
 
-更新 TodoWrite 第 9 项。
+更新 TodoWrite 第 8 项。
 
 | 编号 | 检查类别 | 关注点 |
 |------|---------|--------|

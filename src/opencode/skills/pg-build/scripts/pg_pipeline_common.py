@@ -358,6 +358,50 @@ def render_module_command(normalized):
 # ============================================================
 
 HEADING_RE = re.compile(r"^## (\d+)\.\s+(.+)$")
+# Code block state tracking (for parse_tasks_sections)
+_CODE_BLOCK_MARKER_RE = re.compile(r"^```")
+
+
+def parse_tasks_sections(tasks_path):
+    """Parse tasks.md into sections with code-block-aware heading detection.
+
+    Returns list of dicts:
+      heading      str — full heading line (e.g. "## 1. dev.backend:test - ...")
+      section_key  str — heading after "## " (stable key for manifest reference)
+      body         str — content lines between this heading and next heading
+      start_line   int — 0-based line index of the heading line
+      end_line     int — 0-based line index of the next heading (or total lines)
+
+    Sections are in document order.
+    """
+    with open(tasks_path, encoding="utf-8") as f:
+        all_lines = f.readlines()
+
+    sections = []
+    in_code_block = False
+    for i, line in enumerate(all_lines):
+        if _CODE_BLOCK_MARKER_RE.match(line.strip()):
+            in_code_block = not in_code_block
+            continue
+        if in_code_block:
+            continue
+        m = HEADING_RE.match(line)
+        if not m:
+            continue
+        if sections:
+            sections[-1]["end_line"] = i
+        sections.append(dict(
+            heading=line.rstrip("\n"),
+            section_key=m.group(0).strip(),
+            body="",
+            start_line=i,
+            end_line=len(all_lines),
+        ))
+
+    for sec in sections:
+        sec["body"] = "".join(all_lines[sec["start_line"] + 1: sec["end_line"]])
+
+    return sections
 
 
 def parse_tasks(tasks_path):
