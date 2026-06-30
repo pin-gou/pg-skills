@@ -172,7 +172,12 @@ while true; do
         → break
       else:
         → $RUNNER record <change> completed "" "env ready"
-      ;;
+        # runner 内部:
+        #   1) 验证 current.item 是 env-hook phase (prepare_env/clean_env)
+        #   2) 已由 _execute_phase 写入 completed_items 和 v2 tracks 状态
+        #   3) 清空 state.current 并内联调 cmd_next() 拿下一项 dispatch
+        # 编排器不需要在 record 之后再次调用 next — record 本身已推进
+        ;;
     "done")
       if $ACTION.status == "completed":
         → 输出摘要报告
@@ -493,6 +498,7 @@ Task(
 | fix-gate | completed, failed   | pass, fail, escalate |
 | gate     | pass, fail          | completed, failed, escalate |
 | simple   | completed, failed   | pass, fail, escalate |
+| phase (env hook) | completed, failed | pass, fail, escalate |
 
 **常见错误**（regression: 2026-06-29 `fix-upgrade-download-url-libvirt-missing` 教训）：
 
