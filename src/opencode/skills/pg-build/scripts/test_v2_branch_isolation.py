@@ -328,5 +328,115 @@ class TestV2RecordCommitsOnFeatureBranch(_V2BranchIsolationBase):
                          f"master should not have bootstrap commit. log:\n{master_log}")
 
 
+class TestV2EnvHookInline(_V2BranchIsolationBase):
+    """P0/P1: env-hook (prepare_env) must be inlined into bootstrap.
+
+    Verifies:
+    1. First cmd_next_v2 returns dispatch directly (no phase_result).
+    2. env-hook failure surfaces as env_hook_failed action.
+    """
+
+    def _patch_common_execute_env_hook(self, return_value):
+        """Patch pg_pipeline_common.execute_env_hook_inline via sys.modules.
+
+        cmd_next_v2 imports common lazily. We need to patch the module that
+        the runner's pg_build_bootstrap call resolves at runtime, which is
+        the one in sys.modules['pg_pipeline_common'].
+        """
+        return mock.patch.dict(sys.modules, {
+            "pg_pipeline_common": mock.MagicMock(
+                execute_env_hook_inline=mock.MagicMock(return_value=return_value),
+                EnvHookError=type("EnvHookError", (Exception,), {}),
+            )
+        })
+
+    def test_first_cmd_next_v2_skips_phase_result(self):
+        """First cmd_next_v2: prepare_env is inlined in bootstrap; cmd_next_v2
+        returns dispatch directly without an intermediate phase_result action."""
+        from pg_pipeline_state_v2 import NextDispatch
+
+        class FakeDispatch:
+            def __init__(self):
+                self.kind = "dispatch"
+                self.track = "dummy-track"
+                self.phase = "test"
+                self.agent = "pg-build/test"
+                self.cycle = 1
+                self.is_resume = False
+
+        class FakePS:
+            def __init__(self):
+                self.data = {"context": {}, "current_dispatch": None}
+            def next_pending(self): return FakeDispatch()
+            def set_pipeline_order(self, order): pass
+            def record_dispatch_started(self, **kw): pass
+            def commit(self): pass
+
+        ok_result = {"success": True, "skipped": True,
+                     "log_path": None, "exit_code": None,
+                     "env_name": None, "phase_item": None}
+        # Wrap pg_build_bootstrap at the runner module level since
+        # cmd_next_v2 binds it via `pg_build_bootstrap = runner.pg_build_bootstrap`.
+        # We mock it to skip the env-hook execution entirely and just return None.
+        with mock.patch.object(self.v2, "PipelineState", return_value=FakePS()), \
+             mock.patch.object(self.v2, "_find_cwd_project_root",
+                               return_value=self.tmpdir), \
+             mock.patch.object(self.runner, "_validate_manifest",
+                               return_value=(True, "")), \
+             mock.patch.object(self.runner, "load_config", return_value={}), \
+             mock.patch.object(self.runner, "get_pipeline_order",
+                               return_value=["dummy-track"]), \
+             mock.patch.object(self.runner, "dispatch_action",
+                               return_value={"action": "dispatch"}), \
+             mock.patch.object(self.runner, "pg_build_dispatch_context",
+                               return_value=({"_change": self.change}, False)), \
+             mock.patch.object(self.runner, "pg_build_bootstrap",
+                               return_value=None):
+            result = self.v2.cmd_next_v2(self.change)
+
+        # Should return dispatch (NOT phase_result).
+        self.assertNotEqual(result.get("action"), "phase_result",
+                            f"phase_result path is removed in v2; got {result}")
+        self.assertEqual(result.get("action"), "dispatch",
+                         f"expected dispatch after inline env-hook, got {result}")
+
+    def test_env_failure_returns_env_hook_failed(self):
+        """When prepare_env fails (env-hook exits non-zero), cmd_next_v2 must
+        surface env_hook_failed action (NOT phase_result, NOT workflow_failed)."""
+        class FakePS:
+            data = {"context": {}, "current_dispatch": None}
+            def next_pending(self): return None
+            def set_pipeline_order(self, order): pass
+
+        # Mock pg_build_bootstrap at runner module level to raise EnvHookError
+        # (simulating env-hook failure). This is what cmd_next_v2 will see.
+        from pg_pipeline_common import EnvHookError
+
+        def fake_bootstrap_raising(*a, **kw):
+            raise EnvHookError("prepare_env", "/tmp/hook-failed.log", 7)
+
+        with mock.patch.object(self.v2, "PipelineState", return_value=FakePS()), \
+             mock.patch.object(self.v2, "_find_cwd_project_root",
+                               return_value=self.tmpdir), \
+             mock.patch.object(self.runner, "_validate_manifest",
+                               return_value=(True, "")), \
+             mock.patch.object(self.runner, "load_config", return_value={}), \
+             mock.patch.object(self.runner, "get_pipeline_order",
+                               return_value=[]), \
+             mock.patch.object(self.runner, "pg_build_dispatch_context",
+                               return_value=({}, False)), \
+             mock.patch.object(self.runner, "pg_build_bootstrap",
+                               side_effect=fake_bootstrap_raising):
+            result = self.v2.cmd_next_v2(self.change)
+
+        # Should return env_hook_failed.
+        self.assertEqual(result.get("action"), "env_hook_failed",
+                         f"expected env_hook_failed, got {result}")
+        self.assertEqual(result.get("phase"), "prepare_env")
+        self.assertEqual(result.get("exit_code"), 7)
+        self.assertEqual(result.get("log_path"), "/tmp/hook-failed.log")
+        self.assertTrue(result.get("fatal", False))
+
+
 if __name__ == "__main__":
     unittest.main(verbosity=2)

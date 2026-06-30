@@ -402,6 +402,21 @@ class PipelineState:
             if self.is_track_completed(track):
                 continue
 
+            # Phase items (prepare_env / clean_env) are NOT regular tracks —
+            # they have no TDVG phases, no sub-agent to dispatch, and are
+            # executed inline by pg_build_bootstrap / _execute_phase. Skipping
+            # them here mirrors v1 cmd_detect's `_is_phase_completed` branch
+            # (pg-pipeline-state.py:148-159) and prevents the runner from
+            # treating a skeleton like `tracks.dev.prepare_env.phases.test`
+            # as a dispatchable target. Without this skip, next_pending()
+            # returns a NextDispatch for `dev.prepare_env:test`, cmd_next_v2
+            # detects it as a phase item and recursively re-enters the
+            # "already-completed prepare_env" branch — an infinite recursion
+            # until bash tool's 120s timeout kills the process.
+            bare = track.rsplit(".", 1)[-1] if "." in track else track
+            if bare in ("prepare_env", "clean_env"):
+                continue
+
             # Initialize track skeleton if missing
             self.get_phase(track, "test")  # ensures track dict exists
 

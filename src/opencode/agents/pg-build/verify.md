@@ -147,7 +147,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 - [ ] 非产出代码的 track（`real-integration`，modules=[]）跳过此步骤
 - [ ] 找到 init commit 作为 diff 基线：
   ```bash
-  INIT_SHA=$(git log --all --oneline --grep="bootstrap apply-change" --format="%H" | tail -1)
+  INIT_SHA=$(git log --all --oneline --grep="bootstrap pg-build" --format="%H" | tail -1)
   git diff --name-only "${INIT_SHA:-HEAD~1}" HEAD
   ```
 - [ ] 逐文件检查：每个变更文件必须以允许目录前缀之一开头（模块根或 `.pg/`）

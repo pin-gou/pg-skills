@@ -190,14 +190,44 @@ def cmd_next_v2(change: str) -> dict:
             "reason": f"pg_runner_v2: failed to import runner helpers: {e}",
         }
 
-    # ===== Build bootstrap (mirrors v1 cmd_next:2862-2885) =====
+    # ===== Build bootstrap (mirrors v1 cmd_next:2862-2885 + inline env-hook) =====
     # build-r Step 3 切到 v2 时丢失了 4 个关键副作用, 导致 v2 路径下:
     #   - 不创建 feat/pg/<change> 分支, 所有 commit 直接落 master
     #   - 不跑 init commit, 启动基线 git 节点丢失
     #   - 不创建 2-build/context-chain.md, final-gate 审计缺依据
     #   - 不迁移 legacy state file
     # 现在通过共享 helper pg_build_bootstrap 补回, 与 v1 走同一份逻辑.
-    init_commit = pg_build_bootstrap(change, ps)
+    #
+    # v2 enhancement: pg_build_bootstrap ALSO runs prepare_env inline.
+    # On success, the function writes phase_start/phase_end to context-chain.md
+    # AND persists environment_summary into state.context. On failure, it
+    # raises EnvHookError which we catch below and convert to the new
+    # `env_hook_failed` action. This eliminates the v1 `phase_result` round-trip.
+    try:
+        init_commit = pg_build_bootstrap(change, ps)
+    except Exception as e:
+        # EnvHookError or any other bootstrap exception → surface as
+        # env_hook_failed action. LLM orchestrator decides next step.
+        from pg_pipeline_common import EnvHookError as _EnvHookError
+        if isinstance(e, _EnvHookError):
+            return {
+                "action": "env_hook_failed",
+                "phase": e.phase_name,
+                "log_path": e.log_path,
+                "exit_code": e.exit_code,
+                "fatal": True,
+                "reason": (f"env-hook {e.phase_name} failed "
+                           f"(exit_code={e.exit_code})"),
+                "fix_hint": ("检查 env 脚本日志后, 修复根因或调整 "
+                             "environments.<env>.prepare_env 配置"),
+                "next_call_timeout_seconds": 30,
+            }
+        # Non-env-hook bootstrap exception → workflow_failed
+        return {
+            "action": "workflow_failed",
+            "fatal": True,
+            "reason": f"pg_build_bootstrap exception: {e}",
+        }
 
     # Manifest consistency guard (mirrors v1 cmd_next:2845-2849).
     # build-r Step 3 切到 v2 时丢了这个守卫, 导致 manifest.yaml ↔ tasks.md
@@ -250,11 +280,34 @@ def cmd_next_v2(change: str) -> dict:
         ps.commit()
         return _enter_final_gate(config, change, ps._data)
 
-    # Phase item: delegate to _execute_phase (handles prepare_env/clean_env/simple)
-    # Detect by checking if pipeline_order item is a phase vs a track.
-    # Skip this branch on resume — _execute_phase re-dispatches, which
-    # would create new dispatch entries on every idempotent retry.
-    if not nd.is_resume and _is_phase_item(config, nd.track):
+# Phase item: delegate to _execute_phase (handles prepare_env/clean_env/simple)
+        # Detect by checking if pipeline_order item is a phase vs a track.
+        # Skip this branch on resume — _execute_phase re-dispatches, which
+        # would create new dispatch entries on every idempotent retry.
+        if not nd.is_resume and _is_phase_item(config, nd.track):
+            # v2 enhancement: prepare_env is now inlined into pg_build_bootstrap
+            # (no longer returns phase_result). If pipeline_order still has a
+            # prepare_env entry (because the runner didn't filter it out), skip
+            # it here — pg_build_bootstrap already executed it.
+            bare_phase = nd.track.rsplit(".", 1)[-1] if "." in nd.track else nd.track
+            ctx = ps.data.get("context") or {}
+            if bare_phase == "prepare_env" and ctx.get("prepare_env_completed"):
+                # Already done by bootstrap; advance to next item.
+                #
+                # Critical: mark the phase-item track skeleton as completed
+                # BEFORE the recursive call. Without this, is_track_completed()
+                # keeps returning False on the next iteration (because the
+                # skeleton stays "pending"), next_pending() keeps dispatching
+                # this same track, and cmd_next_v2 keeps re-entering this
+                # branch — an infinite recursion that hammers state.json
+                # until bash tool's timeout kills the process. Symptom
+                # reproduces whenever state was partially initialized by a
+                # prior run that crashed before reaching this branch.
+                ps._data["tracks"][nd.track]["status"] = "completed"
+                ps._data["tracks"][nd.track]["completed_at"] = _now_iso()
+                ps._data["current_dispatch"] = None
+                ps.commit()
+                return cmd_next_v2(change)
         # Phase item — phase advances to done via _execute_phase.
         ps._data["current_dispatch"] = None
         ps.commit()
@@ -266,8 +319,10 @@ def cmd_next_v2(change: str) -> dict:
         # to inject rollback_context / environment.hooks / build_rules.
         ctx, _has_rollback = pg_build_dispatch_context(
             change, nd.track, nd.phase, config)
+        env_summary = _consume_environment_summary(ps)
         return _build_dispatch_response(config, change, nd, ctx,
-                                        init_commit=init_commit)
+                                        init_commit=init_commit,
+                                        env_summary=env_summary)
 
     # Fresh dispatch: record_dispatch_started marks state.
     # For phase items we wouldn't get here, but for tracks:
@@ -282,8 +337,37 @@ def cmd_next_v2(change: str) -> dict:
     # Use shared dispatch context helper (mirrors v1 cmd_next:2935-2941).
     ctx, _has_rollback = pg_build_dispatch_context(
         change, nd.track, nd.phase, config)
+    env_summary = _consume_environment_summary(ps)
     return _build_dispatch_response(config, change, nd, ctx,
-                                    init_commit=init_commit)
+                                    init_commit=init_commit,
+                                    env_summary=env_summary)
+
+
+def _consume_environment_summary(ps) -> dict | None:
+    """Read environment_summary from state, return None if already dispatched.
+
+    Used by cmd_next_v2 to attach environment info to the FIRST dispatch
+    after prepare_env. Marks `environment_summary_dispatched=True` so
+    subsequent dispatches skip the attach.
+    """
+    try:
+        ctx = ps.data.get("context") or {}
+    except Exception:
+        return None
+    summary = ctx.get("environment_summary")
+    if not summary:
+        return None
+    if ctx.get("environment_summary_dispatched"):
+        return None
+    # Mark dispatched (best-effort).
+    ctx["environment_summary_dispatched"] = True
+    summary["_dispatched"] = True
+    try:
+        if hasattr(ps, "commit"):
+            ps.commit()
+    except Exception:
+        pass
+    return summary
 
 
 def _is_phase_item(config: dict, item: str) -> bool:
@@ -297,7 +381,8 @@ def _is_phase_item(config: dict, item: str) -> bool:
 
 def _build_dispatch_response(config: dict, change: str,
                               nd: NextDispatch, ctx: dict,
-                              init_commit=None) -> dict:
+                              init_commit=None,
+                              env_summary = None) -> dict:
     """Build the dispatch action dict (same protocol as v1 dispatch_action).
 
     Args:
@@ -306,6 +391,11 @@ def _build_dispatch_response(config: dict, change: str,
             attached to the action JSON so the LLM orchestrator can show
             "bootstrap committed on branch X" in its terminal summary.
             Mirrors v1 cmd_next:2970-2977 behavior.
+        env_summary: optional environment summary dict from state.context.
+            When provided AND environment_summary_dispatched is False, it's
+            attached to the action JSON so the LLM orchestrator sees the
+            environment info on the first dispatch (mirrors v1 phase_result.
+            environment field, but inlined to avoid the separate action).
     """
     from pg_pipeline_runner import dispatch_action, dispatch_fix_action
     if nd.kind == "dispatch_fix":
@@ -319,7 +409,8 @@ def _build_dispatch_response(config: dict, change: str,
             return dispatch_fix_gate_action(nd.track, nd.cycle, ctx,
                                             config=config)
         return dispatch_fix_action(nd.track, nd.cycle, ctx)
-    return dispatch_action(
+
+    response = dispatch_action(
         agent=nd.agent,
         item=nd.track,
         sub=nd.phase,
@@ -327,6 +418,16 @@ def _build_dispatch_response(config: dict, change: str,
         attempt=1,
         init_commit=init_commit,
     )
+    # Attach environment summary on the FIRST dispatch only. We mark
+    # environment_summary_dispatched=True via the caller (cmd_next_v2) so
+    # subsequent dispatches skip the attach.
+    if env_summary and not env_summary.get("_dispatched"):
+        response["environment"] = {
+            "name": env_summary.get("name"),
+            "prepare_env_log_path": env_summary.get("prepare_env_log_path"),
+            "instances": env_summary.get("instances", {}),
+        }
+    return response
 
 
 # =============================================================================
@@ -337,70 +438,35 @@ def _build_dispatch_response(config: dict, change: str,
 def _try_handle_env_hook_record_v2(ps, change, status, summary, outputs, issues):
     """V2 env-hook record handler.
 
-    Triggered when `cmd_record_v2` sees `current_dispatch=None` AND the
-    state shows that an env-hook phase (prepare_env/clean_env) just
-    completed via `_execute_phase`. We detect this by looking at the
-    v1-style `state["current"]` field — `_execute_phase` (v1 code)
-    populates it before returning `phase_result`, even when invoked
-    from `cmd_next_v2`. The marker is:
-        state["current"]["sub"] is None
-        AND
-        state["current"]["item"] ends in ".prepare_env" or ".clean_env"
+    NOTE (v2 enhancement): prepare_env is now inlined into
+    pg_build_bootstrap. cmd_record_v2 should NEVER see an env-hook phase
+    in this code path — bootstrap already handled it. This function
+    remains as a defensive guard: if LLM orchestrator somehow sends a
+    `record` call for an env-hook phase, we surface it as env_hook_failed
+    (not workflow_failed) so the orchestrator can recognize the
+    architectural change and proceed differently.
 
-    If matched, this function:
-      - verifies status is in ALLOWED_STATUS["phase"]
-      - releases state["current"]
-      - recurses into cmd_next_v2 to fetch the next dispatch
+    Detection: state.context.prepare_env_completed is True (signaling
+    bootstrap already handled it) AND current_dispatch is None AND state
+    has no pending track. If matched, return env_hook_failed.
 
     Returns:
-      None   — env-hook signal not detected; caller should fall through
-               to the standard "No active item to record" path.
-      dict   — the result of handling the env-hook record; caller
-               returns this directly.
+      None   — no env-hook signal detected; caller falls through.
+      dict   — env_hook_failed action.
     """
-    cur = (ps.data.get("current") or {})
-    if cur.get("sub") is not None:
-        return None
-    item = cur.get("item", "")
-    bare = item.rsplit(".", 1)[-1] if "." in item else item
-    if bare not in ("prepare_env", "clean_env"):
-        return None
-
-    # env-hook detected. Validate status.
-    if status not in ALLOWED_STATUS.get("phase", set()):
-        return {"action": "error", "fatal": False,
-                "reason": (f"record status 与 env-hook phase 不匹配: "
-                           f"item={item!r} 不允许 status={status!r}。"
-                           f"env-hook phase 仅支持: completed | failed。"),
-                "fix_hint": ("env-hook phase_result 后, 编排器应使用 "
-                             "`record <change> completed` 或 "
-                             "`record <change> failed`。"),
-                "sub": "phase", "item_id": item}
-
-    # Context-chain logging (best-effort).
-    try:
-        from pg_context_chain import phase_end
-        phase_end(change, item, f"v2 env-hook record: {status} ({summary or ''})")
-    except Exception:
-        pass
-
-    # Release the v1 current slot.
-    ps._data["current"] = None
-    ps._dirty = True
-
-    if status == "failed" and bare == "prepare_env":
-        ps._data["context"]["failed"] = True
-        ps._data["context"]["failed_reason"] = (
-            f"Phase {item} failed: {summary or 'unknown'}")
-        ps._data["current_dispatch"] = None
-        ps.commit()
-        return {"action": "workflow_failed", "fatal": True,
-                "reason": ps._data["context"]["failed_reason"]}
-
-    # completed, or clean_env failed: advance
-    ps._data["current_dispatch"] = None
-    ps.commit()
-    return cmd_next_v2(change)
+    ctx = ps.data.get("context") or {}
+    # If prepare_env was inlined (bootstrap done it), LLM shouldn't be
+    # sending `record` for it. Surface as error so orchestrator knows.
+    if ctx.get("prepare_env_completed") and not ps.data.get("current_dispatch"):
+        return {
+            "action": "error",
+            "fatal": False,
+            "reason": ("env-hook phase_result 路径已在 v2 移除。"
+                       "pg_build_bootstrap 已内联执行 prepare_env，"
+                       "无需调用 `record` 推进。请改用 `next` 获取下一个 dispatch。"),
+            "fix_hint": "重新调用 `next` 跳过 env-hook 阶段",
+        }
+    return None
 
 
 def cmd_record_v2(change: str, status: str, report_path: str = "",

@@ -227,10 +227,17 @@ class TestPgBuildBootstrap(_HelpersTestBase):
         with mock.patch.object(self.runner, "_ensure_context_chain"), \
              mock.patch.object(self.runner, "migrate_legacy_state_files", return_value=[]), \
              mock.patch.object(self.runner, "_maybe_bootstrap_init_commit",
-                               return_value={"branch": f"feat/pg/{self.change}", "committed": True}):
+                               return_value={"branch": f"feat/pg/{self.change}", "committed": True}), \
+             mock.patch.object(self.common, "execute_env_hook_inline",
+                               return_value={"success": True, "skipped": True,
+                                             "log_path": None, "exit_code": None,
+                                             "env_name": None, "phase_item": None}):
             self.common.pg_build_bootstrap(self.change, ps)
         self.assertEqual(ps.data["context"]["init_committed"], True)
-        self.assertEqual(ps.committed, 1)
+        # v2 enhancement: pg_build_bootstrap now also commits when env-hook
+        # completes (write state.context.prepare_env_completed marker), so
+        # the commit count is 2 not 1.
+        self.assertGreaterEqual(ps.committed, 1)
 
     def test_failure_in_sub_function_does_not_raise(self):
         state = {"init_committed": False}
@@ -429,6 +436,234 @@ class TestPgBuildRecordLog(_HelpersTestBase):
                     self.change, "backend", "test", "completed")
             except Exception as e:
                 self.fail(f"pg_build_record_log raised on import failure: {e}")
+
+
+class TestEnvHookError(_HelpersTestBase):
+    """Tests for the EnvHookError exception class."""
+
+    def test_carries_phase_name_log_path_exit_code(self):
+        from pg_pipeline_common import EnvHookError
+        e = EnvHookError("prepare_env", "/tmp/x.log", 2)
+        self.assertEqual(e.phase_name, "prepare_env")
+        self.assertEqual(e.log_path, "/tmp/x.log")
+        self.assertEqual(e.exit_code, 2)
+        # __str__ should mention all three.
+        msg = str(e)
+        self.assertIn("prepare_env", msg)
+        self.assertIn("/tmp/x.log", msg)
+        self.assertIn("2", msg)
+
+
+class TestExecuteEnvHookInline(_HelpersTestBase):
+    """Tests for execute_env_hook_inline (env-hook inline execution).
+
+    Covers P0/P1: env-hook must run synchronously during bootstrap, log
+    phase_start/phase_end to context-chain.md, return a result dict, and
+    raise EnvHookError on failure (caller surfaces as env_hook_failed).
+    """
+
+    def test_invalid_phase_name_returns_error(self):
+        result = self.common.execute_env_hook_inline(self.change, "bogus_phase")
+        self.assertFalse(result["success"])
+        self.assertIn("invalid phase_name", result["error"])
+
+    def test_no_stages_returns_skipped(self):
+        # config has stages=[] → no first stage to resolve
+        with mock.patch.object(self.runner, "load_config",
+                               return_value={"stages": [], "environments": {}}):
+            result = self.common.execute_env_hook_inline(self.change, "prepare_env")
+        self.assertTrue(result["success"])
+        self.assertTrue(result["skipped"])
+
+    def test_skipped_when_no_hook_configured(self):
+        # env_name resolves to something but env_cfg.prepare_env is empty
+        with mock.patch.object(self.runner, "load_config",
+                               return_value={
+                                   "stages": [{"name": "dev", "tracks": ["dummy-track"]}],
+                                   "environments": {"dev-local": {}}
+                               }), \
+             mock.patch.object(self.runner, "_resolve_stage_env",
+                               return_value="dev-local"):
+            result = self.common.execute_env_hook_inline(self.change, "prepare_env")
+        self.assertTrue(result["success"])
+        self.assertTrue(result["skipped"])
+        self.assertEqual(result["env_name"], "dev-local")
+
+    def test_skipped_when_stage_env_is_skip(self):
+        # _resolve_stage_env returns __skip__ → user disabled this stage's env
+        with mock.patch.object(self.runner, "load_config",
+                               return_value={
+                                   "stages": [{"name": "dev", "tracks": ["dummy-track"]}],
+                                   "environments": {}
+                               }), \
+             mock.patch.object(self.runner, "_resolve_stage_env",
+                               return_value="__skip__"):
+            result = self.common.execute_env_hook_inline(self.change, "prepare_env")
+        self.assertTrue(result["success"])
+        self.assertTrue(result["skipped"])
+
+    def test_success_path_runs_script_and_logs_phases(self):
+        # Mock everything: hook script is a no-op `true` that exits 0.
+        # Mock _phase_log_path to return a tmp path under our test dir.
+        # Mock _subprocess.run to short-circuit the actual pg-run-hook
+        # call (which doesn't exist in the test env).
+        log_path = os.path.join(self.tmpdir, "hook.log")
+        fake_proc_success = mock.MagicMock(returncode=0)
+        with mock.patch.object(self.runner, "load_config",
+                               return_value={
+                                   "stages": [{"name": "dev", "tracks": ["dummy-track"]}],
+                                   "environments": {
+                                       "dev-local": {
+                                           "prepare_env": {
+                                               "script": "/bin/true",
+                                               "args": [],
+                                               "timeout_seconds": 30,
+                                           }
+                                       }
+                                   }
+                               }), \
+             mock.patch.object(self.runner, "_resolve_stage_env",
+                               return_value="dev-local"), \
+             mock.patch.object(self.runner, "_phase_log_path",
+                               return_value=log_path), \
+             mock.patch.object(self.common, "_subprocess") as mock_sp, \
+             mock.patch.dict(sys.modules, {"pg_context_chain": mock.MagicMock()}):
+            mock_sp.run.return_value = fake_proc_success
+            mock_chain = sys.modules["pg_context_chain"]
+            mock_chain.phase_start = mock.MagicMock()
+            mock_chain.phase_end = mock.MagicMock()
+            result = self.common.execute_env_hook_inline(self.change, "prepare_env")
+        self.assertTrue(result["success"])
+        self.assertFalse(result["skipped"])
+        self.assertEqual(result["exit_code"], 0)
+        self.assertEqual(result["env_name"], "dev-local")
+        self.assertEqual(result["phase_item"], "dev.prepare_env")
+        # Context-chain phase_start and phase_end both called.
+        mock_chain.phase_start.assert_called_once_with(self.change, "dev.prepare_env")
+        mock_chain.phase_end.assert_called_once()
+        end_args = mock_chain.phase_end.call_args[0]
+        self.assertEqual(end_args[0], self.change)
+        self.assertEqual(end_args[1], "dev.prepare_env")
+        # Log file should exist (subprocess.run was called with stdout=log file).
+        self.assertTrue(os.path.isfile(log_path))
+
+    def test_failure_path_returns_result_with_nonzero_exit(self):
+        # Hook script `false` exits 1. Result should reflect failure.
+        # Mock _subprocess.run to short-circuit (pg-run-hook not in test env).
+        log_path = os.path.join(self.tmpdir, "hook-fail.log")
+        fake_proc_fail = mock.MagicMock(returncode=1)
+        with mock.patch.object(self.runner, "load_config",
+                               return_value={
+                                   "stages": [{"name": "dev", "tracks": ["dummy-track"]}],
+                                   "environments": {
+                                       "dev-local": {
+                                           "prepare_env": {
+                                               "script": "/bin/false",
+                                               "args": [],
+                                               "timeout_seconds": 30,
+                                           }
+                                       }
+                                   }
+                               }), \
+             mock.patch.object(self.runner, "_resolve_stage_env",
+                               return_value="dev-local"), \
+             mock.patch.object(self.runner, "_phase_log_path",
+                               return_value=log_path), \
+             mock.patch.object(self.common, "_subprocess") as mock_sp, \
+             mock.patch.dict(sys.modules, {"pg_context_chain": mock.MagicMock()}):
+            mock_sp.run.return_value = fake_proc_fail
+            mock_chain = sys.modules["pg_context_chain"]
+            mock_chain.phase_start = mock.MagicMock()
+            mock_chain.phase_end = mock.MagicMock()
+            result = self.common.execute_env_hook_inline(self.change, "prepare_env")
+        self.assertFalse(result["success"])
+        self.assertFalse(result["skipped"])
+        self.assertEqual(result["exit_code"], 1)
+        # phase_end should still be called (with failure summary).
+        mock_chain.phase_end.assert_called_once()
+
+    def test_bootstrap_raises_envhook_on_failure(self):
+        # pg_build_bootstrap must raise EnvHookError when execute_env_hook_inline
+        # reports failure. This is the regression guard for the build-r Step 3
+        # bug where phase_result handling was broken.
+        from pg_pipeline_common import EnvHookError
+        class FakePS:
+            def __init__(self):
+                self.data = {"context": {}}
+                self.committed = 0
+            def commit(self):
+                self.committed += 1
+        ps = FakePS()
+        with mock.patch.object(self.runner, "_ensure_context_chain"), \
+             mock.patch.object(self.runner, "migrate_legacy_state_files", return_value=[]), \
+             mock.patch.object(self.runner, "_maybe_bootstrap_init_commit",
+                               return_value={"committed": True}), \
+             mock.patch.object(self.common, "execute_env_hook_inline",
+                               return_value={"success": False, "skipped": False,
+                                             "log_path": "/tmp/x.log",
+                                             "exit_code": 1,
+                                             "env_name": "dev-local",
+                                             "phase_item": "dev.prepare_env",
+                                             "error": "exit_code=1"}):
+            with self.assertRaises(EnvHookError) as ctx:
+                self.common.pg_build_bootstrap(self.change, ps)
+        self.assertEqual(ctx.exception.phase_name, "prepare_env")
+        self.assertEqual(ctx.exception.exit_code, 1)
+
+    def test_bootstrap_skips_envhook_on_v1_state(self):
+        # v1 state is a plain dict (no .data attribute). pg_build_bootstrap
+        # must NOT execute env-hook for v1 (v1 keeps the phase_result path).
+        class V1Dict(dict):
+            pass
+        state = V1Dict(init_committed=False)
+        with mock.patch.object(self.runner, "_ensure_context_chain"), \
+             mock.patch.object(self.runner, "migrate_legacy_state_files", return_value=[]), \
+             mock.patch.object(self.runner, "_maybe_bootstrap_init_commit",
+                               return_value={"committed": True}), \
+             mock.patch.object(self.common, "execute_env_hook_inline") as mock_exec:
+            self.common.pg_build_bootstrap(self.change, state)
+        mock_exec.assert_not_called()
+
+    def test_bootstrap_records_environment_summary_on_success(self):
+        # On env-hook success, state.context.environment_summary must be
+        # populated so cmd_next_v2 can attach it to the first dispatch.
+        class FakePS:
+            def __init__(self):
+                self.data = {"context": {}}
+                self.committed = 0
+            def commit(self):
+                self.committed += 1
+        ps = FakePS()
+        with mock.patch.object(self.runner, "_ensure_context_chain"), \
+             mock.patch.object(self.runner, "migrate_legacy_state_files", return_value=[]), \
+             mock.patch.object(self.runner, "_maybe_bootstrap_init_commit",
+                               return_value={"committed": True}), \
+             mock.patch.object(self.runner, "load_config",
+                               return_value={
+                                   "environments": {
+                                       "dev-local": {
+                                           "roles": {
+                                               "backend": {"instances": [
+                                                   {"name": "backend-1",
+                                                    "host": "localhost",
+                                                    "port": 9080}]}
+                                           }
+                                       }
+                                   }
+                               }), \
+             mock.patch.object(self.common, "execute_env_hook_inline",
+                               return_value={"success": True, "skipped": False,
+                                             "log_path": "/tmp/x.log",
+                                             "exit_code": 0,
+                                             "env_name": "dev-local",
+                                             "phase_item": "dev.prepare_env"}):
+            self.common.pg_build_bootstrap(self.change, ps)
+        summary = ps.data["context"].get("environment_summary")
+        self.assertIsNotNone(summary)
+        self.assertEqual(summary["name"], "dev-local")
+        self.assertEqual(summary["prepare_env_log_path"], "/tmp/x.log")
+        self.assertIn("backend", summary["instances"])
+        self.assertEqual(summary["instances"]["backend"][0]["port"], 9080)
 
 
 if __name__ == "__main__":

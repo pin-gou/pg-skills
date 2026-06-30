@@ -571,6 +571,313 @@ import subprocess as _subprocess
 import sys as _sys
 
 
+class EnvHookError(Exception):
+    """Raised when an env-hook phase (prepare_env / clean_env) execution fails.
+
+    Used by execute_env_hook_inline() to signal non-recoverable env-hook failure
+    to callers (pg_build_bootstrap, cmd_next_v2). The exception carries the
+    log path and exit code so the runner can surface them via the
+    `env_hook_failed` action.
+
+    Attributes:
+        phase_name: "prepare_env" or "clean_env".
+        log_path: absolute path to the hook's stdout/stderr log.
+        exit_code: int non-zero return from the hook script.
+    """
+
+    def __init__(self, phase_name: str, log_path: str, exit_code: int):
+        self.phase_name = phase_name
+        self.log_path = log_path
+        self.exit_code = exit_code
+        super().__init__(
+            f"env-hook {phase_name} failed (exit_code={exit_code}, "
+            f"log={log_path})")
+
+
+def execute_env_hook_inline(change: str, phase_name: str) -> dict:
+    """Execute a prepare_env/clean_env hook inline during bootstrap.
+
+    Resolves the first stage's environment (via runner._resolve_stage_env),
+    reads its `prepare_env` or `clean_env` action from project.yaml, and runs
+    the hook script synchronously. On success, writes phase_start/phase_end
+    to context-chain.md and returns a result dict. On failure, returns a
+    result dict with success=False (caller decides whether to raise).
+
+    This helper **does not** raise EnvHookError — it returns the result so
+    pg_build_bootstrap() can decide whether the failure should abort the
+    bootstrap. The caller (pg_build_bootstrap) is responsible for raising
+    EnvHookError when prepare_env fails (since that aborts dispatch).
+
+    Args:
+        change: change name.
+        phase_name: "prepare_env" or "clean_env".
+
+    Returns:
+        dict with keys:
+          - success (bool): True iff the hook exited 0.
+          - skipped (bool): True iff no hook configured for this phase.
+          - log_path (str|None): absolute path to hook log, when run.
+          - exit_code (int|None): hook exit code (0 on success, non-zero on fail).
+          - env_name (str|None): resolved environment name.
+          - phase_item (str|None): qualified item id like "dev.prepare_env".
+          - error (str|None): error message if success=False.
+    """
+    if phase_name not in ("prepare_env", "clean_env"):
+        return {"success": False, "skipped": False,
+                "error": f"invalid phase_name: {phase_name!r}",
+                "phase_item": None, "log_path": None, "exit_code": None,
+                "env_name": None}
+
+    runner = None
+    try:
+        runner = _import_runner_helpers()
+    except Exception as e:
+        return {"success": False, "skipped": False,
+                "error": f"runner import failed: {e}",
+                "phase_item": None, "log_path": None, "exit_code": None,
+                "env_name": None}
+
+    # Load project config.
+    try:
+        config = runner.load_config()
+    except Exception as e:
+        return {"success": False, "skipped": False,
+                "error": f"load_config failed: {e}",
+                "phase_item": None, "log_path": None, "exit_code": None,
+                "env_name": None}
+
+    # Find the first stage that has tracks (which determines the environment).
+    stages = config.get("stages") or []
+    stage_name = None
+    stage_cfg = None
+    for s in stages:
+        if s.get("tracks"):
+            stage_name = s.get("name")
+            stage_cfg = s
+            break
+    if stage_cfg is None:
+        return {"success": True, "skipped": True,
+                "phase_item": None, "log_path": None, "exit_code": None,
+                "env_name": None}
+
+    # Resolve environment for this stage.
+    try:
+        env_name = runner._resolve_stage_env(change, stage_name)
+    except FileNotFoundError as e:
+        return {"success": False, "skipped": False,
+                "error": f"environment.yaml missing: {e}",
+                "phase_item": f"{stage_name}.{phase_name}",
+                "log_path": None, "exit_code": None, "env_name": None}
+    except Exception as e:
+        return {"success": False, "skipped": False,
+                "error": f"resolve_stage_env failed: {e}",
+                "phase_item": f"{stage_name}.{phase_name}",
+                "log_path": None, "exit_code": None, "env_name": None}
+
+    if env_name == "__skip__":
+        return {"success": True, "skipped": True,
+                "phase_item": f"{stage_name}.{phase_name}",
+                "log_path": None, "exit_code": None, "env_name": None}
+
+    env_cfg = (config.get("environments") or {}).get(env_name, {})
+    action = env_cfg.get(phase_name)
+    if not action:
+        return {"success": True, "skipped": True,
+                "phase_item": f"{stage_name}.{phase_name}",
+                "log_path": None, "exit_code": None, "env_name": env_name}
+
+    phase_item = f"{stage_name}.{phase_name}"
+    script_path = action.get("script")
+    if not script_path:
+        return {"success": False, "skipped": False,
+                "error": f"environment {env_name}.{phase_name} has no script",
+                "phase_item": phase_item, "log_path": None, "exit_code": None,
+                "env_name": env_name}
+
+    # Resolve log path (mirrors runner._phase_log_path).
+    try:
+        log_path = str(runner._phase_log_path(change, phase_item))
+    except Exception as e:
+        log_path = os.path.join(
+            CHANGES_DIR, change, "2-build",
+            f"{phase_item.replace('.', '-')}.log")
+        print(f"[execute_env_hook_inline] _phase_log_path failed, using "
+              f"fallback {log_path}: {e}", file=_sys.stderr)
+
+    # Build command: invoke pg-run-hook.py with JSON spec on stdin (mirrors
+    # _execute_phase pattern at runner.py:3126-3143).
+    import shlex as _shlex
+    import json as _json
+
+    # Use runner's PROJECT_ROOT when available (so test fixtures with
+    # overridden PROJECT_ROOT resolve the same path as v1 _execute_phase).
+    project_root = getattr(runner, "PROJECT_ROOT", None) or PROJECT_ROOT
+    PG_HOOK_RUNNER = os.path.join(
+        project_root, ".pg", "skills", "src", "runtime", "lib", "pg-run-hook.py"
+    )
+
+    args = action.get("args") or []
+    inner_cmd = "bash " + _shlex.quote(script_path) + (
+        " " + " ".join(_shlex.quote(str(a)) for a in args) if args else ""
+    )
+    spec = {
+        "cmd": inner_cmd,
+        "change": change,
+        "stage": stage_name,
+        "env": env_name,
+        "hook_type": phase_name,
+        "timeout_seconds": action.get("timeout_seconds"),
+        "log_path": log_path,
+        "caller": "pg-build",
+        "skill": "pg-build",
+    }
+    cmd = (
+        f"python3 {_shlex.quote(PG_HOOK_RUNNER)}"
+        f" <<'EOF'\n{_json.dumps(spec, indent=2)}\nEOF"
+    )
+
+    # Ensure log directory exists, then run synchronously.
+    try:
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+    except Exception:
+        pass
+
+    # Context-chain bookkeeping: phase_start.
+    try:
+        from pg_context_chain import phase_start, phase_end
+        phase_start(change, phase_item)
+    except Exception as e:
+        print(f"[execute_env_hook_inline] phase_start failed: {e}",
+              file=_sys.stderr)
+
+    try:
+        proc = _subprocess.run(
+            cmd, shell=True,
+            stdout=open(log_path, "w"),
+            stderr=_subprocess.STDOUT,
+            timeout=action.get("timeout_seconds") or 600,
+        )
+        exit_code = proc.returncode
+    except _subprocess.TimeoutExpired as e:
+        exit_code = 124
+        try:
+            with open(log_path, "a") as f:
+                f.write(f"\n[execute_env_hook_inline] TIMEOUT after "
+                        f"{e.timeout}s\n")
+        except Exception:
+            pass
+    except Exception as e:
+        exit_code = 1
+        try:
+            with open(log_path, "a") as f:
+                f.write(f"\n[execute_env_hook_inline] EXCEPTION: {e}\n")
+        except Exception:
+            pass
+
+    success = (exit_code == 0)
+
+    # Context-chain bookkeeping: phase_end.
+    try:
+        from pg_context_chain import phase_end
+        phase_end(change, phase_item,
+                  summary=f"exit_code={exit_code}, "
+                          f"env={env_name}, log={log_path}")
+    except Exception as e:
+        print(f"[execute_env_hook_inline] phase_end failed: {e}",
+              file=_sys.stderr)
+
+    return {
+        "success": success,
+        "skipped": False,
+        "log_path": log_path,
+        "exit_code": exit_code,
+        "env_name": env_name,
+        "phase_item": phase_item,
+        "error": None if success else (f"exit_code={exit_code}, log={log_path}"),
+    }
+
+
+def _resolve_default_env(state) -> str:
+    """Best-effort: return the first stage's environment name for env-hook.
+
+    Falls back to 'dev-local' (the most common case) when state has no
+    environment_name yet. This is only used during bootstrap before any
+    environment.yaml is loaded by execute_env_hook_inline.
+    """
+    state_dict = _normalize_state_for_bootstrap(state)
+    env_name = state_dict.get("environment_name")
+    if env_name:
+        return env_name
+    return "dev-local"
+
+
+def _persist_environment_summary(state, env_name: str, log_path: str,
+                                  instances: dict) -> None:
+    """Persist environment summary into state for first-dispatch挂载.
+
+    Writes into state.context.environment_summary so subsequent cmd_next_v2
+    calls can read it without re-executing the env-hook.
+
+    Args:
+        state: v1 state dict OR v2 PipelineState.
+        env_name: resolved environment name (e.g. "dev-local").
+        log_path: absolute path to the prepare_env log.
+        instances: dict of {role: [{name, host, port?}, ...]}.
+    """
+    summary = {
+        "name": env_name,
+        "prepare_env_log_path": log_path,
+        "instances": instances,
+    }
+    if hasattr(state, "data") and isinstance(state.data, dict):
+        ctx = state.data.setdefault("context", {})
+        ctx["environment_summary"] = summary
+        ctx["environment_summary_dispatched"] = False
+        if hasattr(state, "commit"):
+            try:
+                state.commit()
+            except Exception:
+                pass
+        return
+    if isinstance(state, dict):
+        state["environment_summary"] = summary
+        state["environment_summary_dispatched"] = False
+        return
+
+
+def _extract_instances_summary(config: dict) -> dict:
+    """Build the精简 instances summary from environments.<env>.roles.
+
+    Returns a dict like:
+        {"backend": [{"name": "backend-1", "host": "localhost", "port": 9080}],
+         "frontend": [{"name": "frontend-1", "host": "localhost", "port": 3008}],
+         "agent": [{"name": "agent-1", "host": "localhost"}]}
+
+    Only includes roles/instances that are actually configured. Used to
+    populate ctx.environment for the first dispatch after prepare_env.
+    """
+    envs = config.get("environments") or {}
+    # Use dev-local as the default reference env (the one we just prepared).
+    # If not present, fall back to the first env that has roles.
+    env_cfg = envs.get("dev-local") or {}
+    if not env_cfg.get("roles"):
+        for _name, cfg in envs.items():
+            if cfg.get("roles"):
+                env_cfg = cfg
+                break
+    roles_cfg = env_cfg.get("roles") or {}
+    summary = {}
+    for role_name, role_cfg in roles_cfg.items():
+        inst_list = []
+        for inst in (role_cfg.get("instances") or []):
+            entry = {"name": inst.get("name"), "host": inst.get("host")}
+            if "port" in inst:
+                entry["port"] = inst["port"]
+            inst_list.append(entry)
+        summary[role_name] = inst_list
+    return summary
+
+
 def _import_runner_helpers():
     """Lazy import of pg-pipeline-runner.py module-level functions.
 
@@ -629,13 +936,16 @@ def _persist_state_mutation(state, key, value):
 
 
 def pg_build_bootstrap(change, state):
-    """Run the 4 environment-init side effects required before the first dispatch.
+    """Run the 5 environment-init side effects required before the first dispatch.
 
     Encapsulates what v1 cmd_next:2862-2885 used to do inline:
       1. migrate_legacy_state_files(change) — pull legacy state.json from change root
       2. _ensure_context_chain(change) — create 2-build/context-chain.md
       3. _ensure_feature_branch(change) — git checkout -b feat/pg/<change>
       4. _maybe_bootstrap_init_commit(change, state) — initial git commit
+      5. **execute_env_hook_inline("prepare_env")** — run env script + log
+         phase_start/phase_end to context-chain.md. Failures RAISE EnvHookError
+         so callers (cmd_next_v2) can surface them via `env_hook_failed` action.
 
     Args:
         change: change name.
@@ -645,18 +955,26 @@ def pg_build_bootstrap(change, state):
         dict | None — the init_commit result dict (with branch/sha/message keys)
         when this call actually ran the bootstrap; None when skipped (already done).
 
+    Raises:
+        EnvHookError: when prepare_env execution fails (non-zero exit).
+            Caller (cmd_next_v2) catches this and returns `env_hook_failed` action.
+
     Side effects:
         - Migrates legacy state files at .pg/changes/<change>/* → 2-build/
         - Creates .pg/changes/<change>/2-build/context-chain.md (idempotent)
         - git checkout -b feat/pg/<change> (idempotent, only if not already on it)
         - git add -A + git commit "chore(<change>): bootstrap pg-build" (idempotent
           via state.init_committed marker)
-        - Persists init_committed=True back to state (v2 commits to disk; v1
-          caller is responsible for save_state)
+        - Runs environments.<env>.prepare_env script synchronously (v2 only;
+          v1 still uses _execute_phase / phase_result path)
+        - Writes phase_start/phase_end entries to context-chain.md
+        - Persists environment_summary into state.context for first-dispatch挂载
 
     Note:
-        All four side effects are best-effort: failures are caught and logged
+        Side effects 1-4 are best-effort: failures are caught and logged
         (printed to stderr) but never raised, so dispatch always proceeds.
+        Side effect 5 (env-hook) is the only step that RAISES on failure —
+        since a broken env means dispatch cannot proceed meaningfully.
     """
     state_dict = _normalize_state_for_bootstrap(state)
 
@@ -697,6 +1015,55 @@ def pg_build_bootstrap(change, state):
     # Persist init_committed marker back to the original state container.
     if init_commit is not None:
         _persist_state_mutation(state, "init_committed", True)
+
+    # 5. ==== Inline env-hook (prepare_env) ====
+    # This is the v2 path: bootstrap now does the prepare_env work itself,
+    # so callers don't need to handle `phase_result` action. v1 callers
+    # ignore the EnvHookError because v1 still uses _execute_phase path.
+    # We detect "v1 vs v2" by checking whether the state has the v2 schema
+    # attribute. v1 state is a plain dict with no `data` attribute; v2 is
+    # PipelineState with .data["context"].
+    is_v2_state = hasattr(state, "data") and isinstance(state.data, dict)
+    if is_v2_state:
+        # Mark prepare_env completed flag so we don't re-execute on re-call.
+        # pg_build_bootstrap may be called multiple times per session (e.g.
+        # after each record), but the env-hook only needs to run once.
+        ctx = state.data.setdefault("context", {})
+        if not ctx.get("prepare_env_completed"):
+            result = execute_env_hook_inline(change, "prepare_env")
+            ctx["prepare_env_completed"] = True
+            ctx["prepare_env_result"] = {
+                "success": result.get("success"),
+                "skipped": result.get("skipped"),
+                "log_path": result.get("log_path"),
+                "exit_code": result.get("exit_code"),
+                "env_name": result.get("env_name"),
+                "phase_item": result.get("phase_item"),
+            }
+            # Persist environment summary for first-dispatch挂载.
+            if result.get("success") and not result.get("skipped"):
+                try:
+                    config = runner.load_config()
+                    instances = _extract_instances_summary(config)
+                    _persist_environment_summary(
+                        state, result["env_name"], result["log_path"],
+                        instances)
+                except Exception as e:
+                    print(f"[pg_build_bootstrap] persist environment_summary "
+                          f"failed: {e}", file=_sys.stderr)
+
+            try:
+                if hasattr(state, "commit"):
+                    state.commit()
+            except Exception:
+                pass
+
+            if not result.get("success"):
+                # RAISE — caller (cmd_next_v2) must surface as env_hook_failed.
+                raise EnvHookError(
+                    phase_name="prepare_env",
+                    log_path=result.get("log_path") or "",
+                    exit_code=result.get("exit_code") or -1)
 
     return init_commit
 

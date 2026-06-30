@@ -2,7 +2,7 @@
 """Tests for the bootstrap init-commit in cmd_next.
 
 Covers:
-- `chore(<change>): bootstrap apply-change` is created exactly once on the
+- `chore(<change>): bootstrap pg-build` is created exactly once on the
   first dispatch.
 - The commit message format is fixed.
 - The init commit lands on `feat/pg/<change>` (i.e. AFTER `_ensure_feature_branch`).
@@ -14,6 +14,7 @@ Covers:
   `dispatch_fix` / `dispatch_final_gate` / `execute_phase` / `done` /
   `workflow_failed`.
 """
+
 import importlib.util
 import json
 import os
@@ -24,15 +25,12 @@ import tempfile
 import unittest
 from unittest import mock
 
-
 SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 RUNNER_PY = os.path.join(SCRIPTS_DIR, "pg-pipeline-runner.py")
 
 
 def _git(cwd, *args):
-    return subprocess.run(
-        ["git", *args], cwd=cwd, capture_output=True, text=True
-    )
+    return subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True)
 
 
 def _git_log_subjects(cwd):
@@ -149,10 +147,18 @@ class TestInitCommitFiresOnce(_InitCommitTestBase):
         with the fixed message format."""
         # Track pipeline-detect + sub_start side effects so we don't actually
         # call pg-pipeline-state.py from inside the runner.
-        with mock.patch.object(self.runner, "pipeline_detect", return_value={
-            "item": "dummy-track", "type": "track", "subPhase": "test",
-        }), \
-        mock.patch.object(self.runner, "pg_context_chain") as mock_chain:
+        with (
+            mock.patch.object(
+                self.runner,
+                "pipeline_detect",
+                return_value={
+                    "item": "dummy-track",
+                    "type": "track",
+                    "subPhase": "test",
+                },
+            ),
+            mock.patch.object(self.runner, "pg_context_chain") as mock_chain,
+        ):
             mock_chain.sub_start = mock.MagicMock()
             mock_chain.rollback_get = mock.MagicMock(return_value={"found": False})
 
@@ -168,7 +174,7 @@ class TestInitCommitFiresOnce(_InitCommitTestBase):
         self.assertTrue(result["init_commit"]["committed"], result["init_commit"])
         self.assertEqual(
             result["init_commit"]["message"],
-            f"chore({self.change}): bootstrap apply-change",
+            f"chore({self.change}): bootstrap pg-build",
         )
 
         # 3. Branch is feat/pg/<change>
@@ -177,7 +183,7 @@ class TestInitCommitFiresOnce(_InitCommitTestBase):
 
         # 4. git log on feature branch has the bootstrap commit on top
         subjects = _git_log_subjects(self.tmpdir)
-        self.assertEqual(subjects[0], f"chore({self.change}): bootstrap apply-change")
+        self.assertEqual(subjects[0], f"chore({self.change}): bootstrap pg-build")
 
         # 5. .pipeline-state.json was written with init_committed=True
         with open(os.path.join(self.apply_dir, ".pipeline-state.json")) as f:
@@ -188,18 +194,24 @@ class TestInitCommitFiresOnce(_InitCommitTestBase):
         """Idempotency: a second cmd_next must NOT create another
         bootstrap commit."""
         # First call: real init commit
-        with mock.patch.object(self.runner, "pipeline_detect", return_value={
-            "item": "dummy-track", "type": "track", "subPhase": "test",
-        }), \
-        mock.patch.object(self.runner, "pg_context_chain") as mock_chain:
+        with (
+            mock.patch.object(
+                self.runner,
+                "pipeline_detect",
+                return_value={
+                    "item": "dummy-track",
+                    "type": "track",
+                    "subPhase": "test",
+                },
+            ),
+            mock.patch.object(self.runner, "pg_context_chain") as mock_chain,
+        ):
             mock_chain.sub_start = mock.MagicMock()
             mock_chain.rollback_get = mock.MagicMock(return_value={"found": False})
             self.runner.cmd_next(self.change)
         first_sha = _git_head_sha(self.tmpdir)
         first_subjects = _git_log_subjects(self.tmpdir)
-        first_init_count = sum(
-            1 for s in first_subjects if "bootstrap apply-change" in s
-        )
+        first_init_count = sum(1 for s in first_subjects if "bootstrap pg-build" in s)
         self.assertEqual(first_init_count, 1)
 
         # Second call: runner should detect init_committed=True and skip
@@ -216,9 +228,7 @@ class TestInitCommitFiresOnce(_InitCommitTestBase):
         second_sha = _git_head_sha(self.tmpdir)
         self.assertEqual(first_sha, second_sha)
         second_subjects = _git_log_subjects(self.tmpdir)
-        second_init_count = sum(
-            1 for s in second_subjects if "bootstrap apply-change" in s
-        )
+        second_init_count = sum(1 for s in second_subjects if "bootstrap pg-build" in s)
         self.assertEqual(second_init_count, 1)
 
 
@@ -226,17 +236,27 @@ class TestInitCommitFailureNonFatal(_InitCommitTestBase):
     def test_init_commit_failure_does_not_block_dispatch(self):
         """When _auto_commit_on_init reports failure, dispatch still
         proceeds and the init_committed marker is set so we do not retry."""
-        with mock.patch.object(self.runner, "pipeline_detect", return_value={
-            "item": "dummy-track", "type": "track", "subPhase": "test",
-        }), \
-        mock.patch.object(self.runner, "pg_context_chain") as mock_chain, \
-        mock.patch.object(
-            self.runner, "_auto_commit_on_init",
-            return_value={
-                "attempted": True, "committed": False,
-                "branch": "master",
-                "reason": "simulated git failure",
-            },
+        with (
+            mock.patch.object(
+                self.runner,
+                "pipeline_detect",
+                return_value={
+                    "item": "dummy-track",
+                    "type": "track",
+                    "subPhase": "test",
+                },
+            ),
+            mock.patch.object(self.runner, "pg_context_chain") as mock_chain,
+            mock.patch.object(
+                self.runner,
+                "_auto_commit_on_init",
+                return_value={
+                    "attempted": True,
+                    "committed": False,
+                    "branch": "master",
+                    "reason": "simulated git failure",
+                },
+            ),
         ):
             mock_chain.sub_start = mock.MagicMock()
             mock_chain.rollback_get = mock.MagicMock(return_value={"found": False})
@@ -248,9 +268,7 @@ class TestInitCommitFailureNonFatal(_InitCommitTestBase):
         # 2. init_commit surfaces the failure to LLM
         self.assertIn("init_commit", result)
         self.assertFalse(result["init_commit"]["committed"])
-        self.assertEqual(
-            result["init_commit"]["reason"], "simulated git failure"
-        )
+        self.assertEqual(result["init_commit"]["reason"], "simulated git failure")
 
         # 3. State file still has init_committed=True (no retry next time)
         with open(os.path.join(self.apply_dir, ".pipeline-state.json")) as f:
@@ -259,7 +277,7 @@ class TestInitCommitFailureNonFatal(_InitCommitTestBase):
 
         # 4. No bootstrap commit on the branch (the failure was real)
         subjects = _git_log_subjects(self.tmpdir)
-        bootstrap_subjects = [s for s in subjects if "bootstrap apply-change" in s]
+        bootstrap_subjects = [s for s in subjects if "bootstrap pg-build" in s]
         self.assertEqual(bootstrap_subjects, [])
 
 
@@ -280,17 +298,27 @@ class TestInitCommitOrdering(_InitCommitTestBase):
             call_order.append("auto_commit_on_init")
             return real_init(change)
 
-        with mock.patch.object(self.runner, "pipeline_detect", return_value={
-            "item": "dummy-track", "type": "track", "subPhase": "test",
-        }), \
-        mock.patch.object(self.runner, "pg_context_chain") as mock_chain, \
-        mock.patch.object(
-            self.runner, "_ensure_feature_branch",
-            side_effect=tracking_ensure,
-        ), \
-        mock.patch.object(
-            self.runner, "_auto_commit_on_init",
-            side_effect=tracking_init,
+        with (
+            mock.patch.object(
+                self.runner,
+                "pipeline_detect",
+                return_value={
+                    "item": "dummy-track",
+                    "type": "track",
+                    "subPhase": "test",
+                },
+            ),
+            mock.patch.object(self.runner, "pg_context_chain") as mock_chain,
+            mock.patch.object(
+                self.runner,
+                "_ensure_feature_branch",
+                side_effect=tracking_ensure,
+            ),
+            mock.patch.object(
+                self.runner,
+                "_auto_commit_on_init",
+                side_effect=tracking_init,
+            ),
         ):
             mock_chain.sub_start = mock.MagicMock()
             mock_chain.rollback_get = mock.MagicMock(return_value={"found": False})
@@ -308,7 +336,7 @@ class TestInitCommitOrdering(_InitCommitTestBase):
         # at HEAD.
         r = _git(self.tmpdir, "log", f"feat/pg/{self.change}", "--format=%s")
         subjects = [s for s in r.stdout.strip().splitlines() if s]
-        self.assertEqual(subjects[0], f"chore({self.change}): bootstrap apply-change")
+        self.assertEqual(subjects[0], f"chore({self.change}): bootstrap pg-build")
 
 
 class TestMaybeBootstrapHelper(_InitCommitTestBase):
@@ -318,9 +346,7 @@ class TestMaybeBootstrapHelper(_InitCommitTestBase):
         """If state.init_committed=True, helper returns None and does
         not invoke the commit function."""
         state = {"version": 1, "change": self.change, "init_committed": True}
-        with mock.patch.object(
-            self.runner, "_auto_commit_on_init"
-        ) as mock_init:
+        with mock.patch.object(self.runner, "_auto_commit_on_init") as mock_init:
             result = self.runner._maybe_bootstrap_init_commit(self.change, state)
         self.assertIsNone(result)
         mock_init.assert_not_called()
@@ -328,14 +354,27 @@ class TestMaybeBootstrapHelper(_InitCommitTestBase):
     def test_runs_commit_and_mutates_state_on_first_call(self):
         """Helper mutates the passed-in state dict to set
         init_committed=True so the caller's later save_state persists it.
-        Helper itself does NOT call save_state."""
+
+        Helper MUST persist state to disk BEFORE running the bootstrap
+        commit, otherwise `git add -A` + `git commit` inside
+        `_auto_commit_on_init` lands the commit before `.pipeline-state.json`
+        is staged on disk — so the bootstrap commit silently excludes the
+        freshly-created state file. Regression seen on
+        `instance-detail-host-versions` (commit 6c7eb87a contained only
+        context-chain.md, not .pipeline-state.json).
+        """
         state = {"version": 1, "change": self.change, "failed": False}
 
         with mock.patch.object(
-            self.runner, "_auto_commit_on_init",
+            self.runner,
+            "_auto_commit_on_init",
             return_value={
-                "attempted": True, "committed": True, "branch": "feat/x",
-                "sha": "deadbeef", "message": "x", "reason": None,
+                "attempted": True,
+                "committed": True,
+                "branch": "feat/x",
+                "sha": "deadbeef",
+                "message": "x",
+                "reason": None,
             },
         ) as mock_init:
             result = self.runner._maybe_bootstrap_init_commit(self.change, state)
@@ -347,11 +386,21 @@ class TestMaybeBootstrapHelper(_InitCommitTestBase):
         # State was mutated in place
         self.assertTrue(state.get("init_committed"))
 
-        # Helper did NOT write to disk (save_state is caller's job)
+        # Helper DID write state to disk BEFORE the init commit, so
+        # `git add -A` includes `.pipeline-state.json` in the bootstrap
+        # commit. (Previous "caller-only" contract caused regression where
+        # the bootstrap commit missed state.json — see fix description.)
         state_file = os.path.join(self.apply_dir, ".pipeline-state.json")
-        self.assertFalse(
+        self.assertTrue(
             os.path.isfile(state_file),
-            f"BUG: helper wrote state file; should leave that to caller: {state_file}",
+            f"BUG: helper did NOT persist state before init commit; "
+            f"`git add -A` will miss .pipeline-state.json: {state_file}",
+        )
+        with open(state_file) as f:
+            persisted = json.load(f)
+        self.assertTrue(
+            persisted.get("init_committed"),
+            f"persisted state missing init_committed marker: {persisted}",
         )
 
 
@@ -390,8 +439,12 @@ class TestInitCommitFieldMounting(_InitCommitTestBase):
         # workflow_failed
         with open(state_path, "w") as f:
             json.dump(
-                {"version": 1, "change": self.change, "failed": True,
-                 "fail_reason": "x"},
+                {
+                    "version": 1,
+                    "change": self.change,
+                    "failed": True,
+                    "fail_reason": "x",
+                },
                 f,
             )
         result_failed = self.runner.cmd_next(self.change)

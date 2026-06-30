@@ -165,7 +165,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 - **修改行数合理性**：检查每个文件的修改行数（`git diff --stat`），对超过 200 行的单文件变更标注 WARNING 并要求解释；新增文件列表与 tasks.md 产物声明对比，不对应的新增文件标注 WARNING
 - **文件位置合规**：从 `module_details` 提取本 track 的模块根目录列表，去重合并为允许目录前缀。运行以下命令获取变更文件清单，逐文件检查是否在允许目录内：
   ```bash
-  INIT_SHA=$(git log --all --oneline --grep="bootstrap apply-change" --format="%H" | tail -1)
+  INIT_SHA=$(git log --all --oneline --grep="bootstrap pg-build" --format="%H" | tail -1)
   git diff --name-only "${INIT_SHA:-HEAD~1}" HEAD
   ```
   对 `real-integration`（modules=[]）跳过此检查。记录不合规文件路径：`❌ FAIL — 文件 {path} 不在本 track 模块根 {allowed_roots} 或 .pg/ 内`

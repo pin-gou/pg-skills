@@ -1,6 +1,6 @@
 ---
 name: pg-manager
-description: 主编排器，负责执行所有调度任务（apply-change / CI / 部署等）
+description: 主编排器，负责执行所有调度任务（pg-build / CI / 部署等）
 model: pg-router/pg-associate
 mode: primary
 hidden: true
