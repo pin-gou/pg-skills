@@ -421,6 +421,7 @@ RUNNER="python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py"
 - ❌ 试图自己重新组织 prompt（runner 已写好）
 - ❌ 读 dispatch_file 内容后改写再传给 sub-agent
 - ❌ 直接复制 dispatch_file 内容作为 Task tool 的 prompt
+- ❌ **读项目源码（DTO / service / test / 任何业务文件）为 sub-agent 准备上下文**。sub-agent 自己用 Read/CodeGraph 探索；orchestrator 提供上下文会让 sub-agent 拿到过时视角、浪费 token、并且让"职责分离"失效。提示词由 RUNNER 已经写入到指定的文件，不需要编排器过多准备。
 
 > 设计动机：LLM orchestrator 在派送 sub-agent 时有强烈"重写/总结"本能（哪怕字段名叫 `prompt_final_no_modify` 也会被改）。把指令完全 bypass 到文件系统是**架构层面**的根治——orchestrator 根本不接触指令内容，也就不可能改。
 
