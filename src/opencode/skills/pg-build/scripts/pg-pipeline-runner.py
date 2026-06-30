@@ -2736,9 +2736,15 @@ def _maybe_bootstrap_init_commit(change, state):
         if hasattr(state, "commit"):
             # v2 PipelineState instance — call its commit() to flush.
             state.commit()
-        else:
-            # v1 plain dict — call save_state directly.
+        elif "change" in state:
+            # v1 plain dict with "change" key — call save_state.
             save_state(state)
+        # else: v2 context dict without "change" key (returned by
+        # _normalize_state_for_bootstrap). Skip early persist here;
+        # the caller (_persist_state_mutation) will persist right
+        # after this function returns.  Without this guard,
+        # save_state(state) raises KeyError('change') because the
+        # context dict lacks the top-level "change" key.
     except Exception as e:
         print(
             f"[_maybe_bootstrap_init_commit] state persist failed: {e}", file=sys.stderr

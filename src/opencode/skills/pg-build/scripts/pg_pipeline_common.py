@@ -646,12 +646,15 @@ def execute_env_hook_inline(change: str, phase_name: str) -> dict:
                 "phase_item": None, "log_path": None, "exit_code": None,
                 "env_name": None}
 
-    # Find the first stage that has tracks (which determines the environment).
+    # Find the first stage whose environment should actually be prepared.
+    # Only consider stages with environment.required == true — stages like
+    # prepare-env-scripts (required: false) don't need env preparation.
     stages = config.get("stages") or []
     stage_name = None
     stage_cfg = None
     for s in stages:
-        if s.get("tracks"):
+        env_cfg = s.get("environment") or {}
+        if s.get("tracks") and env_cfg.get("required", False):
             stage_name = s.get("name")
             stage_cfg = s
             break

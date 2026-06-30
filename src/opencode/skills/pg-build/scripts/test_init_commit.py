@@ -403,6 +403,51 @@ class TestMaybeBootstrapHelper(_InitCommitTestBase):
             f"persisted state missing init_committed marker: {persisted}",
         )
 
+    def test_v2_context_dict_without_change_key_does_not_crash(self):
+        """Bug B regression: when state is a v2 context dict (returned by
+        _normalize_state_for_bootstrap) without a top-level 'change' key,
+        save_state(state) must not be called (would raise KeyError).
+
+        The helper should mutate the dict in-place and let the caller
+        (_persist_state_mutation) persist later. No state file should
+        be written directly by save_state.
+        """
+        # Simulate v2 context dict: no "change" key, no "version" key.
+        state = {"init_committed": False, "pipeline_order": ["dev.prepare_env"]}
+
+        with mock.patch.object(
+            self.runner,
+            "_auto_commit_on_init",
+            return_value={
+                "attempted": True,
+                "committed": True,
+                "branch": "feat/pg/bug-b",
+                "sha": "cafebabe",
+                "message": "test",
+                "reason": None,
+            },
+        ) as mock_init:
+            # Should NOT raise (save_state is guarded by "change" in state check)
+            result = self.runner._maybe_bootstrap_init_commit(self.change, state)
+
+        self.assertEqual(result["committed"], True)
+        self.assertEqual(result["sha"], "cafebabe")
+        mock_init.assert_called_once_with(self.change)
+
+        # State mutated in place even without "change" key
+        self.assertTrue(state.get("init_committed"))
+
+        # save_state must NOT have written the context dict as the full
+        # state.json (because that would corrupt the v2 state).
+        state_file = os.path.join(self.apply_dir, ".pipeline-state.json")
+        if os.path.isfile(state_file):
+            with open(state_file) as f:
+                persisted = json.load(f)
+            # The persisted file should still be the v1-style state
+            # (unchanged by this test — we only verified no crash).
+            self.assertIn("change", persisted,
+                          "Bug B save_state wrote context dict as state")
+
 
 class TestInitCommitFieldMounting(_InitCommitTestBase):
     """Verify init_commit field is mounted on dispatch only, not on the

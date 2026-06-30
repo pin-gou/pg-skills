@@ -479,7 +479,8 @@ class TestExecuteEnvHookInline(_HelpersTestBase):
         # env_name resolves to something but env_cfg.prepare_env is empty
         with mock.patch.object(self.runner, "load_config",
                                return_value={
-                                   "stages": [{"name": "dev", "tracks": ["dummy-track"]}],
+                                   "stages": [{"name": "dev", "tracks": ["dummy-track"],
+                                               "environment": {"required": True}}],
                                    "environments": {"dev-local": {}}
                                }), \
              mock.patch.object(self.runner, "_resolve_stage_env",
@@ -493,7 +494,8 @@ class TestExecuteEnvHookInline(_HelpersTestBase):
         # _resolve_stage_env returns __skip__ → user disabled this stage's env
         with mock.patch.object(self.runner, "load_config",
                                return_value={
-                                   "stages": [{"name": "dev", "tracks": ["dummy-track"]}],
+                                   "stages": [{"name": "dev", "tracks": ["dummy-track"],
+                                               "environment": {"required": True}}],
                                    "environments": {}
                                }), \
              mock.patch.object(self.runner, "_resolve_stage_env",
@@ -511,7 +513,8 @@ class TestExecuteEnvHookInline(_HelpersTestBase):
         fake_proc_success = mock.MagicMock(returncode=0)
         with mock.patch.object(self.runner, "load_config",
                                return_value={
-                                   "stages": [{"name": "dev", "tracks": ["dummy-track"]}],
+                                   "stages": [{"name": "dev", "tracks": ["dummy-track"],
+                                               "environment": {"required": True}}],
                                    "environments": {
                                        "dev-local": {
                                            "prepare_env": {
@@ -554,7 +557,8 @@ class TestExecuteEnvHookInline(_HelpersTestBase):
         fake_proc_fail = mock.MagicMock(returncode=1)
         with mock.patch.object(self.runner, "load_config",
                                return_value={
-                                   "stages": [{"name": "dev", "tracks": ["dummy-track"]}],
+                                   "stages": [{"name": "dev", "tracks": ["dummy-track"],
+                                               "environment": {"required": True}}],
                                    "environments": {
                                        "dev-local": {
                                            "prepare_env": {
@@ -581,6 +585,50 @@ class TestExecuteEnvHookInline(_HelpersTestBase):
         self.assertEqual(result["exit_code"], 1)
         # phase_end should still be called (with failure summary).
         mock_chain.phase_end.assert_called_once()
+
+    def test_skips_required_false_stage_selects_required_true(self):
+        """Bug A regression: first stage with environment.required=false
+        (e.g. prepare-env-scripts) must not be selected; the next stage
+        with required=true (e.g. dev) should be selected for env hook."""
+        log_path = os.path.join(self.tmpdir, "bug-a.log")
+        fake_proc = mock.MagicMock(returncode=0)
+        with mock.patch.object(self.runner, "load_config",
+                               return_value={
+                                   "stages": [
+                                       {"name": "prepare-env-scripts",
+                                        "tracks": ["env-scripts"],
+                                        "environment": {"required": False}},
+                                       {"name": "dev", "tracks": ["dummy-track"],
+                                        "environment": {"required": True}},
+                                   ],
+                                   "environments": {
+                                       "dev-local": {
+                                           "prepare_env": {
+                                               "script": "/bin/true",
+                                               "args": [],
+                                               "timeout_seconds": 30,
+                                           }
+                                       }
+                                   }
+                               }), \
+             mock.patch.object(self.runner, "_resolve_stage_env",
+                               return_value="dev-local"), \
+             mock.patch.object(self.runner, "_phase_log_path",
+                               return_value=log_path), \
+             mock.patch.object(self.common, "_subprocess") as mock_sp, \
+             mock.patch.dict(sys.modules, {"pg_context_chain": mock.MagicMock()}):
+            mock_sp.run.return_value = fake_proc
+            mock_chain = sys.modules["pg_context_chain"]
+            mock_chain.phase_start = mock.MagicMock()
+            mock_chain.phase_end = mock.MagicMock()
+            result = self.common.execute_env_hook_inline(
+                self.change, "prepare_env")
+        self.assertTrue(result["success"])
+        self.assertFalse(result["skipped"])
+        self.assertEqual(result["env_name"], "dev-local")
+        self.assertEqual(result["phase_item"], "dev.prepare_env")
+        self.assertNotEqual(result["phase_item"],
+                            "prepare-env-scripts.prepare_env")
 
     def test_bootstrap_raises_envhook_on_failure(self):
         # pg_build_bootstrap must raise EnvHookError when execute_env_hook_inline
