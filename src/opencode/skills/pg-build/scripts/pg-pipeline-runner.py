@@ -74,6 +74,7 @@ import pg_context_chain
 from pg_pipeline_common import (
     get_track_type, parse_tasks, parse_tasks_sections, load_config,
     normalize_simple_command,
+    pg_build_bootstrap, pg_build_dispatch_context,
 )
 
 
@@ -2861,28 +2862,9 @@ def cmd_next(change):
 
     # One-shot migration: legacy state files at change root → 2-build/.
     # Idempotent; safe to run every invocation.
-    moved = migrate_legacy_state_files(change)
-    if moved:
-        print(f"[migrate] moved legacy state files to {APPLY_DIR}/: {moved}", file=sys.stderr)
-        # Reload state after migration (file path changed)
-        state = load_state(change)
-
-    # Auto-init context chain on first run
-    _ensure_context_chain(change)
-
-    # Ensure feature branch exists on first run. Must happen BEFORE init commit
-    # so that the bootstrap commit lands on feat/pg/<change>.
-    _ensure_feature_branch(change)
-
-    # Bootstrap commit: on the first dispatch ever, commit the proposal
-    # artifacts together with a freshly written `.pipeline-state.json`
-    # (carrying the `init_committed: True` marker). Subsequent dispatches
-    # see the marker and skip this step, ensuring idempotency across
-    # session restarts. Done before `migrate_legacy_state_files` would
-    # overwrite the state file with legacy contents from change root.
-    # The helper mutates `state` in place so the caller's later save_state
-    # persists the marker.
-    init_commit = _maybe_bootstrap_init_commit(change, state)
+    # NB: now delegated to pg_build_bootstrap (shared with v2 path) to
+    # avoid drift between v1 and v2. See pg_pipeline_common.pg_build_bootstrap.
+    init_commit = pg_build_bootstrap(change, state)
 
     # Simple-track routing is handled by cmd_detect via get_track_type() —
     # no need to rewrite tasks.md sections to noop markers anymore.
@@ -2933,12 +2915,9 @@ def cmd_next(change):
     has_rollback = rb.get("found", False)
 
     # Build dispatch context (with stage info for v3.0)
-    ctx = filter_track_context(config, item_id, sub, change=change)
-    ctx["_change"] = change
-    _enrich_context_with_rollback(ctx, rb)
-    _enrich_context_with_stage(ctx, config, item_id, change)
-    _enrich_context_with_tasks(ctx, change, item_id, sub)
-    _enrich_context_with_prompt_injection(ctx, config, item_id, sub)
+    # NB: now delegated to pg_build_dispatch_context (shared with v2 path) to
+    # avoid drift between v1 and v2. See pg_pipeline_common.pg_build_dispatch_context.
+    ctx, has_rollback = pg_build_dispatch_context(change, item_id, sub, config)
 
     # Persist state (including the init_committed marker mutated by
     # _maybe_bootstrap_init_commit above) BEFORE returning. This is the
@@ -3004,12 +2983,17 @@ def _resume_waiting(config, change, state, cur, init_commit=None):
         ctx["_change"] = change
         return dispatch_fix_action(item_id, cur.get("fix_cycles", 1), ctx)
 
-    ctx = filter_track_context(config, item_id, sub, change=change)
-    ctx["_change"] = change
-    if has_rollback:
+    # Build dispatch context (resume path) — delegate to shared helper to
+    # avoid drift with v2 path. has_rollback is reused from cur (the helper's
+    # returned has_rollback reflects a fresh rollback_get; for resume we
+    # honor the prior cur["has_rollback"] marker).
+    ctx, _ = pg_build_dispatch_context(change, item_id, sub, config)
+    # If the saved state says there's a rollback but the helper didn't find
+    # one, restore the marker so downstream agents see rollback_context.
+    if has_rollback and "rollback_context" not in ctx:
         rb = pg_context_chain.rollback_get(change, item_id)
-        _enrich_context_with_rollback(ctx, rb)
-    _enrich_context_with_tasks(ctx, change, item_id, sub)
+        if rb and rb.get("found"):
+            _enrich_context_with_rollback(ctx, rb)
 
     # NOTE (build-r Step 3): _duplicate_warning injection removed.
     # State.json's dispatch_history (v2) is the SSOT.
