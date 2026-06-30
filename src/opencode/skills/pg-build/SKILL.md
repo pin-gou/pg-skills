@@ -349,6 +349,43 @@ done 返回的 archive 字段结构：
 
 ---
 
+## v1/v2 行为对齐（共享 helper）
+
+> **回归保护**：v1（`pg-pipeline-runner.py:cmd_next` / `cmd_record`）和 v2（`pg_runner_v2.py:cmd_next_v2` / `cmd_record_v2`）走两条独立的代码路径，但**所有环境初始化副作用 / 上下文组装 / context-chain 记账都通过 `pg_pipeline_common.py` 的 3 个共享 helper 走同一份逻辑**。这套设计在 2026-06-30 commit `cd08e72` / `3a43323` / `fdfcf49` 引入，防止 v2 重构再次丢失 v1 副作用。
+
+### 3 个共享 helper
+
+| Helper | 作用 | 替代的 v1 散落代码 |
+|---|---|---|
+| `pg_build_bootstrap(change, state)` | 启动期的 4 个副作用：migrate / ensure context-chain / 创建 feat/pg/<change> 分支 / init commit | `cmd_next:2862-2885` 的 4 行内联调用 |
+| `pg_build_dispatch_context(change, item_id, sub, config)` | 组装 sub-agent 的 ctx：filter_track_context + 4 个 enrich (rollback / stage / tasks / build_rules) | `cmd_next:2935-2941` 的 5 行内联调用 |
+| `pg_build_record_log(change, item, sub, status, ...)` | record 阶段统一写 context-chain.md（按 sub+status 决策） | v1 散落的 17 处 `pg_context_chain.*` 调用（**v1 保留原状**，v2 入口统一调一次） |
+
+### state 参数 type-dispatch
+
+helper 接受两型 state 输入：
+
+- **v1 state dict**：`{init_committed: bool, current: {...}, ...}` —— helper 直接修改
+- **v2 PipelineState 实例**：helper 通过 `_normalize_state_for_bootstrap(ps)` 取 `ps.data["context"]`，写回时通过 `_persist_state_mutation` + `ps.commit()` 落盘
+
+### 4 个对齐保证
+
+| 行为 | v1 调用点 | v2 调用点 | 共享 helper |
+|---|---|---|---|
+| 创建 feat/pg/<change> 分支 | `cmd_next` 入口 | `cmd_next_v2` 入口 | `pg_build_bootstrap` |
+| init commit + 透传 init_commit 字段 | `cmd_next` 入口 | `cmd_next_v2` + `_build_dispatch_response` | `pg_build_bootstrap` |
+| 组装 ctx (rollback/stage/tasks/build_rules) | `cmd_next:2935-2941` | `cmd_next_v2` 两条 dispatch 路径 | `pg_build_dispatch_context` |
+| context-chain.md 记账 | 17 处散落 `pg_context_chain.*` | `cmd_record_v2` 入口统一调一次 | `pg_build_record_log`（v2 only） |
+
+### 回归测试保护
+
+- `test_pg_build_helpers.py`（26 个单元测试）：覆盖 3 个 helper 的所有 (sub, status) 组合 + state type-dispatch + 失败容错
+- `test_v2_branch_isolation.py`（4 个集成测试）：CI 跑 minimal change，验证 v2 路径下：
+  - 首次 cmd_next_v2 切到 feat/pg/<change>
+  - context-chain.md 被创建
+  - init_commit 挂载到 dispatch action
+  - auto-record commit 落在 feat/pg/<change>，master 不被污染
+
 ## 脚本命令参照
 
 LLM 只需与 `pg-pipeline-runner.py` 交互，不要直接调用其他脚本：
