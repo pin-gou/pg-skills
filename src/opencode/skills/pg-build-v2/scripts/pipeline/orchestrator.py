@@ -22,12 +22,14 @@ from pipeline.events import (
     EVT_PIPELINE_COMPLETED,
     EVT_WORKFLOW_FAILED,
     EVT_FIX_CYCLE_STARTED,
-    EVT_GATE_CYCLE_STARTED,
+    EVT_GIT_COMMIT,
 )
 from pipeline.reducer import reduce_state
 from pipeline.detect import next_pending
 from pipeline.sub_pipeline import FIX_CYCLE, GATE_FIX_CYCLE
+from pipeline.dispatch import build_action, build_final_gate_action
 import bootstrap
+import subprocess
 
 
 CHANGES_DIR = os.path.join(bootstrap.PROJECT_ROOT, ".pg", "changes")
@@ -35,11 +37,6 @@ CHANGES_DIR = os.path.join(bootstrap.PROJECT_ROOT, ".pg", "changes")
 
 def _change_root(change: str) -> str:
     return os.path.join(CHANGES_DIR, change)
-
-
-def _agent_for_phase(phase: str) -> str:
-    from pipeline.reducer import PHASE_AGENTS
-    return PHASE_AGENTS.get(phase, "")
 
 
 class Orchestrator:
@@ -105,9 +102,30 @@ class Orchestrator:
         if boot_result.get("init_commit") and boot_result["init_commit"].get("committed"):
             self.state = self.state.replace(init_committed=True)
 
-        # 找 pipeline_order
-        self.state = self.state.replace(pipeline_order=self._detect_pipeline_order())
-        self.state = self.state.replace(status="running")
+        # 找 pipeline_order + track 配置
+        order, track_configs = self._detect_pipeline_config()
+        tracks: dict[str, TrackState] = {}
+        track_types: dict[str, str] = {}
+        for tid in order:
+            if tid == FINAL_GATE_TRACK:
+                continue
+            cfg = track_configs.get(tid, {})
+            tracks[tid] = TrackState.create(
+                tid,
+                modules=tuple(cfg.get("modules", [])),
+                max_fail_retries=cfg.get("max_fail_retries", 3),
+                max_fix_retries=cfg.get("max_fix_retries", 5),
+                max_gate_fix_retries=cfg.get("max_gate_fix_retries", 2),
+            )
+            if cfg.get("type") == "simple":
+                track_types[tid] = "simple"
+
+        self.state = self.state.replace(
+            pipeline_order=tuple(order),
+            tracks=tracks,
+            track_types=track_types,
+            status="running",
+        )
 
         save_snapshot(self.change_root, self.state)
         self.event_log.append(EVT_PIPELINE_STARTED, {
@@ -118,6 +136,82 @@ class Orchestrator:
         # 返回第一个 dispatch
         action = next_pending(self.state)
         return self._action_to_dict(action)
+
+    def _detect_pipeline_config(self) -> tuple[list[str], dict[str, dict]]:
+        """读取 execution-manifest.yaml + project.yaml 获取 pipeline order 和 track 配置。
+
+        Returns:
+            (order, track_configs):
+                order: 有序的 track id 列表
+                track_configs: {track_id: {modules, max_fail_retries, max_fix_retries, max_gate_fix_retries, type}}
+        """
+        order: list[str] = []
+        manifests_used = False
+
+        # 先从 manifest 读 order
+        manifest_path = os.path.join(self.change_root, "execution-manifest.yaml")
+        if os.path.isfile(manifest_path):
+            try:
+                import yaml as _yaml
+                with open(manifest_path, encoding="utf-8") as f:
+                    manifest = _yaml.safe_load(f) or {}
+                for stage in manifest.get("stages", []):
+                    stage_name = stage.get("name", "")
+                    for track in stage.get("tracks", []):
+                        tid = track["id"] if isinstance(track, dict) else track
+                        qualified = f"{stage_name}.{tid}" if stage_name else tid
+                        order.append(qualified)
+                if "final_gate" in manifest:
+                    order.append(FINAL_GATE_TRACK)
+                if order:
+                    manifests_used = True
+            except Exception:
+                pass
+
+        # fallback: project.yaml
+        if not order:
+            config_path = os.path.join(bootstrap.PROJECT_ROOT, ".pg", "project.yaml")
+            if os.path.isfile(config_path):
+                try:
+                    import yaml as _yaml
+                    with open(config_path, encoding="utf-8") as f:
+                        config = _yaml.safe_load(f) or {}
+                    for stage in config.get("stages", []):
+                        stage_name = stage.get("name", "")
+                        for t in stage.get("tracks", []):
+                            qualified = f"{stage_name}.{t}" if stage_name else t
+                            order.append(qualified)
+                    if order:
+                        manifests_used = True
+                except Exception:
+                    pass
+
+        track_configs: dict[str, dict] = {}
+
+        # 从 project.yaml 读 track 级配置
+        config_path = os.path.join(bootstrap.PROJECT_ROOT, ".pg", "project.yaml")
+        if os.path.isfile(config_path):
+            try:
+                import yaml as _yaml
+                with open(config_path, encoding="utf-8") as f:
+                    config = _yaml.safe_load(f) or {}
+                tracks_cfg = config.get("tracks", {})
+                for tid in order:
+                    if tid == FINAL_GATE_TRACK:
+                        continue
+                    bare = tid.rsplit(".", 1)[-1]
+                    cfg = tracks_cfg.get(bare, {})
+                    track_configs[tid] = {
+                        "modules": cfg.get("modules", []),
+                        "max_fail_retries": cfg.get("max_fail_retries", 3),
+                        "max_fix_retries": cfg.get("max_fix_retries", 5),
+                        "max_gate_fix_retries": cfg.get("max_gate_fix_retries", 2),
+                        "type": cfg.get("type", "standard"),
+                    }
+            except Exception:
+                pass
+
+        return order, track_configs
 
     def _detect_pipeline_order(self) -> tuple[str, ...]:
         """从 execution-manifest.yaml 读取 pipeline order。
@@ -222,8 +316,22 @@ class Orchestrator:
         self.state = new_state
         save_snapshot(self.change_root, new_state)
 
+        # 同步 tasks.md checkbox（Item 2）
+        if status in ("completed", "pass"):
+            try:
+                from pipeline.tasks_md import mark_phase_completed
+                mark_phase_completed(self.change_root, track, phase)
+            except Exception:
+                pass
+
+        # 自动 git commit（Item 3）
+        auto_commit = self._auto_commit(status, track, phase)
+
         # 构建返回
         result = self._action_to_dict(action)
+
+        if auto_commit:
+            result["commit"] = auto_commit
 
         return result
 
@@ -250,21 +358,25 @@ class Orchestrator:
         }
 
     def _action_to_dict(self, action: PipelineAction) -> dict[str, Any]:
-        """把 PipelineAction 转为标准 action JSON。"""
+        """把 PipelineAction 转为标准 action JSON。
+
+        dispatch 路径通过 dispatch.build_action() 写入 dispatch_file，
+        final-gate 通过 dispatch.build_final_gate_action() 写入 dispatch_file。
+        """
         if action.kind == "dispatch":
-            result: dict[str, Any] = {
-                "action": "dispatch",
-                "item": action.track,
-                "sub": action.phase,
-                "agent": _agent_for_phase(action.phase) or action.agent,
-                "cycle": action.cycle,
-            }
+            is_final = action.track == FINAL_GATE_TRACK
+            if is_final:
+                result = build_final_gate_action(self.state, self.change_root)
+            else:
+                result = build_action(self.state, action, self.change_root)
+
             # 写 dispatch_started event
             self.event_log.append(EVT_DISPATCH_STARTED, {
                 "track": action.track,
                 "phase": action.phase,
                 "cycle": action.cycle,
-                "agent": result["agent"],
+                "agent": result.get("agent", ""),
+                "dispatch_file": result.get("dispatch_file", ""),
             })
             # 更新 state 的 current_track/current_phase
             self.state = self.state.replace(
@@ -275,14 +387,17 @@ class Orchestrator:
             return result
 
         if action.kind == "advance":
-            # advance → 自动调用 next()
             return self.next()
 
         if action.kind == "done":
             self.event_log.append(EVT_PIPELINE_COMPLETED, {"final_status": "completed"})
             self.state = self.state.replace(status="completed")
             save_snapshot(self.change_root, self.state)
-            return {"action": "done", "status": "completed"}
+            auto_commit = self._auto_commit("completed", "final-gate", "completed")
+            result = {"action": "done", "status": "completed"}
+            if auto_commit:
+                result["commit"] = auto_commit
+            return result
 
         if action.kind == "workflow_failed":
             reason = action.detail.get("reason", "unknown")
@@ -306,3 +421,35 @@ class Orchestrator:
             return self.next()
 
         return {"action": action.kind, **action.detail}
+
+    def _git(self, *args: str) -> subprocess.CompletedProcess:
+        """执行 git 命令（在项目根目录）。"""
+        return subprocess.run(
+            ["git", *args],
+            capture_output=True, text=True,
+            cwd=bootstrap.PROJECT_ROOT,
+        )
+
+    def _auto_commit(self, status: str, track: str, phase: str) -> dict[str, Any]:
+        """record 后自动 git commit（仅在 pipeline 运行时执行）。"""
+        porcelain = self._git("status", "--porcelain").stdout.strip()
+        if not porcelain:
+            return {
+                "attempted": True, "committed": False, "reason": "工作区干净，无可提交内容",
+            }
+        self._git("add", "-A")
+        msg = f"chore({self.change}): auto-record {track}:{phase} {status}"
+        r = self._git("commit", "-m", msg)
+        if r.returncode == 0:
+            sha = self._git("rev-parse", "HEAD").stdout.strip()
+            self.event_log.append(EVT_GIT_COMMIT, {
+                "sha": sha, "message": msg, "branch": f"feat/pg/{self.change}",
+            })
+            return {
+                "attempted": True, "committed": True, "sha": sha,
+                "message": msg, "reason": None,
+            }
+        return {
+            "attempted": True, "committed": False, "sha": None,
+            "message": msg, "reason": r.stderr.strip() or "commit failed",
+        }

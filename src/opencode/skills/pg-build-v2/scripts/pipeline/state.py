@@ -109,8 +109,11 @@ class TrackState:
     started_at: str | None = None
     completed_at: str | None = None
     modules: tuple[str, ...] = ()
+    max_fail_retries: int = 3
+    max_fix_retries: int = 5
+    max_gate_fix_retries: int = 2
     phases: dict[str, PhaseState] = field(default_factory=dict)
-    sub_pipelines: tuple[Any, ...] = ()  # SubPipeline (从 sub_pipeline.py 导入)
+    sub_pipelines: tuple[Any, ...] = ()  # SubPipeline
     accepted_gaps: tuple[dict[str, Any], ...] = ()
 
     @classmethod
@@ -128,6 +131,9 @@ class TrackState:
             "started_at": self.started_at,
             "completed_at": self.completed_at,
             "modules": list(self.modules),
+            "max_fail_retries": self.max_fail_retries,
+            "max_fix_retries": self.max_fix_retries,
+            "max_gate_fix_retries": self.max_gate_fix_retries,
             "phases": {k: v.to_dict() for k, v in self.phases.items()},
             "sub_pipelines": [sp.to_dict() for sp in self.sub_pipelines],
             "accepted_gaps": list(self.accepted_gaps),
@@ -149,6 +155,9 @@ class TrackState:
             started_at=d.get("started_at"),
             completed_at=d.get("completed_at"),
             modules=tuple(d.get("modules", ())),
+            max_fail_retries=d.get("max_fail_retries", 3),
+            max_fix_retries=d.get("max_fix_retries", 5),
+            max_gate_fix_retries=d.get("max_gate_fix_retries", 2),
             phases=phases,
             sub_pipelines=sub_pipelines,
             accepted_gaps=tuple(d.get("accepted_gaps", ())),
@@ -163,6 +172,9 @@ class TrackState:
             started_at=kwargs.get("started_at", self.started_at),
             completed_at=kwargs.get("completed_at", self.completed_at),
             modules=kwargs.get("modules", self.modules),
+            max_fail_retries=kwargs.get("max_fail_retries", self.max_fail_retries),
+            max_fix_retries=kwargs.get("max_fix_retries", self.max_fix_retries),
+            max_gate_fix_retries=kwargs.get("max_gate_fix_retries", self.max_gate_fix_retries),
             phases=kwargs.get("phases", self.phases),
             sub_pipelines=kwargs.get("sub_pipelines", self.sub_pipelines),
             accepted_gaps=kwargs.get("accepted_gaps", self.accepted_gaps),
@@ -179,8 +191,9 @@ class PipelineState:
     schema_version: str = "2026-06-30"
     change: str = ""
     pipeline_order: tuple[str, ...] = ()
+    track_types: dict[str, str] = field(default_factory=dict)
     tracks: dict[str, TrackState] = field(default_factory=dict)
-    current_sub_pipeline: Any | None = None  # SubPipeline (延迟导入避免循环)
+    current_sub_pipeline: Any | None = None  # SubPipeline
     init_committed: bool = False
     init_commit_sha: str | None = None
     feature_branch: str | None = None
@@ -194,6 +207,7 @@ class PipelineState:
             "schema_version": self.schema_version,
             "change": self.change,
             "pipeline_order": list(self.pipeline_order),
+            "track_types": dict(self.track_types),
             "tracks": {k: v.to_dict() for k, v in self.tracks.items()},
             "init_committed": self.init_committed,
             "init_commit_sha": self.init_commit_sha,
@@ -204,11 +218,9 @@ class PipelineState:
             "current_phase": self.current_phase,
         }
         if self.current_sub_pipeline is not None:
-            # SubPipeline 有 to_dict 方法
             if hasattr(self.current_sub_pipeline, "to_dict"):
                 out["current_sub_pipeline"] = self.current_sub_pipeline.to_dict()
             else:
-                # fallback: 直接序列化（使用 dict 格式）
                 out["current_sub_pipeline"] = {
                     "id": self.current_sub_pipeline.get("id", ""),
                     "parent_track": self.current_sub_pipeline.get("parent_track", ""),
@@ -231,6 +243,7 @@ class PipelineState:
             schema_version=d.get("schema_version", "2026-06-30"),
             change=d.get("change", ""),
             pipeline_order=tuple(d.get("pipeline_order", ())),
+            track_types=d.get("track_types", {}),
             tracks=tracks,
             current_sub_pipeline=current_sp,
             init_committed=d.get("init_committed", False),
@@ -247,6 +260,7 @@ class PipelineState:
             schema_version=kwargs.get("schema_version", self.schema_version),
             change=kwargs.get("change", self.change),
             pipeline_order=kwargs.get("pipeline_order", self.pipeline_order),
+            track_types=kwargs.get("track_types", self.track_types),
             tracks=kwargs.get("tracks", self.tracks),
             current_sub_pipeline=kwargs.get("current_sub_pipeline", self.current_sub_pipeline),
             init_committed=kwargs.get("init_committed", self.init_committed),

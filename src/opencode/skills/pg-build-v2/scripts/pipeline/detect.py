@@ -64,6 +64,15 @@ def next_pending(state: PipelineState) -> PipelineAction:
         if track is None:
             continue
 
+        # Simple track 直接路由到 "simple" phase（跳过 TDVG）
+        if state.track_types.get(track_id) == "simple":
+            return PipelineAction(
+                kind="dispatch",
+                track=track_id,
+                phase="simple",
+                cycle=1,
+            )
+
         # 确定当前 phase
         current_phase = state.current_phase if state.current_track == track_id else ""
         if current_phase:

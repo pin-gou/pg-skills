@@ -46,9 +46,13 @@ from pipeline.sub_pipeline import (
 # 常量
 # ============================================================
 
-MAX_FIX_CYCLES = 4
-DEFAULT_MAX_RETRIES = 3
-DEFAULT_GATE_FIX_RETRIES = 2
+MAX_FIX_CYCLES = 4  # fix 循环最大次数（verify escalate 几次后强制 gate）
+# 各 track 级重试限制从 TrackState 读取：
+#   max_fail_retries / max_fix_retries / max_gate_fix_retries
+# 默认值（TrackState 创建时使用）：
+#   max_fail_retries = 3
+#   max_fix_retries = 5
+#   max_gate_fix_retries = 2
 
 # Sub-agent 映射
 PHASE_AGENTS: dict[str, str] = {
@@ -251,7 +255,7 @@ def _handle_linear_phase(
         elif record.status == STATUS_FAILED:
             old = t.phases.get(phase, PhaseState())
             attempt = old.attempt + 1
-            max_retries = DEFAULT_MAX_RETRIES  # 后续可从 config 取
+            max_retries = t.max_fail_retries
             if attempt > max_retries:
                 return _fail_action(
                     track, phase,
@@ -331,9 +335,10 @@ def _handle_verify(
 
     elif record.status == STATUS_FAILED:
         attempt = verify_attempt(state, track) + 1
-        if attempt > DEFAULT_MAX_RETRIES:
+        max_retries = t.max_fail_retries if track in state.tracks else 3
+        if attempt > max_retries:
             return _fail_action(track, "verify",
-                                f"{track}:verify failed after {DEFAULT_MAX_RETRIES} attempts")
+                                f"{track}:verify failed after {max_retries} attempts")
         t = _update_phase(t, "verify", status="pending", attempt=attempt)
         new_state = state.replace(tracks={**state.tracks, track: t})
         return new_state, _dispatch_action(track, "verify", attempt=attempt)
@@ -375,9 +380,10 @@ def _handle_fix(
     elif record.status == STATUS_FAILED:
         # fix 失败 → 重试
         attempt = (t.phases.get(FIX_SUB, PhaseState()).attempt or 0) + 1
-        if attempt > DEFAULT_MAX_RETRIES:
+        max_retries = t.max_fix_retries if track in state.tracks else 5
+        if attempt > max_retries:
             return _fail_action(track, "fix",
-                                f"{track}:fix failed after {DEFAULT_MAX_RETRIES} attempts")
+                                f"{track}:fix failed after {max_retries} attempts")
         t = _update_phase(t, FIX_SUB, status="pending", attempt=attempt)
         new_state = state.replace(tracks={**state.tracks, track: t})
         return new_state, _dispatch_action(track, FIX_SUB, attempt=attempt)
@@ -414,9 +420,10 @@ def _handle_fix_gate(
 
     elif record.status == STATUS_FAILED:
         attempt = (t.phases.get(FIX_GATE_SUB, PhaseState()).attempt or 0) + 1
-        if attempt > DEFAULT_MAX_RETRIES:
+        max_retries = t.max_fix_retries if track in state.tracks else 5
+        if attempt > max_retries:
             return _fail_action(track, "fix-gate",
-                                f"{track}:fix-gate failed after {DEFAULT_MAX_RETRIES} attempts")
+                                f"{track}:fix-gate failed after {max_retries} attempts")
         t = _update_phase(t, FIX_GATE_SUB, status="pending", attempt=attempt)
         new_state = state.replace(tracks={**state.tracks, track: t})
         return new_state, _dispatch_action(track, FIX_GATE_SUB, attempt=attempt)
@@ -462,7 +469,7 @@ def _handle_gate(
         # gate fail → gate-fix 子 pipeline 或耗尽
         gate = t.phases.get("gate", PhaseState())
         gate_cycles = len(gate.gate_cycles)
-        max_gate = DEFAULT_GATE_FIX_RETRIES
+        max_gate = t.max_gate_fix_retries
 
         if gate_cycles >= max_gate:
             # 耗尽 → 接受 gap，track 完成

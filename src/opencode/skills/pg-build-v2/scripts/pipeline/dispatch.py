@@ -46,7 +46,7 @@ def build_ctx(
         "module_roots": [],
         "module_details": [],
         "review_level": "",
-        "max_fix_retries": 5,
+        "max_fix_retries": t.max_fix_retries,
         "fix_routing": "source",
         # stage
         "stage_name": track.rsplit(".", 1)[0] if "." in track else "dev",
@@ -72,8 +72,8 @@ def build_ctx(
         # fix-gate
         "gate_report_path": "",
         "gate_cycles": cycle,
-        "cycles_remaining": 2 - cycle,
-        "max_gate_fix_retries": 2,
+        "cycles_remaining": max(0, t.max_gate_fix_retries - cycle + 1),
+        "max_gate_fix_retries": t.max_gate_fix_retries,
         # simple
         "track_timeout": 1800,
         "track_on_failure": "workflow_failed",
