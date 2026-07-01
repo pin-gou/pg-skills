@@ -426,17 +426,21 @@ git push origin "$DEFAULT_BRANCH"
 ### Phase 4: 清理
 
 ```bash
-# 此时已在 Git.default_branch 分支上
 CURRENT_BRANCH=$(git branch --show-current)
 DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default_branch'])")
 
-# 提示删除 feature branch
+# 防御性收尾：无条件切回 default_branch
+# 确保即使 Phase 1 失败后编排者走了 feature branch fallback，最终 workspace 仍在 master
+git checkout "$DEFAULT_BRANCH"
+
+# 提示保留 feature branch 用于审计（后续手工清理）
 echo "Feature branch '$CURRENT_BRANCH' has been merged and committed to $DEFAULT_BRANCH"
-echo "To delete local branch: git branch -d $CURRENT_BRANCH"
-echo "To delete remote branch: git push origin --delete $CURRENT_BRANCH"
+echo "Feature branch 保留用于审计，后续手工清理时执行:"
+echo "  git branch -d $CURRENT_BRANCH"
+echo "  git push origin --delete $CURRENT_BRANCH"
 ```
 
-**注意：** Phase 4 不再需要切换分支或恢复 stash，因为整个流程都在 `Git.default_branch` 上执行。
+**注意：** Phase 4 无条件执行 `git checkout $DEFAULT_BRANCH` 作为防御性收尾。不再依赖"整个流程都在 default_branch 上"的假设——即使编排者在 Phase 1 失败后走了 feature branch fallback，Phase 4 也保证最终 workspace 回到 master。
 
 ---
 
