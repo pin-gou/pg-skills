@@ -12,7 +12,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from template_engine.renderer import render_dispatch, render_dispatch_file, _get_templates_dir
 from template_engine.manifest import read_manifest, get_pipeline_order_from_manifest, SUPPORTED_MANIFEST_VERSIONS
-from pipeline.dispatch import build_ctx, build_action, build_final_gate_action
+from pipeline.dispatch import build_ctx, build_action, build_final_gate_action, _set_project_root, _PROJECT_CONFIG_CACHE
 from pipeline.state import PipelineState, TrackState
 from pipeline.events import PipelineAction
 
@@ -162,6 +162,11 @@ class TestManifest(unittest.TestCase):
 class TestBuildCtx(unittest.TestCase):
     """dispatch 上下文构建测试。"""
 
+    def setUp(self):
+        # 清除项目配置缓存（避免跨测试污染）
+        _PROJECT_CONFIG_CACHE.clear()
+        _set_project_root("")
+
     def test_build_ctx_has_required_fields(self):
         state = PipelineState(
             change="my-change",
@@ -181,6 +186,75 @@ class TestBuildCtx(unittest.TestCase):
             with self.subTest(phase=phase):
                 ctx = build_ctx(state, "backend", phase)
                 self.assertIsNotNone(ctx)
+
+    def test_build_ctx_lazy_enrichment(self):
+        """旧快照（无富化字段）场景：build_ctx 惰性从 project.yaml 现场解析。"""
+        import os, tempfile, yaml
+
+        tmp = tempfile.mkdtemp()
+        pg_dir = os.path.join(tmp, ".pg")
+        os.makedirs(pg_dir)
+        project_config = {
+            "modules": {
+                "backend": {
+                    "root": "webvirt-backend",
+                    "language": "java",
+                    "build": "cd webvirt-backend && mvn clean install -DskipTests",
+                    "lint": "cd webvirt-backend && mvn checkstyle:check",
+                    "test": {"unit": "cd webvirt-backend && mvn test"},
+                    "review_level": "security",
+                },
+            },
+            "environments": {
+                "dev-local": {
+                    "roles": {
+                        "backend": {
+                            "instances": [
+                                {"name": "backend-1", "host": "localhost", "port": 9080},
+                            ],
+                        },
+                    },
+                },
+            },
+        }
+        with open(os.path.join(pg_dir, "project.yaml"), "w") as f:
+            yaml.dump(project_config, f)
+
+        # 清空缓存，设置 tmp 为 project root
+        _PROJECT_CONFIG_CACHE.clear()
+        _set_project_root(tmp)
+
+        # TrackState 没有富化字段（模拟旧快照）
+        state = PipelineState(
+            change="test-change",
+            pipeline_order=("dev.backend",),
+            tracks={
+                "dev.backend": TrackState.create(
+                    "dev.backend",
+                    modules=("backend", "agent-proto"),
+                ),
+            },
+            stage_env_map={"dev": "dev-local"},
+        )
+        ctx = build_ctx(state, "dev.backend", "test")
+
+        # 验证惰性解析结果
+        self.assertIn("webvirt-backend", ctx["module_roots"],
+                      "module_roots 应通过惰性解析填充")
+        self.assertIn("module: backend", ctx["module_details"],
+                      "module_details 应通过惰性解析填充")
+        self.assertIn("mvn test", ctx["test_commands"],
+                      "test_commands 应通过惰性解析填充")
+        self.assertIn("dev-local", ctx["env_name"],
+                      "env_name 应通过惰性解析填充")
+        self.assertIn("backend-1", str(ctx["env_instances"]),
+                      "env_instances 应通过惰性解析填充")
+        self.assertEqual(ctx["review_level"], "",
+                         "review_level 不在 tracks 段时默认为空")
+
+        # 清理缓存
+        _PROJECT_CONFIG_CACHE.clear()
+        _set_project_root("")
 
 
 class TestBuildAction(unittest.TestCase):

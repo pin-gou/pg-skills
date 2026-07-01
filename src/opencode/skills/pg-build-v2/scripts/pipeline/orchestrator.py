@@ -261,6 +261,9 @@ class Orchestrator:
                         "max_fix_retries": cfg.get("max_fix_retries", 5),
                         "max_gate_fix_retries": cfg.get("max_gate_fix_retries", 2),
                         "type": cfg.get("type", "standard"),
+                        "review_level": cfg.get("review_level", ""),
+                        "description": cfg.get("description", ""),
+                        "fix_routing": cfg.get("fix_routing", "source"),
                     }
             except Exception:
                 pass

@@ -9,6 +9,15 @@ from typing import Any
 
 from pipeline.events import PipelineAction
 from pipeline.state import PipelineState, TrackState, PhaseState
+from pipeline.config import (
+    load_project_config,
+    resolve_module_roots,
+    resolve_module_details,
+    resolve_test_commands,
+    resolve_env_instances,
+    resolve_hooks,
+)
+from pipeline.tasks_md import extract_section_content
 from template_engine.renderer import render_dispatch_file
 
 
@@ -25,6 +34,24 @@ PHASE_AGENTS: dict[str, str] = {
 FINAL_GATE_AGENT = "pg-build/gate"
 
 _SEQ_COUNTERS: dict[str, int] = {}
+_PROJECT_CONFIG_CACHE: dict[str, Any | None] = {}
+_PROJECT_ROOT_CACHE: str = ""
+
+
+def _set_project_root(root: str) -> None:
+    global _PROJECT_ROOT_CACHE
+    _PROJECT_ROOT_CACHE = root
+
+
+def _load_project_config_cached() -> dict[str, Any]:
+    """从 project.yaml 读取配置，模块级缓存避免重复 I/O。"""
+    if "config" in _PROJECT_CONFIG_CACHE:
+        return _PROJECT_CONFIG_CACHE["config"] or {}
+    if _PROJECT_ROOT_CACHE:
+        cfg = load_project_config(_PROJECT_ROOT_CACHE)
+        _PROJECT_CONFIG_CACHE["config"] = cfg
+        return cfg or {}
+    return {}
 
 
 def _allocate_seq(change_root: str) -> int:
@@ -61,17 +88,65 @@ def build_ctx(
     track: str,
     phase: str,
     cycle: int = 1,
+    change_root: str = "",
+    project_root: str = "",
 ) -> dict[str, Any]:
     """构建 dispatch 上下文 dict。
 
-    从 PipelineState 的 TrackState 中提取 sub-agent 所需的配置字段，
-    优先使用 Step 4 富化后的字段，fallback 到硬编码默认值。
+    从 PipelineState 的 TrackState 中提取 sub-agent 所需的配置字段。
+    如果 TrackState 来自旧快照（富化字段为空），则惰性从 project.yaml
+    和 tasks.md 现场解析——确保即使绕过 _first_next() 也能拿到正确内容。
+
+    Args:
+        project_root: 项目根目录（用于读取 project.yaml），
+                      优先于模块级缓存。
     """
     t = state.tracks.get(track, TrackState.create(track))
     ph = t.phases.get(phase, PhaseState())
 
+    # === 惰性富化：TrackState 来自旧快照时现场解析 ===
+    needs_lazy = not (t.module_roots or t.module_details or t.test_commands)
+    if needs_lazy:
+        if project_root:
+            _set_project_root(project_root)
+        pc = _load_project_config_cached()
+        module_names = list(t.modules)
+        stage_name = track.rsplit(".", 1)[0] if "." in track else "dev"
+        env_name = state.stage_env_map.get(stage_name, "dev-local")
+
+        if pc:
+            lazy_module_roots = resolve_module_roots(pc, module_names) or "[]"
+            lazy_module_details = resolve_module_details(pc, module_names) or ""
+            lazy_test_commands = resolve_test_commands(pc, module_names) or ""
+            lazy_env_instances = resolve_env_instances(pc, env_name) or ""
+            lazy_hooks_yaml = resolve_hooks(pc, env_name) or ""
+            lazy_env_name = env_name
+            lazy_review_level = ""
+        else:
+            lazy_module_roots = "[]"
+            lazy_module_details = ""
+            lazy_test_commands = ""
+            lazy_env_instances = ""
+            lazy_hooks_yaml = ""
+            lazy_env_name = "dev-local"
+            lazy_review_level = ""
+    else:
+        lazy_module_roots = t.module_roots or "[]"
+        lazy_module_details = t.module_details or ""
+        lazy_test_commands = t.test_commands or ""
+        lazy_env_instances = t.env_instances_yaml or ""
+        lazy_hooks_yaml = t.hooks_yaml or ""
+        lazy_env_name = t.env_name or "dev-local"
+        lazy_review_level = t.review_level or ""
+
+    # === 惰性 tasks：tasks.md 内容为空时现场读取 ===
     tasks_preformatted = t.tasks_by_phase.get(phase, "")
+    if not tasks_preformatted and change_root:
+        tasks_preformatted = extract_section_content(change_root, track, phase)
+
     tasks_validation = t.tasks_by_phase.get("verify", "")
+    if not tasks_validation and change_root:
+        tasks_validation = extract_section_content(change_root, track, "verify")
 
     ctx: dict[str, Any] = {
         "_change": state.change,
@@ -79,9 +154,9 @@ def build_ctx(
         "bare": t.bare,
         "label": t.label or track,
         "modules": list(t.modules),
-        "module_roots": t.module_roots or "[]",
-        "module_details": t.module_details or "",
-        "review_level": t.review_level or "",
+        "module_roots": lazy_module_roots,
+        "module_details": lazy_module_details,
+        "review_level": lazy_review_level,
         "max_fix_retries": t.max_fix_retries,
         "fix_routing": "source",
         # stage
@@ -89,11 +164,11 @@ def build_ctx(
         "test_key": "unit",
         "gate": "all_pass",
         "env_required": True,
-        "env_name": t.env_name or "dev-local",
+        "env_name": lazy_env_name,
         "prepare_status": t.prepare_status or "ok",
         "prepare_log_path": t.prepare_log_path or "",
-        "test_commands": t.test_commands or "",
-        "env_instances": t.env_instances_yaml or "",
+        "test_commands": lazy_test_commands,
+        "env_instances": lazy_env_instances,
         # phase
         "phase": phase,
         "cycle": cycle,
@@ -147,8 +222,11 @@ def build_action(
     cycle = action.cycle
     agent = PHASE_AGENTS.get(phase, action.agent)
 
+    # 计算 project root（用于惰性富化时的 project.yaml 读取）
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(change_root)))
+
     # 构建上下文
-    ctx = build_ctx(state, track, phase, cycle)
+    ctx = build_ctx(state, track, phase, cycle, change_root=change_root, project_root=project_root)
 
     # 分配全局 seq
     dispatch_seq = _allocate_seq(change_root)
@@ -188,7 +266,8 @@ def build_final_gate_action(
     change_root: str,
 ) -> dict[str, Any]:
     """构建 final-gate dispatch action。"""
-    ctx = build_ctx(state, "final-gate", "gate")
+    project_root = os.path.dirname(os.path.dirname(os.path.dirname(change_root)))
+    ctx = build_ctx(state, "final-gate", "gate", change_root=change_root, project_root=project_root)
 
     # 分配全局 seq
     dispatch_seq = _allocate_seq(change_root)
