@@ -174,8 +174,9 @@ def _tab_menu_loop(
     current = 0
 
     with Term() as t:
+        term_width = t.width
         tab_bar = render_tab_bar(tab_names, current_tab, tab_keys) if has_tabs else ""
-        lines = render_menu(title, items, current, back_option)
+        lines = render_menu(title, items, current, back_option, term_width=term_width)
         all_lines = (lines[:3] + [tab_bar, ""] + lines[3:]) if has_tabs else lines
         t.write("\n".join(all_lines) + "\n")
         t.flush()
@@ -203,7 +204,7 @@ def _tab_menu_loop(
                         if has_tabs
                         else ""
                     )
-                    lines = render_menu(title, items, current, back_option)
+                    lines = render_menu(title, items, current, back_option, term_width=term_width)
                     all_lines = (lines[:3] + [tab_bar, ""] + lines[3:]) if has_tabs else lines
                     t.write("\n".join(all_lines) + "\n")
                     t.flush()
@@ -235,7 +236,7 @@ def _tab_menu_loop(
                     if has_tabs
                     else ""
                 )
-                lines = render_menu(title, items, current, back_option)
+                lines = render_menu(title, items, current, back_option, term_width=term_width)
                 all_lines = (lines[:3] + [tab_bar, ""] + lines[3:]) if has_tabs else lines
                 t.write("\n".join(all_lines) + "\n")
                 t.flush()

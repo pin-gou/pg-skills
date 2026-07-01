@@ -31,9 +31,9 @@ def render_tab_bar(
     return f" {sep.join(parts)} "
 
 
-def render_menu(title: str, items: list, current: int, back_option: bool) -> list[str]:
-    width = 60
-    lines = [f"\n{_c('90;100', '─' * width)}", f"  {title}", ""]
+def render_menu(title: str, items: list, current: int, back_option: bool, term_width: int = 80) -> list[str]:
+    sep_width = max(20, min(60, term_width - 4))
+    lines = [f"\n{_c('90;100', '─' * sep_width)}", f"  {title}", ""]
     sel_idx = 0
     for item in items:
         if isinstance(item, str):
@@ -42,9 +42,21 @@ def render_menu(title: str, items: list, current: int, back_option: bool) -> lis
         label, desc = item
         desc_str = f" — {desc}" if desc else ""
         marker = _c("1;34", ">") if sel_idx == current else " "
-        lines.append(
-            f" {marker} {sel_idx + 1:2d}) {_c('1;36', label)}{_c('2;37', desc_str) if desc else ''}"
-        )
+
+        plain = f" {marker} {sel_idx + 1:2d}) {label}{desc_str}"
+        max_visible = term_width - 3
+        if len(plain) > max_visible:
+            avail = max_visible - 7 - len(label)
+            desc_str = f" — {desc[:avail - 6]}..." if avail >= 6 else ""
+
+        if desc_str:
+            lines.append(
+                f" {marker} {sel_idx + 1:2d}) {_c('1;36', label)}{_c('2;37', desc_str)}"
+            )
+        else:
+            lines.append(
+                f" {marker} {sel_idx + 1:2d}) {_c('1;36', label)}"
+            )
         sel_idx += 1
     if back_option:
         lines.append(f"  --------------------")
