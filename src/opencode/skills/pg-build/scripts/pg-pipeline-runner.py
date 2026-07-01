@@ -582,7 +582,7 @@ ALLOWED_STATUS = {
     "fix-gate": {"completed", "failed"},
     "gate": {"pass", "fail"},
     "simple": {"completed", "failed"},
-    "final-gate": {"pass", "fail"},
+    "final-gate": {"pass", "fail", "completed", "failed"},
     # Env-hook phase items (prepare_env / clean_env) leave current.sub=None
     # because they are executed inline by _execute_phase rather than
     # dispatched to a sub-agent. The "phase" key is consulted only when
@@ -1067,6 +1067,14 @@ _PROMPT_BLOCK_TEST = """\
 TDD 红 Phase：本阶段只写测试代码，绝不创建或修改任何生产代码。
 运行 `{{context.stage.test_commands.0}}` 后预期结果是编译失败
 （找不到符号/类/方法/模块）。任何测试通过都视为 TDD_VIOLATION。
+
+### 自检清单（新增）
+
+在提交 summary 之前，**必须**对每个新测试 case 做以下自检：
+
+1. **输入-断言一致性**：列出所有 `entity.setXxx(N)` 的值与所有 `assertXxx(expected)` 的 expected 值，核对两者是否逻辑自洽（例如：`setVcpus(2)` 但断言 `cpuTopology` 包含 `"= 4 vCPUs"` → 不自洽）
+2. **派生函数语义校验**：当断言涉及"派生/计算"字段（如 `cpuTopology` 由 sockets×cores×threads 计算而得），确认输入字段值是否会被该派生函数正确消费
+3. **SKIP 标记**：发现自检失败 → **不要**在 `outputs` 中标注 task 完成，直接返回 status: FAILED + issue_summary，让编排器调度修复
 """
 
 _PROMPT_BLOCK_DEV = """\

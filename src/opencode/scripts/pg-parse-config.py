@@ -504,7 +504,7 @@ def _parse_tasks_md_track_ids(tasks_md_path):
             m = TRACK_HEADING_RE.match(line)
             if not m:
                 continue
-            tid = m.group(1)
+            tid = m.group(1).split(":", 1)[0]
             if tid in seen:
                 continue
             seen.add(tid)

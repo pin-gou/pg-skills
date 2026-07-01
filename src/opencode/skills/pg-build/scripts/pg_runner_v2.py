@@ -66,7 +66,7 @@ ALLOWED_STATUS = {
     "fix-gate":  {"completed", "failed"},
     "gate":      {"pass", "fail"},
     "simple":    {"completed", "failed"},
-    "final-gate": {"pass", "fail"},
+    "final-gate": {"pass", "fail", "completed", "failed"},
 }
 
 
