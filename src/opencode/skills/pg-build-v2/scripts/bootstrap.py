@@ -32,10 +32,14 @@ def _now_iso() -> str:
 
 class EnvHookError(Exception):
     """prepare_env 执行失败时抛出。"""
-    def __init__(self, phase_name: str, log_path: str, exit_code: int):
+    def __init__(self, phase_name: str, log_path: str, exit_code: int,
+                 error_category: str = "", error_message: str = "", error_hint: str = ""):
         self.phase_name = phase_name
         self.log_path = log_path
         self.exit_code = exit_code
+        self.error_category = error_category
+        self.error_message = error_message
+        self.error_hint = error_hint
         super().__init__(f"env-hook {phase_name} failed (exit_code={exit_code}, log={log_path})")
 
 
@@ -233,14 +237,32 @@ def execute_env_hook_inline(change: str, phase_name: str = "prepare_env") -> dic
     except Exception as e:
         return {"success": False, "skipped": False, "error": f"load_config failed: {e}"}
 
-    # 找第一个有 environment.required=true 的 stage
+    # 从 execution-manifest.yaml 读取 env 名（manifest 的 stage.environment 是精确值）
     env_name = None
     stage_name = None
-    for s in config.get("stages") or []:
-        if s.get("tracks") and (s.get("environment") or {}).get("required", False):
-            stage_name = s.get("name")
-            env_name = s.get("environment", {}).get("name")
-            break
+    manifest_path = os.path.join(CHANGES_DIR, change, "execution-manifest.yaml")
+    if os.path.isfile(manifest_path):
+        try:
+            import yaml as _yaml2
+            with open(manifest_path, encoding="utf-8") as f:
+                manifest = _yaml2.safe_load(f) or {}
+            for s in manifest.get("stages", []):
+                env = s.get("environment")
+                if env and s.get("tracks"):
+                    stage_name = s.get("name", "")
+                    env_name = env if isinstance(env, str) else env.get("name", "")
+                    if env_name:
+                        break
+        except Exception:
+            pass
+
+    # fallback: 从 project.yaml stages 读取 env 名
+    if not env_name:
+        for s in config.get("stages") or []:
+            if s.get("tracks") and (s.get("environment") or {}).get("required", False):
+                stage_name = s.get("name")
+                env_name = s.get("environment", {}).get("name")
+                break
 
     if not env_name:
         return {"success": True, "skipped": True}
@@ -281,6 +303,23 @@ def execute_env_hook_inline(change: str, phase_name: str = "prepare_env") -> dic
         CHANGES_DIR, change, APPLY_DIR,
         f"{phase_name}-{_now_iso().replace(':', '-')}.log"
     )
+    result_file = os.path.join(
+        CHANGES_DIR, change, APPLY_DIR,
+        f"{phase_name}-result.json"
+    )
+    hook_log_dir = os.path.join(CHANGES_DIR, change, APPLY_DIR, "logs")
+
+    # 构建 hooks 协议环境变量（与 pg-run-hook.py 的 build_env() 一致）
+    _env = os.environ.copy()
+    _env.setdefault("PG_PROJECT_ROOT", PROJECT_ROOT)
+    _env.setdefault("PG_SKILLS_PATH", os.path.join(PROJECT_ROOT, ".pg", "skills"))
+    _env.setdefault("PG_RUN_CALLER", "pg-build-v2")
+    _env["PG_ENV"] = env_name
+    _env["PG_STAGE"] = stage_name or ""
+    _env["PG_HOOK_TYPE"] = phase_name
+    _env["PG_HOOK_LOG_DIR"] = hook_log_dir
+    _env["PG_LOG_FILE"] = log_path
+    _env["PG_RESULT_FILE"] = result_file
 
     # 执行
     timeout = action.get("timeout_seconds") or 600
@@ -290,7 +329,8 @@ def execute_env_hook_inline(change: str, phase_name: str = "prepare_env") -> dic
             cmd, shell=True,
             stdout=open(log_path, "w"),
             stderr=subprocess.STDOUT,
-            timeout=timeout,
+            timeout=timeout, env=_env,
+            cwd=PROJECT_ROOT,
         )
         exit_code = proc.returncode
     except subprocess.TimeoutExpired:
@@ -303,7 +343,7 @@ def execute_env_hook_inline(change: str, phase_name: str = "prepare_env") -> dic
             f.write(f"\nEXCEPTION: {e}\n")
 
     success = (exit_code == 0)
-    return {
+    result: dict[str, Any] = {
         "success": success,
         "skipped": False,
         "log_path": log_path,
@@ -311,7 +351,25 @@ def execute_env_hook_inline(change: str, phase_name: str = "prepare_env") -> dic
         "env_name": env_name,
         "phase_item": f"{stage_name}.{phase_name}",
         "error": None if success else f"exit_code={exit_code}, log={log_path}",
+        "hook_result": None,
     }
+
+    # 读取 hook 写入的 result.json（hooks 协议要求）
+    if os.path.isfile(result_file):
+        try:
+            with open(result_file, encoding="utf-8") as f:
+                hook_result = json.load(f)
+            result["hook_result"] = hook_result
+            if not success and hook_result.get("error"):
+                err = hook_result["error"]
+                result["error"] = json.dumps(err, ensure_ascii=False)
+                result["error_category"] = err.get("category", "unknown")
+                result["error_message"] = err.get("message", "")
+                result["error_hint"] = err.get("hint", "")
+        except Exception as e:
+            result["hook_result_error"] = str(e)
+
+    return result
 
 
 # ============================================================
@@ -398,11 +456,17 @@ def run_bootstrap(
                 _log("prepare_env_completed", {
                     "success": False, "exit_code": env_result.get("exit_code"),
                     "log_path": env_result.get("log_path"),
+                    "error_category": env_result.get("error_category", "unknown"),
+                    "error_message": env_result.get("error_message", ""),
+                    "error_hint": env_result.get("error_hint", ""),
                 })
                 raise EnvHookError(
                     phase_name="prepare_env",
                     log_path=env_result.get("log_path") or "",
                     exit_code=env_result.get("exit_code") or -1,
+                    error_category=env_result.get("error_category", "unknown"),
+                    error_message=env_result.get("error_message", ""),
+                    error_hint=env_result.get("error_hint", ""),
                 )
         else:
             _log("prepare_env_completed", {

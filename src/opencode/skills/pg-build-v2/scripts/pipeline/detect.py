@@ -56,6 +56,55 @@ def next_pending(state: PipelineState) -> PipelineAction:
         return PipelineAction(kind="bootstrap")
 
     # 走 pipeline_order
+    # 先找第一个未完成的 track，确定它所属的 stage
+    first_pending_track = None
+    for track_id in state.pipeline_order:
+        if state.is_track_completed(track_id):
+            continue
+        first_pending_track = track_id
+        break
+
+    if first_pending_track is None:
+        # 所有 track 完成 → final-gate
+        return PipelineAction(
+            kind="dispatch",
+            track=FINAL_GATE_TRACK,
+            phase="gate",
+            agent="pg-build/gate",
+        )
+
+    # 如果 stage_order 为空（向后兼容：无 stage 元数据的旧 state），跳过 stage 边界检测
+    if state.stage_order:
+        next_stage = PipelineState.extract_stage(first_pending_track)
+
+        # 检测 stage 边界：需要 clean 当前 stage 的环境
+        if state.current_stage and state.current_stage != next_stage:
+            if state.current_stage in state.stage_prepared:
+                return PipelineAction(
+                    kind="env_switch",
+                    track=first_pending_track,
+                    phase="clean_env",
+                    detail={
+                        "stage": state.current_stage,
+                        "env_name": state.stage_env_map.get(state.current_stage, ""),
+                        "next_stage": next_stage,
+                        "next_env_name": state.stage_env_map.get(next_stage, ""),
+                    },
+                )
+
+        # 检测 stage 边界：需要 prepare 新 stage 的环境
+        if next_stage and next_stage not in state.stage_prepared:
+            return PipelineAction(
+                kind="env_switch",
+                track=first_pending_track,
+                phase="prepare_env",
+                detail={
+                    "stage": next_stage,
+                    "env_name": state.stage_env_map.get(next_stage, ""),
+                },
+            )
+
+    # 正常 track 内的 dispatch 逻辑
     for track_id in state.pipeline_order:
         if state.is_track_completed(track_id):
             continue

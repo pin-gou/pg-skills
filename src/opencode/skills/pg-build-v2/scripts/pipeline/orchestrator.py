@@ -23,6 +23,8 @@ from pipeline.events import (
     EVT_WORKFLOW_FAILED,
     EVT_FIX_CYCLE_STARTED,
     EVT_GIT_COMMIT,
+    EVT_PREPARE_ENV_COMPLETED,
+    EVT_CLEAN_ENV_COMPLETED,
 )
 from pipeline.reducer import reduce_state
 from pipeline.detect import next_pending
@@ -96,14 +98,18 @@ class Orchestrator:
                 "exit_code": e.exit_code,
                 "fatal": True,
                 "reason": f"env-hook {e.phase_name} failed (exit_code={e.exit_code})",
+                "error_category": e.error_category,
+                "error_message": e.error_message,
+                "error_hint": e.error_hint,
             }
 
         # 标记 init_committed
         if boot_result.get("init_commit") and boot_result["init_commit"].get("committed"):
             self.state = self.state.replace(init_committed=True)
 
-        # 找 pipeline_order + track 配置
+        # 找 pipeline_order + track 配置 + stage 配置
         order, track_configs = self._detect_pipeline_config()
+        stage_order, stage_env_map = self._detect_stage_config()
         tracks: dict[str, TrackState] = {}
         track_types: dict[str, str] = {}
         for tid in order:
@@ -120,12 +126,24 @@ class Orchestrator:
             if cfg.get("type") == "simple":
                 track_types[tid] = "simple"
 
+        # 确定当前 stage
+        first_stage = PipelineState.extract_stage(order[0]) if order else ""
+
         self.state = self.state.replace(
             pipeline_order=tuple(order),
             tracks=tracks,
             track_types=track_types,
+            stage_order=tuple(stage_order),
+            stage_env_map=stage_env_map,
+            current_stage=first_stage,
             status="running",
         )
+
+        # 标记第一个 stage 为已 prepared（由 bootstrap 完成）
+        if first_stage:
+            self.state = self.state.replace(
+                stage_prepared={first_stage},
+            )
 
         save_snapshot(self.change_root, self.state)
         self.event_log.append(EVT_PIPELINE_STARTED, {
@@ -212,6 +230,43 @@ class Orchestrator:
                 pass
 
         return order, track_configs
+
+    def _detect_stage_config(self) -> tuple[list[str], dict[str, str]]:
+        """从 execution-manifest.yaml 读取 stage 顺序和环境映射。
+
+        Returns:
+            (stage_order, stage_env_map):
+                stage_order: 有序的 stage 名称列表
+                stage_env_map: {stage_name: env_name}
+        """
+        stage_order: list[str] = []
+        stage_env_map: dict[str, str] = {}
+
+        manifest_path = os.path.join(self.change_root, "execution-manifest.yaml")
+        if os.path.isfile(manifest_path):
+            try:
+                import yaml as _yaml
+                with open(manifest_path, encoding="utf-8") as f:
+                    manifest = _yaml.safe_load(f) or {}
+                for stage in manifest.get("stages", []):
+                    name = stage.get("name", "")
+                    if not name:
+                        continue
+                    stage_order.append(name)
+                    env = stage.get("environment", "")
+                    if isinstance(env, str):
+                        stage_env_map[name] = env
+                    elif isinstance(env, dict):
+                        stage_env_map[name] = env.get("name", "dev-local")
+                    else:
+                        stage_env_map[name] = "dev-local"
+            except Exception:
+                pass
+
+        if not stage_order:
+            stage_order.append("dev")
+
+        return stage_order, stage_env_map
 
     def _detect_pipeline_order(self) -> tuple[str, ...]:
         """从 execution-manifest.yaml 读取 pipeline order。
@@ -420,7 +475,64 @@ class Orchestrator:
         if action.kind == "noop":
             return self.next()
 
+        if action.kind == "env_switch":
+            return self._handle_env_switch(action)
+
         return {"action": action.kind, **action.detail}
+
+    def _handle_env_switch(self, action: PipelineAction) -> dict[str, Any]:
+        """处理 env_switch action：执行 prepare_env 或 clean_env 脚本。"""
+        phase = action.phase
+        env_name = action.detail.get("env_name", "")
+        stage = action.detail.get("stage", "")
+
+        event_type = EVT_PREPARE_ENV_COMPLETED if phase == "prepare_env" else EVT_CLEAN_ENV_COMPLETED
+
+        # 执行 env hook
+        try:
+            env_result = bootstrap.execute_env_hook_inline(self.change, phase)
+        except Exception as e:
+            env_result = {"success": False, "error": str(e)}
+
+        self.event_log.append(event_type, {
+            "success": env_result.get("success", False),
+            "skipped": env_result.get("skipped", False),
+            "exit_code": env_result.get("exit_code"),
+            "log_path": env_result.get("log_path"),
+            "env_name": env_name,
+            "stage": stage,
+        })
+
+        if not env_result.get("success"):
+            if not env_result.get("skipped"):
+                return {
+                    "action": "env_hook_failed",
+                    "phase": phase,
+                    "log_path": env_result.get("log_path", ""),
+                    "exit_code": env_result.get("exit_code", -1),
+                    "fatal": True,
+                    "reason": f"env-hook {phase} failed (exit_code={env_result.get('exit_code', -1)}, env={env_name})",
+                    "error_category": env_result.get("error_category", "unknown"),
+                    "error_message": env_result.get("error_message", ""),
+                    "error_hint": env_result.get("error_hint", ""),
+                }
+
+        # 更新 stage_prepared 状态
+        new_prepared = set(self.state.stage_prepared)
+        if phase == "prepare_env":
+            new_prepared.add(stage)
+            self.state = self.state.replace(
+                current_stage=stage,
+                stage_prepared=new_prepared,
+            )
+        elif phase == "clean_env":
+            new_prepared.discard(stage)
+            self.state = self.state.replace(stage_prepared=new_prepared)
+
+        save_snapshot(self.change_root, self.state)
+
+        # 继续推进 pipeline（返回下一个 action）
+        return self.next()
 
     def _git(self, *args: str) -> subprocess.CompletedProcess:
         """执行 git 命令（在项目根目录）。"""

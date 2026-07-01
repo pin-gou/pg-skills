@@ -88,6 +88,19 @@ def append_event(change_root: str, event: dict[str, Any]) -> None:
         lines.append(f"### {ts} - PREPARE_ENV {label}\n")
         if data.get("log_path"):
             lines.append(f"**日志**: {data['log_path']}\n")
+        if data.get("env_name"):
+            lines.append(f"**环境**: {data['env_name']}\n")
+        lines.append("\n")
+
+    elif event_type == "clean_env_completed":
+        ok = data.get("success", False)
+        skipped = data.get("skipped", False)
+        label = "SKIPPED" if skipped else ("OK" if ok else "FAILED")
+        lines.append(f"### {ts} - CLEAN_ENV {label}\n")
+        if data.get("log_path"):
+            lines.append(f"**日志**: {data['log_path']}\n")
+        if data.get("env_name"):
+            lines.append(f"**环境**: {data['env_name']}\n")
         lines.append("\n")
 
     elif event_type == "fix_cycle_started":

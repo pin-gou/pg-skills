@@ -201,6 +201,11 @@ class PipelineState:
     failed_reason: str | None = None
     current_track: str = ""
     current_phase: str = ""
+    # stage 生命周期管理
+    stage_order: tuple[str, ...] = ()               # ["dev", "integration"]
+    stage_env_map: dict[str, str] = field(default_factory=dict)  # {"dev": "dev-local", "integration": "dev-3tier"}
+    current_stage: str = ""
+    stage_prepared: set[str] = field(default_factory=set)        # 已 prepare 的 stage 集合
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -216,6 +221,10 @@ class PipelineState:
             "failed_reason": self.failed_reason,
             "current_track": self.current_track,
             "current_phase": self.current_phase,
+            "stage_order": list(self.stage_order),
+            "stage_env_map": dict(self.stage_env_map),
+            "current_stage": self.current_stage,
+            "stage_prepared": list(self.stage_prepared),
         }
         if self.current_sub_pipeline is not None:
             if hasattr(self.current_sub_pipeline, "to_dict"):
@@ -253,6 +262,10 @@ class PipelineState:
             failed_reason=d.get("failed_reason"),
             current_track=d.get("current_track", ""),
             current_phase=d.get("current_phase", ""),
+            stage_order=tuple(d.get("stage_order", ())),
+            stage_env_map=d.get("stage_env_map", {}),
+            current_stage=d.get("current_stage", ""),
+            stage_prepared=set(d.get("stage_prepared", [])),
         )
 
     def replace(self, **kwargs: Any) -> "PipelineState":
@@ -270,6 +283,10 @@ class PipelineState:
             failed_reason=kwargs.get("failed_reason", self.failed_reason),
             current_track=kwargs.get("current_track", self.current_track),
             current_phase=kwargs.get("current_phase", self.current_phase),
+            stage_order=kwargs.get("stage_order", self.stage_order),
+            stage_env_map=kwargs.get("stage_env_map", self.stage_env_map),
+            current_stage=kwargs.get("current_stage", self.current_stage),
+            stage_prepared=kwargs.get("stage_prepared", self.stage_prepared),
         )
 
     def is_track_completed(self, track_id: str) -> bool:
@@ -280,3 +297,9 @@ class PipelineState:
         if not self.pipeline_order:
             return False
         return all(self.is_track_completed(t) for t in self.pipeline_order)
+
+    @staticmethod
+    def extract_stage(qualified_track: str) -> str:
+        """从 qualified track id（如 dev.backend）中提取 stage 名。"""
+        parts = qualified_track.rsplit(".", 1)
+        return parts[0] if len(parts) > 1 else ""

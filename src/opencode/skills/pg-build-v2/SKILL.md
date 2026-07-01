@@ -65,6 +65,105 @@ $RUNNER progress <change>
 
 ---
 
+## 编排器执行协议
+
+### 主循环
+
+编排器（调用 SKILL 的 LLM）通过调用 runner CLI 实现 pipeline 推进，每一步都必须遵守以下协议：
+
+```
+循环:
+  1. 调 `next <change>` → 检查 action 字段
+  2. switch(action):
+       "env_hook_failed" → 环境准备失败: 查看 log_path, 修复后重试
+       "env_switch"      → orchestrator 自动执行 clean_env/prepare_env, 回步骤 1
+       "dispatch"        → 派遣 sub-agent (见下方协议)
+       "advance"         → 回步骤 1 (调 next)
+       "done"            → pipeline 完成, 终止
+       "workflow_failed" → pipeline 失败, 终止
+```
+
+### 环境准备验证
+
+- `next` 首次调用时 runner 自动执行 bootstrap（含 prepare_env hook）
+- bootstrap 步骤 5 `execute_env_hook_inline` 优先从 change 的 `execution-manifest.yaml` 读取 `stage.environment` 字段确定环境名，fallback 到 `project.yaml` stages 的 `environment.name`
+- 若 bootstrap 返回 `env_hook_failed`：环境准备失败，编排器必须终止循环并提示用户修复环境
+- 若返回 `dispatch`：环境已就绪（或跳过），编排器可正常派遣 sub-agent
+
+### 多 Stage 环境切换
+
+当 pipeline 包含多个 stage 且 stage 间使用不同环境时，runner 自动检测 stage 边界：
+
+```
+pipeline_order = ["dev.backend", "dev.frontend", "integration.backend"]
+                         ↑ stage 边界 ↑
+```
+
+`detect.py:next_pending()` 返回 `env_switch` action，orchestrator 自动执行：
+
+1. **clean_env** — 当前 stage 完成后，清理其环境
+2. **prepare_env** — 下一个 stage 开始前，准备其环境
+
+编排器无需手动处理 `env_switch` action，orchestrator 自动执行 hook 脚本并继续推进。
+若 env_switch 失败，返回 `env_hook_failed`（与 bootstrap 同一错误处理路径）。
+
+### Dispatch 派遣协议（重要）
+
+runner 返回 dispatch action 时，携带字段：
+
+```json
+{
+  "action": "dispatch",
+  "item": "dev.backend",
+  "sub": "test",
+  "agent": "pg-build/test",
+  "dispatch_file": ".pg/changes/<change>/2-build/dev.backend-test-dispatch.md"
+}
+```
+
+**编排器必须遵守以下规则**：
+
+1. **绝不读取 dispatch_file 内容进行加工**。runner 的模板引擎已生成完整提示词，编排器任何二次加工（摘要、重写、翻译、合并上下文）都会引入 LLM 间差异和内容漂移。
+2. **只告诉 sub-agent dispatch 文件路径**，让 sub-agent 自己读取。
+3. **正确用法**：
+   ```
+   task(prompt="你的任务指令在 {dispatch_file} 中，请读取该文件并严格按指示执行。
+              完成后返回 { summary, outputs, tasks_updated, status }")
+   ```
+4. **错误用法（已禁止）**：
+   ```
+   task(prompt="...我读了文件内容后为你总结如下...请做XYZ...")  ← 禁止
+   ```
+
+Dispatch 文件路径始终是 `dispatch_file` 字段的值（绝对值或相对于项目根）。
+
+### Record 协议
+
+sub-agent 完成后，编排器调 `record` 记录结果：
+
+```bash
+RUNNER="python3 .opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py"
+$RUNNER record <change> <status> [report_path] [summary] [outputs] [issues]
+```
+
+- `<status>` 必须从 Record 状态守卫表选择（见下文）
+- `[report_path]`：sub-agent 输出的验证/审查报告路径
+- `[summary]`：一句话摘要
+- `[outputs]`：产物文件列表（逗号分隔）
+- `[issues]`：问题列表（逗号分隔，仅 gate 提交 gap 时用）
+
+Record 完成后 runner 自动执行 `next` 推进 pipeline，返回下一步 action。
+编排器回归到步骤 1。
+
+### 常见错误排查
+
+| 现象 | 原因 | 修复 |
+|------|------|------|
+| `action: error` + `No active item` | 连续两次 record 未调 next | 每次 record 后调 next 获取下一步 |
+| `action: error` + `invalid transition` | record status 用错 | 对照 Record 状态守卫表 |
+| sub-agent 告"任务不完整" | dispatch 文件没传或路径错 | 检查 `dispatch_file` 路径是否可读 |
+| send sub-agent 后返回格式不对 | 未约束 sub-agent 返回格式 | 在 prompt 中明确要求返回 JSON |
+
 ## Event Schema
 
 所有 event 写入 `{change}/2-build/pipeline.events`，JSONL 格式。
@@ -73,7 +172,8 @@ $RUNNER progress <change>
 |---|---|---|
 | `pipeline_started` | 首次 next | change, pipeline_order |
 | `bootstrap_step_completed` | bootstrap 子步 | step, detail |
-| `prepare_env_started/completed` | env-hook | env_name, exit_code, log_path |
+| `prepare_env_started/completed` | env-hook（bootstrap 或 stage 切换） | env_name, exit_code, log_path |
+| `clean_env_started/completed` | stage 切换时清理环境 | env_name, exit_code, log_path |
 | `dispatch_started` | 派送 sub-agent | track, phase, agent, attempt |
 | `record_received` | LLM 调 record | track, phase, status, summary, report_path |
 | `fix_cycle_started` | verify escalate | track, cycle, source_report |

@@ -60,7 +60,7 @@ class PipelineRecord:
 class PipelineAction:
     """reducer 输出：状态变更后的下一步动作。"""
 
-    kind: str  # dispatch | dispatch_fix | advance | done | failed | error | workflow_failed
+    kind: str  # dispatch | dispatch_fix | advance | done | failed | error | workflow_failed | env_switch
     track: str = ""
     phase: str = ""
     cycle: int = 1
