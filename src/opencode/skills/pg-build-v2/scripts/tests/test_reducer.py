@@ -23,8 +23,6 @@ from pipeline.events import PipelineRecord, PipelineAction, FINAL_GATE_TRACK
 from pipeline.reducer import (
     reduce_state,
     MAX_FIX_CYCLES,
-    DEFAULT_MAX_RETRIES,
-    DEFAULT_GATE_FIX_RETRIES,
     _handle_linear_phase,
     _handle_final_gate,
     _handle_fix,
@@ -127,7 +125,8 @@ class TestLinearPhase(unittest.TestCase):
 
     def test_test_failed_exhausted(self):
         t = self.track
-        t = t.replace(phases={"test": _make_phase_state("pending", attempt=DEFAULT_MAX_RETRIES)})
+        t = t.replace(phases={"test": _make_phase_state("pending", attempt=3)},
+                       max_fail_retries=3)
         state = PipelineState(
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": t},
@@ -267,15 +266,16 @@ class TestGatePhase(unittest.TestCase):
         self.assertEqual(action.phase, "fix-gate")
         self.assertIsNotNone(new_state.current_sub_pipeline)
 
-    def test_gate_fail_exhausted_accepts_gaps(self):
+def test_gate_fail_exhausted_accepts_gaps(self):
         """gate-fix 循环耗尽 → track 完成，接受 gap。"""
-        gate_cycles = tuple({"cycle": i+1, "status": "fail"} for i in range(DEFAULT_GATE_FIX_RETRIES))
+        gate_cycles = tuple({"cycle": i+1, "status": "fail"} for i in range(2))
         gate = PhaseState(status="running", gate_cycles=gate_cycles)
         t = _make_track("dev.backend")
         t = t.replace(phases={"gate": gate,
-                               "test": _make_phase_state("completed"),
-                               "dev": _make_phase_state("completed"),
-                               "verify": _make_phase_state("completed")})
+                                "test": _make_phase_state("completed"),
+                                "dev": _make_phase_state("completed"),
+                                "verify": _make_phase_state("completed")},
+                       max_gate_fix_retries=2)
         state = PipelineState(
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": t},

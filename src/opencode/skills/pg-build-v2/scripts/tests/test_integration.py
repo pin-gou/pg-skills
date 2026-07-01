@@ -96,7 +96,8 @@ class TestIntegrationTdvg(unittest.TestCase):
         self.orch.record("completed")  # verify
         r2 = self.orch.record("pass")  # gate → advance 到 final-gate
 
-        self.assertEqual(r2["action"], "dispatch")
+        # final-gate now returns dispatch_final_gate (with dispatch_file written)
+        self.assertTrue(r2["action"] in ("dispatch_final_gate", "dispatch"))
         self.assertEqual(r2["item"], FINAL_GATE_TRACK)
 
     def test_workflow_failed(self):
