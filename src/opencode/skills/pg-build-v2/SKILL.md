@@ -79,9 +79,38 @@ $RUNNER progress <change>
        "env_switch"      → orchestrator 自动执行 clean_env/prepare_env, 回步骤 1
        "dispatch"        → 派遣 sub-agent (见下方协议)
        "advance"         → 回步骤 1 (调 next)
-       "done"            → pipeline 完成, 终止
+       "done"            → 检查 result.next_action:
+                             - "verify_and_merge" → 加载 pg-verify-and-merge skill，按 PHASE 0-4 执行
+                             - 无此字段 → pipeline 完成，终止
        "workflow_failed" → pipeline 失败, 终止
 ```
+
+pipeline 完成时 runner 返回的 `done` action 还包含以下字段，供编排器在 verify-and-merge 阶段使用：
+
+```json
+{
+  "action": "done",
+  "status": "completed",
+  "next_action": "verify_and_merge",
+  "affected_tracks": ["backend", "frontend"],
+  "archive": {"ok": true, "target": ".pg/changes/archive/2026-07-01-xxx"}
+}
+```
+
+### verify-and-merge 集成
+
+当 `result.next_action == "verify_and_merge"` 时，编排器按以下流程执行：
+
+1. **加载 skill**：`skill("pg-verify-and-merge")`
+2. **Setup**：`mkdir -p temp && python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-verify-and-merge --change-dir ".pg/changes/archive/<date>-<change>" > temp/vm-context.json`
+3. **Phase 0**：在 feature branch 上运行 flyway renumber + 受影响 track lint → 提交并推送
+4. **Phase 1**：切换到 default_branch，`git merge --squash` feature branch
+5. **Phase 1.5**：判定是否跳过测试（无冲突 + `skip_tests_if_no_conflict=true` 时跳过）
+6. **Phase 2**：按 affected_tracks 运行测试套件
+7. **Phase 3**：git commit（squash 合并） + git push
+8. **Phase 4**：清理（提示删除 feature branch）
+
+具体执行细节（envSetup / verifySetup / outputFormat 推断等）遵循 `pg-verify-and-merge` SKILL 的 phase 定义。
 
 ### 环境准备验证
 

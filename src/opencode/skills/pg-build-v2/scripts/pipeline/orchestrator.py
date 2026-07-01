@@ -510,7 +510,24 @@ class Orchestrator:
             self.state = self.state.replace(status="completed")
             save_snapshot(self.change_root, self.state)
             auto_commit = self._auto_commit("completed", "final-gate", "completed")
-            result = {"action": "done", "status": "completed"}
+
+            archive_result = self._auto_archive()
+
+            affected = [
+                t.bare
+                for tid in self.state.pipeline_order
+                if tid != FINAL_GATE_TRACK
+                for t in [self.state.tracks.get(tid)]
+                if t and t.status == "completed"
+            ]
+
+            result = {
+                "action": "done",
+                "status": "completed",
+                "next_action": "verify_and_merge",
+                "affected_tracks": affected,
+                "archive": archive_result,
+            }
             if auto_commit:
                 result["commit"] = auto_commit
             return result
@@ -626,3 +643,39 @@ class Orchestrator:
             "attempted": True, "committed": False, "sha": None,
             "message": msg, "reason": r.stderr.strip() or "commit failed",
         }
+
+    def _auto_archive(self) -> dict[str, Any]:
+        """调用 pg-archive.py 归档 change 目录 + git commit 归档。"""
+        script = os.path.join(
+            bootstrap.PROJECT_ROOT, ".opencode", "skills", "pg-archive", "scripts", "pg-archive.py"
+        )
+        r = subprocess.run(
+            ["python3", script, "move", self.change, "--project-root", bootstrap.PROJECT_ROOT],
+            capture_output=True, text=True, timeout=30,
+        )
+        try:
+            archive_result = json.loads(r.stdout)
+        except (json.JSONDecodeError, Exception):
+            archive_result = {"ok": False, "reason": r.stderr.strip() or "pg-archive.py 输出无法解析"}
+
+        if archive_result.get("ok"):
+            src = archive_result.get("src", "")
+            target = archive_result.get("target", "")
+            if src:
+                self._git("rm", "-r", "--cached", src)
+            if target:
+                self._git("add", target)
+            commit_r = self._git("commit", "-m", f"archive change {self.change}")
+            if commit_r.returncode == 0:
+                sha = self._git("rev-parse", "HEAD").stdout.strip()
+                archive_result["commit"] = {"sha": sha, "committed": True}
+                self.event_log.append(EVT_GIT_COMMIT, {
+                    "sha": sha, "message": f"archive change {self.change}",
+                    "branch": f"feat/pg/{self.change}",
+                })
+            else:
+                archive_result["commit"] = {
+                    "committed": False, "reason": commit_r.stderr.strip() or "commit failed",
+                }
+
+        return archive_result

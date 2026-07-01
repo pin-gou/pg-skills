@@ -232,6 +232,13 @@ def build_ctx(
     else:
         commands_normalized = ""
 
+    # === gate_report_path — fix-gate 用，从 track 的 gate phase 报告路径读取 ===
+    _gate_report_path = ""
+    if phase in ("fix-gate",) and track in state.tracks:
+        _gp = state.tracks[track].phases.get("gate")
+        if _gp and _gp.report_path:
+            _gate_report_path = _gp.report_path
+
     ctx: dict[str, Any] = {
         "_change": state.change,
         "id": track,
@@ -268,7 +275,7 @@ def build_ctx(
         "verify_report_path": "",
         "fix_report_filename": f"{track}-{phase}-fix-{cycle}.md",
         # fix-gate
-        "gate_report_path": "",
+        "gate_report_path": _gate_report_path,
         "gate_cycles": cycle,
         "cycles_remaining": max(0, t.max_gate_fix_retries - cycle + 1),
         "max_gate_fix_retries": t.max_gate_fix_retries,
