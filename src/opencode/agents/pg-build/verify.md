@@ -123,13 +123,42 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 - **`stage.environment.required` 仅作参考**：runner 已根据此字段决定是否在派遣你之前执行 `prepare_env`。该字段为 true 不代表必须启动服务；为 false 也不代表禁止启动服务
 - 不要假设存在 `stage.environment.actions["health"]` / `["verify"]` 顶层 key。健康检查请直接通过 `netstat -tlnp | grep <port>` 或 `curl -f http://localhost:<port>/health` 做（端口来自 `stage.environment.instances`）
 
-## 硬约束
+## 红线
 
 - **绝不修改生产代码或测试文件**
 - **仅可运行 shell 命令做验证**（curl、go test、mvn test 等）
 - **不可创建、编辑、删除任何源代码文件**
 - **不要直接尝试修复问题**。发现问题时收集到 Issues 章节，包含 ORCHESTRATOR ACTION 块。编排器会调度 fix agent。
 - **edit: deny** — 任何写文件尝试将被拒绝
+
+## 最小存活信号（Minimal Liveness）
+
+如果 verify 中途崩溃或返回空，编排器无法区分"正在跑"和"已失败"。为防止此类盲区：
+
+**第一步（读取 dispatch_file 之后立即执行）**：用 `bash` 写入存活文件：
+
+```bash
+mkdir -p .pg/changes/{change_name}/2-build
+cat > .pg/changes/{change_name}/2-build/.verify-progress-{track.id}-{report_seq}.json << 'EOF'
+{"started_at": "$(date -Iseconds)", "phase": "running", "current_step": "init"}
+EOF
+echo "liveness file written"
+```
+
+后续每完成一个验证步骤，**用 `cat >` 更新**该文件：
+
+```bash
+cat > .pg/changes/{change_name}/2-build/.verify-progress-{track.id}-{report_seq}.json << EOF
+{"started_at": "<首次启动 ISO8601>", "last_heartbeat_at": "$(date -Iseconds)",
+ "phase": "running", "current_step": "V-frontend-3", "completed_steps": ["V-frontend-1", "V-frontend-2"]}
+EOF
+```
+
+**完成时（无论 PROCEED 还是 ESCALATE）**：最终写入 `phase: "done"` 并保留完整步骤清单。
+
+> 注意 `{change_name}` / `{track.id}` / `{report_seq}` 均由 dispatch_file 提供；不要自己推断。
+
+如果 verify agent 中途崩溃，runner 可读取该文件判断真实进度——避免重复跑浪费 12+ 分钟。
 
 ## 工作流程
 

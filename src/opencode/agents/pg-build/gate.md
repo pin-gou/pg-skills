@@ -351,6 +351,24 @@ PASS / FAIL
 
 **不要**在 agent 返回里塞 markdown 全文（编排器不会落盘）。**完整 Gate Assessment 必须先写到磁盘文件**（见上文"写盘步骤"），然后 agent 返回里只回 summary。
 
+### summary 标准格式
+
+```
+[<item>:<sub>] <PASS|FAIL> — <N/M 检查通过>[ — <gap 列表 if FAIL>]
+```
+
+| 字段 | 必填 | 示例 |
+|---|---|---|
+| `[<item>:<sub>]` | ✅ | `[dev.backend:gate]` / `[final-gate]` |
+| `<PASS\|FAIL>` | ✅ | 与 Gate Assessment 整体判定一致 |
+| `<N/M 检查通过>` | ✅ | `9/9` / `7/9`（与 Gate Assessment 检查项表的计数一致）|
+| `<gap 列表>` | 仅 FAIL | `G-1 missing field check, G-2 scope creep`（用逗号分隔，仅列 gap 编号） |
+
+**正确示例**：
+- `[dev.backend:gate] PASS — 9/9 检查通过`
+- `[dev.frontend:gate] FAIL — 7/9 检查通过 — G-1 missing field check, G-2 scope creep`
+- `[final-gate] PASS — 所有 track gate PASS，无跨 track 问题`
+
 ---
 
 `## 不通过项详细说明` 章节的格式被编排器和 fix-gate agent 解析，**必须严格遵循**：

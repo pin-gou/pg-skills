@@ -180,13 +180,37 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 
 ### 步骤 4：执行修复
 
-#### 4.1 修复测试文件
-- 修改断言使其匹配实际 API 行为（但必须确保实际行为符合 design.md）
-- 修正 mock 配置、请求格式等
-- 不要删除测试用例或降低覆盖度
+#### 4.0 先判断：测试 bug 还是实现 bug？
 
-#### 4.2 修复生产代码
+在动手前**必须**区分两种根因（参考 `test.md` "测试代码自检清单"）：
+
+| 维度 | 测试 bug | 实现 bug |
+|---|---|---|
+| **现象** | 测试代码自身有错（输入与断言不自洽，如 `setVcpus(2)` + assert `"= 4 vCPUs"`） | 实现未对齐 design.md（vcpus 派生逻辑未实现 / 实现错误） |
+| **修复范围** | 测试文件 | 生产代码 |
+| **允许改动测试？** | ✅ 允许（但必须改对） | ❌ 禁止（只能改生产代码） |
+| **如何判定** | 跑同一个 test input 通过 manual calculation 能算出 expected → 是测试 bug；算出与 expected 不一致 → 是测试 bug | 跑同一个 test input 通过 design.md 语义能算出与 expected 一致 → 是实现 bug |
+
+**判定示例**：
+- task 1.2: `setVcpus(2)` + assert `"1 sockets × 2 cores × 2 threads = 4 vCPUs"` → design.md 说 `deriveCpuTopology` 不做乘法只拼接 raw vcpus，2 不可能推出 "4 vCPUs" → 测试 bug（应改 setVcpus(4)）
+- task 1.2: `setVcpus(2)` + assert `"= 2 vCPUs"` + 实现返回 `"= 4 vCPUs"` → 实现 bug（实现多乘了）
+
+#### 4.1 修复测试文件（仅当 4.0 判定为测试 bug 时）
+
+- 修正测试数据/断言，使其与 design.md 期望一致
+- 修正 mock 配置、请求格式等
+- **不要删除测试用例或降低覆盖度**——只改错的部分
+- **必须**保留 dev.md 中要求的 "测试应驱动实现" 的语义（红 phase 写过的测试必须继续能 fail 那些未对齐的代码）
+
+#### 4.2 修复生产代码（仅当 4.0 判定为实现 bug 时）
+
 - 遵循项目编码规范
+- 不要为了通过测试而 hack（e.g. 写 `if (test_env) return expected;`）
+
+#### 4.3 修改纪律
+
+- **跨文件修改限制**：test bug 只动测试文件；实现 bug 只动生产代码；两类不要混改
+- **不要"顺手优化"**：发现其他不在 issue 范围内的 bug，记录但**不修**，留给后续 cycle 或单独 task
 
 ### 步骤 5：验证修复
 

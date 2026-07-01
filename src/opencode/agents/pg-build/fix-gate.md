@@ -173,9 +173,29 @@ gaps = [
 
 ## 返回格式
 
+### summary 标准格式
+
+```
+[<item>:<sub>] <SUCCESS|PARTIAL|FAILED> — 修复 G-<N1>, G-<N2>[ — <剩余 gap if PARTIAL>]
+```
+
+| 字段 | 必填 | 示例 |
+|---|---|---|
+| `[<item>:<sub>]` | ✅ | `[dev.backend:fix-gate]` |
+| `<SUCCESS\|PARTIAL\|FAILED>` | ✅ | 与状态字段一致 |
+| `修复 G-<N1>, G-<N2>` | ✅ | 列出本次修复的所有 gap 编号（必填） |
+| 剩余 gap | 仅 PARTIAL | `; remaining: G-3` |
+
+**正确示例**：
+- `[dev.agent:fix-gate] SUCCESS — 修复 G-1, G-2, G-3 — 共 3 处改动, 22 测试 pass / 0 fail`
+- `[dev.backend:fix-gate] PARTIAL — 修复 G-1, G-2; remaining: G-3 (设计文档与实现不一致需 design 修复)`
+- `[dev.frontend:fix-gate] FAILED — 修复 G-1 失败，编译错误未解决`
+
+### 字段格式
+
 ```
 {
-  "summary": "修复 G-1 (handler.go:139 加 triggerVmStateReport), G-2 (handler.go:147 同), G-3 (handler.go:159 加 clearVmStage+triggerVmStateReport)。共 3 处改动, 22 测试 pass / 0 fail。",
+  "summary": "<按上述格式>",
   "outputs": ".pg/changes/{change}/2-build/{track.id}-{N}-gate-fix.md",
   "tasks_updated": true,
   "status": "SUCCESS" | "PARTIAL" | "FAILED"

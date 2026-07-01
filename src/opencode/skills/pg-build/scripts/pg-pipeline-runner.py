@@ -495,12 +495,16 @@ def _phase_log_path_latest(change, item_id):
 def _build_prepare_status(change, stage_name):
     """Return prepare_env status dict for stage.environment.prepare.
 
-    Returns:
-      {"status": "skipped", "log_path": "", "message": ""}    — change=None OR stage not required
-      {"status": "ok",       "log_path": "<abs>", "message": ""}    — prepare_env 已完成
-      {"status": "error",    "log_path": "<abs>", "message": "<stderr 摘要>"}  — 失败
+    Returns a normalized dict (no ANSI noise, no status/exit_code contradictions):
+      {"status": "skipped", "log_path": "", "exit_code": null,
+       "duration_ms": null, "summary": ""}    — change=None OR stage not required
+      {"status": "ok",       "log_path": "<abs>", "exit_code": 0,
+       "duration_ms": <int>, "summary": "<semantic steps>"}    — prepare_env 已完成
+      {"status": "error",    "log_path": "<abs>", "exit_code": <int>,
+       "duration_ms": <int>, "summary": "<error tail>"}         — 失败
     """
-    skipped = {"status": "skipped", "log_path": "", "message": ""}
+    skipped = {"status": "skipped", "log_path": "",
+               "exit_code": None, "duration_ms": None, "summary": ""}
     if not change:
         return skipped
     stage_cfg = None
@@ -514,22 +518,192 @@ def _build_prepare_status(change, stage_name):
         return skipped
     item_id = f"{stage_name}.prepare_env"
     log_path = _phase_log_path_latest(change, item_id)
+    completed = _is_prepare_env_completed(change, item_id)
+    exit_code, duration_ms = _parse_log_exit_and_duration(log_path) if log_path else (None, None)
+    if completed:
+        # completed=true is authoritative (runner recorded success in state).
+        # Fall back to log-based detection when state file is missing/corrupted.
+        if exit_code is not None and exit_code != 0:
+            return {"status": "error", "log_path": log_path or "",
+                    "exit_code": exit_code, "duration_ms": duration_ms,
+                    "summary": _summarize_prepare_log(log_path, tail=400)}
+        return {"status": "ok", "log_path": log_path or "",
+                "exit_code": exit_code if exit_code is not None else 0,
+                "duration_ms": duration_ms,
+                "summary": _summarize_prepare_log(log_path, tail=600)}
+    # Not marked completed — fall back to log-based classification.
+    if exit_code == 0:
+        return {"status": "ok", "log_path": log_path or "",
+                "exit_code": 0, "duration_ms": duration_ms,
+                "summary": _summarize_prepare_log(log_path, tail=600)}
+    summary = _summarize_prepare_log(log_path, tail=400)
+    return {"status": "error", "log_path": log_path or "",
+            "exit_code": exit_code if exit_code is not None else -1,
+            "duration_ms": duration_ms, "summary": summary}
+
+
+def _is_prepare_env_completed(change, item_id):
+    """Read completed_items from both v1 and v2 state files; return True if item_id is in either."""
     try:
         state = load_state(change)
-        completed = state.get("completed_items", []) or []
+        completed = (state.get("completed_items") or [])
+        if item_id in completed:
+            return True
+        # v2 schema: tracks.<item_id>.status
+        tracks = state.get("tracks") or {}
+        td = tracks.get(item_id) or {}
+        if td.get("status") == "completed":
+            return True
     except Exception:
-        completed = []
-    if item_id in completed:
-        return {"status": "ok", "log_path": log_path or "", "message": ""}
-    msg = ""
-    if log_path and os.path.isfile(log_path):
+        pass
+    return False
+
+
+_ANSI_RE = re.compile(r"\x1b\[[0-9;]*[A-Za-z]")
+
+
+def _strip_ansi(text):
+    if not text:
+        return ""
+    return _ANSI_RE.sub("", text)
+
+
+def _parse_log_exit_and_duration(log_path):
+    """Extract exit_code and total duration_ms from prepare_env log tail.
+
+    Looks for:
+      - `--- exit: OK (exit=0) ---` or `--- exit: FAIL (exit=N) ---`
+      - `[0m  总耗时: 106s[0m` or `总耗时: 106s` or `Total: 55s`
+    Returns (exit_code: int|None, duration_ms: int|None).
+    """
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except Exception:
+        return None, None
+    stripped = _strip_ansi(content)
+
+    exit_code = None
+    m = re.search(r"---\s*exit:\s*(?:OK|FAIL)\s*\(exit=(-?\d+)\)", stripped)
+    if m:
         try:
-            with open(log_path, encoding="utf-8", errors="replace") as f:
-                content = f.read()
-            msg = content[-500:].strip()
+            exit_code = int(m.group(1))
         except Exception:
-            msg = ""
-    return {"status": "error", "log_path": log_path or "", "message": msg}
+            exit_code = None
+    if exit_code is None:
+        # Last-resort: search for the JSON-line `{"ok": true|false, ..., "exit_code": N}`
+        m = re.search(r'"exit_code"\s*:\s*(-?\d+)', stripped)
+        if m:
+            try:
+                exit_code = int(m.group(1))
+            except Exception:
+                exit_code = None
+
+    duration_ms = None
+    for pattern in (r"总耗时[:：]\s*(\d+(?:\.\d+)?)\s*s",
+                    r"Total[:：]\s*(\d+(?:\.\d+)?)\s*s",
+                    r"Duration[:：]\s*(\d+(?:\.\d+)?)\s*s"):
+        m = re.search(pattern, stripped)
+        if m:
+            try:
+                duration_ms = int(float(m.group(1)) * 1000)
+                break
+            except Exception:
+                duration_ms = None
+    return exit_code, duration_ms
+
+
+_STEP_RE = re.compile(r"\[(\d+/\d+)\]\s+([^\n\[]+)")
+
+
+def _summarize_prepare_log(log_path, tail=600):
+    """Build a semantic, ANSI-stripped summary of the prepare_env log.
+
+    Strategy:
+      1. Read last `tail` chars of log (avoids ANSI/JSON noise at the end).
+      2. Strip ANSI codes.
+      3. Extract `[N/M] <step name>` markers — these are the dev-local-setup
+         phase indicators and are the only semantic anchors we trust.
+      4. If no step markers, fall back to last 5 non-empty lines.
+    Returns a multi-line string suitable for injection into dispatch prompt.
+    """
+    if not log_path or not os.path.isfile(log_path):
+        return ""
+    try:
+        with open(log_path, encoding="utf-8", errors="replace") as f:
+            content = f.read()
+    except Exception:
+        return ""
+    tail_text = _strip_ansi(content[-tail:] if len(content) > tail else content)
+
+    steps = _STEP_RE.findall(tail_text)
+    if steps:
+        # Deduplicate while preserving order; cap at 12 steps to keep prompt lean.
+        seen = set()
+        out = []
+        for idx, name in steps:
+            key = idx + "|" + name.strip()
+            if key in seen:
+                continue
+            seen.add(key)
+            name = name.strip()
+            if len(name) > 80:
+                name = name[:77] + "..."
+            out.append(f"[{idx}] {name}")
+            if len(out) >= 12:
+                break
+        if out:
+            return "\n".join(out)
+
+    # Fallback: last 5 non-empty lines (already ANSI-stripped)
+    lines = [ln.rstrip() for ln in tail_text.splitlines() if ln.strip()]
+    return "\n".join(lines[-5:])
+
+
+def _extract_env_roles_summary(config, env_name):
+    """Build a compact env.roles summary for dispatch prompt injection.
+
+    Returns a dict like:
+      {"backend": [{"name": "backend-1", "host": "localhost", "port": 9080,
+                    "actions": ["start", "stop", "logs", "tail"]}],
+       "frontend": [...], "agent": [...]}
+
+    Empty dict if env_name not found in config or has no roles.
+    """
+    envs = (config or {}).get("environments") or {}
+    env_cfg = envs.get(env_name) or {}
+    if not env_cfg:
+        for name, cfg in envs.items():
+            if cfg.get("roles"):
+                env_cfg = cfg
+                break
+    roles_cfg = env_cfg.get("roles") or {}
+    summary = {}
+    # Pull supported actions from hooks.action_metadata (SSOT for invoke-hook)
+    # first, then fall back to roles.<role>.actions keys (legacy schema).
+    hooks = env_cfg.get("hooks") or {}
+    supported_by_role = {}
+    for role_name, role_meta in (hooks.get("action_metadata") or {}).items():
+        supported_by_role[role_name] = list(role_meta.keys())
+    for role_name, role_cfg in roles_cfg.items():
+        inst_list = []
+        for inst in (role_cfg.get("instances") or []):
+            entry = {
+                "name": inst.get("name"),
+                "host": inst.get("host"),
+            }
+            if "port" in inst:
+                entry["port"] = inst["port"]
+            if "libvirt_uri" in inst:
+                entry["libvirt_uri"] = inst["libvirt_uri"]
+            inst_list.append(entry)
+        # Prefer hooks.action_metadata; fall back to role.actions keys.
+        actions = supported_by_role.get(role_name) or list((role_cfg.get("actions") or {}).keys())
+        summary[role_name] = {
+            "instances": inst_list,
+            "actions": actions,
+        }
+    return summary
 
 
 # ============================================================
@@ -941,7 +1115,7 @@ def _render_prompt_template(template, ctx):
 # content, and cannot accidentally rewrite it.
 
 _PROMPT_TEMPLATE_BASE = """\
-## 任务：{{context.id}} - {{context.label}}
+## 任务：{{context.id}}{#if context.label} - {{context.label}}{/if}
 
 ### 变更名称
 {{context._change}}
@@ -970,16 +1144,27 @@ _PROMPT_TEMPLATE_BASE = """\
 - stage.test_key: {{context.stage.test_key}}  # unit / integration / e2e
 - stage.gate: {{context.stage.gate}}  # all_pass / any_pass / no_gate
 - stage.environment.required: {{context.stage.environment.required}}
-- stage.environment.prepare.status: {{context.stage.environment.prepare.status}}
-- stage.environment.prepare.log_path: {{context.stage.environment.prepare.log_path}}
-- stage.environment.prepare.message: {{context.stage.environment.prepare.message}}
 - stage.environment.name: {{context.stage.environment.name}}
+{#if context.stage.environment.prepare}
+- stage.environment.prepare:
+    status: {{context.stage.environment.prepare.status}}     # ok | error | skipped
+    exit_code: {{context.stage.environment.prepare.exit_code}}
+    duration_ms: {{context.stage.environment.prepare.duration_ms}}
+    log_path: {{context.stage.environment.prepare.log_path}}
+    summary: |
+{{context.stage.environment.prepare.summary}}
+{/if}
+{#if context.stage.environment.roles}
+- stage.environment.roles:
+```yaml
+{{context.stage.environment.roles | toyaml}}
+```
+{/if}
 {#if context.stage.environment.instances}
-- stage.environment.instances:
+- stage.environment.instances (host/port, raw schema fields preserved):
 ```yaml
 {{context.stage.environment.instances | toyaml}}
 ```
-  每个 instance 是 project.yaml 原样 dict，包含 name/host/(可选)port/(可选)libvirt_uri。
 {/if}
 - stage.test_commands: {{context.stage.test_commands}}
 
@@ -1609,10 +1794,12 @@ def _build_stage_context(config, item, change=None):
             "test_commands": [],
             "environment": {
                 "required": True,
-                "prepare": {"status": "skipped", "log_path": "", "message": ""},
+                "prepare": {"status": "skipped", "log_path": "",
+                            "exit_code": None, "duration_ms": None, "summary": ""},
                 "name": None,
                 "instances": None,
                 "actions": None,
+                "roles": None,
             },
         }
 
@@ -1646,11 +1833,13 @@ def _build_stage_context(config, item, change=None):
                 "name": "__skip__",
                 "instances": None,
                 "actions": None,
+                "roles": None,
             },
         }
 
     hooks_payload = None
     env_summary = None
+    roles_summary = None
     if requires_environment and env_name:
         env_cfg = (config.get("environments") or {}).get(env_name) or {}
         instances = {}
@@ -1672,6 +1861,8 @@ def _build_stage_context(config, item, change=None):
                     meta["description"] = act_cfg["description"]
                 action_metadata.setdefault(role_name, {})[act_name] = meta
         env_summary = {"name": env_name, "instances": instances}
+        # Compact role summary for prompt injection: per-role {instances, actions}.
+        roles_summary = _extract_env_roles_summary(config, env_name)
 
         # invoke-hook CLI template — the only LLM-facing entry for triggering
         # role actions. timeout_seconds is NOT exposed as a flag; LLM only
@@ -1726,6 +1917,7 @@ def _build_stage_context(config, item, change=None):
             "name": env_name,
             "instances": env_summary["instances"] if env_summary else None,
             "hooks": hooks_payload,
+            "roles": roles_summary,
         },
     }
 

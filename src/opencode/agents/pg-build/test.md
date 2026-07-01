@@ -33,20 +33,6 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 
 > 设计动机：dispatch_file 模式让 orchestrator 完全 bypass 指令内容，从架构上杜绝"派送时被改写"的可能性。
 
-## 启动指令（dispatch_file 模式）
-
-orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_file` 路径**——你的完整任务指令在那个文件里。**第一步必须执行**：
-
-1. 用 Read 工具读取 `dispatch_file` 路径对应的文件
-2. **逐字执行**文件中所有内容作为你的任务指令
-
-**绝对禁止**：
-- ❌ 改写、摘要或重组 dispatch_file 中的指令
-- ❌ 忽略 dispatch_file 而自己另写任务
-- ❌ 不读 dispatch_file 就开始干活
-
-> 设计动机：dispatch_file 模式让 orchestrator 完全 bypass 指令内容，从架构上杜绝"派送时被改写"的可能性。
-
 ## 编排器传入的上下文
 
 你从编排器接收以下字段（runner 通过 ctx dict 注入）：
@@ -128,6 +114,19 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
    - **TypeScript/Vue**: 类型错误或 import 失败——这是**正确**的结果
 3. **禁止 stub 生产代码**：不得在 test phase 创建任何生产代码文件（entity / service / controller / mapper / handler 等）。只测试你预期存在的接口。
 4. **禁止 mock 绕开编译**: 不得用 mock 框架绕过编译失败（例如 mock 一个不存在的类）。被测试的类/接口必须真实存在于生产代码中才能 mock。
+
+### 测试代码自检清单（必读）
+
+在写完每个新测试 case 后、提交 summary 之前，**必须**做以下自检：
+
+1. **输入-断言一致性**：列出所有 `entity.setXxx(N)` / `mockXxx.N` 的值与所有 `assertXxx(expected)` 的 expected 值，验证两者是否逻辑自洽。
+   - 反例：`entity.setVcpus(2)` 但断言 `cpuTopology` 包含 `"= 4 vCPUs"` → **不自洽**（vcpus=2 不可能推出 "4 vCPUs"）
+   - 反例：`setStatus("PENDING")` 但断言 `isError=true` → 不自洽
+2. **派生函数语义校验**：当断言涉及"派生/计算"字段（如 `cpuTopology` 由 sockets×cores×threads 计算而得，或 `formatBytes(bytes)` 由 raw bytes 派生），确认输入字段值经过派生函数后会**精确**等于 expected 值。
+   - **避免双重事实**：不要在同一 test 中既设置 `setXxx(N)` 又设置 `setYyy(M)`，然后断言二者均生效——除非你确认二者会同时被实现消费
+3. **失败兜底**：发现自检失败 → **不要**在 `outputs` 中标注 task 完成；改写测试直到自洽后再标完成；如反复仍不自洽则 `status: FAILED` + `issue_summary` 让编排器调度 dev agent 协助判断是测试还是 design 错配。
+
+> 自检不是可选的"建议"——它是红 phase 防止数据 bug 流入绿 phase 的最后一道防线。如果测试代码本身有 bug（输入与断言不自洽），dev agent 会按"测试失败"修实现，最终反而改坏了 design.md 期望的正确实现。
 
 ### 执行顺序
 
