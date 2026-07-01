@@ -30,6 +30,15 @@ from pipeline.reducer import reduce_state
 from pipeline.detect import next_pending
 from pipeline.sub_pipeline import FIX_CYCLE, GATE_FIX_CYCLE
 from pipeline.dispatch import build_action, build_final_gate_action
+from pipeline.config import (
+    load_project_config,
+    resolve_module_details,
+    resolve_module_roots,
+    resolve_test_commands,
+    resolve_env_instances,
+    resolve_hooks,
+)
+from pipeline.tasks_md import extract_section_content
 import bootstrap
 import subprocess
 
@@ -110,18 +119,45 @@ class Orchestrator:
         # 找 pipeline_order + track 配置 + stage 配置
         order, track_configs = self._detect_pipeline_config()
         stage_order, stage_env_map = self._detect_stage_config()
+
+        # 读取 project.yaml 富化上下文
+        project_config = load_project_config(bootstrap.PROJECT_ROOT)
+        SUB_PHASE_NAMES = ("test", "dev", "verify", "gate")
+
         tracks: dict[str, TrackState] = {}
         track_types: dict[str, str] = {}
         for tid in order:
             if tid == FINAL_GATE_TRACK:
                 continue
             cfg = track_configs.get(tid, {})
+            bare = tid.rsplit(".", 1)[-1]
+            module_names = cfg.get("modules", [])
+            stage_name = PipelineState.extract_stage(tid)
+            env_name = stage_env_map.get(stage_name, "dev-local")
+
+            # 解析 tasks.md 各 phase 内容
+            tasks_by_phase: dict[str, str] = {}
+            for pname in SUB_PHASE_NAMES:
+                content = extract_section_content(self.change_root, tid, pname)
+                if content:
+                    tasks_by_phase[pname] = content
+
             tracks[tid] = TrackState.create(
                 tid,
-                modules=tuple(cfg.get("modules", [])),
+                modules=tuple(module_names),
                 max_fail_retries=cfg.get("max_fail_retries", 3),
                 max_fix_retries=cfg.get("max_fix_retries", 5),
                 max_gate_fix_retries=cfg.get("max_gate_fix_retries", 2),
+                module_roots=resolve_module_roots(project_config, module_names),
+                module_details=resolve_module_details(project_config, module_names),
+                test_commands=resolve_test_commands(project_config, module_names),
+                review_level=cfg.get("review_level", ""),
+                env_name=env_name,
+                env_instances_yaml=resolve_env_instances(project_config, env_name),
+                hooks_yaml=resolve_hooks(project_config, env_name),
+                prepare_status="ok",
+                label=cfg.get("description", bare),
+                tasks_by_phase=tasks_by_phase,
             )
             if cfg.get("type") == "simple":
                 track_types[tid] = "simple"

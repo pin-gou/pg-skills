@@ -26,6 +26,49 @@ def get_tasks_path(change_root: str) -> str:
     return os.path.join(change_root, "tasks.md")
 
 
+def extract_section_content(change_root: str, track: str, phase: str | None) -> str:
+    """从 tasks.md 提取指定 track[:phase] section 的内容。
+
+    返回 section 标题之后、下一个 section 标题之前的所有行。
+    phase=None 时匹配 "## N. track - label"（无 :sub 格式）。
+    """
+    tasks_path = get_tasks_path(change_root)
+    if not os.path.isfile(tasks_path):
+        return ""
+
+    with open(tasks_path, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    in_section = False
+    result: list[str] = []
+
+    for line in lines:
+        stripped = line.strip()
+
+        m = _SECTION_HEADING_RE.match(stripped)
+        if m:
+            if in_section:
+                break
+            in_section = (m.group(2) == track and (phase is None or m.group(3) == phase))
+            if in_section:
+                result.append(line)
+            continue
+
+        m2 = _SECTION_HEADING_NO_SUB.match(stripped)
+        if m2:
+            if in_section:
+                break
+            in_section = (m2.group(2) == track)
+            if in_section:
+                result.append(line)
+            continue
+
+        if in_section:
+            result.append(line)
+
+    return "".join(result).rstrip()
+
+
 def mark_task(change_root: str, section_item: str, section_sub: str | None, task_id: int) -> bool:
     """在 tasks.md 中把 - [ ] X.Y 改为 - [x] X.Y。
 

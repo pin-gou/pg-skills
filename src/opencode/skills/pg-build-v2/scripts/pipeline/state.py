@@ -116,6 +116,18 @@ class TrackState:
     sub_pipelines: tuple[Any, ...] = ()  # SubPipeline
     accepted_gaps: tuple[dict[str, Any], ...] = ()
 
+    # 富化上下文（由 _first_next 从 project.yaml 预填充）
+    module_roots: str = ""               # "[webvirt-backend, webvirt-agent-proto]"
+    module_details: str = ""             # "- module: backend\n  - root: webvirt-backend\n..."
+    test_commands: str = ""              # "cd webvirt-backend && mvn test"
+    review_level: str = ""               # "security" | "standard" | "none"
+    env_name: str = ""                   # "dev-local"
+    env_instances_yaml: str = ""         # 环境实例的 YAML 文本
+    hooks_yaml: str = ""                 # 环境 hooks 的 YAML 文本
+    prepare_log_path: str = ""           # prepare_env 日志路径
+    prepare_status: str = ""             # "ok" | "error" | "skipped"
+    tasks_by_phase: dict[str, str] = field(default_factory=dict)
+
     @classmethod
     def create(cls, track_id: str, **kwargs) -> "TrackState":
         """工厂方法：bare 自动从 track_id 派生。"""
@@ -137,6 +149,16 @@ class TrackState:
             "phases": {k: v.to_dict() for k, v in self.phases.items()},
             "sub_pipelines": [sp.to_dict() for sp in self.sub_pipelines],
             "accepted_gaps": list(self.accepted_gaps),
+            "module_roots": self.module_roots,
+            "module_details": self.module_details,
+            "test_commands": self.test_commands,
+            "review_level": self.review_level,
+            "env_name": self.env_name,
+            "env_instances_yaml": self.env_instances_yaml,
+            "hooks_yaml": self.hooks_yaml,
+            "prepare_log_path": self.prepare_log_path,
+            "prepare_status": self.prepare_status,
+            "tasks_by_phase": dict(self.tasks_by_phase),
         }
 
     @classmethod
@@ -161,6 +183,16 @@ class TrackState:
             phases=phases,
             sub_pipelines=sub_pipelines,
             accepted_gaps=tuple(d.get("accepted_gaps", ())),
+            module_roots=d.get("module_roots", ""),
+            module_details=d.get("module_details", ""),
+            test_commands=d.get("test_commands", ""),
+            review_level=d.get("review_level", ""),
+            env_name=d.get("env_name", ""),
+            env_instances_yaml=d.get("env_instances_yaml", ""),
+            hooks_yaml=d.get("hooks_yaml", ""),
+            prepare_log_path=d.get("prepare_log_path", ""),
+            prepare_status=d.get("prepare_status", ""),
+            tasks_by_phase=d.get("tasks_by_phase", {}),
         )
 
     def replace(self, **kwargs: Any) -> "TrackState":
@@ -178,6 +210,16 @@ class TrackState:
             phases=kwargs.get("phases", self.phases),
             sub_pipelines=kwargs.get("sub_pipelines", self.sub_pipelines),
             accepted_gaps=kwargs.get("accepted_gaps", self.accepted_gaps),
+            module_roots=kwargs.get("module_roots", self.module_roots),
+            module_details=kwargs.get("module_details", self.module_details),
+            test_commands=kwargs.get("test_commands", self.test_commands),
+            review_level=kwargs.get("review_level", self.review_level),
+            env_name=kwargs.get("env_name", self.env_name),
+            env_instances_yaml=kwargs.get("env_instances_yaml", self.env_instances_yaml),
+            hooks_yaml=kwargs.get("hooks_yaml", self.hooks_yaml),
+            prepare_log_path=kwargs.get("prepare_log_path", self.prepare_log_path),
+            prepare_status=kwargs.get("prepare_status", self.prepare_status),
+            tasks_by_phase=kwargs.get("tasks_by_phase", self.tasks_by_phase),
         )
 
     def get_phase(self, phase: str) -> PhaseState:

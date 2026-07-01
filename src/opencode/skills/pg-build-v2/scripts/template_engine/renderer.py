@@ -134,6 +134,7 @@ def render_dispatch_file(
     cycle: int = 1,
     templates_dir: str | None = None,
     output_dir: str | None = None,
+    dispatch_seq: str = "",
 ) -> str:
     """渲染 dispatch 并写入文件。
 
@@ -145,6 +146,8 @@ def render_dispatch_file(
         cycle: fix/gate-fix cycle number
         templates_dir: 模板目录
         output_dir: 输出目录（默认 change_root/2-build/）
+        dispatch_seq: 3 位零填充全局 seq 前缀（如 "001"）,
+                      空字符串时无前缀（向后兼容）
 
     Returns:
         写入的文件路径
@@ -154,7 +157,8 @@ def render_dispatch_file(
     od = output_dir or os.path.join(change_root, "2-build")
     os.makedirs(od, exist_ok=True)
 
-    filename = f"{track}-{phase}-dispatch"
+    prefix = f"{dispatch_seq}-" if dispatch_seq else ""
+    filename = f"{prefix}{track}-{phase}-dispatch"
     if cycle > 1:
         filename += f"-{cycle}"
     filename += ".md"
