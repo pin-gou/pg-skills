@@ -49,13 +49,14 @@ def render_menu(title: str, items: list, current: int, back_option: bool, term_w
             avail = max_visible - 7 - len(label)
             desc_str = f" — {desc[:avail - 6]}..." if avail >= 6 else ""
 
+        label_code = "1;36;44" if sel_idx == current else "1;36"
         if desc_str:
             lines.append(
-                f" {marker} {sel_idx + 1:2d}) {_c('1;36', label)}{_c('2;37', desc_str)}"
+                f" {marker} {sel_idx + 1:2d}) {_c(label_code, label)}{_c('2;37', desc_str)}"
             )
         else:
             lines.append(
-                f" {marker} {sel_idx + 1:2d}) {_c('1;36', label)}"
+                f" {marker} {sel_idx + 1:2d}) {_c(label_code, label)}"
             )
         sel_idx += 1
     if back_option:
