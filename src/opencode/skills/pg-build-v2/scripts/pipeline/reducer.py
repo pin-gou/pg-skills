@@ -597,12 +597,18 @@ def _handle_sub_gate(
     t = state.tracks.get(track)
 
     if record.status == STATUS_PASS:
-        # 子 pipeline 中的 gate pass → 子 pipeline 完成
+        # 子 pipeline 中的 gate pass → 标记主 pipeline gate 为 pass，track 完成
         if t is not None:
-            t = _update_phase(t, "gate", status="completed",
+            t = _update_phase(t, "gate", status="pass",
                               summary=record.summary, report_path=record.report_path)
-            state = state.replace(tracks={**state.tracks, track: t})
-        return _sub_pipeline_advance(state, sp=sp)
+            t = t.replace(status="completed")
+            state = state.replace(
+                tracks={**state.tracks, track: t},
+                current_sub_pipeline=None,
+                current_track="",
+                current_phase="",
+            )
+        return state, PipelineAction(kind="advance", track=track)
 
     elif record.status == STATUS_FAIL:
         # 子 pipeline 中的 gate 仍然 fail → 再试 gate-fix

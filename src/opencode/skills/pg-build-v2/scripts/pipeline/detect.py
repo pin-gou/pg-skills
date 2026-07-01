@@ -149,6 +149,9 @@ def next_pending(state: PipelineState) -> PipelineAction:
                             attempt=ph.attempt,
                         )
 
+                # 所有 phase 已完成 → 跳到下一 track
+                continue
+
         # 全新 track → 从 test 开始
         return PipelineAction(
             kind="dispatch",
