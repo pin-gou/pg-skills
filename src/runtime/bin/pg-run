@@ -610,7 +610,12 @@ _ACTION_ORDER = ["start", "stop", "logs", "tail"]
 
 
 def _build_quick_items() -> list:
-    return [("准备环境并启动所有实例", ""), ("启动所有实例", ""), ("停止所有实例", "")]
+    return [
+        ("准备环境并启动所有实例", ""),
+        ("停止所有实例并清理环境", ""),
+        ("启动所有实例", ""),
+        ("停止所有实例", ""),
+    ]
 
 
 def _build_env_items(env_name: str, config: dict) -> list:
@@ -705,8 +710,41 @@ def _exec_quick_action(idx: int, env_name: str, config: dict, project_root: Path
         else:
             print("  准备环境失败，跳过启动所有实例")
     elif idx == 1:
-        _run_env_start_all(env_name, cfg, project_root)
+        hook = find_invoke_hook(project_root)
+        print()
+        print(_c("1;36", "=" * 60))
+        print(_c("1;33", f"  停止所有实例: {env_name}"))
+        print(_c("1;36", "=" * 60))
+        _run_env_stop_all(env_name, cfg, project_root)
+
+        clean_cfg = cfg.get("clean_env")
+        if clean_cfg:
+            print()
+            print(_c("1;36", "=" * 60))
+            print(_c("1;33", f"  清理环境: {env_name}"))
+            print(_c("1;36", "=" * 60))
+            if hook.is_file():
+                cmd = (
+                    f"python3 {shlex.quote(str(hook))} invoke-hook"
+                    f" --env {shlex.quote(env_name)}"
+                    f" --action clean_env --session manual"
+                )
+                run_shell(
+                    cmd,
+                    cwd=project_root,
+                    timeout=clean_cfg.get("timeout_seconds", 300),
+                )
+            else:
+                cmd, timeout = extract_command(clean_cfg)
+                if cmd:
+                    run_shell(
+                        f"bash {shlex.quote(cmd)}", cwd=project_root, timeout=timeout
+                    )
+        else:
+            print("  clean_env 未定义，跳过清理")
     elif idx == 2:
+        _run_env_start_all(env_name, cfg, project_root)
+    elif idx == 3:
         _run_env_stop_all(env_name, cfg, project_root)
     pause()
 
