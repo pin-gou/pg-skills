@@ -238,6 +238,27 @@ class TestBuildCtx(unittest.TestCase):
         with open(os.path.join(pg_dir, "project.yaml"), "w") as f:
             yaml.dump(project_config, f)
 
+        # 创建 change 目录和 design.md（用于验证 tasks_validation 的惰性解析）
+        change_dir = os.path.join(tmp, ".pg", "changes", "test-change")
+        os.makedirs(change_dir, exist_ok=True)
+        design_md = os.path.join(change_dir, "design.md")
+        with open(design_md, "w") as f:
+            f.write("""## 设计
+
+### dev backend Verification Criteria
+
+| ID | 验证项 | 方法 | 预期结果 |
+|-----|--------|------|---------|
+| V-backend-1 | GET /documents 分页 | curl GET /api/.../documents | 200 |
+| V-backend-2 | GET /documents/version | curl GET /api/.../documents/1 | 200 |
+
+### dev frontend Verification Criteria
+
+| ID | 验证项 | 方法 | 预期结果 |
+|-----|--------|------|---------|
+| V-frontend-1 | 双 Tab 显示 | 浏览器访问 | 显示两个标签 |
+""")
+
         # 清空缓存，设置 tmp 为 project root
         _PROJECT_CONFIG_CACHE.clear()
         _set_project_root(tmp)
@@ -254,7 +275,7 @@ class TestBuildCtx(unittest.TestCase):
             },
             stage_env_map={"dev": "dev-local"},
         )
-        ctx = build_ctx(state, "dev.backend", "test")
+        ctx = build_ctx(state, "dev.backend", "test", change_root=change_dir)
 
         # 验证惰性解析结果
         self.assertIn("webvirt-backend", ctx["module_roots"],
@@ -283,6 +304,14 @@ class TestBuildCtx(unittest.TestCase):
                       "hooks_yaml 应存在于上下文中")
         self.assertIn("start", ctx["hooks_yaml"],
                       "hooks_yaml 应包含 action 名称")
+
+        # 验证 tasks_validation 来自 design.md 的 Verification Criteria
+        self.assertIn("V-backend-1", ctx["tasks_validation"],
+                      "tasks_validation 应包含 design.md 的 V-* 表")
+        self.assertIn("GET /documents", ctx["tasks_validation"],
+                      "tasks_validation 应包含设计验证项")
+        self.assertNotIn("V-frontend-1", ctx["tasks_validation"],
+                         "tasks_validation 不应包含其他 track 的验证项")
 
         # 清理缓存
         _PROJECT_CONFIG_CACHE.clear()

@@ -99,6 +99,43 @@ def _format_yaml_block(label: str, content: str) -> str:
     return f"- {label}:\n```yaml\n{content}\n```"
 
 
+def extract_design_verification_criteria(change_root: str, track: str) -> str:
+    """从 design.md 提取当前 track 对应的 Verification Criteria 节内容。
+
+    搜索模式: "### <stage> <bare> Verification Criteria"
+    例如 dev.backend → "### dev backend Verification Criteria"
+    返回该标题到下一同级标题之间的全部行（含表头行）。
+
+    Returns:
+        提取的文本块，未找到时返回空字符串。
+    """
+    design_path = os.path.join(change_root, "design.md")
+    if not os.path.isfile(design_path):
+        return ""
+
+    stage = PipelineState.extract_stage(track)
+    bare = track.rsplit(".", 1)[-1] if "." in track else track
+    target = f"### {stage} {bare} Verification Criteria"
+
+    with open(design_path, encoding="utf-8") as f:
+        lines = f.readlines()
+
+    in_section = False
+    result: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if stripped.startswith("### "):
+            if in_section:
+                break
+            if stripped == target:
+                in_section = True
+                continue
+        if in_section:
+            result.append(line)
+
+    return "".join(result).rstrip()
+
+
 def build_ctx(
     state: PipelineState,
     track: str,
@@ -160,9 +197,11 @@ def build_ctx(
     if not tasks_preformatted and change_root:
         tasks_preformatted = extract_section_content(change_root, track, phase)
 
-    tasks_validation = t.tasks_by_phase.get("verify", "")
-    if not tasks_validation and change_root:
-        tasks_validation = extract_section_content(change_root, track, "verify")
+    # tasks_validation: 来自 design.md 的 Verification Criteria 章节
+    # 对所有 phase 注入，给 sub-agent 明确的验收标准（V-* 验证表）
+    tasks_validation = ""
+    if change_root:
+        tasks_validation = extract_design_verification_criteria(change_root, track)
 
     ctx: dict[str, Any] = {
         "_change": state.change,
