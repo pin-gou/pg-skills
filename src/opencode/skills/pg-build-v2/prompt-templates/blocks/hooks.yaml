@@ -3,11 +3,17 @@
 prompt: |
   ### 运行时环境查询
 
+  可用环境实例：
+  {env_instances}
+
+  各角色可用操作：
+  {hooks_yaml}
+
   如需启动/停止服务或查看日志，使用：
 
   ```
   python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-    --session <SESSION> --env <ENV> --role <ROLE> --instance <INSTANCE> \
+    --session {_change} --env {env_name} --role <ROLE> --instance <INSTANCE> \
     --action <ACTION> [--tail-lines <N>] [--skill pg-build]
   ```
 

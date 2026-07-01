@@ -26,3 +26,6 @@ header: |
   - stage.environment.prepare.status: {prepare_status}
   - stage.environment.prepare.log_path: {prepare_log_path}
   - stage.test_commands: {test_commands}
+
+  {env_instances_block}
+  {hooks_block}

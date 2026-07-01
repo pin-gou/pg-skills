@@ -212,6 +212,24 @@ class TestBuildCtx(unittest.TestCase):
                             "instances": [
                                 {"name": "backend-1", "host": "localhost", "port": 9080},
                             ],
+                            "actions": {
+                                "start": {
+                                    "host": "localhost",
+                                    "script": ".pg/hooks/role-backend-start.sh",
+                                    "timeout_seconds": 300,
+                                    "description": "Start backend service",
+                                },
+                                "stop": {
+                                    "host": "localhost",
+                                    "script": ".pg/hooks/role-backend-stop.sh",
+                                    "timeout_seconds": 30,
+                                },
+                                "logs": {
+                                    "host": "localhost",
+                                    "script": ".pg/hooks/role-backend-logs.sh",
+                                    "timeout_seconds": 30,
+                                },
+                            },
                         },
                     },
                 },
@@ -251,6 +269,20 @@ class TestBuildCtx(unittest.TestCase):
                       "env_instances 应通过惰性解析填充")
         self.assertEqual(ctx["review_level"], "",
                          "review_level 不在 tracks 段时默认为空")
+
+        # 验证 YAML 块渲染
+        self.assertIn("backend-1", ctx["env_instances_block"],
+                      "env_instances_block 应包含实例名称")
+        self.assertIn("yaml", ctx["env_instances_block"],
+                      "env_instances_block 应包含 yaml 代码块标记")
+        self.assertIn("localhost", ctx["hooks_block"],
+                      "hooks_block 应包含环境信息")
+        self.assertIn("role-backend-start.sh", ctx["hooks_block"],
+                      "hooks_block 应包含 action 脚本路径")
+        self.assertIn("hooks_yaml", ctx,
+                      "hooks_yaml 应存在于上下文中")
+        self.assertIn("start", ctx["hooks_yaml"],
+                      "hooks_yaml 应包含 action 名称")
 
         # 清理缓存
         _PROJECT_CONFIG_CACHE.clear()

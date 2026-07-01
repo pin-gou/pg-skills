@@ -83,6 +83,22 @@ def _format_seq(seq: int) -> str:
     return f"{seq:03d}"
 
 
+def _format_yaml_block(label: str, content: str) -> str:
+    """将 YAML 内容包装为 Markdown 代码块 + label。
+
+    输出格式：
+      - {label}:
+      ```yaml
+      {content}
+      ```
+
+    content 为空时返回空字符串。
+    """
+    if not content or not content.strip():
+        return ""
+    return f"- {label}:\n```yaml\n{content}\n```"
+
+
 def build_ctx(
     state: PipelineState,
     track: str,
@@ -169,6 +185,9 @@ def build_ctx(
         "prepare_log_path": t.prepare_log_path or "",
         "test_commands": lazy_test_commands,
         "env_instances": lazy_env_instances,
+        "env_instances_block": _format_yaml_block("stage.environment.instances", lazy_env_instances),
+        "hooks_block": _format_yaml_block("stage.environment.hooks", lazy_hooks_yaml),
+        "hooks_yaml": lazy_hooks_yaml,
         # phase
         "phase": phase,
         "cycle": cycle,
