@@ -197,6 +197,30 @@ class TestBuildAction(unittest.TestCase):
         self.assertEqual(result["agent"], "pg-build/test")
         self.assertIn("dispatch_file", result)
         self.assertTrue(os.path.isfile(result["dispatch_file"]))
+        self.assertIn("dispatch_seq", result)
+        self.assertIn("report_seq", result)
+        self.assertEqual(result["dispatch_seq"], "001")
+        self.assertEqual(result["report_seq"], "002")
+
+    def test_build_action_seq_prefix_in_filename(self):
+        """dispatch 文件名带 seq 前缀。"""
+        state = PipelineState(change="x", pipeline_order=("backend",))
+        action = PipelineAction(kind="dispatch", track="backend", phase="test", cycle=1)
+        tmp = tempfile.mkdtemp()
+        result = build_action(state, action, tmp)
+        fname = os.path.basename(result["dispatch_file"])
+        self.assertTrue(fname.startswith("001-"), f"文件名应以 001- 开头: {fname}")
+
+    def test_build_action_seq_increments(self):
+        """连续两次 build_action seq 递增。"""
+        state = PipelineState(change="x", pipeline_order=("backend",))
+        tmp = tempfile.mkdtemp()
+        a1 = PipelineAction(kind="dispatch", track="backend", phase="test", cycle=1)
+        r1 = build_action(state, a1, tmp)
+        a2 = PipelineAction(kind="dispatch", track="backend", phase="dev", cycle=1)
+        r2 = build_action(state, a2, tmp)
+        self.assertEqual(r1["dispatch_seq"], "001")
+        self.assertEqual(r2["dispatch_seq"], "002")
 
     def test_build_final_gate(self):
         state = PipelineState(change="x")
@@ -204,6 +228,8 @@ class TestBuildAction(unittest.TestCase):
         result = build_final_gate_action(state, tmp)
         self.assertEqual(result["action"], "dispatch_final_gate")
         self.assertEqual(result["item"], "final-gate")
+        self.assertIn("dispatch_seq", result)
+        self.assertIn("report_seq", result)
 
 
 if __name__ == "__main__":

@@ -110,6 +110,37 @@ class TestTrackState(unittest.TestCase):
         self.assertEqual(t.phases["test"].status, t2.phases["test"].status)
         self.assertEqual(t.phases["dev"].status, t2.phases["dev"].status)
 
+    def test_enriched_fields_roundtrip(self):
+        """验证富化字段的序列化/反序列化。"""
+        t = TrackState(
+            track_id="dev.backend",
+            bare="backend",
+            module_roots="['webvirt-backend']",
+            module_details="- module: backend\n  - root: webvirt-backend",
+            test_commands="cd webvirt-backend && mvn test",
+            review_level="security",
+            env_name="dev-local",
+            env_instances_yaml="backend:\n  - name: backend-1\n    host: localhost\n    port: 9080",
+            hooks_yaml="backend:\n  start:\n    script: .pg/hooks/role-backend-start.sh",
+            prepare_log_path="2-build/prepare_env.log",
+            prepare_status="ok",
+            tasks_by_phase={"test": "- [ ] 1.1 test task", "dev": "- [ ] 2.1 dev task"},
+            label="Backend Module",
+        )
+        d = t.to_dict()
+        t2 = TrackState.from_dict(d)
+        self.assertEqual(t.module_roots, t2.module_roots)
+        self.assertEqual(t.module_details, t2.module_details)
+        self.assertEqual(t.test_commands, t2.test_commands)
+        self.assertEqual(t.review_level, t2.review_level)
+        self.assertEqual(t.env_name, t2.env_name)
+        self.assertEqual(t.env_instances_yaml, t2.env_instances_yaml)
+        self.assertEqual(t.hooks_yaml, t2.hooks_yaml)
+        self.assertEqual(t.prepare_log_path, t2.prepare_log_path)
+        self.assertEqual(t.prepare_status, t2.prepare_status)
+        self.assertEqual(t.tasks_by_phase, t2.tasks_by_phase)
+        self.assertEqual(t.label, t2.label)
+
 
 class TestPipelineState(unittest.TestCase):
     def test_empty_state(self):
