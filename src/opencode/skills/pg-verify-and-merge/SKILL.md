@@ -141,13 +141,13 @@ bash .opencode/skills/pg-verify-and-merge/scripts/renumber-flyway-migration.sh \
 }
 
 # Step 2: 对 AffectedTracks 每个 track 跑 lint
+# lint_cmd 已是 dict {cmd, timeout_seconds}（pg-parse-config.py 直接产出）
 for track in $AFFECTED; do
-    LINT_CMD_JSON=$(python3 -c "import json,sys; t=json.load(open('temp/vm-context.json'))['tracks'].get('$track',{}).get('lint_cmd'); print(json.dumps(t) if t else '')")
-    if [ -n "$LINT_CMD_JSON" ] && [ "$LINT_CMD_JSON" != "null" ]; then
-        LINT_CMD=$(python3 -c "import json; print(json.loads('''$LINT_CMD_JSON''')['cmd'])")
-        TIMEOUT=$(python3 -c "import json; print(json.loads('''$LINT_CMD_JSON''')['timeout_seconds'])")
+    LINT_CMD=$(python3 -c "import json; t=json.load(open('temp/vm-context.json'))['tracks'].get('$track',{}).get('lint_cmd'); print(t['cmd'] if t else '')")
+    if [ -n "$LINT_CMD" ]; then
+        TIMEOUT=$(python3 -c "import json; t=json.load(open('temp/vm-context.json'))['tracks'].get('$track',{}).get('lint_cmd'); print(t.get('timeout_seconds', 1800))")
         echo "=== Lint $track (timeout=${TIMEOUT}s) ==="
-        eval "$LINT_CMD"
+        timeout "$TIMEOUT" bash -c "$LINT_CMD" 2>&1 | tail -50
     else
         echo "track '$track' 无 lint 命令，跳过"
     fi

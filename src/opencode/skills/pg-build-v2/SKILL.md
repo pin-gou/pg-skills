@@ -75,15 +75,31 @@ $RUNNER progress <change>
 循环:
   1. 调 `next <change>` → 检查 action 字段
   2. switch(action):
-       "env_hook_failed" → 环境准备失败: 查看 log_path, 修复后重试
-       "env_switch"      → orchestrator 自动执行 clean_env/prepare_env, 回步骤 1
-       "dispatch"        → 派遣 sub-agent (见下方协议)
-       "advance"         → 回步骤 1 (调 next)
-       "done"            → 检查 result.next_action:
-                             - "verify_and_merge" → 加载 pg-verify-and-merge skill，按 PHASE 0-4 执行
-                             - 无此字段 → pipeline 完成，终止
-       "workflow_failed" → pipeline 失败, 终止
+       "env_hook_failed"   → 环境准备失败: 查看 log_path, 修复后重试
+       "env_switch"        → orchestrator 自动执行 clean_env/prepare_env, 回步骤 1
+       "dispatch"          → 派遣 sub-agent (见下方协议)
+       "dispatch_final_gate" → 与 dispatch 等价，但 item="final-gate"。派遣 gate agent
+                              执行跨 track 依赖审查。**注意**：与 "dispatch" 共享派遣协议，
+                              区别仅在于 dispatch_file 路径与 agent 名。
+                              派遣成功后编排器仍按正常 record 协议处理结果。
+       "advance"           → 回步骤 1 (调 next)
+       "done"              → 检查 result.next_action:
+                               - "verify_and_merge" → 加载 pg-verify-and-merge skill，按 PHASE 0-4 执行
+                               - 无此字段 → pipeline 完成，终止
+       "workflow_failed"   → pipeline 失败, 终止
 ```
+
+**action 字段完整清单**（防漏）：
+
+| action | 触发时机 | 编排器响应 |
+|--------|---------|-----------|
+| `env_hook_failed` | bootstrap / env_switch 中 hook 脚本失败 | 终止循环，提示修复 |
+| `env_switch` | stage 边界切换 | 调用 _handle_env_switch 自动执行 clean_env/prepare_env |
+| `dispatch` | sub-agent 派遣（普通 track） | 派遣对应 agent |
+| `dispatch_final_gate` | final-gate 阶段派遣 | 派遣 pg-build/gate agent |
+| `advance` | 当前 step 完成，继续推进 | 自动调 next |
+| `done` | pipeline 全部完成 | 触发 verify-and-merge |
+| `workflow_failed` | 重试耗尽 / fatal | 终止循环 |
 
 pipeline 完成时 runner 返回的 `done` action 还包含以下字段，供编排器在 verify-and-merge 阶段使用：
 
@@ -105,6 +121,14 @@ pipeline 完成时 runner 返回的 `done` action 还包含以下字段，供编
 2. **Setup**：`mkdir -p temp && python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-verify-and-merge --change-dir ".pg/changes/archive/<date>-<change>" > temp/vm-context.json`
 3. **Phase 0**：在 feature branch 上运行 flyway renumber + 受影响 track lint → 提交并推送
 4. **Phase 1**：切换到 default_branch，`git merge --squash` feature branch
+
+   > ### 编排期间 commit 策略（噪音 commit 并非 bug）
+   >
+   > 编排每一步 `record` 都会 `git commit --all` 产生 `chore(<change>): auto-record <track>:<phase> <status>`。
+   > 这些 commit 作为 **编排期的原子化审计痕迹**，让每一步修改都可追溯。
+   > 最终 `pg-verify-and-merge` Phase 1 的 `git merge --squash` 会将所有编排期 commit 压平为单条 `feat(…): …` commit 进入 master。
+   > **master 历史零噪音**——squash 合并自动消除中间 commit。
+
 5. **Phase 1.5**：判定是否跳过测试（无冲突 + `skip_tests_if_no_conflict=true` 时跳过）
 6. **Phase 2**：按 affected_tracks 运行测试套件
 7. **Phase 3**：git commit（squash 合并） + git push
@@ -184,6 +208,37 @@ $RUNNER record <change> <status> [report_path] [summary] [outputs] [issues]
 Record 完成后 runner 自动执行 `next` 推进 pipeline，返回下一步 action。
 编排器回归到步骤 1。
 
+### Sub-agent 返回契约（强制）
+
+**所有 sub-agent 必须**返回以下 JSON 结构（缺一不可）。编排器在收到 record 前会先校验 schema：
+
+```json
+{
+  "summary": "<= 200 字字符串",
+  "outputs": ["<产物文件绝对路径>", ...],
+  "tasks_updated": ["<tasks.md 中的 task_id>", ...],
+  "status": "completed | failed | escalate | pass | fail",
+  "evidence_paths": ["<证据文件绝对路径>", ...],
+  "report_path": "<必须存在且可读>"
+}
+```
+
+**字段约束**：
+
+| 字段 | 类型 | 必填 | 校验规则 |
+|------|------|------|---------|
+| `summary` | str | ✅ | 长度 1-200 |
+| `outputs` | list[str] | ✅ | 文件必须存在 |
+| `tasks_updated` | list[str] | ✅ | 元素为字符串，可为空 |
+| `status` | str | ✅ | 见 Record 状态守卫表 |
+| `evidence_paths` | list[str] | ✅ | 每个路径必须存在 |
+| `report_path` | str | ✅ | 文件必须存在 |
+
+**verify/gate agent 额外要求**：
+- `evidence_paths` 不能为空数组（空 = 触发 hard fail，详见 reducer 错误协议）
+- `report_path` 必须存在
+- `report_path` 文件内容首行必须包含 "PASS" 或 "FAIL" 标记
+
 ### 常见错误排查
 
 | 现象 | 原因 | 修复 |
@@ -192,6 +247,15 @@ Record 完成后 runner 自动执行 `next` 推进 pipeline，返回下一步 ac
 | `action: error` + `invalid transition` | record status 用错 | 对照 Record 状态守卫表 |
 | sub-agent 告"任务不完整" | dispatch 文件没传或路径错 | 检查 `dispatch_file` 路径是否可读 |
 | send sub-agent 后返回格式不对 | 未约束 sub-agent 返回格式 | 在 prompt 中明确要求返回 JSON |
+| `action: error` + `schema_violation` | sub-agent 返回 JSON 缺少必填字段或类型错误 | 重新派遣，prompt 显式引用 Sub-agent 返回契约 |
+| `action: error` + `evidence_missing` | verify/gate 的 `evidence_paths` 为空 | 重跑验证，prompt 强调必须产出 evidence |
+| `action: error` + `report_missing` | `report_path` 指向的文件不存在 | 让 sub-agent 实际写盘后再 record |
+
+### Evidence 强制规则（v2.1 引入）
+
+verify 和 gate agent 在 record 时若 `evidence_paths` 为空数组，reducer 直接返回
+`{"action": "error", "reason": "evidence_missing", "fatal": True}`，跳过状态推进，
+编排器必须终止循环并要求 sub-agent 补交 evidence。这是 hard fail，无 skip 选项。
 
 ## Event Schema
 

@@ -95,6 +95,7 @@ def render_dispatch(
     block_hooks = ""
     block_rollback = ""
     block_tasks = ""
+    block_contract = ""
 
     hooks_path = os.path.join(blocks_dir, "hooks.yaml")
     if os.path.isfile(hooks_path):
@@ -111,6 +112,12 @@ def render_dispatch(
         tasks_data = _load_yaml(tasks_path)
         block_tasks = tasks_data.get("prompt", "")
 
+    # v2.1 新增：sub-agent 返回契约块（强制 JSON schema）
+    contract_path = os.path.join(blocks_dir, "sub_agent_contract.yaml")
+    if os.path.isfile(contract_path):
+        contract_data = _load_yaml(contract_path)
+        block_contract = contract_data.get("block", "")
+
     # 4. 合并 base + blocks + phase 模板
     sections = []
     if base.get("header"):
@@ -122,6 +129,9 @@ def render_dispatch(
         sections.append(_safe_format(block_tasks, ctx))
     if block_rollback and ctx.get("rollback_context"):
         sections.append(_safe_format(block_rollback, ctx))
+    # v2.1: 契约块始终在最后，强调返回值约束
+    if block_contract:
+        sections.append(_safe_format(block_contract, ctx))
 
     return "\n\n---\n\n".join(sections)
 

@@ -1,20 +1,45 @@
 # gate.yaml — sub=gate 完整提示词
+# v2.1: 引入 gate-score 加权评估，PASS 必须 ≥ 80 分且无 P0 失败
 
 prompt: |
-  ### 门控审查要求
+  ### 门控审查要求（v2.1 加权评分）
 
-  审查上一轮 verify 报告，逐项核查 tasks.md 的 G-* 门控项：
+  审查上一轮 verify 报告，逐项核查 tasks.md 的 G-* 门控项，
+  **并对每个维度独立打分**（0-100），最后综合计算 gate-score。
 
-  1. 所有 V-* 验证项是否全部通过
-  2. 是否有未修复的已知问题
-  3. 代码质量是否达标（lint 警告数、测试覆盖率）
+  ### 加权评分维度
+
+  | 维度 | 权重 | P0 失败条件（即使总分高也 FAIL） |
+  |------|------|-------------------------------|
+  | V-* 验证项通过率 | 50% | 任何 V-* FAIL |
+  | design.md 一致性 | 20% | 缺核心 API/DTO 改动 |
+  | scope creep 检查 | 15% | 修改了未在 proposal 声明的文件 |
+  | 测试质量 | 10% | 新代码无单测覆盖 |
+  | 安全审查 (review_level=security) | 5% | 高危漏洞 |
+
+  ### gate-score 计算
+
+  ```
+  gate-score = Σ(维度分 × 权重)  (0-100)
+  PASS 判定: gate-score ≥ 80 AND 无 P0 失败
+  FAIL 判定: gate-score < 80 或 存在 P0 失败
+  ```
 
   ### 判定
 
-  - PASS：所有 G-* 项通过，返回 gate pass
-  - FAIL：存在未通过的 G-* 项，返回 gate fail（需列出具体 G-N 项）
+  - **PASS**：gate-score ≥ 80 且无 P0 失败，返回 `gate pass`
+  - **FAIL**：gate-score < 80 或存在 P0 失败，返回 `gate fail`（需列出具体 G-N 项 + 维度分）
+
+  ### 返回契约
+
+  除 Sub-agent 返回契约的 6 字段外，还必须包含：
+  - 在 summary 中附加: `"gate_score: <0-100>, p0_failures: [G-N, ...]"`
+  - 在 report_path 文件中提供每个维度的分数明细
 
   ### 写盘要求
 
   完成审查后，自行用 cat > 写盘到 2-build/{report_filename}。
-  格式：Markdown，包含每项 G-* 的结论（PASS / FAIL）及依据。
+  格式：Markdown，包含：
+  - 每个 G-* 项的结论（PASS / FAIL）及依据
+  - 每个维度的分数（0-100）和权重
+  - 最终 gate-score 和 PASS/FAIL 判定

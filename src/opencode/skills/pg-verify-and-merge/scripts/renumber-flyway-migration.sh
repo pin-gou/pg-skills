@@ -23,7 +23,24 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+
+# ── 解析项目根（v2.1 修复）──
+# 旧实现: PROJECT_DIR="$(cd "$SCRIPT_DIR/.." && pwd)"
+#   问题：脚本位于 .opencode/skills/pg-verify-and-merge/scripts/,
+#         dirname = scripts, .. = .opencode/skills/pg-verify-and-merge,
+#         这不是仓库根，find/git 都会失败。
+#
+# 进一步踩坑：直接 git rev-parse --show-toplevel 在 symlinked skill 下
+#   会解析到 symlink 源目录（如 /home/ubuntu/workspace/pg-skills/），而非调用方项目根。
+#
+# 正确方法：用 CWD (即用户调用脚本时所在的目录) 而非 SCRIPT_DIR 解析项目根。
+#   因为编排器总是在项目根运行脚本（如 cd /home/.../webvirt && bash .opencode/...），
+#   PWD 必然是项目根或子目录。
+PROJECT_DIR="$(git rev-parse --show-toplevel 2>/dev/null || true)"
+if [ -z "$PROJECT_DIR" ] || [ ! -d "$PROJECT_DIR" ]; then
+    # fallback 1: 用 PWD
+    PROJECT_DIR="$(pwd)"
+fi
 
 # ── 默认值 ───────────────────────────────────────────────────────────
 MIGRATION_REL="webvirt-backend/webvirt-bootstrap/src/main/resources/db/migration"

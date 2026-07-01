@@ -39,6 +39,8 @@ from pipeline.config import (
     resolve_hooks,
 )
 from pipeline.tasks_md import extract_section_content
+from pipeline.sub_agent_contract import validate_record_args
+from pipeline.replay import replay_state
 import bootstrap
 import subprocess
 
@@ -59,13 +61,34 @@ class Orchestrator:
       - 记录 dispatch 和 record 事件到 event_log
       - reduce_state(state, record) 产出 (new_state, action)
       - save_snapshot(change_root, new_state)
+
+    v2.1 checkpoint / resume：
+      - 默认从 snapshot.json 加载（快速）
+      - snapshot 损坏时自动 fallback 到 pipeline.events replay
+      - 显式 use_replay=True 强制走 events 重建（用于 debug / 时间旅行）
+
+    Args:
+        change: change 名称或相对路径（支持 'archive/2026-07-02-grpc-query-correlation'
+                这种带子目录的形式）
+        use_replay: 强制从 events 重建 state
     """
 
-    def __init__(self, change: str):
-        self.change = change
-        self.change_root = _change_root(change)
+    def __init__(self, change: str, use_replay: bool = False):
+        self.change = os.path.basename(change.rstrip("/")) if "/" in change else change
+        # v2.1: 兼容 archive/<date>-<name> 路径
+        if "/" in change:
+            self.change_root = os.path.join(CHANGES_DIR, change)
+        else:
+            self.change_root = _change_root(change)
         self.event_log = EventLog(change_root=self.change_root)
-        self.state: PipelineState = load_snapshot(self.change_root) or PipelineState(change=change)
+
+        if use_replay:
+            # v2.1: 强制从 events 重建 state
+            self.state = replay_state(self.change_root)
+            self._loaded_via = "replay"
+        else:
+            self.state = load_snapshot(self.change_root) or PipelineState(change=self.change)
+            self._loaded_via = "snapshot"
 
     def next(self) -> dict[str, Any]:
         """返回下一个 action JSON。
@@ -394,6 +417,30 @@ class Orchestrator:
             return {"action": "error", "fatal": False,
                     "reason": "No active item to record"}
 
+        # ── Sub-agent 返回契约校验（v2.1）──
+        # 失败时不推进 state、不写 event log，直接返回 error action
+        ok, reason = validate_record_args(
+            phase=phase,
+            track=track,
+            status=status,
+            summary=summary,
+            report_path=report_path,
+            outputs=outputs,
+            issues=issues,
+        )
+        if not ok:
+            return {
+                "action": "error",
+                "fatal": True,
+                "reason": reason,
+                "phase": phase,
+                "track": track,
+                "hint": (
+                    "重新派遣 sub-agent 并显式要求其按 Sub-agent 返回契约返回 JSON。"
+                    "Prompt 模板已在 v2.1 增加 SUB_AGENT_RETURN_CONTRACT 段。"
+                ),
+            }
+
         # 构建 record
         record = PipelineRecord(
             track=track,
@@ -478,10 +525,36 @@ class Orchestrator:
 
         dispatch 路径通过 dispatch.build_action() 写入 dispatch_file，
         final-gate 通过 dispatch.build_final_gate_action() 写入 dispatch_file。
+
+        v2.1 新增：final-gate 派遣前做 gate-assessment.md 存在性预检，
+        任何一个 track 的 gate assessment 缺失则阻断 final-gate 派遣，
+        返回 workflow_failed（fatal=True），避免 final-gate 在残缺数据上 pass。
         """
         if action.kind == "dispatch":
             is_final = action.track == FINAL_GATE_TRACK
             if is_final:
+                # ── v2.1: final-gate 前置门控 ──
+                # 检查所有非 simple track 是否有有效的 gate-assessment 报告
+                missing = self._collect_missing_gate_assessments()
+                if missing:
+                    # 阻断 final-gate：返回 workflow_failed
+                    reason = (
+                        f"final-gate 派遣前门控失败：以下 {len(missing)} 个 track "
+                        f"缺少 gate assessment 报告: {', '.join(missing)}。"
+                        f"编排器应回到缺失 track 重新跑 gate。"
+                    )
+                    self.event_log.append(EVT_WORKFLOW_FAILED, {"reason": reason})
+                    self.state = self.state.replace(
+                        status="failed", failed_reason=reason,
+                    )
+                    save_snapshot(self.change_root, self.state)
+                    return {
+                        "action": "workflow_failed",
+                        "fatal": True,
+                        "reason": reason,
+                        "missing_gate_assessments": missing,
+                    }
+
                 result = build_final_gate_action(self.state, self.change_root)
             else:
                 result = build_action(self.state, action, self.change_root)
@@ -621,12 +694,30 @@ class Orchestrator:
         )
 
     def _auto_commit(self, status: str, track: str, phase: str) -> dict[str, Any]:
-        """record 后自动 git commit（仅在 pipeline 运行时执行）。"""
+        """record 后自动 git commit（仅在 pipeline 运行时执行）。
+
+        每次 record 都创建 chore(<change>): auto-record ... 提交。
+        **这是设计意图——编排期间的原子化审计痕迹**，让每一步修改都可追溯。
+        pg-verify-and-merge Phase 1 会 squash 所有编排期 commit 为单条 feat(…): … 进入 master。
+        master 历史不产生任何噪音。
+
+        Args:
+            status: 当前 record 的 status
+            track: 当前 track id
+            phase: 当前 phase
+
+        Returns:
+            dict:
+                - attempted=True, committed=True → 实际创建了 git commit
+                - attempted=True, committed=False → 工作区干净或 commit 失败
+        """
         porcelain = self._git("status", "--porcelain").stdout.strip()
         if not porcelain:
             return {
-                "attempted": True, "committed": False, "reason": "工作区干净，无可提交内容",
+                "attempted": True, "committed": False,
+                "reason": "工作区干净，无可提交内容",
             }
+
         self._git("add", "-A")
         msg = f"chore({self.change}): auto-record {track}:{phase} {status}"
         r = self._git("commit", "-m", msg)
@@ -643,6 +734,68 @@ class Orchestrator:
             "attempted": True, "committed": False, "sha": None,
             "message": msg, "reason": r.stderr.strip() or "commit failed",
         }
+
+    def _collect_missing_gate_assessments(self) -> list[str]:
+        """收集所有缺少 gate assessment 报告的 track id。
+
+        v2.1: 用于 final-gate 派遣前门控。
+
+        规则：
+          - 只检查 status == "completed" 的 track（避免查未完成的）
+          - simple track 跳过（无 gate-assessment）
+          - gate assessment 路径约定: 2-build/{seq}-{track}-gate-report.md
+            或 *.gate.md / *.gate-assessment.md
+
+        Returns:
+            缺少 gate assessment 的 track id 列表
+        """
+        build_dir = os.path.join(self.change_root, "2-build")
+        if not os.path.isdir(build_dir):
+            return [t for t in self.state.pipeline_order
+                    if t != FINAL_GATE_TRACK
+                    and not self._is_simple_track(t)]
+
+        existing = set(os.listdir(build_dir))
+        missing: list[str] = []
+
+        for tid in self.state.pipeline_order:
+            if tid == FINAL_GATE_TRACK:
+                continue
+            if self._is_simple_track(tid):
+                continue
+            t = self.state.tracks.get(tid)
+            if not t or t.status != "completed":
+                continue
+
+            # 检查是否存有该 track 的 gate assessment
+            # 文件命名约定（dispatch.py 实际产出）:
+            #   {seq}-{track}-gate.md            ← 实际命名（如 006-dev.backend-gate.md）
+            #   {seq}-{track}-gate-assessment.md ← SKILL 文档约定
+            #   {seq}-{track}-gate-report.md     ← 旧命名
+            track_bare = tid.rsplit(".", 1)[-1]
+            candidates = [
+                f for f in existing
+                if f.endswith(".md")
+                and (
+                    # 实际命名：必须包含完整 track id + "-gate" 后缀
+                    f.endswith(f"-{track_bare}-gate.md")
+                    or f.endswith(f"-{track_bare}-gate-assessment.md")
+                    or f.endswith(f"-{track_bare}-gate-report.md")
+                    # 也兼容：完整 track id 带 -gate 后缀
+                    or f.endswith(f"-{tid}-gate.md")
+                    or f.endswith(f"-{tid}-gate-assessment.md")
+                    or f.endswith(f"-{tid}-gate-report.md")
+                )
+            ]
+            if not candidates:
+                missing.append(tid)
+
+        return missing
+
+    def _is_simple_track(self, track_id: str) -> bool:
+        """判断 track 是否为 simple track（无需 gate-assessment）。"""
+        track_types = getattr(self.state, "track_types", {}) or {}
+        return track_types.get(track_id) == "simple"
 
     def _auto_archive(self) -> dict[str, Any]:
         """调用 pg-archive.py 归档 change 目录 + git commit 归档。"""

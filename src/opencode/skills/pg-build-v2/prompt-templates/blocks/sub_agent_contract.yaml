@@ -1,0 +1,54 @@
+# sub_agent_contract.yaml — sub-agent 返回契约块（v2.1 新增）
+# 此块被 base.yaml 通过 {sub_agent_contract_block} 占位符引用，
+# 注入到所有 dispatch prompt 的尾部，强制 sub-agent 按契约返回 JSON。
+#
+# 编排器在 record 阶段会按此契约校验返回值：
+#   - 必填字段缺失 → schema_violation (hard fail)
+#   - verify/gate/fix-gate/final-gate 的 evidence_paths 为空 → evidence_missing (hard fail)
+#   - report_path 指向的文件不存在 → report_missing (hard fail)
+
+block: |
+  ## Sub-agent 返回契约（强制）
+
+  **完成本任务后，必须返回以下 JSON 结构**（不要返回其他格式，否则 record 会被拒）：
+
+  ```json
+  {
+    "summary": "一句话描述结果（<= 200 字）",
+    "outputs": ["<产物文件绝对路径>", ...],
+    "tasks_updated": ["<tasks.md 中的 task_id>", ...],
+    "status": "completed | failed | escalate | pass | fail",
+    "evidence_paths": ["<证据文件绝对路径>", ...],
+    "report_path": "<报告文件绝对路径，verify/gate 必须存在且包含 PASS/FAIL 标记>"
+  }
+  ```
+
+  ### 字段约束
+
+  | 字段 | 必填 | 校验 |
+  |------|------|------|
+  | `summary` | ✅ | 1-200 字字符串 |
+  | `outputs` | ✅ | 数组（可空），元素为字符串 |
+  | `tasks_updated` | ✅ | 数组（可空），元素为字符串 |
+  | `status` | ✅ | 枚举见上 |
+  | `evidence_paths` | ✅ | 数组；verify/gate/fix-gate/final-gate **不可为空** |
+  | `report_path` | ✅ | verify/gate 必须是真实存在的文件路径 |
+
+  ### 阶段特别要求
+
+  - **test / dev / simple**：`evidence_paths` 可为空（产物即证据）
+  - **verify / gate / fix-gate / final-gate**：
+    - `evidence_paths` 必须至少包含一个真实存在的文件（测试日志 / 命令输出 / 日志片段）
+    - `report_path` 必须存在，且首行包含 `PASS` 或 `FAIL`
+  - **fix / fix-gate**：额外要求输出修复方案说明（在 `summary` 中）
+
+  ### 失败示例（这些会被拒）
+
+  - 缺字段：`{"summary": "...", "outputs": [...]}` ← 缺 status
+  - 证据缺失：verify agent 返回的 `evidence_paths: []` ← 触发 hard fail
+  - 报告不存在：`"report_path": "/tmp/not_exist.md"` ← 触发 hard fail
+
+  ### 返回方式
+
+  将上述 JSON 作为 task() 的返回值整体返回（不要拆散到 summary 文本里）。
+  编排器会原样提取字段并校验。
