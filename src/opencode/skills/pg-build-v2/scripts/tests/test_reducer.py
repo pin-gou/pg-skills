@@ -411,6 +411,48 @@ class TestDetect(unittest.TestCase):
         self.assertEqual(action.track, FINAL_GATE_TRACK)
         self.assertEqual(action.kind, "dispatch")
 
+    def test_simple_track_routed_to_simple_phase(self):
+        """Simple track 应路由到 simple phase。"""
+        from pipeline.detect import next_pending
+        state = PipelineState(
+            change="x",
+            pipeline_order=("proto-gen", "dev.backend"),
+            track_types={"proto-gen": "simple"},
+            status="running",
+            tracks={
+                "proto-gen": TrackState.create("proto-gen"),
+                "dev.backend": TrackState.create("dev.backend"),
+            },
+        )
+        action = next_pending(state)
+        self.assertEqual(action.kind, "dispatch")
+        self.assertEqual(action.phase, "simple",
+                         "track_types 标记为 simple 的 track 应 dispatch phase=simple")
+        self.assertEqual(action.track, "proto-gen")
+
+    def test_simple_track_skipped_after_completion(self):
+        """Simple track 完成后转到下一个标准 track。"""
+        from pipeline.detect import next_pending
+        t = TrackState.create("proto-gen", status="completed")
+        ph = t.phases.copy()
+        from pipeline.state import PhaseState
+        ph["simple"] = PhaseState(status="completed")
+        t = t.replace(phases=ph)
+        state = PipelineState(
+            change="x",
+            pipeline_order=("proto-gen", "dev.backend"),
+            track_types={"proto-gen": "simple"},
+            status="running",
+            tracks={
+                "proto-gen": t,
+                "dev.backend": TrackState.create("dev.backend"),
+            },
+        )
+        action = next_pending(state)
+        self.assertEqual(action.track, "dev.backend",
+                         "simple track 完成后应跳到下一 track")
+        self.assertEqual(action.phase, "test")
+
 
 if __name__ == "__main__":
     unittest.main()

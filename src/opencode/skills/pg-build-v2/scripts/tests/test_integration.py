@@ -191,5 +191,85 @@ class TestOrchestratorProgress(unittest.TestCase):
         self.assertGreaterEqual(p["event_count"], 1)
 
 
+class TestOrchestratorDispatchFile(unittest.TestCase):
+    """验证 orchestrator.next() / record() 写入 dispatch_file。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.change_root = os.path.join(self.tmp, "test-change")
+        os.makedirs(self.change_root)
+        self.orch = _setup_initial_state(self.tmp, "test-change")
+
+    def test_next_returns_dispatch_file(self):
+        """next() 返回的 dispatch action 包含 dispatch_file。"""
+        # 重新获取 next (因为 _setup_initial_state 已调过一次)
+        r = self.orch.next()
+        self.assertEqual(r["action"], "dispatch")
+        self.assertIn("dispatch_file", r,
+                      "dispatch action 必须包含 dispatch_file 字段")
+        self.assertTrue(os.path.isfile(r["dispatch_file"]),
+                        f"dispatch_file 应在磁盘上存在: {r.get('dispatch_file')}")
+
+    def test_record_returns_dispatch_file(self):
+        """record() 返回的 dispatch action 包含 dispatch_file。"""
+        r = self.orch.record("completed")
+        self.assertIn("dispatch_file", r,
+                      "record 返回的 dispatch action 必须包含 dispatch_file")
+        self.assertTrue(os.path.isfile(r["dispatch_file"]))
+
+    def test_dispatch_file_content(self):
+        """dispatch_file 内容包含任务描述。"""
+        r = self.orch.record("completed")
+        if "dispatch_file" in r:
+            with open(r["dispatch_file"], encoding="utf-8") as f:
+                content = f.read()
+            self.assertIn("任务", content, "dispatch_file 应包含任务说明")
+
+    def test_record_returns_commit_field(self):
+        """record() 返回包含 commit 字段（auto-commit）。"""
+        r = self.orch.record("completed")
+        # 测试在非 git 目录中运行时，commit 字段仍然存在（attempted=true）
+        self.assertIn("commit", r, "record 返回应包含 commit 字段")
+        self.assertTrue(r["commit"]["attempted"])
+
+
+class TestIntegrationSimpleTrack(unittest.TestCase):
+    """Simple track 在完整 pipeline 中的行为。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.change_root = os.path.join(self.tmp, "test-change")
+        os.makedirs(self.change_root)
+        state = PipelineState(
+            change="test-change",
+            pipeline_order=("dev.backend", "proto-gen"),
+            track_types={"proto-gen": "simple"},
+            status="running",
+            tracks={
+                "dev.backend": TrackState.create("dev.backend", modules=("backend",)),
+                "proto-gen": TrackState.create("proto-gen", modules=(), max_fail_retries=1),
+            },
+        )
+        save_snapshot(self.tmp, state)
+        self.orch = Orchestrator("test-change")
+        self.orch.change_root = self.tmp
+        self.orch.state = state
+        self.orch.next()
+
+    def test_simple_track_route(self):
+        """next_pending 在 simple track 上返回 phase=simple。"""
+        from pipeline.detect import next_pending
+        action = next_pending(self.orch.state)
+        self.assertEqual(action.kind, "dispatch")
+        self.assertEqual(action.phase, "simple",
+                         "simple track 应路由到 simple phase 而非 test")
+
+    def test_simple_track_completes_first(self):
+        """simple track 在标准 track 之前被 dispatch 并完成。"""
+        r = self.orch.record("completed", summary="proto-gen commands done")
+        self.assertIn("dispatch_file", r,
+                      "simple track 的 record 应包含 dispatch_file")
+
+
 if __name__ == "__main__":
     unittest.main()
