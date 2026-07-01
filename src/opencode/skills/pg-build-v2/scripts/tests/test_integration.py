@@ -242,7 +242,7 @@ class TestIntegrationSimpleTrack(unittest.TestCase):
         os.makedirs(self.change_root)
         state = PipelineState(
             change="test-change",
-            pipeline_order=("dev.backend", "proto-gen"),
+            pipeline_order=("proto-gen", "dev.backend"),
             track_types={"proto-gen": "simple"},
             status="running",
             tracks={
