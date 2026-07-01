@@ -127,6 +127,7 @@ class TrackState:
     prepare_log_path: str = ""           # prepare_env 日志路径
     prepare_status: str = ""             # "ok" | "error" | "skipped"
     tasks_by_phase: dict[str, str] = field(default_factory=dict)
+    commands: tuple[str, ...] = ()       # simple track 的命令列表
 
     @classmethod
     def create(cls, track_id: str, **kwargs) -> "TrackState":
@@ -159,6 +160,7 @@ class TrackState:
             "prepare_log_path": self.prepare_log_path,
             "prepare_status": self.prepare_status,
             "tasks_by_phase": dict(self.tasks_by_phase),
+            "commands": list(self.commands),
         }
 
     @classmethod
@@ -193,6 +195,7 @@ class TrackState:
             prepare_log_path=d.get("prepare_log_path", ""),
             prepare_status=d.get("prepare_status", ""),
             tasks_by_phase=d.get("tasks_by_phase", {}),
+            commands=tuple(d.get("commands", [])),
         )
 
     def replace(self, **kwargs: Any) -> "TrackState":
@@ -220,6 +223,7 @@ class TrackState:
             prepare_log_path=kwargs.get("prepare_log_path", self.prepare_log_path),
             prepare_status=kwargs.get("prepare_status", self.prepare_status),
             tasks_by_phase=kwargs.get("tasks_by_phase", self.tasks_by_phase),
+            commands=kwargs.get("commands", self.commands),
         )
 
     def get_phase(self, phase: str) -> PhaseState:

@@ -158,6 +158,7 @@ class Orchestrator:
                 prepare_status="ok",
                 label=cfg.get("description", bare),
                 tasks_by_phase=tasks_by_phase,
+                commands=tuple(cfg.get("commands", [])),
             )
             if cfg.get("type") == "simple":
                 track_types[tid] = "simple"
@@ -241,6 +242,27 @@ class Orchestrator:
                     pass
 
         track_configs: dict[str, dict] = {}
+
+        # 从 manifest 读 track 级配置（含 simple track commands）
+        manifest_path = os.path.join(self.change_root, "execution-manifest.yaml")
+        if os.path.isfile(manifest_path):
+            try:
+                import yaml as _yaml
+                with open(manifest_path, encoding="utf-8") as f:
+                    manifest = _yaml.safe_load(f) or {}
+                for stage in manifest.get("stages", []):
+                    stage_name = stage.get("name", "")
+                    for track in stage.get("tracks", []):
+                        tid = track["id"] if isinstance(track, dict) else track
+                        qualified = f"{stage_name}.{tid}" if stage_name else tid
+                        if qualified not in track_configs:
+                            track_configs[qualified] = {}
+                        if isinstance(track, dict):
+                            cmds = track.get("commands", [])
+                            if cmds:
+                                track_configs[qualified]["commands"] = cmds
+            except Exception:
+                pass
 
         # 从 project.yaml 读 track 级配置
         config_path = os.path.join(bootstrap.PROJECT_ROOT, ".pg", "project.yaml")

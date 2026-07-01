@@ -203,6 +203,35 @@ def build_ctx(
     if change_root:
         tasks_validation = extract_design_verification_criteria(change_root, track)
 
+    # commands_normalized — simple track 的命令列表
+    commands = t.commands if hasattr(t, 'commands') else ()
+    if not commands and change_root:
+        # 惰性从 execution-manifest.yaml 加载（兼容旧快照）
+        import yaml as _yaml
+        m_path = os.path.join(change_root, "execution-manifest.yaml")
+        if os.path.isfile(m_path):
+            try:
+                with open(m_path, encoding="utf-8") as mf:
+                    mdata = _yaml.safe_load(mf) or {}
+                for stage in mdata.get("stages", []):
+                    for trk in stage.get("tracks", []):
+                        if isinstance(trk, dict) and trk.get("id") == t.bare:
+                            cmds = trk.get("commands", [])
+                            if cmds:
+                                commands = tuple(cmds)
+                            break
+            except Exception:
+                pass
+    if commands:
+        cmds_lines = []
+        for i, cmd in enumerate(commands, 1):
+            cmds_lines.append(f"  {i}. cmd: \"{cmd}\"")
+            cmds_lines.append(f"     timeout_seconds: 300")
+            cmds_lines.append(f"     on_failure: fail")
+        commands_normalized = "\n".join(cmds_lines)
+    else:
+        commands_normalized = ""
+
     ctx: dict[str, Any] = {
         "_change": state.change,
         "id": track,
@@ -246,7 +275,7 @@ def build_ctx(
         # simple
         "track_timeout": 1800,
         "track_on_failure": "workflow_failed",
-        "commands_normalized": "",
+        "commands_normalized": commands_normalized,
         # final-gate
         "proposal_path": "",
         "tasks_path": "",
@@ -293,7 +322,7 @@ def build_action(
     rs = _format_seq(report_seq)
     ctx["dispatch_seq"] = ds
     ctx["report_seq"] = rs
-    ctx["report_filename"] = f"{rs}-{track}-{phase}-report.md"
+    ctx["report_filename"] = f"{rs}-{track}-{phase}.md"
     ctx["fix_report_filename"] = f"{rs}-{track}-{phase}-fix-{cycle}.md"
 
     # 写 dispatch_file

@@ -25,7 +25,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 
 1. 用 Read 工具读取 `dispatch_file` 路径对应的文件
 2. **逐字执行**文件中所有内容作为你的任务指令
-3. 文件中提到的 `report_seq` 是 runner 预分配的全局 seq 编号，**必须**用 `cat > 2-build/{report_seq}-{item}-simple-verify.md << 'EOF' ... EOF` 写报告
+3. 文件中提到的 `report_seq` 是 runner 预分配的全局 seq 编号，**必须**用 `cat > 2-build/{report_seq}-{item}-simple.md << 'EOF' ... EOF` 写报告
 
 **绝对禁止**：
 - ❌ 改写、摘要或重组 dispatch_file 中的指令
