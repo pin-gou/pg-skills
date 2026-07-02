@@ -32,6 +32,13 @@ def _get_templates_dir() -> str:
     return os.path.join(skills, "prompt-templates")
 
 
+# v2.2: env.instances + env.hooks + 运行时环境操作指令 按 phase 条件注入
+# WITH_ENV: test/dev/verify/fix/fix-gate —— 需要起停服务 / 看日志
+# WITHOUT_ENV: gate/simple/final-gate —— 不直接操作服务
+PHASES_WITH_ENV: frozenset[str] = frozenset({"test", "dev", "verify", "fix", "fix-gate"})
+PHASES_WITHOUT_ENV: frozenset[str] = frozenset({"gate", "simple", "final-gate"})
+
+
 def _load_yaml(path: str) -> dict[str, Any]:
     import yaml as _yaml
     with open(path, encoding="utf-8") as f:
@@ -118,12 +125,24 @@ def render_dispatch(
         contract_data = _load_yaml(contract_path)
         block_contract = contract_data.get("block", "")
 
+    # v2.2: 按 phase 决定是否注入 env 块
+    #  - PHASES_WITH_ENV (test/dev/verify/fix/fix-gate): 注入 env_instances + env_hooks + 运行时环境操作指令
+    #  - PHASES_WITHOUT_ENV (gate/simple/final-gate): 跳过这些块
+    inject_env = phase in PHASES_WITH_ENV
+
+    ctx_for_header = ctx
+    if not inject_env:
+        # 用空字符串覆盖占位符，避免 base header 中残留 env 块
+        ctx_for_header = dict(ctx)
+        ctx_for_header["env_instances_block"] = ""
+        ctx_for_header["hooks_block"] = ""
+
     # 4. 合并 base + blocks + phase 模板
     sections = []
     if base.get("header"):
-        sections.append(_safe_format(base["header"], ctx))
+        sections.append(_safe_format(base["header"], ctx_for_header))
     sections.append(_safe_format(template_str, ctx))
-    if block_hooks:
+    if block_hooks and inject_env:
         sections.append(_safe_format(block_hooks, ctx))
     if block_tasks:
         sections.append(_safe_format(block_tasks, ctx))

@@ -25,9 +25,3 @@ prompt: |
   6. 抓日志确认无 ERROR
   7. 停止 invoke-hook --action stop 服务（如启动过）
   8. 用 cat > 写盘到 2-build/{fix_report_filename}
-
-  ### 返回格式
-
-  - summary: 修复摘要
-  - outputs: 修改的文件清单
-  - status: SUCCESS / FAILED

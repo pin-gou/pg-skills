@@ -2,7 +2,7 @@
 # 使用 {var} 格式，由 Python str.format() 替换
 
 header: |
-  ## 任务：{id} - {label}
+  ## 任务：{id}
 
   ### 变更名称
   {_change}
