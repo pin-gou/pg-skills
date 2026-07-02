@@ -5,6 +5,57 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.6.0] - 2026-07-02
+
+### 新增
+
+- **pg-build-v2 事件溯源引擎**：Event Sourcing + Reducer 纯函数取代过程式状态机（`pipeline.events` append-only JSONL 作为唯一持久化入口）。核心指标：7800 LOC → 3000 LOC（-62%），51 `save_state` 调用收敛为 1 `event_log.append`。详见 `src/opencode/skills/pg-build-v2/`
+  - YAML 模板与代码解耦（11 个模板文件）
+  - SubPipeline 递归复用 reducer（替代 `in_fix_cycle` 状态 flag）
+  - v1 迁移脚本（旧 `.pipeline-state.json` → `pipeline.events`）
+  - 125 单元+集成测试全绿
+- **pg-build-v2 v2.1 pipeline reliability improvements**：
+  - 保留每 record 原子化 commit（审计痕迹，最终 squash 压平）
+  - Sub-agent 返回 JSON schema 校验 + `evidence_missing` hard fail
+  - 5 维加权评分 gate-score（≥ 80 通过）
+  - final-gate 前置门控 gate assessment 缺失阻断 + 加权评分
+  - checkpoint/resume 机制 + verify-replay 对比命令
+- **pg-build-v2 v2.2 dispatch 提示词结构优化**：
+  - env.instances/hooks + 运行时环境操作指令按 phase 条件注入（test/dev/verify/fix/fix-gate 注入完整 env 配置；gate/simple/final-gate 跳过）
+  - 删除末尾旧"返回格式"段（被 `sub_agent_contract.yaml` 6 字段段取代）
+  - 标题简化：`## 任务：{id} - {label}` → `## 任务：{id}`
+  - 测试：新增 `test_dispatch_renderer.py`（13 个 case 覆盖 5 phase × 2 维度）
+- **v1/v2 行为对齐**：3 个共享 helper（`pg_build_bootstrap` / `pg_build_dispatch_context` / `pg_build_record_log`）统一 v1/v2 的 分支创建 / init commit / context-chain 记账 / manifest 校验逻辑，避免回归。v1 `cmd_next`/`cmd_record` 行为不变
+- **mark-task CLI**：`pg_pipeline_state_v2.py mark-task` 子命令，tasks.md 转为派生视图（state.json 是 SSOT），支持幂等标记。配套 CI lint `lint_tasks_md.py` 检测直接 Edit tasks.md 的违规变更，与 state.json 交叉验证
+- **`actions.health_check`（声明才生成）**：instance 级 health check action，支持 HTTP 探针（backend/frontend）与 TCP 探针（agent）。`pg-init-project` 仅当 `environments.<env>.roles.<r>.actions.health_check` 存在时生成 hook
+- **pg-agent workflow + Phase 5**：新增 `CALLER_PG_AGENT` 路由（`.pg/agent/<session>/<env>/logs/`），治理 AGENTS.md drift。`pg-init-project` Phase 5 扫描 **/AGENTS.md 分类 drift（a/b/c 三类），生成 SSOT 速查 + review 清单。`pg doctor` 新增 2 项 warn 检查
+- **pg-run 菜单增强**：新增"停止所有实例并清理环境"菜单项，高亮选中菜单，修复菜单切换界面漂移，优化"准备环境并启动所有实例"过程中的输出提示
+- **symlink 管理**：`pg init` 重建已存在的 symlink，删除冗余 symlink
+
+### 修复
+
+- **Simple track 路由**：`type=simple` 的 track（如 openapi-gen）不再被错误走成 test/dev/verify/gate 4 个空 sub。两处 bug：`_is_phase_item()` 委托给 `get_track_type()` helper；`_next_phase_in_track()` 加 `is_simple_track()` 短路
+- **Final-gate 单次派遣**：`record_completed()` 顶部加 final-gate special handling，委托给 `record_pass()`，避免 final-gate 被拆成 4 个 sub 派遣
+- **pg-build bootstrap `prepare_env` 阶段错选**：修复 state persist bug 导致 prepare_env 阶段选择错误
+- **pg-verify-and-merge Phase 4 防御性切回 master**：避免 workspace 滞留在 feature branch，确保即使编排者走 feature branch fallback 后最终也回到 master
+- **`renumber-flyway-migration.sh` 路径 bug**：修复脚本中飞路迁移文件重编号时的路径解析错误
+- **Simple track 上下文缺失**：`cmd_record_v2` 补回 context-chain 记账 + commit 元数据挂载；`cmd_next_v2` 补回分支创建 / init commit / ctx enrich / manifest 校验
+- **Hook `wait_for_completion` 默认行为修复**：start hook 在 background 运行，默认 `wait_for_completion=false`
+
+### 变更
+
+- **非破坏性**：`pg-pipeline-runner.py` 删除 v1 漂移检测（`_validate_state_consistency` / `_any_open_section` / `_duplicate_warning` 等 ~212 行），默认启用 `state_v2.enabled=true`
+- **非破坏性**：`pg-build` SKILL.md 新增 v1/v2 行为对齐章节（共享 helper 设计文档）
+- **非破坏性**：优化 pg-build 编排器提示词，禁止过多准备 prompt
+- **非破坏性**：`pg upgrade` 从 tag 拉取新版本
+
+### 备注
+
+- pg-build-v2 与 pg-build 并行存在，通过 `/3-pg-build-v2` 命令访问；旧 `pg-build` 标记 deprecated（`_deprecated_README.md`）
+- 新增 6 个测试文件：`test_state_v2.py`(25)、`test_runner_v2_shadow.py`(3)、`test_replay_archive.py`(6)、`test_mark_task_cli.py`(15)、`test_lint_tasks_md.py`(13)、`test_dispatch_renderer.py`(13)，合计 ~75 新增测试
+- 旧 `pg-build` 保留 v1 17 处 `pg_context_chain.*` 散落调用，不动
+- `actions.health_check` 是 opt-in，不会给已有项目强加
+
 ## [0.5.0] - 2026-06-28
 
 ### 变更
