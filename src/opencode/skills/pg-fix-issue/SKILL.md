@@ -39,11 +39,9 @@ metadata:
 | `modules.<id>.build` / `.lint` / `.test.<test_key>` | 验证/编译/lint 命令 | Phase 5 | 该类操作跳过 |
 | `environments.<env>.description` | Phase 3 列出可用环境给用户选 | Phase 3 | 不列出该 env |
 | `environments.<env>.prepare_env` / `.clean_env` | 准备/清理环境脚本 | Phase 3/6 | 不询问 prepare/clean |
-| `environments.<env>.roles.<role>.actions.{start,stop,logs,tail}` | 精细化启停（替代整栈重启） | Phase 5 | 由 LLM 调 `pg-invoke-hook.py` 触发（不进 executor operations）；字段缺失时回退到让编排器用 `type: shell` 调 `pg-run-hook.py`（不推荐） |
+| `environments.<env>.roles.<role>.actions.{start,stop,restart,logs,tail,health_check}` | 精细化启停（替代整栈重启） | Phase 5 | 由 LLM 调 `pg-invoke-hook.py invoke-hook` 触发（不进 executor operations）；字段缺失时回退到让编排器用 `type: shell` 调 `pg-run-hook.py`（不推荐） |
 | `tracks.<id>.modules` | file path → track 反查 | Phase 0.1 | 该 track 不可识别 |
-| `tracks.<id>.max_fix_retries` | subagent 重试上限（**仅 subagent 层**，不影响 iteration） | Phase 5 | 跳过 |
-| `fix_issue.max_iteration_count` | **主 agent 整体迭代上限**（区别于 `tracks.max_fix_retries`）| Phase 6 | 默认 5 |
-| `fix_issue.max_per_iteration_subcalls` | 单次 iteration 内 executor 重派上限 | Phase 5 | 默认 3 |
+| `fix_issue.max_iteration_count` | **主 agent 整体迭代上限** | Phase 6 | 默认 5 |
 | `fix_issue.partial_success_threshold` | 成功率低于此值算修复失败 | Phase 5b | 默认 0.7 |
 | `fix_issue.ask_environment_choice` | Phase 3 是否询问环境选择 | Phase 3 | 默认 true |
 | `fix_issue.ask_prepare_env` / `.ask_clean_env` | Phase 3 是否询问 prepare/clean 时机 | Phase 3 | 默认 true |
@@ -138,10 +136,9 @@ fix_issue_context:
 | `modules.<m>.build` | `pg-parse-config.py --resolve-module-build <m>` → `{cmd, timeout_seconds}` |
 | `modules.<m>.test.<test_key>` | `pg-parse-config.py --resolve-module-test <m> <test_key>` → `{cmd, timeout_seconds}`（test_key 由 `stages[*].test_key` 决定） |
 | `modules.<m>.lint` | `pg-parse-config.py --resolve-module-lint <m>` → `{cmd, timeout_seconds}` |
-| `environments.<env>.roles.<role>.actions.{start,stop,logs,tail}` | **v3.0 变更**：不再由 parser 预渲染。LLM 调 `pg-invoke-hook.py invoke-hook --session <C> --env <ENV> --role <ROLE> --instance <INSTANCE> --action <ACTION> [--tail-lines N]` 触发；runner 内部从 project.yaml 反查 spec |
+| `environments.<env>.roles.<role>.actions.{start,stop,restart,logs,tail,health_check}` | **v3.0 变更**：不再由 parser 预渲染。LLM 调 `pg-invoke-hook.py invoke-hook --session <C> --env <ENV> --role <ROLE> --instance <INSTANCE> --action <ACTION> [--tail-lines N]` 触发；runner 内部从 project.yaml 反查 spec |
 | `environments.<env>.prepare_env` / `.clean_env` | LLM 调 `pg-invoke-hook.py invoke-hook --session <C> --env <ENV> --action prepare_env\|clean_env`（v3.0 新增，无需 `--role`/`--instance`） |
 | `tracks.<t>.modules` | `pg-parse-config.py pg-fix-issue` 输出 `tracks.<t>.modules` |
-| `tracks.<t>.max_fix_retries` | 5（**subagent 重试上限，仅 Phase 5 用**） |
 | `fix_issue.max_iteration_count` | 5（**主 agent 整体迭代上限，Phase 6 用**） |
 | `fix_issue.ask_environment_choice` | true（Phase 3 是否问环境） |
 
@@ -178,7 +175,6 @@ affected_modules: [<module-id-1>, <module-id-2>, ...]
 ```yaml
 fix_issue_defaults:
   max_iteration_count: 5
-  max_per_iteration_subcalls: 3
   partial_success_threshold: 0.7
   ask_environment_choice: true
   ask_prepare_env: true
@@ -191,17 +187,6 @@ fix_issue_defaults:
     - executor_json_history
     - git_diff_state
 ```
-
-**`max_iteration_count` 与 `tracks.<id>.max_fix_retries` 的语义隔离**：
-
-| 维度 | `tracks.<id>.max_fix_retries` | `fix_issue.max_iteration_count` |
-|------|------------------------------|-------------------------------|
-| 计费对象 | subagent（pg-build 的 dev agent 等） | **主 agent 整体修复循环** |
-| 重试内容 | "TDV 跑 N 次" | "修一个 bug 修了 N 轮，每轮可能暴露新根因" |
-| pg-fix-issue 用法 | Phase 5 subagent 重试时参考（pg-fix-issue 通常不派遣 subagent） | **Phase 6 ESCALATE 判定** |
-| 默认值 | 5 | 5 |
-
-**两者不同步**：一次 iteration 可能内部跑 N 次验证（不计入 iteration_count），每轮验证失败本身又有 subagent 重试上限（tracks.max_fix_retries）。**严禁混用**。
 
 ---
 
@@ -711,7 +696,7 @@ operations:
 
 ### 5.1.4.1 Deployment 工具调用约定（v3.0 新增）
 
-service 启停（backend / frontend / agent start|stop|logs|tail）以及 environment-level prepare_env / clean_env，**统一由编排器 LLM 调用** `pg-invoke-hook.py invoke-hook` 触发：
+service 启停（backend / frontend / agent start|stop|restart|logs|tail|health_check）以及 environment-level prepare_env / clean_env，**统一由编排器 LLM 调用** `pg-invoke-hook.py invoke-hook` 触发：
 
 ```bash
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
@@ -725,11 +710,15 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 |------|------|------|
 | `--session` | ✅ | session 名（v4）。pg-fix-issue 调用 = `fix-<YYYY-MM-DD>-<slug>`。`--change` 保留 1 版本作为 deprecated alias |
 | `--env` | ✅ | 必须在 project.yaml `environments` 列表中 |
-| `--role` | ⚠️ | backend / frontend / agent。**仅 `--action start\|stop\|logs\|tail` 必填**；`prepare_env\|clean_env` 时忽略 |
-| `--instance` | ⚠️ | 必须在 `environments.<env>.roles.<role>.instances[]` 中。**仅 `--action start\|stop\|logs\|tail` 必填**；`prepare_env\|clean_env` 时忽略 |
-| `--action` | ✅ | `start` / `stop` / `logs` / `tail`（per-role） 或 `prepare_env` / `clean_env`（environment-level） |
+| `--role` | ⚠️ | backend / frontend / agent。**仅 `--action start\|stop\|restart\|logs\|tail\|health_check` 必填**；`prepare_env\|clean_env` 时忽略 |
+| `--instance` | ⚠️ | 必须在 `environments.<env>.roles.<role>.instances[]` 中。**仅 per-role action 必填**；`prepare_env\|clean_env` 时忽略 |
+| `--action` | ✅ | `start` / `stop` / `restart` / `logs` / `tail` / `health_check`（per-role） 或 `prepare_env` / `clean_env`（environment-level） |
 | `--stage` | ❌ | 默认 `manual`；用于 spec.stage 标记 |
 | `--tail-lines` | ❌ | 仅 `--action logs\|tail` 生效 |
+| `--log-dir` | ❌ | 显式覆盖日志目录（agent 调试用，透传 `PG_HOOK_LOG_DIR`） |
+| `--timeout-override` | ❌ | 覆盖 `timeout_seconds`（ad-hoc 调试用，CLI 显式传时输出 WARN） |
+| `--no-wait-for-bg` | ❌ | start action 的 fire-and-forget 开关（hook `pg_start_bg` setsid detach 后立即返回）；stop/logs/tail 忽略 |
+| `--wait-for-completion` | ❌ | 强制等 hook 跑完（覆盖 start 默认）。调试时偶尔有用 |
 | `--skill` / `--caller` | ❌ | **硬缺省 `ad-hoc`**。SKILL 调用必须显式标注（pg-fix-issue → `--skill pg-fix-issue`）。注入为 `PG_RUN_CALLER` 环境变量 |
 
 **`--timeout` / `--host` / `--port` 均不是 CLI flag**——LLM 不传，由 runner 从 project.yaml 反查 spec，runner 内部 `subprocess.run(timeout=...)` 强制执行。
@@ -759,8 +748,6 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 
 ### 5.1.5 test_key 选择
 
-### 5.1.5 test_key 选择
-
 `stages[*].test_key` 决定 `modules.<m>.test.<test_key>` 用哪个 key：
 
 | bug 类型 | 推荐 test_key | 理由 |
@@ -772,7 +759,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 
 **编排器根据 affected_modules 数量自动推断**：1 个 module → unit；2-3 个 → integration；≥4 个 → e2e。**用户可在 Phase 3 覆盖**。
 
-### 5.1.5 派遣 prompt 模板
+### 5.1.6 派遣 prompt 模板
 
 ```
 Task 工具调用:
@@ -984,15 +971,6 @@ loop:
       ESCALATE_WITH_MENU
 ```
 
-**iteration_count 与 `tracks.<id>.max_fix_retries` 的区别**：
-
-| 计数器 | 来源 | 计费对象 | 适用场景 |
-|--------|------|---------|---------|
-| `iteration_count` | `fix_issue.max_iteration_count` | 主 agent 整体迭代 | 修一个 bug 暴露新根因，重做 Phase 1 |
-| subagent 重试 | `tracks.<id>.max_fix_retries` | subagent 调用 | pg-build 风格，pg-fix-issue 通常不派遣 subagent |
-
-**严禁混用**：`tracks.max_fix_retries` 不影响 Phase 6 判定；`fix_issue.max_iteration_count` 不影响 Phase 5 单次验证内的 subagent 重试。
-
 ### 6.2 失败类型分类
 
 | 失败类型 | 处理 | 计入 retry |
@@ -1008,19 +986,19 @@ loop:
 | 端口占用 | executor 自决 | ❌ |
 | 环境问题（libvirt 不可用等） | 记 KnownIssues | ❌ |
 
-### 6c. 编排器需要用户补充信息
+### 6.3 编排器需要用户补充信息
 
 如果修复需要用户决策（如架构级变更），用 `question` 工具问用户：
 - 补充信息**不改变诊断方向** → 续接，不计 retry
 - 补充信息**改变诊断方向** → 计入 retry
 
-### 6d. ESCALATE 条件
+### 6.4 ESCALATE 条件
 
 - `iteration_count > fix_issue.max_iteration_count` 后仍未修好
 - 修复需要架构级变更（用户决策）
 - 修复范围超出原问题 scope
 
-### 6e. ESCALATE_WITH_MENU（**3 选项 menu**）
+### 6.5 ESCALATE_WITH_MENU（**3 选项 menu**）
 
 当触发 ESCALATE 时，编排器**不直接放弃**，而是向用户展示 **3 选项 menu**：
 

@@ -210,7 +210,6 @@ stages:
 
 fix_issue:
   max_iteration_count: 5
-  max_per_iteration_subcalls: 3
 """
 
 

@@ -9,10 +9,6 @@
         :modelValue="(fixIssue as any)?.max_iteration_count"
         :schema="intSchema1"
         @update:modelValue="v => store.setAt(['fix_issue', 'max_iteration_count'], v)" />
-      <FormField name="max_per_iteration_subcalls" label="单次 iteration 内 executor 重派上限"
-        :modelValue="(fixIssue as any)?.max_per_iteration_subcalls"
-        :schema="intSchema1"
-        @update:modelValue="v => store.setAt(['fix_issue', 'max_per_iteration_subcalls'], v)" />
       <FormField name="partial_success_threshold" label="部分成功率阈值 (0=禁用)"
         :modelValue="(fixIssue as any)?.partial_success_threshold"
         :schema="numSchema"

@@ -41,7 +41,7 @@ pnpm dev
 - 🌐 **environments** （roles × instances × actions；prepare_env / clean_env；actions cross-role orchestration）
 - 🛤 **tracks** （type=standard/simple；commands 简写/对象切换；lint 模块 override）
 - ⏱ **stages** （顺序执行，gate 策略；environment.required / selection_rules / on_conditions）
-- 🔧 **fix_issue** （max_iteration_count / max_per_iteration_subcalls / partial_success_threshold 等）
+- 🔧 **fix_issue** （max_iteration_count / partial_success_threshold 等）
 - 📊 **regression** （suite.{name}.module / test_keys / environment）
 - 📐 **rules** （proposal / design / tasks 自由对象）
 - 🔨 **build_rules** （id / type / target_agent / position / template）

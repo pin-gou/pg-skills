@@ -366,13 +366,7 @@
           "type": "integer",
           "minimum": 1,
           "default": 5,
-          "description": "主 agent 整体修复迭代上限. 每轮: 跑 Phase 1 调用链路分析 + Phase 2 规划 + Phase 4 修复 + Phase 5 验证. 超限进入 ESCALATE 3 选项 menu. 区别于 tracks.<id>.max_fix_retries (subagent 重试)."
-        },
-        "max_per_iteration_subcalls": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 3,
-          "description": "单次 iteration 内 executor 重派上限 (防卡死 / 防 prompt-injection 死循环)."
+          "description": "主 agent 整体修复迭代上限. 每轮: 跑 Phase 1 调用链路分析 + Phase 2 规划 + Phase 4 修复 + Phase 5 验证. 超限进入 ESCALATE 3 选项 menu."
         },
         "partial_success_threshold": {
           "type": "number",

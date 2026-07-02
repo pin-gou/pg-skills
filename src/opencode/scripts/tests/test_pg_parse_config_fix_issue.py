@@ -18,7 +18,38 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-PROJECT_ROOT = next(p for p in Path(__file__).resolve().parents if (p / ".pg" / "project.yaml").exists())
+
+def _find_project_root() -> Path:
+    """Walk up from __file__ + cwd + PG_PROJECT_ROOT env var.
+
+    Handles symlinks (.opencode/...) AND hardlinks (upstream pg-skills
+    without .pg/project.yaml). Mirrors test_v3_invoke_hook_migration.py
+    for consistency.
+    """
+    env_root = os.environ.get("PG_PROJECT_ROOT")
+    if env_root and (Path(env_root) / ".pg" / "project.yaml").is_file():
+        return Path(env_root)
+    candidates = [Path(__file__).resolve().parent, Path.cwd()]
+    seen = set()
+    for start in candidates:
+        p = start
+        for _ in range(15):
+            if p in seen:
+                break
+            seen.add(p)
+            if (p / ".pg" / "project.yaml").is_file():
+                return p
+            parent = p.parent
+            if parent == p:
+                break
+            p = parent
+    raise RuntimeError(
+        f"Cannot find .pg/project.yaml from {start}. "
+        f"Set PG_PROJECT_ROOT env var."
+    )
+
+
+PROJECT_ROOT = _find_project_root()
 SCRIPT_PATH = PROJECT_ROOT / ".pg" / "skills" / "src" / "opencode" / "scripts" / "pg-parse-config.py"
 
 
@@ -69,7 +100,6 @@ stages:
 
 fix_issue:
   max_iteration_count: 7
-  max_per_iteration_subcalls: 4
   partial_success_threshold: 0.8
   ask_environment_choice: true
   ask_prepare_env: false
@@ -129,7 +159,6 @@ class FixIssueFilterTest(unittest.TestCase):
         filtered = self.mod.filter_by_workflow(data, "pg-fix-issue")
         fi = filtered["fix_issue"]
         self.assertEqual(fi["max_iteration_count"], 7)
-        self.assertEqual(fi["max_per_iteration_subcalls"], 4)
         self.assertEqual(fi["partial_success_threshold"], 0.8)
         self.assertTrue(fi["ask_environment_choice"])
         self.assertFalse(fi["ask_prepare_env"])
@@ -190,7 +219,6 @@ class FixIssueShapeTest(unittest.TestCase):
 
     EXPECTED_KEYS = {
         "max_iteration_count",
-        "max_per_iteration_subcalls",
         "partial_success_threshold",
         "ask_environment_choice",
         "ask_prepare_env",
@@ -257,7 +285,8 @@ class RealConfigSanityTest(unittest.TestCase):
 
         fi = filtered["fix_issue"]
         self.assertEqual(fi["max_iteration_count"], 5)
-        self.assertEqual(fi["max_per_iteration_subcalls"], 3)
+        self.assertNotIn("max_per_iteration_subcalls", fi,
+                         "max_per_iteration_subcalls removed in v3.x")
         self.assertEqual(fi["partial_success_threshold"], 0.7)
         self.assertEqual(len(fi["escalation_artifacts"]), 5)
 
