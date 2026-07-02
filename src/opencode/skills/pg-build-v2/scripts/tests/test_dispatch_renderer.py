@@ -70,24 +70,36 @@ def _ctx(phase: str = "test") -> dict:
 
 
 class TestPhaseEnvClassification(unittest.TestCase):
-    """PHASES_WITH_ENV / PHASES_WITHOUT_ENV 分类正确性。"""
+    """PHASES_WITH_ENV / PHASES_WITHOUT_ENV 分类正确性。
+
+    v2.2 调整：test phase 不再属于 WITH_ENV（test 阶段只需要写测试代码 + 跑 mvn test，
+    不需要手动起停服务或查日志——服务由编排器 hook 管理）。
+    """
 
     def test_with_env_phases_contains_expected(self):
         self.assertEqual(
             PHASES_WITH_ENV,
-            frozenset({"test", "dev", "verify", "fix", "fix-gate"}),
+            frozenset({"dev", "verify", "fix", "fix-gate"}),
         )
 
     def test_without_env_phases_contains_expected(self):
         self.assertEqual(
             PHASES_WITHOUT_ENV,
-            frozenset({"gate", "simple", "final-gate"}),
+            frozenset({"test", "gate", "simple", "final-gate"}),
         )
 
     def test_phases_disjoint(self):
         self.assertEqual(
             PHASES_WITH_ENV & PHASES_WITHOUT_ENV,
             frozenset(),
+        )
+
+    def test_all_known_phases_classified(self):
+        """所有已知 phase 必须属于其中一个集合（确保调度全覆盖）。"""
+        all_phases = {"test", "dev", "verify", "gate", "fix", "fix-gate", "simple", "final-gate"}
+        self.assertEqual(
+            PHASES_WITH_ENV | PHASES_WITHOUT_ENV,
+            frozenset(all_phases),
         )
 
 
@@ -104,10 +116,12 @@ class TestEnvBlockInjection(unittest.TestCase):
         # 运行时环境操作指令（v2.2 新标题）
         self.assertIn("运行时环境操作指令", content)
 
-    def test_test_injects_env_hooks(self):
+    def test_test_skips_env_hooks(self):
+        """v2.2: test 阶段不需要手动起停服务，跳过 env 配置注入。"""
         content = render_dispatch("test", _ctx("test"))
-        self.assertIn("stage.environment.hooks", content)
-        self.assertIn("运行时环境操作指令", content)
+        self.assertNotIn("stage.environment.hooks", content)
+        self.assertNotIn("stage.environment.instances", content)
+        self.assertNotIn("运行时环境操作指令", content)
 
     def test_dev_injects_env_hooks(self):
         content = render_dispatch("dev", _ctx("dev"))
@@ -142,6 +156,50 @@ class TestEnvBlockInjection(unittest.TestCase):
         self.assertNotIn("stage.environment.hooks", content)
         self.assertNotIn("stage.environment.instances", content)
         self.assertNotIn("运行时环境操作指令", content)
+
+
+class TestEnvBlockPosition(unittest.TestCase):
+    """v2.2: 运行时环境操作指令紧跟 Stage 配置段（在 phase template 之前）。"""
+
+    def test_env_block_immediately_after_stage_config(self):
+        content = render_dispatch("verify", _ctx("verify"))
+        # 位置约束: Stage 配置段 必须在 运行时环境操作指令 之前
+        stage_pos = content.find("### Stage 配置")
+        env_op_pos = content.find("### 运行时环境操作指令")
+        self.assertGreater(stage_pos, 0, "应含 ### Stage 配置 段")
+        self.assertGreater(env_op_pos, 0, "应含 ### 运行时环境操作指令 段")
+        self.assertGreater(env_op_pos, stage_pos,
+                           "运行时环境操作指令应紧跟 Stage 配置之后")
+
+    def test_env_block_after_phase_template(self):
+        """运行时环境操作指令必须在 phase template 之前（与 base header 一起）。"""
+        content = render_dispatch("dev", _ctx("dev"))
+        env_op_pos = content.find("### 运行时环境操作指令")
+        phase_marker_pos = content.find("### 实现要求")  # dev.yaml marker
+        # 运行时操作指令应在 phase template 之前（即在 base header_env 段）
+        self.assertGreater(env_op_pos, 0)
+        # phase template 应在 运行时操作指令 之后
+        if phase_marker_pos > 0:
+            self.assertGreater(phase_marker_pos, env_op_pos)
+
+
+class TestRoleInstanceDocumentation(unittest.TestCase):
+    """v2.2: ROLE/INSTANCE 字段来源解释必须出现在 env block 中。"""
+
+    def test_role_source_explained(self):
+        content = render_dispatch("verify", _ctx("verify"))
+        self.assertIn("ROLE", content)
+        self.assertIn("INSTANCE", content)
+        # 应解释 ROLE 从 hooks 顶层 key 选取
+        self.assertIn("stage.environment.hooks", content)
+        # 应解释 INSTANCE 从 instances.<role> 的 name 字段选取
+        self.assertIn("name", content)
+
+    def test_example_invocation_present(self):
+        """header_env 应提供具体调用示例。"""
+        content = render_dispatch("verify", _ctx("verify"))
+        # 应含至少一个 --action start 例子
+        self.assertIn("--action start", content)
 
 
 class TestTitleSimplification(unittest.TestCase):

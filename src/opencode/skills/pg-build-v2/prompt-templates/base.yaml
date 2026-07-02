@@ -1,5 +1,11 @@
 # base.yaml — 所有 dispatch 提示词的公共头部
 # 使用 {var} 格式，由 Python str.format() 替换
+#
+# v2.2 拆分：
+#   - header: 所有 phase 通用（任务标题 / Track / Module / Stage 配置）
+#   - header_env: 仅 PHASES_WITH_ENV (dev/verify/fix/fix-gate) 注入，
+#                 紧跟 header 之后（即 Stage 配置之后），含 env.instances +
+#                 env.hooks + 运行时环境操作指令 + ROLE/INSTANCE 来源解释
 
 header: |
   ## 任务：{id}
@@ -27,5 +33,40 @@ header: |
   - stage.environment.prepare.log_path: {prepare_log_path}
   - stage.test_commands: {test_commands}
 
-  {env_instances_block}
-  {hooks_block}
+header_env: |
+  - stage.environment.instances:
+  ```yaml
+  {env_instances}
+  ```
+
+  - stage.environment.hooks:
+  ```yaml
+  {hooks_yaml}
+  ```
+
+  ### 运行时环境操作指令
+
+  如需启动/停止服务或查看日志，使用：
+
+  ```
+  python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+    --session {_change} --env {env_name} --role <ROLE> --instance <INSTANCE> \
+    --action <ACTION> [--tail-lines <N>] [--skill pg-build]
+  ```
+
+  | action | 用途 |
+  |--------|------|
+  | start  | 启动某 role 实例 |
+  | stop   | 停止某 role 实例 |
+  | logs   | 查看完整日志 |
+  | tail   | 查看末尾 N 行日志 |
+
+  **ROLE / INSTANCE 来源**：
+  - **ROLE**：从上方 `stage.environment.hooks` 的顶层 key 选取（如 `backend` / `agent` / `frontend`）
+  - **INSTANCE**：从 `stage.environment.instances.<ROLE>` 列表中选取 `name` 字段（如 `backend-1` / `agent-1` / `frontend-1`）
+  - **示例**：若要启动 backend 服务并查看日志，命令为：
+    ```
+    python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+      --session {_change} --env {env_name} --role backend --instance backend-1 \
+      --action start --skill pg-build
+    ```

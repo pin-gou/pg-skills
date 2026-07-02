@@ -1,12 +1,12 @@
 """Renderer — 加载 YAML 模板 → Jinja2 渲染。
 
-模板目录结构：
+模板目录结构（v2.2）：
   prompt-templates/
-    base.yaml             # 所有 dispatch 的公共头部
+    base.yaml             # 所有 dispatch 的公共头部（header + header_env）
     blocks/
-      hooks.yaml          # invoke-hook 调用约定
-      rollback.yaml       # [ROLLBACK CONTEXT] 块
-      tasks.yaml          # tasks_preformatted 渲染
+      rollback.yaml       # [ROLLBACK CONTEXT] 块（仅子 pipeline 注入）
+      tasks.yaml          # 任务清单 + 验证要求渲染
+      sub_agent_contract.yaml  # v2.1 sub-agent 返回契约（强制 JSON schema）
     test.yaml             # sub=test 完整模板
     dev.yaml
     verify.yaml
@@ -15,6 +15,9 @@
     fix-gate.yaml
     simple.yaml
     final-gate.yaml
+
+注：原 blocks/hooks.yaml 内容已整合到 base.yaml 的 header_env 段，
+    由 renderer 根据 phase 条件（PHASES_WITH_ENV）注入。
 """
 
 from __future__ import annotations
@@ -33,10 +36,14 @@ def _get_templates_dir() -> str:
 
 
 # v2.2: env.instances + env.hooks + 运行时环境操作指令 按 phase 条件注入
-# WITH_ENV: test/dev/verify/fix/fix-gate —— 需要起停服务 / 看日志
-# WITHOUT_ENV: gate/simple/final-gate —— 不直接操作服务
-PHASES_WITH_ENV: frozenset[str] = frozenset({"test", "dev", "verify", "fix", "fix-gate"})
-PHASES_WITHOUT_ENV: frozenset[str] = frozenset({"gate", "simple", "final-gate"})
+# WITH_ENV: dev/verify/fix/fix-gate —— 需要起停服务 / 看日志
+# WITHOUT_ENV: test/gate/simple/final-gate —— 不直接操作服务
+#   - test 阶段: 写测试代码 + 跑 mvn test, 不需要手动起停服务（由编排器 hook 管理）
+#   - gate: 审查 evidence, 不需要操作服务
+#   - simple: 只跑预定 commands
+#   - final-gate: 聚合 gate assessment, 不需要操作服务
+PHASES_WITH_ENV: frozenset[str] = frozenset({"dev", "verify", "fix", "fix-gate"})
+PHASES_WITHOUT_ENV: frozenset[str] = frozenset({"test", "gate", "simple", "final-gate"})
 
 
 def _load_yaml(path: str) -> dict[str, Any]:
@@ -99,15 +106,12 @@ def render_dispatch(
 
     # 3. 加载 blocks
     blocks_dir = os.path.join(td, "blocks")
-    block_hooks = ""
     block_rollback = ""
     block_tasks = ""
     block_contract = ""
 
-    hooks_path = os.path.join(blocks_dir, "hooks.yaml")
-    if os.path.isfile(hooks_path):
-        hooks_data = _load_yaml(hooks_path)
-        block_hooks = hooks_data.get("prompt", "")
+    # 注：v2.2 起 blocks/hooks.yaml 内容已整合到 base.yaml 的 header_env 段，
+    # 由 renderer 根据 phase 条件注入，不再单独加载。
 
     rollback_path = os.path.join(blocks_dir, "rollback.yaml")
     if os.path.isfile(rollback_path):
@@ -126,24 +130,19 @@ def render_dispatch(
         block_contract = contract_data.get("block", "")
 
     # v2.2: 按 phase 决定是否注入 env 块
-    #  - PHASES_WITH_ENV (test/dev/verify/fix/fix-gate): 注入 env_instances + env_hooks + 运行时环境操作指令
-    #  - PHASES_WITHOUT_ENV (gate/simple/final-gate): 跳过这些块
+    #  - PHASES_WITH_ENV (dev/verify/fix/fix-gate): 注入 header_env（紧跟 Stage 配置，含
+    #    env_instances + env_hooks + 运行时环境操作指令 + ROLE/INSTANCE 来源解释）
+    #  - PHASES_WITHOUT_ENV (test/gate/simple/final-gate): 跳过 header_env
     inject_env = phase in PHASES_WITH_ENV
-
-    ctx_for_header = ctx
-    if not inject_env:
-        # 用空字符串覆盖占位符，避免 base header 中残留 env 块
-        ctx_for_header = dict(ctx)
-        ctx_for_header["env_instances_block"] = ""
-        ctx_for_header["hooks_block"] = ""
 
     # 4. 合并 base + blocks + phase 模板
     sections = []
     if base.get("header"):
-        sections.append(_safe_format(base["header"], ctx_for_header))
+        sections.append(_safe_format(base["header"], ctx))
+    # v2.2: 运行时环境操作指令紧跟 Stage 配置（仅 WITH_ENV phase 注入）
+    if inject_env and base.get("header_env"):
+        sections.append(_safe_format(base["header_env"], ctx))
     sections.append(_safe_format(template_str, ctx))
-    if block_hooks and inject_env:
-        sections.append(_safe_format(block_hooks, ctx))
     if block_tasks:
         sections.append(_safe_format(block_tasks, ctx))
     if block_rollback and ctx.get("rollback_context"):
