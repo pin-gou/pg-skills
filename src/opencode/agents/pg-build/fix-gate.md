@@ -40,7 +40,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 
 本 agent 产出**修复记录**（全局时序编号），是 track 内"我**修复了**哪些 G-N gap、为什么这样修"的记录：
 
-- 触发源：**gate FAIL**（与 verify ESCALATE 触发的 fix agent 区分）
+- 触发源：**gate fail**（与 verify escalate 触发的 fix agent 区分）
 - 文件名：`.pg/changes/{change_name}/2-build/{report_seq}-{item}-fix-gate-verify-{fix_cycle}.md`
 - `{report_seq}` 与 `{fix_cycle}` 来自 dispatch_file 中的预分配值，**禁止更改**
 - 所有报告存放于 `<change>/2-build/` 子目录（与 `1-propose-review/` 平行）
@@ -49,18 +49,18 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 
 | 报告类型 | 文件名 | 关注点 |
 |---------|--------|--------|
-| 验证报告 | `2-build/{track.id}-{N}-verify.md` | "我**验证了**哪些 V-N 项" |
-| 门控评估报告 | `2-build/{track.id}-{N}-gate-assessment.md` | "我**评审了**哪些 P-N 项" |
-| **修复记录（本 agent）**| `2-build/{track.id}-{N}-gate-fix.md` | "我**修复了** G-N gap" |
-| 修复记录（verify 触发）| `2-build/{track.id}-{N}-verify-fix.md` | 同上，但触发源是 verify |
+| 验证报告 | `2-build/{report_seq}-{item}-verify.md` | "我**验证了**哪些 V-N 项" |
+| 门控评估报告 | `2-build/{report_seq}-{item}-gate-verify.md` | "我**评审了**哪些 P-N 项" |
+| **修复记录（本 agent）**| `2-build/{report_seq}-{item}-fix-gate-verify-{fix_cycle}.md` | "我**修复了** G-N gap" |
+| 修复记录（verify 触发）| `2-build/{report_seq}-{item}-fix-verify-{fix_cycle}.md` | 同上，但触发源是 verify |
 
-阅读路径：`gate-assessment (FAIL) → gate-fix（本 agent）→ re-verify (PROCEED) → gate-assessment (PASS)`。
+阅读路径：`gate-assessment (fail) → gate-fix（本 agent）→ re-verify (completed) → gate-assessment (pass)`。
 
 ## 与 fix agent 的差异
 
 | 维度 | fix agent | fix-gate agent（本 agent）|
 |---|---|---|
-| 触发源 | verify ESCALATE（编译/测试失败）| gate FAIL（结构化审查不通过）|
+| 触发源 | verify escalate（编译/测试失败）| gate fail（结构化审查不通过）|
 | 输入 | issue 字段（expected/actual/root_cause）| gate 报告 markdown（`## 不通过项详细说明`）|
 | 修复范围 | 编译错误 / 测试失败（可能跨多文件）| gate 列出的 gap（**只**针对这些）|
 | 模型 | 默认 | `pg-router/pg-master`（需要更强语义理解）|
@@ -99,7 +99,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 
 - `gate_cycles` — 当前是第几轮 (1..MAX_GATE_CYCLES=2)
 - `cycles_remaining` — 还剩几轮 (0 表示最后一轮)
-- `gate_report_path` — `.pg/changes/{change}/2-build/{track.id}-{N}-gate-assessment.md` 绝对路径
+- `gate_report_path` — `.pg/changes/{change}/2-build/{report_seq}-{item}-gate-verify.md` 绝对路径（dispatch_file 注入）
 
 ### 任务注入
 
@@ -112,7 +112,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 - `.pg/changes/{change_name}/proposal.md`
 - `.pg/changes/{change_name}/design.md`
 - `.pg/changes/{change_name}/tasks.md`
-- `.pg/changes/{change_name}/2-build/{track.id}-{N}-gate-assessment.md` — **本次修复的主输入**
+- `.pg/changes/{change_name}/2-build/{report_seq}-{item}-gate-verify.md` — **本次修复的主输入**（路径见 `gate_report_path`）
 
 ## 工作流程
 
@@ -196,7 +196,7 @@ gaps = [
 ```
 {
   "summary": "<按上述格式>",
-  "outputs": ".pg/changes/{change}/2-build/{track.id}-{N}-gate-fix.md",
+  "outputs": ".pg/changes/{change}/2-build/{report_seq}-{item}-fix-gate-verify-{fix_cycle}.md",
   "tasks_updated": true,
   "status": "SUCCESS" | "PARTIAL" | "FAILED"
 }

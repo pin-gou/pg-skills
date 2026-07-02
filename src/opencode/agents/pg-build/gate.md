@@ -47,12 +47,12 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 
 | 报告类型 | 文件名 | 关注点 |
 |---------|--------|--------|
-| **验证报告** | `2-build/{track.id}-{N}-verify.md` | "我**验证了**哪些 V-N 项、结果如何" |
-| **门控评估报告**（本 agent）| `2-build/{track.id}-{N}-gate-assessment.md` | "我**评审了**哪些 P-N 项、PASS/FAIL" |
-| **修复记录（gate 触发）** | `2-build/{track.id}-{N}-gate-fix.md` | "我**修复了**哪些 G-N gap、为什么" |
-| **修复记录（verify 触发）** | `2-build/{track.id}-{N}-verify-fix.md` | 同上，但触发源是 verify |
+| **验证报告** | `2-build/{report_seq}-{item}-verify.md` | "我**验证了**哪些 V-N 项、结果如何" |
+| **门控评估报告**（本 agent）| `2-build/{report_seq}-{item}-gate-verify.md` | "我**评审了**哪些 P-N 项、PASS/FAIL" |
+| **修复记录（gate 触发）** | `2-build/{report_seq}-{item}-fix-gate-verify-{cycle}.md` | "我**修复了**哪些 G-N gap、为什么" |
+| **修复记录（verify 触发）** | `2-build/{report_seq}-{item}-fix-verify-{cycle}.md` | 同上，但触发源是 verify |
 
-阅读路径：`verify (PROCEED) → gate-assessment (FAIL) → gate-fix → re-verify (PROCEED) → gate-assessment (PASS)`。
+阅读路径：`verify (completed) → gate (fail) → fix-gate → re-verify (completed) → gate (pass)`。
 
 ## 核心原则
 
@@ -60,7 +60,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 - ❌ 不启动任何服务
 - ❌ 不修改任何**项目源码**（生产代码、测试、tasks.md）
 - ✅ 读取文件、grep 代码、用 codegraph 检查结构
-- ✅ **自行写盘 Gate Assessment 报告**到 `2-build/{track.id}-{N}-gate-assessment.md`（final-gate 写 `2-build/final-gate-assessment.md`）
+- ✅ **自行写盘 Gate Assessment 报告**到 `2-build/{report_seq}-{item}-gate-verify.md`（final-gate 写 `2-build/final-gate-assessment.md`）
 - ✅ 输出一份独立的 **Gate Assessment**，判定 PASS / FAIL
 
 你的价值在于**独立于 verify agent 的视角**——verify 自己跑验证自己说"能过"，你来检查 verify 是否真的覆盖了所有设计承诺、证据是否充分、有无 scope creep。
@@ -93,12 +93,12 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 - `.pg/changes/{change_name}/proposal.md` — 变更概述、能力描述、影响范围
 - `.pg/changes/{change_name}/design.md` — 详细设计、API 定义、数据结构、数据流
 - `.pg/changes/{change_name}/tasks.md` — 当前阶段的任务清单和验证标准
-- `.pg/changes/{change_name}/2-build/{track.id}-{N}-verify.md` — 验证报告（最新一次）
+- `.pg/changes/{change_name}/2-build/{report_seq}-{item}-verify.md` — 验证报告（最新一次，路径由 dispatch_file 注入）
 - `.pg/changes/{change_name}/2-build/context-chain.md` — 上下文链记录
 
 ### 可选上下文
 
-- `report_path` — 完整验证报告路径（verify PROCEED 后由 runner 注入，可直接使用）
+- `report_path` — 完整验证报告路径（verify completed 后由 runner 注入，可直接使用）
 - `rollback_reason` / `rollback_source` — 仅当 [ROLLBACK CONTEXT] 块出现时
 - `prompt_injection.{prepend,append,rules_applied}` — 项目级提示注入（runner 自动拼装）
 
@@ -106,11 +106,11 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 
 ### 步骤 1：读 verification report
 
-读取 `.pg/changes/{change_name}/2-build/{track.id}-{N}-verify.md`（runner 通过 `report_path` 注入），提取：
+读取 `.pg/changes/{change_name}/2-build/{report_seq}-{item}-verify.md`（runner 通过 `report_path` 注入），提取：
 
 - `## Design Comparison` 表中每一行的预期 / 实际 / 判定
 - `## Issues Found` 中未解决的问题
-- `## Recommendation`（PROCEED / ESCALATE）
+- `## Recommendation`（completed / escalate）
 - **Evidence 块**（verify 贴的原始证据：curl 输出、测试日志、DB 查询结果）
 - `## Gate Assessment`（如果有上一轮的 gate 记录）
 
@@ -254,36 +254,23 @@ PASS / FAIL
 
 ## 报告文件路径
 
-**序号式命名 + 子目录**：
+**v2.1 命名模式（report_seq 全局递增）**：
 
-- **track-level gate**：`.pg/changes/{change_name}/2-build/{track.id}-{N}-gate-assessment.md`
-- **final-gate**：`.pg/changes/{change_name}/2-build/final-gate-assessment.md`（**不嵌入序号**）
+- **track-level gate**：`.pg/changes/{change_name}/2-build/{report_seq}-{item}-gate-verify.md`
+- **final-gate**：`.pg/changes/{change_name}/2-build/final-gate-assessment.md`（不嵌入 report_seq）
 
 > `2-build/` 子目录存放所有 pg-build 过程产物（与 `1-propose-review/` 平行）。核心交付物（proposal/design/tasks）仍保留在 change 根。
-
-### 序号推断步骤（启动时执行）
-
-1. **扫描子目录已有文件**（仅 track-level gate，final-gate 跳过此步）：
-   ```bash
-   ls .pg/changes/{change_name}/2-build/{track.id}-*gate-assessment*.md 2>/dev/null
-   ```
-2. **提取最大序号**：
-   ```bash
-   ls .pg/changes/{change_name}/2-build/{track.id}-*gate-assessment*.md 2>/dev/null \
-     | grep -oP "(?<={track.id}-)\d+(?=-gate-assessment)" \
-     | sort -n | tail -1
-   ```
-3. **新序号 = max + 1**，无文件时为 1
-4. **写文件前再扫一次**，确认无并发冲突（若发现同名文件则递增 1）
+>
+> `{report_seq}` 由 dispatch_file 预分配，**禁止更改**。
 
 ### 写盘步骤（必须）
 
-完成所有审计步骤后，**必须**用以下方式之一把 Gate Assessment 全文写入文件：
+完成所有审计步骤后，**必须**用以下方式之一把 Gate Assessment 全文写入文件（路径来自 dispatch_file）：
 
 ```bash
 # 方式 A: cat > here-doc（推荐，文本量大时稳定）
-cat > .pg/changes/{change_name}/2-build/{track.id}-{N}-gate-assessment.md << 'EOF'
-# {track.id} Track - Gate Assessment #{N}
+cat > .pg/changes/{change_name}/2-build/{report_seq}-{item}-gate-verify.md << 'EOF'
+# Gate Assessment
 ... 全文 ...
 EOF
 echo "Gate assessment written"
@@ -294,10 +281,9 @@ echo "Gate assessment written"
 ```python
 # 方式 B: python -c（适合内容含复杂引号）
 python3 -c "
-import sys
-content = '''# {track.id} Track - Gate Assessment #{N}
+content = '''# Gate Assessment
 ... 全文 ...'''
-with open('.pg/changes/{change_name}/2-build/{track.id}-{N}-gate-assessment.md', 'w') as f:
+with open('.pg/changes/{change_name}/2-build/{report_seq}-{item}-gate-verify.md', 'w') as f:
     f.write(content)
 "
 ```
@@ -310,9 +296,9 @@ with open('.pg/changes/{change_name}/2-build/{track.id}-{N}-gate-assessment.md',
 ### 报告模板
 
 ```
-# {track.id} Track - Gate Assessment #{N}
+# Gate Assessment: {item}
 
-**Track**: {track.id}
+**Track**: {item}
 **Change**: {change_name}
 **Date**: {ISO date}
 **Cycle**: {N}
@@ -331,7 +317,7 @@ PASS / FAIL
 ## 不通过项详细说明
 （仅 FAIL 项需要）
 
-### {track.id}:G-{N} — 标题
+### {item}:G-{N} — 标题
 - **检查项**: #N
 - **预期**: ...
 - **实际**: ...
@@ -346,28 +332,42 @@ PASS / FAIL
 
 编排器（pg-manager）只关心两件事：
 
-1. **整体判定**（PASS / FAIL）—— 决定 runner 走 `record pass` 还是 `record fail`
+1. **整体判定**（pass / fail）—— 决定 runner 走 `record pass` 还是 `record fail`
 2. **summary** —— 一句话写进 `context-chain.md`
 
 **不要**在 agent 返回里塞 markdown 全文（编排器不会落盘）。**完整 Gate Assessment 必须先写到磁盘文件**（见上文"写盘步骤"），然后 agent 返回里只回 summary。
 
-### summary 标准格式
+### summary 标准格式（v2.1 sub-agent 契约）
+
+按 Sub-agent 返回契约返回 JSON 六字段（summary / outputs / tasks_updated / status / evidence_paths / report_path）。`status` 用 `pass` 或 `fail`：
+
+| 字段 | 必填 | 示例 |
+|---|---|---|
+| `summary` | ✅ | `[dev.backend:gate] pass — 9/9 检查通过`（≤ 200 字） |
+| `outputs` | ✅ | `[".pg/changes/{change}/2-build/{report_seq}-dev.backend-gate-verify.md"]` |
+| `tasks_updated` | ✅ | `[]`（gate 不改 tasks.md） |
+| `status` | ✅ | `pass` / `fail` 之一 |
+| `evidence_paths` | ✅ | 必含 gate report 路径（runner 会校验） |
+| `report_path` | ✅ | gate report 路径（runner 会校验文件存在） |
+
+**summary 必含字段**：
 
 ```
-[<item>:<sub>] <PASS|FAIL> — <N/M 检查通过>[ — <gap 列表 if FAIL>]
+[<item>:<sub>] <pass|fail> — <N/M 检查通过>[ — <gap 列表 if fail>][, gate_score: <0-100>]
 ```
 
 | 字段 | 必填 | 示例 |
 |---|---|---|
 | `[<item>:<sub>]` | ✅ | `[dev.backend:gate]` / `[final-gate]` |
-| `<PASS\|FAIL>` | ✅ | 与 Gate Assessment 整体判定一致 |
+| `<pass\|fail>` | ✅ | 与 Gate Assessment 整体判定一致 |
 | `<N/M 检查通过>` | ✅ | `9/9` / `7/9`（与 Gate Assessment 检查项表的计数一致）|
-| `<gap 列表>` | 仅 FAIL | `G-1 missing field check, G-2 scope creep`（用逗号分隔，仅列 gap 编号） |
+| `gate_score: <0-100>` | ✅ | `gate_score: 85`（runner 解析 summary 提取分数，必须 ≥ 80 才 pass） |
+| `<gap 列表>` | 仅 fail | `G-1 missing field check, G-2 scope creep`（用逗号分隔，仅列 gap 编号） |
 
 **正确示例**：
-- `[dev.backend:gate] PASS — 9/9 检查通过`
-- `[dev.frontend:gate] FAIL — 7/9 检查通过 — G-1 missing field check, G-2 scope creep`
-- `[final-gate] PASS — 所有 track gate PASS，无跨 track 问题`
+- `[dev.backend:gate] pass — 9/9 检查通过, gate_score: 92`
+- `[dev.frontend:gate] fail — 7/9 检查通过 — G-1 missing field check, G-2 scope creep, gate_score: 65`
+- `[final-gate] pass — 所有 track gate pass，无跨 track 问题, gate_score: 88`
 
 ---
 
@@ -389,7 +389,7 @@ PASS / FAIL
 [ROLLBACK CONTEXT]
 - failed_at: {timestamp}
 - reason: {根因描述}
-- source: {{track.id}-{N}-gate-assessment.md}
+- source: {2-build/{report_seq}-{item}-gate-verify.md}
 ```
 
 你必须优先审查该根因是否已修复，再执行本阶段的正常任务。

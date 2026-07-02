@@ -63,7 +63,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 
 - 变更名称 `change_name` 由编排器告知
 - `.pg/changes/{change_name}/` — 变更根目录
-- `.pg/changes/{change_name}/2-build/{track.id}-{N}-simple.md` — 你需要落盘的执行报告（**N 由编排器注入**，不要自己推断）
+- `.pg/changes/{change_name}/2-build/{report_seq}-{item}-simple.md` — 你需要落盘的执行报告（**路径由 dispatch_file 注入**，不要自己推断）
 
 ## 任务
 
@@ -75,12 +75,12 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 2. **执行命令**：
    - 用 `bash -c '<cmd>'` 执行
    - runner 在编排器侧已用 `timeout N` 包裹时遵守；你自己执行时也建议在 bash 命令里加 `timeout` 防止卡死
-   - stdout/stderr 建议 tee 到 `{track.id}-{next_report_n}-simple.log`（可选）
+   - stdout/stderr 建议 tee 到 `{report_seq}-{item}-simple.log`（可选）
 3. **失败处理**（按 per-cmd on_failure + track.on_failure 决策表）：
    - `retry`：自动重试 `retry_max` 次，每次用 `retry_timeout_seconds` timeout；仍失败按 track.on_failure 处理
    - `continue`：记 warning，继续下一条
    - `fail`：立即返回 status=FAILED
-4. **全部完成或终止后**：用 `cat > 2-build/{track.id}-{next_report_n}-simple.md <<'EOF' ... EOF` 写执行报告，包含：
+4. **全部完成或终止后**：用 `cat > 2-build/{report_seq}-{item}-simple.md <<'EOF' ... EOF` 写执行报告（路径由 dispatch_file 注入），包含：
    - 每条命令的 cmd / 退出码 / stdout 末尾 ~50 行 / stderr 末尾 ~50 行 / 耗时
    - 最终判定（OK / FAILED）+ 失败原因
 
@@ -122,6 +122,6 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 ## 返回格式
 
 - `summary`：一句话总结（如 "执行 3/3 条命令成功" 或 "Command #2 失败: <err>，按 on_failure=fail 终止"）
-- `outputs`：产物文件列表（如 `2-build/{track.id}-1-simple.md`）
+- `outputs`：产物文件列表（如 `2-build/{report_seq}-openapi-gen-simple.md`）
 - `tasks_updated`：固定 `false`（simple track 不更新 tasks.md 复选框）
 - `status`：`SUCCESS` 或 `FAILED`
