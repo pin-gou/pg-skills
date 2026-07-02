@@ -85,6 +85,18 @@ class EventLog:
     def _ensure_dir(self) -> None:
         Path(self.path).parent.mkdir(parents=True, exist_ok=True)
 
+    def update_path(self, new_path: str) -> None:
+        """重定向 event 文件到新路径（用于 archive 后跟随 change 目录移动）。
+
+        调用场景：pg-archive.py 把 .pg/changes/<change>/ mv 到 .pg/changes/archive/<date>-<change>/，
+        EventLog 实例的 path 仍指向原位置，后续 append 会创建孤儿文件。archive 成功后
+        orchestrator 调用此方法把 path 切到 archive 新位置，后续 event 自然写入 archive 副本。
+
+        Args:
+            new_path: 新的 event 文件绝对路径（通常为 archive 目录下的 pipeline.events）
+        """
+        self.path = new_path
+
     def exists(self) -> bool:
         return os.path.isfile(self.path)
 

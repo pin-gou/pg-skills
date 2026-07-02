@@ -1,11 +1,10 @@
 """Bootstrap — pipeline 启动副作用。
 
-5 个步骤（与旧 pg_build_bootstrap 行为对等）：
+4 个步骤（v2.1 起 context-chain.md 被 pipeline.events 取代）：
   1. migrate_legacy_state_files — 创建 2-build/，迁移遗留 state 文件
-  2. _ensure_context_chain — 创建 context-chain.md
-  3. _ensure_feature_branch — git checkout -b feat/pg/<change>
-  4. _maybe_bootstrap_init_commit — git add -A + commit（仅首次）
-  5. execute_env_hook_inline — 运行 prepare_env 脚本（v2 内联）
+  2. _ensure_feature_branch — git checkout -b feat/pg/<change>
+  3. _maybe_bootstrap_init_commit — git add -A + commit（仅首次）
+  4. execute_env_hook_inline — 运行 prepare_env 脚本（v2 内联）
 
 所有步骤容错：失败写 event log 但不阻塞 dispatch。
 env-hook 是唯一可能抛出异常（EnvHookError）的步骤。
@@ -104,21 +103,8 @@ def _migrate_files_impl(change_root: str) -> list[str]:
 
 
 # ============================================================
-# 步骤 2: 确保 context-chain.md 存在
+# 步骤 2: （已删除 — v2.1 起 context-chain.md 被 pipeline.events 取代）
 # ============================================================
-
-def ensure_context_chain(change: str) -> None:
-    """创建 context-chain.md 文件（如果不存在）。"""
-    path = os.path.join(CHANGES_DIR, change, APPLY_DIR, "context-chain.md")
-    if os.path.isfile(path):
-        return
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(f"# Context Chain - {change}\n\n")
-        f.write("---\n")
-        f.write("*此文件由编排器自动管理，请勿手动修改*\n\n")
-        f.write(f"### {_now_iso()} - PIPELINE STARTED\n")
-        f.write("**状态**: INITIALIZED\n\n")
 
 
 # ============================================================
@@ -415,12 +401,7 @@ def run_bootstrap(
     except Exception as e:
         _log("bootstrap_step_completed", {"step": 1, "error": str(e)})
 
-    # 步骤 2: context-chain
-    try:
-        ensure_context_chain(change)
-        _log("bootstrap_step_completed", {"step": 2})
-    except Exception as e:
-        _log("bootstrap_step_completed", {"step": 2, "error": str(e)})
+    # 步骤 2: （已删除 — v2.1 起 context-chain.md 被 pipeline.events 取代）
 
     # 步骤 3: feature branch
     try:

@@ -819,6 +819,13 @@ class Orchestrator:
             if target:
                 self._git("add", target)
             commit_r = self._git("commit", "-m", f"archive change {self.change}")
+            # 切 event_log path 到 archive 新位置，避免后续 append 写到被 mv 的原路径
+            # 产生孤儿文件（archive 后原目录已不存在，append 会创建空文件残留）。
+            if target:
+                archive_event_path = os.path.join(
+                    bootstrap.PROJECT_ROOT, target, "2-build", "pipeline.events"
+                )
+                self.event_log.update_path(archive_event_path)
             if commit_r.returncode == 0:
                 sha = self._git("rev-parse", "HEAD").stdout.strip()
                 archive_result["commit"] = {"sha": sha, "committed": True}

@@ -42,7 +42,7 @@ sub-agent (via Task tool)      ← 执行 test / dev / verify / gate / fix / fix
 | 模板 | 嵌入 .py 字符串（484 行） | 独立 YAML 文件 |
 | 子循环 | `in_fix_cycle` 状态 flag | SubPipeline 递归复用 reducer |
 | 查看器 | 无接口 | event log 天然 SSE/WebSocket 源 |
-| 审计 | context-chain.md 人读 | event log 可编程回放 |
+| 审计 | ~~context-chain.md 人读~~ (v2.1 弃用) | event log 可编程回放 |
 
 ---
 
@@ -333,5 +333,6 @@ event log 的格式设计为查看器的直接数据源：
 python3 .opencode/skills/pg-build-v2/scripts/migrations/v1_to_events.py <change_root>
 ```
 
-从旧 `.pipeline-state.json` + `context-chain.md` 重建 `pipeline.events` + `pipeline.snapshot.json`。
+从旧 `.pipeline-state.json` 重建 `pipeline.events` + `pipeline.snapshot.json`
+（v2.1 起 context-chain.md 已弃用，v1 兼容脚本从 dispatch_history + completed_items 重建，无需 context-chain.md 数据）。
 旧文件不会被修改。

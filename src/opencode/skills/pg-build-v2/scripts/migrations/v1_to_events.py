@@ -4,7 +4,8 @@
 用法：
   python3 v1_to_events.py <change_root>
 
-从 v1 的 dispatch_history / completed_items / context-chain.md 重建新 v2 event log。
+从 v1 的 dispatch_history / completed_items 重建新 v2 event log。
+（v1 的 context-chain.md 数据已被 dispatch_history + completed_items 完整覆盖，无需额外读取。）
 """
 
 from __future__ import annotations

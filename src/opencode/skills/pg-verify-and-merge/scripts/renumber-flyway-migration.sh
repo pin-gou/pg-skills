@@ -133,6 +133,8 @@ NEXT=$((MAX_VERSION + 1))
 declare -a RENAME_PAIRS
 declare -a NEW_NAMES
 
+# 跟踪是否真的有重命名发生（避免 set -u 下空数组引用触发 unbound error）
+HAD_RENAMES=0
 IDX=0
 for f in "${NEW_FILES[@]}"; do
   basename_f=$(basename "$f")
@@ -147,13 +149,14 @@ for f in "${NEW_FILES[@]}"; do
     continue
   fi
 
+  HAD_RENAMES=1
   RENAME_PAIRS[$IDX]="$f|$MIGRATION_DIR/$new_name|$basename_f|$new_name"
   NEW_NAMES[$IDX]="$new_name"
   IDX=$((IDX + 1))
   NEXT=$((NEXT + 1))
 done
 
-if [ ${#RENAME_PAIRS[@]} -eq 0 ]; then
+if [ "$HAD_RENAMES" -eq 0 ]; then
   echo "✅ 所有文件版本号已是最新，无需变更"
   exit 0
 fi

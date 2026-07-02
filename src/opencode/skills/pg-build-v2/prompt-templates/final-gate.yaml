@@ -24,7 +24,8 @@ prompt: |
   1. **所有 design.md**（{design_doc_paths}）— 找 🆕 标记的跨 track 验证项
   2. **所有 track 的 gate assessment 报告**（{report_paths}）
      - **每个 gate assessment 必须存在**且包含 `gate-score` 字段（v2.1 强制）
-  3. **context-chain.md** — 了解 sub-agent 执行历史与已知问题
+  3. **pipeline.events**（`{events_path}`）— 了解 sub-agent 执行历史与已知问题；
+     可通过 `python3 .opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py progress {_change}` 查看
   4. **known-issues.md**（如存在）— 累积的 gate-fix 兜底问题
 
   ### 加权评分维度
@@ -34,7 +35,7 @@ prompt: |
   | 所有 track gate-score ≥ 80 | 50% | 任一 track gate-score < 80 |
   | 跨 track 依赖满足 | 20% | 🆕 项无对应实现证据 |
   | evidence 充分性 | 15% | 任一 track evidence_paths 为空 |
-  | context-chain 无未解决 error | 10% | 存在未解决 error |
+  | pipeline.events 无未解决 error | 10% | 存在未解决 error |
   | known-issues 已记录豁免 | 5% | 未豁免的已知问题 |
 
   ### gate-score 计算
@@ -50,7 +51,7 @@ prompt: |
   1. **遍历所有 design.md，提取所有 🆕 标记的跨 track 验证项**
   2. **对每条 🆕 项，确认目标 track 的 gate-assessment.md 里有对应实现证据**
   3. **校验每个 gate-assessment.md 含 `gate-score` 字段且 ≥ 80**
-  4. 检查 context-chain.md 没有未解决的 error
+  4. 检查 pipeline.events 没有未解决的 error（grep `type=workflow_failed` 与 `fix_cycle_started cycle=exhausted`）
   5. 列出跨 track 不一致/缺失项（如有）
 
   ### 判定
