@@ -252,7 +252,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <a href="#sec2">2. 架构全景</a>
 
   <span class="section-group">新项目接入</span>
-  <a href="#sec3-onboard">3.1 4 步接入</a>
+  <a href="#sec3-onboard">3.1 四步接入</a>
   <a href="#sec3-yaml">3.2 project.yaml</a>
   <a href="#sec3-hook">3.3 Hook 协议</a>
   <a href="#sec3-demo">3.4 执行演示</a>
@@ -263,6 +263,8 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <a href="#sec4-define">4.2 定界</a>
   <a href="#sec4-propose">4.3 提案</a>
   <a href="#sec4-build">4.4 构建</a>
+  <a href="#sec4-build" class="sub">4.4.5 simple track</a>
+  <a href="#sec4-build" class="sub">4.4.6 gate-score</a>
   <a href="#sec5">5. Bug 修复</a>
   <a href="#sec6">6. 回归测试</a>
   <a href="#sec7">7. 动手实操</a>
@@ -312,6 +314,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <tr><td>编码中</td><td>AI 自由发挥</td><td>Pipeline 按 stages × tracks  编排，不可越界</td></tr>
   <tr><td>完成后</td><td>用户自己跑测试</td><td>自动 TDVG + Gate 审查</td></tr>
   <tr><td>出问题</td><td>人工定位+猜测</td><td><code>/5-pg-fix-issue</code> 系统化诊断修复</td></tr>
+  <tr><td>回归测试</td><td>改完就跑一次 ad-hoc 验证，回归靠手工</td><td><code>/4-pg-regression</code> 按 suite 声明自动跑测试 + fix-test 自动修脚本 + 输出 JSON 问题清单 + 可选调用 <code>pg-fix-regression-runner</code> 自动修复生产代码并提 PR</td></tr>
 </table>
 </div>
 
@@ -334,8 +337,8 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <text x="60" y="72" font-size="12" fill="var(--muted)">.opencode/skills/ 下的 13 个 SKILL 定义（跨项目复用）</text>
   <rect x="60" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
   <text x="72" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-propose</text>
-  <rect x="168" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
-  <text x="180" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-build</text>
+  <rect x="158" y="85" width="116" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
+  <text x="170" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-build-v2</text>
   <rect x="276" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
   <text x="288" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-fix-issue</text>
   <rect x="384" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
@@ -367,16 +370,16 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <line x1="350" y1="265" x2="350" y2="285" stroke="var(--muted)" stroke-width="2" marker-end="url(#arrow)"/>
 
   <!-- L3 -->
-  <rect x="160" y="290" width="380" height="90" rx="10" fill="url(#g3)" opacity="0.15"/>
-  <rect x="160" y="290" width="380" height="90" rx="10" stroke="url(#g3)" stroke-width="2" fill="none"/>
-  <text x="180" y="320" font-size="14" font-weight="700" fill="var(--text)">L3：业务代码层</text>
-  <text x="180" y="342" font-size="12" fill="var(--muted)">你的真实项目代码，不感知 pipeline 机制</text>
-  <rect x="180" y="355" width="100" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
-  <text x="187" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-backend</text>
-  <rect x="290" y="355" width="100" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
-  <text x="297" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-frontend</text>
-  <rect x="400" y="355" width="100" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
-  <text x="407" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-agent</text>
+  <rect x="40" y="290" width="620" height="90" rx="10" fill="url(#g3)" opacity="0.15"/>
+  <rect x="40" y="290" width="620" height="90" rx="10" stroke="url(#g3)" stroke-width="2" fill="none"/>
+  <text x="60" y="320" font-size="14" font-weight="700" fill="var(--text)">L3：业务代码层</text>
+  <text x="60" y="342" font-size="12" fill="var(--muted)">你的真实项目代码，不感知 pipeline 机制</text>
+  <rect x="80" y="355" width="120" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
+  <text x="90" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-backend</text>
+  <rect x="210" y="355" width="120" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
+  <text x="220" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-frontend</text>
+  <rect x="340" y="355" width="120" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
+  <text x="350" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-agent</text>
 </svg>
 </div>
 
@@ -387,22 +390,41 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 <h2>2.2 项目目录结构</h2>
 <pre>
 .pg/
-├── project.yaml           # 统一配置 SSOT（六段结构）
-├── changes/               # 变更产物
-│   ├── add-login-page/    # 某次变更
-│   │   ├── proposal.md    # 做什么、为什么做
-│   │   ├── design.md      # 怎么做、验证标准
-│   │   ├── tasks.md       # stages × tracks  任务列表
-│   │   └── 2-build/       # pipeline 过程产物
-│   └── archive/           # 已完成变更归档
-├── hooks/                 # 环境生命周期脚本
+├── project.yaml                  # 统一配置 SSOT（六段结构）
+├── changes/                      # pg-build-v2 caller 路由：变更提案与过程产物
+│   ├── add-login-page/           # 某次变更
+│   │   ├── proposal.md           # 做什么、为什么做
+│   │   ├── design.md             # 怎么做、验证标准
+│   │   ├── tasks.md              # stages × tracks  任务列表
+│   │   ├── execution-manifest.yaml  # 按 tasks.md 结构化生成的 pipeline 编排清单（runner 读取）
+│   │   ├── environment.yaml      # per-change SSOT：每个 stage 选哪个 environment
+│   │   └── 2-build/              # pipeline 过程产物（pipeline.events / 报告 / gate-score）
+│   └── archive/                  # 已完成变更归档
+├── regression/                   # pg-regression caller 路由：回归测试与问题清单
+│   ├── frontend.json             # 生产代码问题清单（SSOT, 跨 run 累积）
+│   ├── frontend-<date>-NN/       # 单次 run 目录（fix-issues / fix-test 留痕 + 报告）
+│   └── ...
+├── fix-issue/                    # pg-fix-issue caller 路由：bug 修复会话
+│   └── fix-<YYYY-MM-DD>-<slug>/  # 每次修复一个独立目录
+│       └── dev-local/logs/       # hook 日志与产物
+├── ad-hoc/                       # ad-hoc caller 路由：用户/agent 直接调 hook
+│   └── auto-<date>-<pid>/        # 留空 --session 时自动生成
+├── cronjobs/                     # 定时任务：crontab + opencode run 驱动批量任务
+│   ├── run-opencode.sh           # 入口脚本（stash → master → opencode run → pop）
+│   ├── prompt.txt                # 待执行提示词（git ignored）
+│   └── cron.log                  # 定时执行日志
+├── hooks/                        # 环境生命周期脚本
 │   ├── role-backend-start.sh
 │   ├── role-agent-start.sh
 │   ├── env-dev-local-prepare.sh
 │   └── ...
-├── context/               # 项目上下文快照
-└── skills/                # pg-skills 嵌入（git subtree）
+├── context/                      # 项目上下文快照（AGENTS.md 提取后缓存）
+└── skills/                       # pg-skills 嵌入（git subtree），pg init 在 .opencode/ 创建 symlink
 </pre>
+
+<div class="info-card card">
+  <p style="margin:0"><strong>caller × session 双维度路由</strong>：上面 <code>changes/</code> / <code>regression/</code> / <code>fix-issue/</code> / <code>ad-hoc/</code> 四个目录由 <code>PG_RUN_CALLER</code> 决定一级目录，由 <code>PG_RUN_SESSION</code> 决定二级目录。runner 自动按调用方身份把日志、PID、result.json 写到对应路径，无需手动指定。<code>cronjobs/</code> 不属于 hook 协议路由，由项目自管；典型场景是 crontab 触发 <code>pg-regression</code> 或 <code>pg-propose</code> 批量任务。</p>
+</div>
 
 <h2>2.3 AGENTS.md 的角色</h2>
 <p>AGENTS.md 是 AI 的"入职手册"——包含项目的技术栈、包结构、数据库约定、编码风格、路径规范等。pg-propose 会自动从 AGENTS.md 提取上下文写入 <code>.pg/context/summary.yaml</code>。</p>
@@ -413,7 +435,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 <h1>3. 新项目接入——Two Pillars</h1>
 <p class="muted">接入新项目，最重要的两件事：<strong>写对 project.yaml</strong> + <strong>写对 hooks</strong></p>
 
-<h2>3.1 4 步接入流程</h2>
+<h2>3.1 四步接入</h2>
 <div class="card">
 <ol>
   <li><strong>git subtree 拉入 pg-skills</strong></li>
@@ -456,7 +478,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 
   <!-- pg-build container -->
   <rect x="36" y="60" width="200" height="152" rx="8" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
-  <text x="136" y="82" font-size="12" font-weight="700" fill="#6d28d9" text-anchor="middle">pg-build 专用</text>
+  <text x="136" y="82" font-size="12" font-weight="700" fill="#6d28d9" text-anchor="middle">pg-build-v2 专用</text>
 
   <rect x="56" y="95" width="160" height="42" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
   <text x="136" y="115" font-size="13" font-weight="600" fill="#6d28d9" text-anchor="middle">tracks</text>
@@ -502,7 +524,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
   <text x="521" y="321" font-size="11" fill="#64748b" text-anchor="middle">运行时拓扑 + role 启停动作</text>
 
   <!-- ======== Footer ======== -->
-  <text x="36" y="375" font-size="11" fill="#64748b">补充字段：verifyMerge / flyway / git / rules / test_strategy / coding_standards</text>
+  <text x="36" y="375" font-size="11" fill="#64748b">补充字段：verify_merge / flyway.migration_path / git.default_branch / build_rules</text>
 
   <rect x="36" y="385" width="648" height="30" rx="6" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
   <text x="48" y="404" font-size="11" font-family="monospace" fill="#2563eb">python3 .pg/skills/src/opencode/scripts/pg-parse-config.py &lt;workflow&gt;</text>
@@ -616,23 +638,23 @@ DURATION=$(($(date +%s) - START))
 <span style="color:#94a3b8">#         --message="mvn test failed" --agent-recoverable=true</span>
 </pre>
 
-<h2>注入的环境变量（v4 协议）</h2>
+<h2>注入的环境变量（v5 协议）</h2>
 <table>
   <tr><th>变量</th><th>说明</th><th>适用范围</th></tr>
   <tr><td><code>PG_SKILLS_PATH</code></td><td>pg-skills 根路径</td><td>全部</td></tr>
   <tr><td><code>PG_PROJECT_ROOT</code></td><td>项目根路径</td><td>全部</td></tr>
-  <tr><td><code>PG_RUN_CALLER</code></td><td>调用方身份（pg-build / pg-regression / pg-fix-issue / ad-hoc）</td><td>全部</td></tr>
+  <tr><td><code>PG_RUN_CALLER</code></td><td>调用方身份（pg-build / pg-regression / pg-fix-issue / pg-agent / ad-hoc）</td><td>全部</td></tr>
   <tr><td><code>PG_RUN_SESSION</code></td><td>session 名（与 caller 正交）</td><td>全部</td></tr>
-  <tr><td><code>PG_HOOK_LOG_DIR</code></td><td>服务内部 stdout/PID 的目标目录（预拼绝对路径）</td><td>全部</td></tr>
+  <tr><td><code>PG_HOOK_LOG_DIR</code></td><td>hook 派生的业务日志目录（预拼绝对路径）</td><td>全部</td></tr>
+  <tr><td><code>PG_LOG_FILE</code></td><td>hook 自身 stdout/stderr 目标路径</td><td>全部</td></tr>
   <tr><td><code>PG_RESULT_FILE</code></td><td>写 result.json 的路径</td><td>全部</td></tr>
-  <tr><td><code>PG_LOG_FILE</code></td><td>写 stdout/stderr 的路径</td><td>全部</td></tr>
   <tr><td><code>PG_STAGE</code></td><td>当前 stage 名</td><td>全部</td></tr>
-  <tr><td><code>PG_ENV</code></td><td>当前环境（dev-local / dev-3tier）</td><td>全部</td></tr>
+  <tr><td><code>PG_ENV</code></td><td>当前 environment（dev-local / dev-3tier）</td><td>全部</td></tr>
   <tr><td><code>PG_ROLE</code></td><td>role 名</td><td>role action 时</td></tr>
   <tr><td><code>PG_INSTANCE_NAME</code></td><td>instance 名</td><td>role action 时</td></tr>
   <tr><td><code>PG_INSTANCE_HOST</code></td><td>instance host</td><td>role action 时</td></tr>
 </table>
-<p style="font-size:13px;color:var(--muted)">1 版本 alias（向下兼容老 hook）：<code>PG_SKILL_NAME</code> → <code>PG_RUN_CALLER</code>，<code>PG_CHANGE_NAME</code> → <code>PG_RUN_SESSION</code></p>
+<p style="font-size:13px;color:var(--muted)">v4 之前曾用 <code>PG_SKILL_NAME</code> / <code>PG_CHANGE_NAME</code>，现已统一为 <code>PG_RUN_CALLER</code> / <code>PG_RUN_SESSION</code>。模块维度（build / lint / test）不走 hook 协议，<code>PG_MODULE</code> / <code>PG_MODULE_ROOT</code> 已被移除。</p>
 
 <h2>两套入口：用户用 ./pg-run，agent/skill 用 pg-invoke-hook.py</h2>
 <p>hooks 操作有两套入口，使用场景不同：</p>
@@ -650,7 +672,8 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
   --env dev-local \
   --role backend \
   --instance backend-1 \
-  --action start
+  --action start \
+  --caller pg-build-v2
 
 <span style="color:#94a3b8"># 用户手工查看日志</span>
 ./pg-run --env dev-local --role backend --instance backend-1 --action logs --tail-lines 20
@@ -745,26 +768,30 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <div id="sec3-checklist" class="section">
 <h1>3.5 新项目接入 Checklist</h1>
 
+<div class="tip-card card">
+  <p style="margin:0">接入流程的前 3 步（<code>git subtree</code> → <code>pg init</code> → <code>pg-init-project</code>）会<strong>自动生成 project.yaml 与 hooks 骨架</strong>。但 AI 推断可能与实际项目有偏差，需要人工核对产物准确性，并通过 <code>./pg-run</code> 对所有 hooks 做端到端测试验证。</p>
+</div>
+
 <div class="card">
 <ul class="checklist">
   <li><input type="checkbox"> <code>git subtree</code> 拉入 pg-skills → <code>.pg/skills/</code></li>
   <li><input type="checkbox"> <code>pg init</code> 生成骨架 + symlink</li>
-  <li style="margin-top:12px"><strong>写 project.yaml（最重要）</strong></li>
-  <li><input type="checkbox" style="margin-left:24px"> modules：每个模块的根目录 + build/lint/test 命令</li>
-  <li><input type="checkbox" style="margin-left:24px"> environments：有哪些环境，每个环境有哪些 role</li>
-  <li><input type="checkbox" style="margin-left:24px"> tracks：哪些 track，每个 track 跑哪些 module</li>
-  <li><input type="checkbox" style="margin-left:24px"> stages：分几个阶段，阶段内 track 顺序</li>
-  <li><input type="checkbox" style="margin-left:24px"> fix_issue：修复迭代参数</li>
-  <li><input type="checkbox" style="margin-left:24px"> regression：回归测试套件</li>
-  <li style="margin-top:12px"><strong>写 hooks（第二重要）</strong></li>
-  <li><input type="checkbox" style="margin-left:24px"> 每个 role 的 start / stop / logs 脚本</li>
-  <li><input type="checkbox" style="margin-left:24px"> 每个环境的 prepare_env / clean_env 脚本</li>
-  <li><input type="checkbox" style="margin-left:24px"> 复制 lib/common.sh SSOT 到 hooks/lib/</li>
-  <li><input type="checkbox" style="margin-left:24px"> 遵循 hook 协议（source hook-helpers.sh + pg_exit）</li>
-  <li style="margin-top:12px"><strong>运行时入口</strong></li>
-  <li><input type="checkbox" style="margin-left:24px"> pg-run symlink → .pg/skills/src/runtime/bin/pg-run</li>
-  <li style="margin-top:12px"><input type="checkbox"> <code>pg doctor</code> 校验（含 hooks 检查）</li>
-  <li><input type="checkbox"> 跑一个最小 <code>/2b-pg-quick-build</code> 验证全链路通</li>
+  <li><input type="checkbox"> 在 opencode 中触发 <code>pg-init-project</code> skill（自动生成 project.yaml + hooks 模板）</li>
+  <li style="margin-top:12px"><strong>人工核对自动产物</strong></li>
+  <li><input type="checkbox" style="margin-left:24px"> modules：每个模块的根目录 + build/lint/test 命令是否准确</li>
+  <li><input type="checkbox" style="margin-left:24px"> environments：环境列表、role 列表、actions 是否完整</li>
+  <li><input type="checkbox" style="margin-left:24px"> tracks / stages：编排是否符合项目结构</li>
+  <li><input type="checkbox" style="margin-left:24px"> fix_issue / regression：参数是否合理</li>
+  <li><input type="checkbox" style="margin-left:24px"> 每个 role 的 start / stop / logs 脚本：业务命令是否准确（<code>CMD_PLACEHOLDER</code> 是否替换）</li>
+  <li><input type="checkbox" style="margin-left:24px"> 每个 env 的 prepare_env / clean_env 脚本：环境准备/清理逻辑是否对</li>
+  <li><input type="checkbox" style="margin-left:24px"> lib/common.sh SSOT：是否正确复制到 <code>.pg/hooks/lib/</code></li>
+  <li><input type="checkbox" style="margin-left:24px"> （可选）声明 <code>actions.health_check</code> → <code>pg-init-project</code> 自动生成 health_check hook</li>
+  <li style="margin-top:12px"><strong>通过 pg-run 验证 hooks</strong></li>
+  <li><input type="checkbox" style="margin-left:24px"> <code>pg doctor</code> 校验（含 <code>hooks/lib/common.sh</code> 检查）</li>
+  <li><input type="checkbox" style="margin-left:24px"> <code>./pg-run --module &lt;m&gt; --action build/lint/test.&lt;key&gt;</code> 验证 module 命令直跑</li>
+  <li><input type="checkbox" style="margin-left:24px"> <code>./pg-run --env &lt;env&gt; --role &lt;role&gt; --instance &lt;i&gt; --action logs</code> 验证 hook 可加载（只读）</li>
+  <li><input type="checkbox" style="margin-left:24px"> 菜单 <strong>"准备环境并启动所有实例"</strong> → <strong>"停止所有实例并清理环境"</strong> 一键验证所有角色 + 环境级 hook（便捷）</li>
+  <li><input type="checkbox" style="margin-left:24px"> 或单独验证：<code>./pg-run --env &lt;env&gt; --role &lt;role&gt; --instance &lt;i&gt; --action start/stop</code> + <code>./pg-run --env &lt;env&gt; --action prepare_env / clean_env</code></li>
 </ul>
 </div>
 
@@ -785,13 +812,13 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <h2>4.1 概述 —— 全景路线图</h2>
 
 <div class="svg-container">
-<svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <marker id="arr-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
   </defs>
 
   <!-- 标准流 -->
-  <rect x="30" y="40" width="490" height="60" rx="30" fill="none" stroke="#2563eb" stroke-width="2"/>
+  <rect x="30" y="40" width="490" height="60" rx="30" fill="none" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4,3"/>
   <text x="275" y="28" font-size="12" font-weight="700" fill="#2563eb" text-anchor="middle">标准流（正经功能开发）</text>
   <circle cx="80" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
   <text x="80" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">1</text>
@@ -817,7 +844,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <circle cx="380" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
   <text x="380" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">4</text>
   <text x="380" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Build</text>
-  <text x="380" y="118" font-size="10" fill="#64748b" text-anchor="middle">/3-pg-build</text>
+  <text x="380" y="118" font-size="10" fill="#64748b" text-anchor="middle">/3-pg-build-v2</text>
 
   <line x1="402" y1="70" x2="458" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
 
@@ -827,38 +854,44 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <text x="480" y="118" font-size="10" fill="#64748b" text-anchor="middle">verify-and-merge</text>
 
   <!-- 快捷流 -->
-  <rect x="30" y="160" width="220" height="60" rx="30" fill="none" stroke="#059669" stroke-width="2"/>
-  <text x="140" y="148" font-size="12" font-weight="700" fill="#059669" text-anchor="middle">快捷流（小改动）</text>
-  <circle cx="80" cy="190" r="22" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
-  <text x="80" y="194" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">Q</text>
-  <text x="80" y="225" font-size="11" font-weight="600" fill="#065f46" text-anchor="middle">Quick-build</text>
-  <text x="80" y="238" font-size="10" fill="#64748b" text-anchor="middle">/2b-pg-quick-build</text>
+  <rect x="30" y="160" width="320" height="60" rx="30" fill="none" stroke="#059669" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="190" y="148" font-size="12" font-weight="700" fill="#059669" text-anchor="middle">快捷流（小改动，不切分支）</text>
+  <circle cx="60" cy="190" r="22" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="60" y="194" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">1</text>
+  <text x="60" y="225" font-size="11" font-weight="600" fill="#065f46" text-anchor="middle">Define</text>
+  <text x="60" y="238" font-size="10" fill="#64748b" text-anchor="middle">/1-pg-define</text>
 
-  <line x1="102" y1="190" x2="158" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
-  <circle cx="180" cy="190" r="22" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
-  <text x="180" y="194" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">M</text>
-  <text x="180" y="225" font-size="11" font-weight="600" fill="#065f46" text-anchor="middle">Merge</text>
+  <line x1="82" y1="190" x2="138" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
+
+  <circle cx="160" cy="190" r="22" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
+  <text x="160" y="194" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">Q</text>
+  <text x="160" y="225" font-size="11" font-weight="600" fill="#065f46" text-anchor="middle">Quick-build</text>
+  <text x="160" y="238" font-size="10" fill="#64748b" text-anchor="middle">/2b-pg-quick-build</text>
+
+  <text x="200" y="174" font-size="10" fill="#64748b" font-style="italic">→ master</text>
+  <text x="200" y="186" font-size="9" fill="#94a3b8">（不切分支，</text>
+  <text x="200" y="197" font-size="9" fill="#94a3b8">直接 commit）</text>
 
   <!-- 修复/回归流 -->
-  <rect x="280" y="160" width="240" height="60" rx="30" fill="none" stroke="#ea580c" stroke-width="2"/>
-  <text x="400" y="148" font-size="12" font-weight="700" fill="#ea580c" text-anchor="middle">修复/回归流</text>
-  <circle cx="320" cy="190" r="22" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
-  <text x="320" y="194" font-size="12" font-weight="700" fill="#9a3412" text-anchor="middle">F</text>
-  <text x="320" y="225" font-size="11" font-weight="600" fill="#9a3412" text-anchor="middle">Fix-issue</text>
-  <text x="320" y="238" font-size="10" fill="#64748b" text-anchor="middle">/5-pg-fix-issue</text>
-
-  <line x1="342" y1="190" x2="398" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <rect x="380" y="160" width="340" height="60" rx="30" fill="none" stroke="#ea580c" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="550" y="148" font-size="12" font-weight="700" fill="#ea580c" text-anchor="middle">修复/回归流</text>
   <circle cx="420" cy="190" r="22" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
   <text x="420" y="194" font-size="12" font-weight="700" fill="#9a3412" text-anchor="middle">R</text>
   <text x="420" y="225" font-size="11" font-weight="600" fill="#9a3412" text-anchor="middle">Regression</text>
   <text x="420" y="238" font-size="10" fill="#64748b" text-anchor="middle">/4-pg-regression</text>
 
-  <line x1="442" y1="190" x2="478" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
-  <circle cx="500" cy="190" r="22" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
-  <text x="500" y="194" font-size="12" font-weight="700" fill="#9a3412" text-anchor="middle">PR</text>
-  <text x="500" y="225" font-size="11" font-weight="600" fill="#9a3412" text-anchor="middle">PR</text>
+  <line x1="442" y1="190" x2="498" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <circle cx="520" cy="190" r="22" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="520" y="194" font-size="12" font-weight="700" fill="#9a3412" text-anchor="middle">F</text>
+  <text x="520" y="225" font-size="11" font-weight="600" fill="#9a3412" text-anchor="middle">Fix-issue</text>
+  <text x="520" y="238" font-size="10" fill="#64748b" text-anchor="middle">/5-pg-fix-issue</text>
 
-  <text x="360" y="270" font-size="11" fill="#64748b" text-anchor="middle">三路径共享同一个 .pg/project.yaml 与 hooks 基础设施</text>
+  <line x1="542" y1="190" x2="618" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
+  <circle cx="640" cy="190" r="22" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
+  <text x="640" y="194" font-size="12" font-weight="700" fill="#9a3412" text-anchor="middle">PR</text>
+  <text x="640" y="225" font-size="11" font-weight="600" fill="#9a3412" text-anchor="middle">PR</text>
+
+  <text x="380" y="270" font-size="11" fill="#64748b" text-anchor="middle">三路径共享同一个 .pg/project.yaml 与 hooks 基础设施</text>
 </svg>
 </div>
 
@@ -868,7 +901,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <tr><td>1. 定界</td><td><code>/1-pg-define</code></td><td>模糊需求</td><td>边界清单 + scope summary</td></tr>
   <tr><td>2. 提案</td><td><code>/2-pg-propose</code></td><td>边界 + project.yaml</td><td>proposal + design + tasks + environment.yaml</td></tr>
   <tr><td>3. 评审</td><td><code>/2.1-pg-propose-refine</code></td><td>review-notes 评审意见</td><td>修改后的 proposal/design/tasks</td></tr>
-  <tr><td>4. 构建</td><td><code>/3-pg-build</code></td><td>设计文档 + project.yaml</td><td>代码 + 测试 + 报告 + 自动归档</td></tr>
+  <tr><td>4. 构建</td><td><code>/3-pg-build-v2</code></td><td>设计文档 + project.yaml</td><td>代码 + 测试 + 报告 + 自动归档</td></tr>
   <tr><td>5. 合并</td><td><code>pg-verify-and-merge</code></td><td>feature branch</td><td>合入 master</td></tr>
 </table>
 </div>
@@ -891,7 +924,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <tr>
     <td><span class="tag tag-yellow">适中</span></td>
     <td>单模块、≤8 tasks、无 DB schema 变更、有明确边界</td>
-    <td>走标准流 <code>/2-pg-propose</code> + <code>/3-pg-build</code></td>
+    <td>走标准流 <code>/2-pg-propose</code> + <code>/3-pg-build-v2</code></td>
   </tr>
   <tr>
     <td><span class="tag tag-green">过小</span></td>
@@ -909,7 +942,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <div class="compare-row">
   <div class="compare-box compare-box-new">
     <h4 style="color:var(--success)">正经功能 → 标准流</h4>
-    <p><code>/1-pg-define</code> → <code>/2-pg-propose</code> → review → <code>/3-pg-build</code></p>
+    <p><code>/1-pg-define</code> → <code>/2-pg-propose</code> → review → <code>/3-pg-build-v2</code></p>
   </div>
   <div class="compare-box compare-box-new" style="background:#fef3c7;border-color:#fcd34d">
     <h4 style="color:#92400e">Bug → 修复流</h4>
@@ -955,16 +988,17 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <div id="sec4-propose" class="section">
 <h1>4.3 提案 —— `/2-pg-propose`</h1>
 
-<p style="color:var(--muted); font-style:italic">"边界有了，现在出图纸。图纸有四份，每份给不同的人看。"</p>
+<p style="color:var(--muted); font-style:italic">"边界有了，现在出图纸。图纸分四份人类可读文档 + 两份机器 SSOT，每份给不同的对象看。"</p>
 
-<h2>四份文档 + 一份 SSOT</h2>
+<h2>四份文档 + 两份 SSOT</h2>
 <table>
-  <tr><th>文件</th><th>读者</th><th>职责</th></tr>
-  <tr><td><code>proposal.md</code></td><td>产品 / 架构师</td><td>做什么、为什么、不做哪些</td></tr>
+  <tr><th>类别</th><th>文件</th><th>读者</th><th>职责</th></tr>
+  <tr><td rowspan="4">人类可读</td><td><code>proposal.md</code></td><td>产品 / 架构师</td><td>做什么、为什么、不做哪些</td></tr>
   <tr><td><code>design.md</code></td><td>开发者</td><td>怎么做、架构决策、V-* 验证标准</td></tr>
-  <tr><td><code>tasks.md</code></td><td>Pipeline Runner</td><td>stages × tracks 任务矩阵</td></tr>
-  <tr><td><code>1-propose-review/review-notes.md</code></td><td>人机评审</td><td>6 类自审项 + checkbox 追踪</td></tr>
-  <tr><td><code>environment.yaml</code></td><td>Runner 部署引擎</td><td>每个 stage 选哪个 environment（SSOT）</td></tr>
+  <tr><td><code>tasks.md</code></td><td>Pipeline Runner + 开发者</td><td>stages × tracks 任务矩阵</td></tr>
+  <tr><td><code>1-propose-review/review-notes.md</code></td><td>人机评审</td><td>5 项通用决策 + 6 类自审项 + checkbox 追踪</td></tr>
+  <tr><td rowspan="2">机器 SSOT</td><td><code>execution-manifest.yaml</code></td><td>Pipeline Runner</td><td>按 tasks.md 结构化生成的 pipeline 编排清单（runner 直接消费的机器可读形态）</td></tr>
+  <tr><td><code>environment.yaml</code></td><td>Runner 部署引擎</td><td>per-stage 环境选择 SSOT：每个 stage 用哪个 environment</td></tr>
 </table>
 
 <h2>核心机制：tasks.md 的 stages × tracks  展开</h2>
@@ -1082,52 +1116,81 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <!-- ============================================================ -->
 <!-- 4.4 构建 -->
 <div id="sec4-build" class="section">
-<h1>4.4 构建 —— `/3-pg-build`</h1>
+<h1>4.4 构建 —— `/3-pg-build-v2`（基于事件溯源引擎）</h1>
 
 <p style="color:var(--muted); font-style:italic">"图纸审完了，Runner 开始施工。<strong>人只做一件事</strong>：执行命令等结果。"</p>
 
 <h2>驱动流程：调用-派送-记录 循环</h2>
 
 <div class="svg-container">
-<svg viewBox="0 0 700 110" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 760 110" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <marker id="arr-r3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
   </defs>
 
-  <rect x="20" y="20" width="140" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
-  <text x="90" y="44" font-size="12" font-weight="600" fill="#1d4ed8" text-anchor="middle">LLM 调用</text>
-  <text x="90" y="60" font-size="11" fill="#1d4ed8" text-anchor="middle">$RUNNER next &lt;change&gt;</text>
+  <rect x="10" y="20" width="220" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="120" y="40" font-size="12" font-weight="600" fill="#1d4ed8" text-anchor="middle">LLM 调用 runner</text>
+  <text x="120" y="56" font-size="10" fill="#1d4ed8" text-anchor="middle">python3 .../pg-pipeline-runner.py next &lt;change&gt;</text>
+  <text x="120" y="68" font-size="9" fill="#64748b" text-anchor="middle">（位于 pg-build-v2/scripts/）</text>
 
-  <line x1="160" y1="45" x2="190" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
+  <line x1="230" y1="45" x2="260" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
 
-  <rect x="195" y="20" width="160" height="50" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="275" y="44" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">Runner 返回</text>
-  <text x="275" y="60" font-size="10" fill="#92400e" text-anchor="middle">action: dispatch / phase_result /</text>
-  <text x="275" y="73" font-size="10" fill="#92400e" text-anchor="middle">done / workflow_failed</text>
+  <rect x="265" y="20" width="160" height="50" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="345" y="44" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">Runner 返回</text>
+  <text x="345" y="60" font-size="10" fill="#92400e" text-anchor="middle">action: dispatch / phase_result /</text>
+  <text x="345" y="73" font-size="10" fill="#92400e" text-anchor="middle">done / workflow_failed</text>
 
-  <line x1="355" y1="45" x2="385" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
+  <line x1="425" y1="45" x2="455" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
 
-  <rect x="390" y="20" width="140" height="50" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
-  <text x="460" y="44" font-size="12" font-weight="600" fill="#065f46" text-anchor="middle">派送 sub-agent</text>
-  <text x="460" y="60" font-size="10" fill="#065f46" text-anchor="middle">Task tool 调 agent</text>
+  <rect x="460" y="20" width="140" height="50" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
+  <text x="530" y="44" font-size="12" font-weight="600" fill="#065f46" text-anchor="middle">派送 sub-agent</text>
+  <text x="530" y="60" font-size="10" fill="#065f46" text-anchor="middle">Task tool 调 agent</text>
 
-  <line x1="530" y1="45" x2="560" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
+  <line x1="600" y1="45" x2="630" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
 
-  <rect x="565" y="20" width="120" height="50" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
-  <text x="625" y="44" font-size="12" font-weight="600" fill="#6d28d9" text-anchor="middle">Runner 记录</text>
-  <text x="625" y="60" font-size="11" fill="#6d28d9" text-anchor="middle">$RUNNER record</text>
+  <rect x="635" y="20" width="120" height="50" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="695" y="44" font-size="12" font-weight="600" fill="#6d28d9" text-anchor="middle">Runner 记录</text>
+  <text x="695" y="60" font-size="10" fill="#6d28d9" text-anchor="middle">record &lt;change&gt;</text>
 
-  <text x="350" y="100" font-size="11" fill="#64748b" text-anchor="middle">重复直到 runner 返回 done 或 workflow_failed</text>
+  <text x="380" y="100" font-size="11" fill="#64748b" text-anchor="middle">重复直到 runner 返回 done 或 workflow_failed</text>
 </svg>
 </div>
 
 <h3>Runner 自动管的事（你不用操心）</h3>
 <ul>
   <li>切到 <code>feat/pg/&lt;change&gt;</code> feature branch</li>
-  <li>启动时 init commit（<code>chore(&lt;change&gt;): bootstrap pg-build</code>）</li>
+  <li>启动时 init commit（<code>chore(&lt;change&gt;): bootstrap pg-build-v2</code>）</li>
   <li>每个 sub 阶段 record commit（<code>chore(&lt;change&gt;): auto-record &lt;item&gt;:&lt;sub&gt; &lt;status&gt;</code>）</li>
   <li>报告顺序编号 <code>{track.id}-{N}-{kind}.md</code></li>
   <li>final-gate pass 后自动归档到 <code>changes/archive/</code></li>
+</ul>
+
+<h2>execution-manifest.yaml —— runner 的执行蓝图</h2>
+
+<p>在 runner 启动编排前，<code>tasks.md</code>（人类可读 markdown）需要先被<strong>结构化</strong>成 <code>execution-manifest.yaml</code>，这是 runner <strong>直接消费</strong>的机器可读形态：</p>
+
+<table>
+  <tr><th>字段</th><th>含义</th><th>示例</th></tr>
+  <tr><td><code>stages</code></td><td>stage 列表（顺序）</td><td><code>[prepare-env-scripts, dev, real-integration]</code></td></tr>
+  <tr><td><code>stages[].name</code></td><td>stage 名（与 <code>project.yaml.stages</code> 对齐）</td><td><code>dev</code></td></tr>
+  <tr><td><code>stages[].tracks</code></td><td>本 stage 包含的 track 列表（顺序执行）</td><td><code>[backend, agent, openapi-gen, frontend]</code></td></tr>
+  <tr><td><code>stages[].environment.name</code></td><td>本 stage 选用的 environment 名</td><td><code>dev-local</code> / <code>dev-3tier</code></td></tr>
+  <tr><td><code>stages[].test_key</code></td><td>本 stage 跑哪个 test_key</td><td><code>unit</code> / <code>integration</code> / <code>e2e</code></td></tr>
+  <tr><td><code>tracks[].id</code></td><td>track 名</td><td><code>backend</code></td></tr>
+  <tr><td><code>tracks[].modules</code></td><td>本 track 涉及的 modules（用于定位 build/lint/test 命令）</td><td><code>[backend, agent-proto]</code></td></tr>
+  <tr><td><code>tracks[].type</code></td><td>track 类型</td><td><code>standard</code>（默认 TDVG）/ <code>simple</code>（commands 列表直跑）</td></tr>
+</table>
+
+<div class="info-card card">
+  <p style="margin:0"><strong>为什么需要 manifest？</strong><code>tasks.md</code> 是带 checkbox 的人类文档（LLM 友好），但 runner 是程序（机器友好）。manifest 把 <code>tasks.md</code> 的 stages × tracks 二维结构<strong>扁平化</strong>成确定性数据结构：每个 stage 的 environment、test_key、track 顺序都<strong>冻结</strong>到 manifest，避免 runner 在执行时再次解析 markdown 带来的不确定性。manifest 是 <strong>disposable</strong>（可重新生成），但作为执行期 SSOT 必须存在。</p>
+</div>
+
+<p>manifest 由 pg-propose 在生成 tasks.md 后<strong>自动产出</strong>（LLM <strong>不直接写</strong>，通过 CLI 工具基于 tasks.md 生成）。runner 启动时一次性读取，决定：</p>
+<ul>
+  <li>要执行哪些 stage、顺序如何</li>
+  <li>每个 stage 切到哪个 environment（<strong>优先</strong>于 <code>project.yaml.stages[*].environment.name</code>）</li>
+  <li>每个 stage 跑哪个 test_key</li>
+  <li>每个 track 派遣哪个 sub-agent（test / dev / verify / gate / fix / fix-gate / simple）</li>
 </ul>
 
 <h2>TDVG 四阶段：每个 track 内部循环</h2>
@@ -1191,7 +1254,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <text x="595" y="44" font-size="12" font-weight="600" fill="#6d28d9" text-anchor="middle">stage 内执行</text>
   <text x="595" y="60" font-size="10" fill="#6d28d9" text-anchor="middle">TDVG 循环</text>
 
-  <text x="20" y="105" font-size="11" fill="#64748b">phase_result 成功 → LLM $RUNNER record completed 推进；phase_result 失败且 terminate==true → 流程终止</text>
+  <text x="20" y="105" font-size="11" fill="#64748b">phase_result 成功 → LLM 调 runner record completed 推进；phase_result 失败且 terminate==true → 流程终止</text>
   <text x="20" y="120" font-size="11" fill="#64748b">stage 完成后或 pipeline 终止时 → runner 自动 clean_env</text>
 </svg>
 </div>
@@ -1208,21 +1271,25 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <tr><th>中断场景</th><th>恢复方式</th></tr>
   <tr>
     <td>会话中断（网络/超时）</td>
-    <td>重新 <code>$RUNNER next</code>，runner 从断点恢复，不丢失进度</td>
+    <td>重新 <code>pg-pipeline-runner.py next</code>，runner 从断点恢复，不丢失进度</td>
   </tr>
   <tr>
     <td>Sub-agent 返回空</td>
-    <td><code>$RUNNER record failed</code> 触发重试（最多 <code>max_fail_retries</code> 次）</td>
+    <td><code>pg-pipeline-runner.py record failed</code> 触发重试（最多 <code>max_fail_retries</code> 次）</td>
   </tr>
   <tr>
     <td><strong><code>workflow_failed</code>（铁律）</strong></td>
-    <td><strong>人工介入</strong>：修复根因 → 删除 <code>2-build/.pipeline-state.json</code> → 重新 <code>$RUNNER next</code> → runner 扫描 tasks.md checkbox，<strong>从第一个含未完成任务 <code>[ ]</code> 的章节恢复</strong></td>
+    <td><strong>人工介入</strong>：修复根因 → 重新 <code>pg-pipeline-runner.py next</code> → runner 读取 <code>2-build/pipeline.events</code> 重放 + 扫描 tasks.md checkbox，<strong>从第一个含未完成任务 <code>[ ]</code> 的章节恢复</strong></td>
+  </tr>
+  <tr>
+    <td><strong>回归比对</strong></td>
+    <td><code>pg-pipeline-runner.py replay &lt;change&gt;</code> 基于 event log 重放并比对结果，用于排查不一致</td>
   </tr>
 </table>
 
 <div class="danger-card card">
-<h4 style="margin:0 0 8px">⚠ workflow_failed 恢复的关键点</h4>
-<p style="margin:0">不是<strong>从头开始</strong>！runner 重新扫描 tasks.md，定位到<strong>第一个未勾选 <code>[ ]</code> 的章节</strong>作为恢复起点。已完成的 <code>[x]</code> 章节全部跳过。这就是为什么 propose 阶段每个子任务都必须有 checkbox —— 它是 build 阶段断点恢复的依据。</p>
+  <h4 style="margin:0 0 8px">⚠ workflow_failed 恢复的关键点</h4>
+  <p style="margin:0">不是<strong>从头开始</strong>！runner 从 <code>pipeline.events</code> 重放事件流，并扫描 tasks.md checkbox，定位到<strong>第一个未勾选 <code>[ ]</code> 的章节</strong>作为恢复起点。已完成的 <code>[x]</code> 章节全部跳过。这就是为什么 propose 阶段每个子任务都必须有 checkbox —— 它是 build 阶段断点恢复的依据。</p>
 </div>
 
 <h2>副产物目录结构</h2>
@@ -1231,22 +1298,175 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 ├── proposal.md                       ← pg-propose 产物（不动）
 ├── design.md                         ← pg-propose 产物（不动）
 ├── tasks.md                          ← pg-propose 产物（runner 持续更新 checkbox）
-├── environment.yaml                  ← pg-propose 产物（per-change SSOT）
+├── execution-manifest.yaml           ← pg-propose 产物（runner 直接消费的机器可读编排清单）
+├── environment.yaml                  ← pg-propose 产物（per-stage environment SSOT）
 ├── 1-propose-review/
 │   └── review-notes.md               ← 评审历史（归档保留，build 不读）
-└── 2-build/                          ← pg-build 过程产物
+└── 2-build/                          ← pg-build-v2 过程产物
     ├── context-chain.md
-    ├── .pipeline-state.json          ← state 文件（恢复用）
+    ├── pipeline.events               ← append-only JSONL（唯一持久化入口）
     ├── known-issues.md
     ├── final-gate-assessment.md
     └── {track}-{N}-{kind}.md         ← 报告：verify / verify-fix / gate / gate-fix
 </pre>
 
+<h2>4.4.5 simple track —— 跳过 sub-agent 的轻量编排</h2>
+
+<p>并非所有 track 都需要完整 TDVG 四阶段。对于纯代码生成、文档同步、模板替换这类<strong>无设计决策</strong>的小活，可以用 <code>simple</code> 类型的 track：</p>
+
+<div class="svg-container">
+<svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr-simple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+  </defs>
+
+  <!-- standard track -->
+  <rect x="20" y="30" width="320" height="170" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
+  <text x="180" y="52" font-size="13" font-weight="700" fill="#1d4ed8" text-anchor="middle">standard track</text>
+  <text x="180" y="70" font-size="10" fill="#64748b" text-anchor="middle">（默认）</text>
+
+  <rect x="40" y="85" width="60" height="30" rx="4" fill="#fecaca"/>
+  <text x="70" y="104" font-size="11" font-weight="700" fill="#991b1b" text-anchor="middle">T</text>
+  <line x1="100" y1="100" x2="120" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-simple)"/>
+  <rect x="125" y="85" width="60" height="30" rx="4" fill="#bbf7d0"/>
+  <text x="155" y="104" font-size="11" font-weight="700" fill="#065f46" text-anchor="middle">D</text>
+  <line x1="185" y1="100" x2="205" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-simple)"/>
+  <rect x="210" y="85" width="60" height="30" rx="4" fill="#fde68a"/>
+  <text x="240" y="104" font-size="11" font-weight="700" fill="#92400e" text-anchor="middle">V</text>
+  <line x1="270" y1="100" x2="290" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-simple)"/>
+  <rect x="295" y="85" width="40" height="30" rx="4" fill="#c7d2fe"/>
+  <text x="315" y="104" font-size="11" font-weight="700" fill="#3730a3" text-anchor="middle">G</text>
+
+  <text x="180" y="140" font-size="11" fill="#64748b" text-anchor="middle">4 个 sub-agent（test / dev / verify / gate）</text>
+  <text x="180" y="158" font-size="11" fill="#64748b" text-anchor="middle">适合：跨模块、需设计评审</text>
+  <text x="180" y="176" font-size="10" fill="#94a3b8" text-anchor="middle">max_fail_retries / max_gate_fix_retries 生效</text>
+
+  <!-- simple track -->
+  <rect x="380" y="30" width="320" height="170" rx="10" fill="#f0fdf4" stroke="#86efac" stroke-width="1.5"/>
+  <text x="540" y="52" font-size="13" font-weight="700" fill="#059669" text-anchor="middle">simple track</text>
+  <text x="540" y="70" font-size="10" fill="#64748b" text-anchor="middle">（轻量）</text>
+
+  <rect x="400" y="85" width="60" height="30" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
+  <text x="430" y="104" font-size="11" font-weight="700" fill="#065f46" text-anchor="middle">cmd 1</text>
+  <line x1="460" y1="100" x2="480" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-simple)"/>
+  <rect x="485" y="85" width="60" height="30" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
+  <text x="515" y="104" font-size="11" font-weight="700" fill="#065f46" text-anchor="middle">cmd 2</text>
+  <line x1="545" y1="100" x2="565" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-simple)"/>
+  <rect x="570" y="85" width="60" height="30" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
+  <text x="600" y="104" font-size="11" font-weight="700" fill="#065f46" text-anchor="middle">cmd 3</text>
+
+  <text x="540" y="140" font-size="11" fill="#64748b" text-anchor="middle">commands 列表直跑（无 sub-agent）</text>
+  <text x="540" y="158" font-size="11" fill="#64748b" text-anchor="middle">适合：代码生成、文件复制、模板替换</text>
+  <text x="540" y="176" font-size="10" fill="#94a3b8" text-anchor="middle">命令 exit 0 即视为通过；按 on_failure 策略处理失败</text>
+
+  <text x="360" y="218" font-size="11" fill="#64748b" text-anchor="middle">两种 track 共用同一个 pipeline.events 与 runner 入口，仅 type 字段区分</text>
+</svg>
+</div>
+
+<h3>simple track 配置示例</h3>
+<pre>
+tracks:
+  openapi-gen:
+    type: simple                       <span style="color:#94a3b8"># 关键：跳过 sub-agent</span>
+    modules: [backend]
+    commands:
+      - cd webvirt-backend && mvn -pl webvirt-openapi openapi:generate
+      - cp webvirt-backend/target/openapi.json webvirt-frontend/src/api/
+</pre>
+
+<table>
+  <tr><th>维度</th><th>standard track</th><th>simple track</th></tr>
+  <tr><td>编排模型</td><td>TDVG 4 阶段 sub-agent</td><td>commands 列表直跑</td></tr>
+  <tr><td>重试策略</td><td><code>max_fail_retries</code> / <code>max_gate_fix_retries</code></td><td>按每条命令的 <code>on_failure</code>（默认 workflow_failed）</td></tr>
+  <tr><td>报告产物</td><td><code>{track}-N-verify/gate.md</code> + <code>gate-assessment.md</code></td><td>runner 自动写 <code>{track}-N-simple.md</code>（stdout/stderr 摘录）</td></tr>
+  <tr><td>适用场景</td><td>跨模块、需设计评审、含 verify / gate 决策</td><td>openapi-gen、license header 注入、模板替换、单测命名规范化等</td></tr>
+</table>
+
+<div class="tip-card card">
+  <p style="margin:0"><strong>选择原则</strong>：如果 track 不需要"设计决策 → 代码 → 验证 → 门控"四步走、且失败信号可直接从命令 exit code 读出，就用 <code>simple</code>。否则用 <code>standard</code>。</p>
+</div>
+
+<h2>4.4.6 gate-score —— 5 维加权评分</h2>
+
+<p>每个 track 在进入 <code>gate</code> 阶段时，由 <code>pg-build-v2/gate</code> sub-agent 按 5 个维度打分，<strong>总分 ≥ 80 才视为 gate 通过</strong>。相比传统的 bool 通过/失败，gate-score 能区分"差一点点"和"差很多"：</p>
+
+<div class="svg-container">
+<svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <marker id="arr-gate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+  </defs>
+
+  <text x="360" y="22" font-size="13" font-weight="700" fill="var(--text)" text-anchor="middle">gate-score 5 维雷达</text>
+
+  <!-- radar: pentagon -->
+  <polygon points="360,60 510,140 445,250 275,250 210,140" fill="none" stroke="#cbd5e1" stroke-width="1"/>
+  <polygon points="360,90 470,140 425,230 295,230 250,140" fill="none" stroke="#e2e8f0" stroke-width="0.5"/>
+  <polygon points="360,120 430,140 405,210 315,210 290,140" fill="none" stroke="#e2e8f0" stroke-width="0.5"/>
+  <polygon points="360,150 390,140 385,190 335,190 330,140" fill="none" stroke="#e2e8f0" stroke-width="0.5"/>
+
+  <!-- 维度轴 -->
+  <line x1="360" y1="140" x2="510" y2="140" stroke="#cbd5e1" stroke-width="0.5"/>
+  <line x1="360" y1="140" x2="445" y2="250" stroke="#cbd5e1" stroke-width="0.5"/>
+  <line x1="360" y1="140" x2="275" y2="250" stroke="#cbd5e1" stroke-width="0.5"/>
+  <line x1="360" y1="140" x2="210" y2="140" stroke="#cbd5e1" stroke-width="0.5"/>
+  <line x1="360" y1="140" x2="360" y2="60" stroke="#cbd5e1" stroke-width="0.5"/>
+
+  <!-- 分数多边形（示例：95/88/82/76/90 → 综合 86） -->
+  <polygon points="360,80 488,140 437,238 295,230 230,140" fill="#dbeafe" fill-opacity="0.4" stroke="#2563eb" stroke-width="2"/>
+  <circle cx="360" cy="80" r="4" fill="#2563eb"/>
+  <circle cx="488" cy="140" r="4" fill="#2563eb"/>
+  <circle cx="437" cy="238" r="4" fill="#2563eb"/>
+  <circle cx="295" cy="230" r="4" fill="#2563eb"/>
+  <circle cx="230" cy="140" r="4" fill="#2563eb"/>
+
+  <!-- 维度标签 -->
+  <text x="525" y="135" font-size="12" font-weight="600" fill="#1d4ed8">correctness</text>
+  <text x="525" y="150" font-size="10" fill="#64748b">权重 35%</text>
+
+  <text x="455" y="262" font-size="12" font-weight="600" fill="#1d4ed8">security</text>
+  <text x="455" y="276" font-size="10" fill="#64748b">权重 25%</text>
+
+  <text x="200" y="262" font-size="12" font-weight="600" fill="#1d4ed8">maintainability</text>
+  <text x="200" y="276" font-size="10" fill="#64748b">权重 15%</text>
+
+  <text x="148" y="135" font-size="12" font-weight="600" fill="#1d4ed8">performance</text>
+  <text x="148" y="150" font-size="10" fill="#64748b">权重 15%</text>
+
+  <text x="325" y="48" font-size="12" font-weight="600" fill="#1d4ed8">spec_coverage</text>
+  <text x="325" y="62" font-size="10" fill="#64748b">权重 10%</text>
+</svg>
+</div>
+
+<table>
+  <tr><th>维度</th><th>权重</th><th>评估内容</th></tr>
+  <tr><td>correctness</td><td>35%</td><td>行为是否符合 proposal.md 描述、单元测试覆盖关键路径</td></tr>
+  <tr><td>security</td><td>25%</td><td>权限校验、敏感字段脱敏、依赖 CVE 扫描</td></tr>
+  <tr><td>maintainability</td><td>15%</td><td>命名规范、模块边界、日志规范、复用度</td></tr>
+  <tr><td>performance</td><td>15%</td><td>关键路径延迟、数据库查询 N+1、资源占用</td></tr>
+  <tr><td>spec_coverage</td><td>10%</td><td>design.md 验收点是否全部被测试或文档覆盖</td></tr>
+</table>
+
+<h3>评分如何驱动 fix-gate 循环</h3>
+<ol>
+  <li>gate agent 输出结构化 JSON：<code>{"scores": {...}, "total": 86, "threshold": 80, "passed": true, "weak_dims": []}</code></li>
+  <li><code>total ≥ 80</code> → gate pass，pipeline 推进</li>
+  <li><code>total &lt; 80</code> → 进入 fix-gate 循环，runner 把 <code>weak_dims</code> 传给 <code>pg-build-v2/fix-gate</code> sub-agent 定向修复</li>
+  <li><code>max_gate_fix_retries</code> 次仍未达 80 → final-gate 触发人工评审</li>
+</ol>
+
+<h3>前置门控：gate-assessment.md</h3>
+<p>final-gate 启动前必须存在 <code>2-build/gate-assessment.md</code>，汇总所有 track 的 gate-score + 弱项清单。缺失则 final-gate <strong>硬阻断</strong>，避免"未评审就合入"。</p>
+
+<div class="danger-card card">
+  <h4 style="margin:0 0 8px">⚠ 分数驱动 ≠ 形式主义</h4>
+  <p style="margin:0">gate-score 不是为了让 AI "凑分数"。<strong>权重和阈值在 pg-skills 上游 SSOT 定义</strong>，项目内不可随意调。如发现某维度评分与人类判断长期偏离，应反馈到上游调整 prompt 模板，而非本地 hack。</p>
+</div>
+
 <h2>4.5 流程差异速查表</h2>
 
 <table>
   <tr><th></th><th>标准流</th><th>快捷流</th><th>修复流</th><th>回归流</th></tr>
-  <tr><td>入口</td><td><code>/2-pg-propose</code> + <code>/3-pg-build</code></td><td><code>/2b-pg-quick-build</code></td><td><code>/5-pg-fix-issue</code></td><td><code>/4-pg-regression</code></td></tr>
+  <tr><td>入口</td><td><code>/2-pg-propose</code> + <code>/3-pg-build-v2</code></td><td><code>/2b-pg-quick-build</code></td><td><code>/5-pg-fix-issue</code></td><td><code>/4-pg-regression</code></td></tr>
   <tr><td>设计文档</td><td>4 份</td><td>零产物落盘</td><td>仅诊断报告</td><td>仅问题清单</td></tr>
   <tr><td>change 目录</td><td>是</td><td>否</td><td>否</td><td>否</td></tr>
   <tr><td>人工参与</td><td>提案 review</td><td>无</td><td>确认复现方案</td><td>无</td></tr>
@@ -1479,14 +1699,14 @@ ls .opencode/skills/pg-propose/references/
 <div class="card" onclick="toggleQA(this)">
   <div class="collapse-toggle open"><strong>Build 跑到一半失败了怎么办？</strong></div>
   <div class="collapse-body open">
-    <p>查看 <code>.pg/changes/&lt;name&gt;/2-build/*.md</code> 中的报告。gate 或 verify 报告会写明失败原因。修复后重跑 <code>/3-pg-build</code>。</p>
+    <p>查看 <code>.pg/changes/&lt;name&gt;/2-build/*.md</code> 中的报告。gate 或 verify 报告会写明失败原因。修复后重跑 <code>/3-pg-build-v2</code>。</p>
   </div>
 </div>
 
 <div class="card" onclick="toggleQA(this)">
   <div class="collapse-toggle"><strong>怎么知道当前 pipeline 跑到哪一步了？</strong></div>
   <div class="collapse-body">
-    <p>查看 <code>.pg/changes/&lt;name&gt;/2-build/.pipeline-state.json</code>。</p>
+    <p>查看 <code>.pg/changes/&lt;name&gt;/2-build/pipeline.events</code>（append-only JSONL），或调 <code>pg-pipeline-runner.py progress &lt;change&gt;</code> 看人类可读摘要。</p>
   </div>
 </div>
 
@@ -1529,7 +1749,7 @@ regression:
 pg upgrade
 
 <span style="color:#94a3b8"># 升级到指定版</span>
-pg upgrade v0.3.0
+pg upgrade v0.6.0
 
 <span style="color:#94a3b8"># 查看远程可用版本</span>
 pg upgrade --list
@@ -1574,7 +1794,7 @@ pg doctor
   <tr><td><code>/2-pg-propose</code></td><td>提案——生成设计文档</td></tr>
   <tr><td><code>/2.1-pg-propose-refine</code></td><td>按评审意见修设计</td></tr>
   <tr><td><code>/2b-pg-quick-build</code></td><td>小改动直接编码</td></tr>
-  <tr><td><code>/3-pg-build</code></td><td>构建——pipeline 实现</td></tr>
+  <tr><td><code>/3-pg-build-v2</code></td><td>构建——pipeline 实现（事件溯源引擎）</td></tr>
   <tr><td><code>/4-pg-regression</code></td><td>回归——跑全量测试</td></tr>
   <tr><td><code>/5-pg-fix-issue</code></td><td>修复——系统化修 bug</td></tr>
   <tr><td><code>/6-pg-archive</code></td><td>归档已完成变更</td></tr>
