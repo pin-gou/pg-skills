@@ -80,13 +80,15 @@ def next_pending(state: PipelineState) -> PipelineAction:
         # 检测 stage 边界：需要 clean 当前 stage 的环境
         if state.current_stage and state.current_stage != next_stage:
             if state.current_stage in state.stage_prepared:
+                _env_name = state.stage_env_map.get(state.current_stage, "")
                 return PipelineAction(
                     kind="env_switch",
                     track=first_pending_track,
                     phase="clean_env",
                     detail={
                         "stage": state.current_stage,
-                        "env_name": state.stage_env_map.get(state.current_stage, ""),
+                        "env_name": _env_name,
+                        "hook_timeout_seconds": state.stage_env_timeout.get(_env_name, 600),
                         "next_stage": next_stage,
                         "next_env_name": state.stage_env_map.get(next_stage, ""),
                     },
@@ -94,13 +96,15 @@ def next_pending(state: PipelineState) -> PipelineAction:
 
         # 检测 stage 边界：需要 prepare 新 stage 的环境
         if next_stage and next_stage not in state.stage_prepared:
+            _env_name = state.stage_env_map.get(next_stage, "")
             return PipelineAction(
                 kind="env_switch",
                 track=first_pending_track,
                 phase="prepare_env",
                 detail={
                     "stage": next_stage,
-                    "env_name": state.stage_env_map.get(next_stage, ""),
+                    "env_name": _env_name,
+                    "hook_timeout_seconds": state.stage_env_timeout.get(_env_name, 600),
                 },
             )
 

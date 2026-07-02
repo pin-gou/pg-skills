@@ -250,6 +250,7 @@ class PipelineState:
     # stage 生命周期管理
     stage_order: tuple[str, ...] = ()               # ["dev", "integration"]
     stage_env_map: dict[str, str] = field(default_factory=dict)  # {"dev": "dev-local", "integration": "dev-3tier"}
+    stage_env_timeout: dict[str, int] = field(default_factory=dict)  # {"dev-local": 600} hook timeout
     current_stage: str = ""
     stage_prepared: set[str] = field(default_factory=set)        # 已 prepare 的 stage 集合
 
@@ -269,6 +270,7 @@ class PipelineState:
             "current_phase": self.current_phase,
             "stage_order": list(self.stage_order),
             "stage_env_map": dict(self.stage_env_map),
+            "stage_env_timeout": dict(self.stage_env_timeout),
             "current_stage": self.current_stage,
             "stage_prepared": list(self.stage_prepared),
         }
@@ -310,6 +312,7 @@ class PipelineState:
             current_phase=d.get("current_phase", ""),
             stage_order=tuple(d.get("stage_order", ())),
             stage_env_map=d.get("stage_env_map", {}),
+            stage_env_timeout=d.get("stage_env_timeout", {}),
             current_stage=d.get("current_stage", ""),
             stage_prepared=set(d.get("stage_prepared", [])),
         )
@@ -331,6 +334,7 @@ class PipelineState:
             current_phase=kwargs.get("current_phase", self.current_phase),
             stage_order=kwargs.get("stage_order", self.stage_order),
             stage_env_map=kwargs.get("stage_env_map", self.stage_env_map),
+            stage_env_timeout=kwargs.get("stage_env_timeout", self.stage_env_timeout),
             current_stage=kwargs.get("current_stage", self.current_stage),
             stage_prepared=kwargs.get("stage_prepared", self.stage_prepared),
         )

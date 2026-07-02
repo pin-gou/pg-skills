@@ -203,8 +203,19 @@ def maybe_bootstrap_init_commit(change: str, init_committed: bool) -> dict[str, 
 # 步骤 5: prepare_env 内联执行
 # ============================================================
 
-def execute_env_hook_inline(change: str, phase_name: str = "prepare_env") -> dict[str, Any]:
-    """执行 prepare_env 脚本。
+def execute_env_hook_inline(
+    change: str,
+    phase_name: str = "prepare_env",
+    explicit_env_name: str | None = None,
+    explicit_stage_name: str | None = None,
+) -> dict[str, Any]:
+    """执行 prepare_env / clean_env 脚本。
+
+    Args:
+        change: change name
+        phase_name: "prepare_env" | "clean_env"
+        explicit_env_name: 显式 env 名（来自 env_switch action detail，跳过自动检测）
+        explicit_stage_name: 显式 stage 名（同上）
 
     Returns:
         {"success": bool, "skipped": bool, "log_path": str|None, "exit_code": int|None, ...}
@@ -223,27 +234,31 @@ def execute_env_hook_inline(change: str, phase_name: str = "prepare_env") -> dic
     except Exception as e:
         return {"success": False, "skipped": False, "error": f"load_config failed: {e}"}
 
-    # 从 execution-manifest.yaml 读取 env 名（manifest 的 stage.environment 是精确值）
-    env_name = None
-    stage_name = None
-    manifest_path = os.path.join(CHANGES_DIR, change, "execution-manifest.yaml")
-    if os.path.isfile(manifest_path):
-        try:
-            import yaml as _yaml2
-            with open(manifest_path, encoding="utf-8") as f:
-                manifest = _yaml2.safe_load(f) or {}
-            for s in manifest.get("stages", []):
-                env = s.get("environment")
-                if env and s.get("tracks"):
-                    stage_name = s.get("name", "")
-                    env_name = env if isinstance(env, str) else env.get("name", "")
-                    if env_name:
-                        break
-        except Exception:
-            pass
+    # 确定 env_name / stage_name
+    # 优先级: 显式参数 > manifest 自动检测 > project.yaml fallback
+    env_name = explicit_env_name
+    stage_name = explicit_stage_name
 
-    # fallback: 从 project.yaml stages 读取 env 名
     if not env_name:
+        # 从 execution-manifest.yaml 读取 env 名
+        manifest_path = os.path.join(CHANGES_DIR, change, "execution-manifest.yaml")
+        if os.path.isfile(manifest_path):
+            try:
+                import yaml as _yaml2
+                with open(manifest_path, encoding="utf-8") as f:
+                    manifest = _yaml2.safe_load(f) or {}
+                for s in manifest.get("stages", []):
+                    env = s.get("environment")
+                    if env and s.get("tracks"):
+                        stage_name = s.get("name", "")
+                        env_name = env if isinstance(env, str) else env.get("name", "")
+                        if env_name:
+                            break
+            except Exception:
+                pass
+
+    if not env_name:
+        # fallback: 从 project.yaml stages 读取 env 名
         for s in config.get("stages") or []:
             if s.get("tracks") and (s.get("environment") or {}).get("required", False):
                 stage_name = s.get("name")
@@ -458,5 +473,227 @@ def run_bootstrap(
         raise
     except Exception as e:
         _log("bootstrap_step_completed", {"step": 5, "error": str(e)})
+
+    return result
+
+
+# ============================================================
+# CLI 入口：cli_bootstrap / cli_env_action
+# ============================================================
+
+def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
+    """从 execution-manifest.yaml + project.yaml 检测 pipeline 配置。
+
+    纯文件系统操作，与 Orchestrator.state 无关。
+    供 cli_bootstrap 命令使用。
+
+    Returns:
+        {"pipeline_order": [...], "track_configs": {...}, "stage_order": [...], "stage_env_map": {...}}
+    """
+    from pipeline.events import FINAL_GATE_TRACK
+    order: list[str] = []
+    track_configs: dict[str, dict] = {}
+    stage_order: list[str] = []
+    stage_env_map: dict[str, str] = {}
+    config_path = os.path.join(PROJECT_ROOT, ".pg", "project.yaml")
+
+    # 从 execution-manifest.yaml 读 stage order + env 映射
+    manifest_path = os.path.join(CHANGES_DIR, change, "execution-manifest.yaml")
+    if os.path.isfile(manifest_path):
+        try:
+            import yaml as _yaml
+            with open(manifest_path, encoding="utf-8") as f:
+                manifest = _yaml.safe_load(f) or {}
+            for stage in manifest.get("stages", []):
+                name = stage.get("name", "")
+                if not name:
+                    continue
+                stage_order.append(name)
+                env = stage.get("environment", "")
+                if isinstance(env, str):
+                    stage_env_map[name] = env
+                elif isinstance(env, dict):
+                    stage_env_map[name] = env.get("name", "dev-local")
+                else:
+                    stage_env_map[name] = "dev-local"
+                for track in stage.get("tracks", []):
+                    tid = track["id"] if isinstance(track, dict) else track
+                    qualified = f"{name}.{tid}" if name else tid
+                    order.append(qualified)
+                    if isinstance(track, dict) and track.get("commands"):
+                        track_configs[qualified] = {"commands": track["commands"]}
+            if manifest.get("final_gate"):
+                order.append(FINAL_GATE_TRACK)
+        except Exception:
+            pass
+
+    # fallback: project.yaml
+    if not order and os.path.isfile(config_path):
+        try:
+            import yaml as _yaml
+            with open(config_path, encoding="utf-8") as f:
+                config = _yaml.safe_load(f) or {}
+            for stage in config.get("stages", []):
+                stage_name = stage.get("name", "")
+                stage_order.append(stage_name)
+                env = stage.get("environment", {})
+                if isinstance(env, dict) and env.get("name"):
+                    stage_env_map[stage_name] = env["name"]
+                for t in stage.get("tracks", []):
+                    qualified = f"{stage_name}.{t}" if stage_name else t
+                    order.append(qualified)
+        except Exception:
+            pass
+
+    if not stage_order:
+        stage_order.append("dev")
+
+    # 从 project.yaml 读 track 级配置
+    if os.path.isfile(config_path):
+        try:
+            import yaml as _yaml
+            with open(config_path, encoding="utf-8") as f:
+                config = _yaml.safe_load(f) or {}
+            tracks_cfg = config.get("tracks", {})
+            for tid in order:
+                if tid == FINAL_GATE_TRACK:
+                    continue
+                bare = tid.rsplit(".", 1)[-1]
+                if tid not in track_configs:
+                    track_configs[tid] = {}
+                cfg = tracks_cfg.get(bare, {})
+                track_configs[tid].setdefault("modules", cfg.get("modules", []))
+                track_configs[tid].setdefault("max_fail_retries", cfg.get("max_fail_retries", 3))
+                track_configs[tid].setdefault("max_fix_retries", cfg.get("max_fix_retries", 5))
+                track_configs[tid].setdefault("max_gate_fix_retries", cfg.get("max_gate_fix_retries", 2))
+                track_configs[tid].setdefault("type", cfg.get("type", "standard"))
+                track_configs[tid].setdefault("review_level", cfg.get("review_level", ""))
+                track_configs[tid].setdefault("description", cfg.get("description", ""))
+                track_configs[tid].setdefault("fix_routing", cfg.get("fix_routing", "source"))
+        except Exception:
+            pass
+
+    return {
+        "pipeline_order": order,
+        "track_configs": track_configs,
+        "stage_order": stage_order,
+        "stage_env_map": stage_env_map,
+    }
+
+
+def cli_bootstrap(change: str) -> dict[str, Any]:
+    """CLI 入口：执行 bootstrap 5 步 + 检测 pipeline 配置。
+
+    与 Orchestrator._first_next 中的 bootstrap 逻辑等价，
+    但独立于 PipelineState 和 EventLog，适合 CLI 调用。
+
+    Returns:
+        {"action": "bootstrap_result", "ok": bool, "init_commit": dict|None,
+         "env_hook": dict|None, "pipeline_config": dict|None,
+         "error": str|None}
+    """
+    result: dict[str, Any] = {
+        "action": "bootstrap_result",
+        "ok": True,
+        "init_commit": None,
+        "env_hook": None,
+        "pipeline_config": None,
+        "error": None,
+        "prepare_env_failed": False,
+        "prepare_env_log_path": None,
+    }
+
+    # 步骤 1-4: migrate, feature branch, init commit
+    try:
+        moved = migrate_legacy_state_files(change)
+    except Exception as e:
+        result["error"] = f"migrate failed: {e}"
+
+    try:
+        branch_result = ensure_feature_branch(change)
+    except Exception as e:
+        result["error"] = f"branch failed: {e}"
+
+    # init commit: 从 state 读取 init_committed 状态。CLI 模式无 state，
+    # 每次尝试提交（幂等：git commit 在工作区干净时跳过）
+    try:
+        init_commit = auto_commit_on_init(change)
+        if init_commit.get("committed") or init_commit.get("reason"):
+            result["init_commit"] = init_commit
+    except Exception as e:
+        result["error"] = f"init_commit failed: {e}"
+
+    # 步骤 5: prepare_env
+    try:
+        env_result = execute_env_hook_inline(change, "prepare_env")
+        result["env_hook"] = env_result
+        if env_result.get("log_path"):
+            result["prepare_env_log_path"] = env_result["log_path"]
+        if not env_result.get("success") and not env_result.get("skipped"):
+            result["prepare_env_failed"] = True
+            result["ok"] = False
+            result["error"] = env_result.get("error") or f"prepare_env failed (exit_code={env_result.get('exit_code')})"
+    except Exception as e:
+        result["prepare_env_failed"] = True
+        result["ok"] = False
+        result["error"] = f"prepare_env exception: {e}"
+
+    # 检测 pipeline 配置（不依赖 Orchestrator）
+    try:
+        pipeline_config = _detect_pipeline_config_from_disk(change)
+        result["pipeline_config"] = pipeline_config
+    except Exception as e:
+        result["error"] = f"detect config failed: {e}"
+
+    return result
+
+
+def cli_env_action(change: str, phase_name: str, stage_name: str, env_name: str) -> dict[str, Any]:
+    """CLI 入口：执行一次 env hook（prepare_env / clean_env）。
+
+    与 Orchestrator._handle_env_switch 中的执行逻辑等价，
+    但独立于 PipelineState，适合 CLI 调用。
+
+    Args:
+        change: change name
+        phase_name: "prepare_env" | "clean_env"
+        stage_name: 当前 stage 名称
+        env_name: 环境名称
+
+    Returns:
+        {"action": "env_action_result", "ok": bool, ...}
+    """
+    result: dict[str, Any] = {
+        "action": "env_action_result",
+        "ok": False,
+        "phase": phase_name,
+        "stage": stage_name,
+        "env_name": env_name,
+        "log_path": None,
+        "exit_code": None,
+        "error": None,
+    }
+
+    try:
+        env_result = execute_env_hook_inline(
+            change, phase_name,
+            explicit_env_name=env_name,
+            explicit_stage_name=stage_name,
+        )
+        result["log_path"] = env_result.get("log_path")
+        result["exit_code"] = env_result.get("exit_code")
+        result["error_category"] = env_result.get("error_category", "unknown")
+        result["error_message"] = env_result.get("error_message", "")
+        result["error_hint"] = env_result.get("error_hint", "")
+
+        if env_result.get("success"):
+            result["ok"] = True
+        elif env_result.get("skipped"):
+            result["ok"] = True
+            result["skipped"] = True
+        else:
+            result["error"] = env_result.get("error") or f"{phase_name} failed"
+    except Exception as e:
+        result["error"] = f"{phase_name} exception: {e}"
 
     return result

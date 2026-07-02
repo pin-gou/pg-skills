@@ -79,5 +79,60 @@ class TestBootstrapEnvHook(unittest.TestCase):
                 os.environ["PG_PROJECT_ROOT"] = old
 
 
+class TestCliBootstrap(unittest.TestCase):
+    """cli_bootstrap / cli_env_action 测试。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.old_root = os.environ.get("PG_PROJECT_ROOT")
+        os.environ["PG_PROJECT_ROOT"] = self.tmp
+        self.change_root = os.path.join(self.tmp, ".pg", "changes", "test-change")
+        os.makedirs(os.path.join(self.change_root, "2-build"), exist_ok=True)
+
+    def tearDown(self):
+        if self.old_root:
+            os.environ["PG_PROJECT_ROOT"] = self.old_root
+        else:
+            os.environ.pop("PG_PROJECT_ROOT", None)
+
+    def test_cli_bootstrap_structure(self):
+        """cli_bootstrap 返回正确结构 (无项目配置时跳过 env hook)。"""
+        result = bootstrap.cli_bootstrap("test-change")
+        self.assertEqual(result["action"], "bootstrap_result")
+        self.assertIn("ok", result)
+        self.assertIn("init_commit", result)
+        self.assertIn("env_hook", result)
+        self.assertIn("pipeline_config", result)
+        # 无 project.yaml → skipped
+        if result.get("env_hook"):
+            self.assertTrue(result["env_hook"].get("skipped", False))
+
+    def test_cli_env_action_structure(self):
+        """cli_env_action 返回正确结构。"""
+        result = bootstrap.cli_env_action("test-change", "prepare_env", "dev", "dev-local")
+        self.assertEqual(result["action"], "env_action_result")
+        self.assertIn("ok", result)
+        self.assertEqual(result["phase"], "prepare_env")
+        self.assertEqual(result["stage"], "dev")
+        self.assertEqual(result["env_name"], "dev-local")
+
+    def test_cli_env_action_clean_env(self):
+        """cli_env_action 支持 clean_env phase。"""
+        result = bootstrap.cli_env_action("test-change", "clean_env", "integration", "dev-3tier")
+        self.assertEqual(result["action"], "env_action_result")
+        self.assertEqual(result["phase"], "clean_env")
+
+    def test_cli_bootstrap_detect_config_no_manifest(self):
+        """无 manifest 时 pipeline_config 为默认值。"""
+        result = bootstrap.cli_bootstrap("test-change")
+        pc = result.get("pipeline_config", {})
+        self.assertIn("pipeline_order", pc)
+        self.assertIn("track_configs", pc)
+        self.assertIn("stage_order", pc)
+        self.assertIn("stage_env_map", pc)
+        # stage_order 至少非空（具体值取决于运行环境的 project.yaml）
+        self.assertGreater(len(pc["stage_order"]), 0)
+
+
 if __name__ == "__main__":
     unittest.main()

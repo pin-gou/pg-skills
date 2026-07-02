@@ -40,11 +40,33 @@ def build_summary(suites: list[dict]) -> str:
     t_skipped = sum(s["skipped"] for s in suite_stats.values())
     t_suites = len(suites)
 
+    # 自动修复 vs 上报生产代码 统计
+    auto_fixed = [iss for iss in all_issues if iss.get("auto_fixed") is True]
+    reported = [iss for iss in all_issues if iss.get("auto_fixed") is not True]
+    # B/C 分类统计（B 类修了也带 rationale）
+    by_category: dict[str, int] = {}
+    for iss in all_issues:
+        cat = iss.get("category") or "?"
+        by_category[cat] = by_category.get(cat, 0) + 1
+
     lines.append("# pg-regression 汇总报告\n")
     lines.append(f"**生成时间**: {__import__('datetime').datetime.now().strftime('%Y-%m-%d %H:%M')}")
     lines.append(f"**套件数**: {t_suites}")
     lines.append(f"**生产代码问题总数**: {total}")
-    lines.append(f"**已知问题跳过**: {t_skipped}\n")
+    lines.append(f"**已知问题跳过**: {t_skipped}")
+    lines.append(f"**已自动修复（auto_fixed=true）**: {len(auto_fixed)}")
+    lines.append(f"**待 runner 修复（auto_fixed=false）**: {len(reported)}\n")
+
+    lines.append("---\n")
+
+    # 分类分布
+    if by_category:
+        lines.append("## 按分类分布\n")
+        lines.append("| 分类 | 数量 |")
+        lines.append("|------|------|")
+        for cat in sorted(by_category.keys()):
+            lines.append(f"| {cat} | {by_category[cat]} |")
+        lines.append("")
 
     lines.append("---\n")
 
@@ -70,16 +92,27 @@ def build_summary(suites: list[dict]) -> str:
         file_path = iss.get("file", "")
         expected = iss.get("expected", "")
         actual = iss.get("actual", "")
+        auto_fixed = iss.get("auto_fixed")
+        category = iss.get("category")
+        rationale = iss.get("rationale")
 
         lines.append(f"### {title}\n")
         lines.append(f"- **套件**: {suite}")
-        lines.append(f"- **组件**: {component}")
+        if category:
+            lines.append(f"- **分类**: {category}")
+        if auto_fixed is not None:
+            af_label = "✅ 已自动修复" if auto_fixed else "❌ 待 runner 修复"
+            lines.append(f"- **状态**: {af_label}")
+        if component:
+            lines.append(f"- **组件**: {component}")
         if file_path:
             lines.append(f"- **文件**: {file_path}")
         if expected:
             lines.append(f"- **期望**: {expected}")
         if actual:
             lines.append(f"- **实际**: {actual}")
+        if rationale:
+            lines.append(f"- **Rationale**: {rationale}")
         lines.append("")
 
     lines.append("---\n")

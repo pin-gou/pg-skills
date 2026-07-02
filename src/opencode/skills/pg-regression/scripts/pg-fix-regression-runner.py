@@ -522,6 +522,21 @@ def main():
         print("无生产代码问题待修复")
         sys.exit(0)
 
+    # 1a. 过滤 auto_fixed=True（已由 fix-test 自动修，跳过 Phase 4）
+    skipped_auto_fixed = [iss for iss in all_issues if iss.get("auto_fixed") is True]
+    all_issues = [iss for iss in all_issues if iss.get("auto_fixed") is not True]
+
+    if skipped_auto_fixed:
+        print(f"\n⏭️  跳过 {len(skipped_auto_fixed)} 个 auto_fixed=True 项（已由 fix-test 自动修）：")
+        for iss in skipped_auto_fixed:
+            cat = iss.get("category", "?")
+            print(f"  [{iss['_suite']}] {iss.get('id', '?')}: {iss.get('title', '')} ({cat})")
+        print()
+
+    if not all_issues:
+        print("无 production-code issue 待修复（全部由 fix-test 自动修）")
+        sys.exit(0)
+
     print(f"\n共 {len(all_issues)} 个 production-code issue 待处理:\n")
     for iss in all_issues:
         print(f"  [{iss['_suite']}] {iss.get('id', '?')}: {iss.get('title', '')}")

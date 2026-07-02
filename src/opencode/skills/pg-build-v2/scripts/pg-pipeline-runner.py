@@ -2,9 +2,11 @@
 """pg-pipeline-runner.py — pg-build-v2 CLI 入口。
 
 用法：
+  python3 pg-pipeline-runner.py bootstrap <change>
   python3 pg-pipeline-runner.py next <change>
   python3 pg-pipeline-runner.py record <change> <status> [report_path] [summary] [outputs] [issues]
   python3 pg-pipeline-runner.py progress <change>
+  python3 pg-pipeline-runner.py env-action <change> <phase> <stage> <env>
 """
 
 from __future__ import annotations
@@ -21,9 +23,10 @@ if _THIS_DIR not in sys.path:
 
 from pipeline.orchestrator import Orchestrator
 from pipeline.replay import verify_snapshot_matches_replay
+import bootstrap as _bootstrap
 
 
-VALID_COMMANDS = {"next", "record", "progress", "replay", "verify-replay"}
+VALID_COMMANDS = {"next", "record", "progress", "replay", "verify-replay", "bootstrap", "env-action"}
 VALID_STATUSES = {"completed", "failed", "escalate", "pass", "fail"}
 
 
@@ -43,12 +46,31 @@ def main() -> None:
         sys.exit(1)
 
     change_arg = sys.argv[2]
-    # v2.1: 若 change 含 /, 提取最后一段作为显示名（Orchestrator 会处理路径）
     change = os.path.basename(change_arg.rstrip("/")) if "/" in change_arg else change_arg
 
-    # v2.1: replay / verify-replay 命令强制走 events 重建
-    use_replay = command in ("replay", "verify-replay")
+    # ── bootstrap 命令（独立命令，不依赖 Orchestrator）──
+    if command == "bootstrap":
+        result = _bootstrap.cli_bootstrap(change)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
 
+    # ── env-action 命令（独立命令，不依赖 Orchestrator）──
+    if command == "env-action":
+        if len(sys.argv) < 5:
+            _usage("env-action 命令缺少参数: <change> <phase> <stage> <env>")
+            sys.exit(1)
+        phase_name = sys.argv[3]
+        if phase_name not in ("prepare_env", "clean_env"):
+            _usage(f"无效 phase: {phase_name}，有效值: prepare_env | clean_env")
+            sys.exit(1)
+        stage_name = sys.argv[4]
+        env_name = sys.argv[5] if len(sys.argv) > 5 else ""
+        result = _bootstrap.cli_env_action(change, phase_name, stage_name, env_name)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    # ── 以下命令需要 Orchestrator ──
+    use_replay = command in ("replay", "verify-replay")
     orch = Orchestrator(change_arg, use_replay=use_replay)
 
     result: dict[str, Any] = {}
@@ -56,7 +78,6 @@ def main() -> None:
         result = orch.next()
 
     elif command == "replay":
-        # 强制从 events 重建并返回当前 state
         result = {
             "command": "replay",
             "change": change,
@@ -65,7 +86,6 @@ def main() -> None:
         }
 
     elif command == "verify-replay":
-        # 对比 snapshot vs replay 结果
         ok, message = verify_snapshot_matches_replay(orch.change_root)
         result = {
             "command": "verify-replay",
@@ -93,25 +113,6 @@ def main() -> None:
     elif command == "progress":
         result = orch.progress()
 
-    elif command == "replay":
-        # 强制从 events 重建并返回当前 state
-        result = {
-            "command": "replay",
-            "change": change,
-            "loaded_via": orch._loaded_via,
-            "state": orch.state.to_dict(),
-        }
-
-    elif command == "verify-replay":
-        # 对比 snapshot vs replay 结果
-        ok, message = verify_snapshot_matches_replay(orch.change_root)
-        result = {
-            "command": "verify-replay",
-            "change": change,
-            "consistent": ok,
-            "message": message,
-        }
-
     # 输出 JSON
     print(json.dumps(result, ensure_ascii=False, indent=2))
 
@@ -120,13 +121,16 @@ def _usage(msg: str = "") -> None:
     if msg:
         print(f"错误: {msg}", file=sys.stderr)
     print("用法:", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py bootstrap <change>       # 执行 5 步 bootstrap + 检测配置", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py next <change>           # 获取下一步 action", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py record <change> <status> [report_path] [summary] [outputs] [issues]", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py progress <change>        # 查看进度", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py env-action <change> <phase> <stage> <env> # 执行 env hook", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py replay <change>          # v2.1: 从 events 重建 state", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py verify-replay <change>   # v2.1: 对比 snapshot vs replay", file=sys.stderr)
     print(file=sys.stderr)
     print("status: completed | failed | escalate | pass | fail", file=sys.stderr)
+    print("env-action phase: prepare_env | clean_env", file=sys.stderr)
 
 
 if __name__ == "__main__":

@@ -51,6 +51,9 @@ sub-agent (via Task tool)      ← 执行 test / dev / verify / gate / fix / fix
 ```bash
 RUNNER="python3 .opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py"
 
+# 执行 5 步 bootstrap（首次）：migrate / branch / init-commit / prepare_env
+$RUNNER bootstrap <change>
+
 # 获取下一步 action
 $RUNNER next <change>
 
@@ -59,9 +62,14 @@ $RUNNER record <change> <status> [report_path] [summary] [outputs] [issues]
 
 # 查看进度
 $RUNNER progress <change>
+
+# 执行 env hook（prepare_env / clean_env），由编排器在收到 env_switch 时调用
+$RUNNER env-action <change> <phase> <stage> <env>
 ```
 
 **status**: `completed | failed | escalate | pass | fail`
+
+**env-action phase**: `prepare_env | clean_env`
 
 ---
 
@@ -73,15 +81,20 @@ $RUNNER progress <change>
 
 ```
 循环:
-  1. 调 `next <change>` → 检查 action 字段
+  0. [首次] $RUNNER bootstrap <change> (600s timeout)
+
+  1. 调 `next <change>` (30s timeout) → 检查 action 字段
   2. switch(action):
-       "env_hook_failed"   → 环境准备失败: 查看 log_path, 修复后重试
-       "env_switch"        → orchestrator 自动执行 clean_env/prepare_env, 回步骤 1
+       "env_switch"        → $RUNNER env-action <change> <phase> <stage> <env_name>
+                             (timeout=hook_timeout_seconds, 由 action 返回)
+                             失败 → 提示用户修复环境或终止
+                             成功 → 回步骤 1
+
        "dispatch"          → 派遣 sub-agent (见下方协议)
        "dispatch_final_gate" → 与 dispatch 等价，但 item="final-gate"。派遣 gate agent
-                              执行跨 track 依赖审查。**注意**：与 "dispatch" 共享派遣协议，
-                              区别仅在于 dispatch_file 路径与 agent 名。
-                              派遣成功后编排器仍按正常 record 协议处理结果。
+                               执行跨 track 依赖审查。**注意**：与 "dispatch" 共享派遣协议，
+                               区别仅在于 dispatch_file 路径与 agent 名。
+                               派遣成功后编排器仍按正常 record 协议处理结果。
        "advance"           → 回步骤 1 (调 next)
        "done"              → 检查 result.next_action:
                                - "verify_and_merge" → 加载 pg-verify-and-merge skill，按 PHASE 0-4 执行
@@ -93,8 +106,8 @@ $RUNNER progress <change>
 
 | action | 触发时机 | 编排器响应 |
 |--------|---------|-----------|
-| `env_hook_failed` | bootstrap / env_switch 中 hook 脚本失败 | 终止循环，提示修复 |
-| `env_switch` | stage 边界切换 | 调用 _handle_env_switch 自动执行 clean_env/prepare_env |
+| `env_hook_failed` | bootstrap / env-action 中 hook 脚本失败 | 终止循环，提示修复 |
+| `env_switch` | stage 边界切换 | 编排器调 `$RUNNER env-action <change> <phase> <stage> <env_name>` 并设 timeout=`hook_timeout_seconds`，完成后回步骤 1 |
 | `dispatch` | sub-agent 派遣（普通 track） | 派遣对应 agent |
 | `dispatch_final_gate` | final-gate 阶段派遣 | 派遣 pg-build/gate agent |
 | `advance` | 当前 step 完成，继续推进 | 自动调 next |
@@ -138,10 +151,11 @@ pipeline 完成时 runner 返回的 `done` action 还包含以下字段，供编
 
 ### 环境准备验证
 
-- `next` 首次调用时 runner 自动执行 bootstrap（含 prepare_env hook）
-- bootstrap 步骤 5 `execute_env_hook_inline` 优先从 change 的 `execution-manifest.yaml` 读取 `stage.environment` 字段确定环境名，fallback 到 `project.yaml` stages 的 `environment.name`
-- 若 bootstrap 返回 `env_hook_failed`：环境准备失败，编排器必须终止循环并提示用户修复环境
-- 若返回 `dispatch`：环境已就绪（或跳过），编排器可正常派遣 sub-agent
+`bootstrap` 和 `env-action` 是独立 CLI 命令，编排器自行控制 bash timeout：
+
+- **首次**：编排器调用 `$RUNNER bootstrap <change>`（600s timeout），执行 migrate / feature branch / init commit / prepare_env
+- `bootstrap` 返回 `ok=false` 时：环境准备失败，编排器必须终止循环并提示用户修复环境
+- `bootstrap` 返回 `ok=true` 时：编排器开始正常 `next` → `dispatch` → `record` 循环
 
 ### 多 Stage 环境切换
 
@@ -152,13 +166,21 @@ pipeline_order = ["dev.backend", "dev.frontend", "integration.backend"]
                          ↑ stage 边界 ↑
 ```
 
-`detect.py:next_pending()` 返回 `env_switch` action，orchestrator 自动执行：
+`detect.py:next_pending()` 返回 `env_switch` action，编排器自行调用：
 
-1. **clean_env** — 当前 stage 完成后，清理其环境
-2. **prepare_env** — 下一个 stage 开始前，准备其环境
+```bash
+$RUNNER env-action <change> prepare_env <stage> <env_name>
+```
 
-编排器无需手动处理 `env_switch` action，orchestrator 自动执行 hook 脚本并继续推进。
-若 env_switch 失败，返回 `env_hook_failed`（与 bootstrap 同一错误处理路径）。
+`env_switch` action 包含 `hook_timeout_seconds` 字段，编排器应将其作为 bash timeout 值。
+
+**编排器 vs 旧架构的责任转移**：
+
+| 责任 | 旧架构（orchestrator 内联） | 新架构（编排器控制） |
+|------|---------------------------|-------------------|
+| bash timeout 控制 | runner 无法控制 | 编排器设 `hook_timeout_seconds` |
+| hook 失败重试 | 隐式在 `next` 内 | 编排器显式处理 |
+| stage_prepared 更新 | orchestrator 内部 | 编排器在 `env-action` 成功后调 `next`，由 _first_next 自动设置 |
 
 ### Dispatch 派遣协议（重要）
 

@@ -23,12 +23,9 @@ from pipeline.events import (
     EVT_WORKFLOW_FAILED,
     EVT_FIX_CYCLE_STARTED,
     EVT_GIT_COMMIT,
-    EVT_PREPARE_ENV_COMPLETED,
-    EVT_CLEAN_ENV_COMPLETED,
 )
 from pipeline.reducer import reduce_state
 from pipeline.detect import next_pending
-from pipeline.sub_pipeline import FIX_CYCLE, GATE_FIX_CYCLE
 from pipeline.dispatch import build_action, build_final_gate_action
 from pipeline.config import (
     load_project_config,
@@ -93,11 +90,11 @@ class Orchestrator:
     def next(self) -> dict[str, Any]:
         """返回下一个 action JSON。
 
-        首次调用时执行 bootstrap（如果未初始化）。
+        首次调用时检测 pipeline 配置并初始化 state（bootstrap 已由独立命令完成）。
         """
         # bootstrap 状态检查
         if not self.state.pipeline_order:
-            # 首次调用：执行 bootstrap + 读取 pipeline_order
+            # 首次调用：检测配置 + 初始化 state（bootstrap 副作用已由 $RUNNER bootstrap 完成）
             return self._first_next()
 
         # 检查是否已 terminal
@@ -114,37 +111,29 @@ class Orchestrator:
         return self._action_to_dict(action)
 
     def _first_next(self) -> dict[str, Any]:
-        """首次 next：执行 bootstrap 并设置 pipeline_order。"""
-        # 执行 bootstrap
-        try:
-            boot_result = bootstrap.run_bootstrap(
-                self.change,
-                init_committed=self.state.init_committed,
-                event_log=self.event_log,
-            )
-        except bootstrap.EnvHookError as e:
-            return {
-                "action": "env_hook_failed",
-                "phase": e.phase_name,
-                "log_path": e.log_path,
-                "exit_code": e.exit_code,
-                "fatal": True,
-                "reason": f"env-hook {e.phase_name} failed (exit_code={e.exit_code})",
-                "error_category": e.error_category,
-                "error_message": e.error_message,
-                "error_hint": e.error_hint,
-            }
+        """首次 next：检测配置 + 初始化 TrackState（bootstrap 已由独立命令完成）。
 
-        # 标记 init_committed
-        if boot_result.get("init_commit") and boot_result["init_commit"].get("committed"):
-            self.state = self.state.replace(init_committed=True)
-
+        与 bootstrap CLI 命令的分工：
+          - bootstrap 命令：migrate / feature branch / init commit / prepare_env
+          - _first_next：读取 manifest + project.yaml，创建 TrackState，写 snapshot
+        """
         # 找 pipeline_order + track 配置 + stage 配置
         order, track_configs = self._detect_pipeline_config()
         stage_order, stage_env_map = self._detect_stage_config()
 
-        # 读取 project.yaml 富化上下文
+        # 读取 project.yaml 富化上下文 + 获取 env timeout
         project_config = load_project_config(bootstrap.PROJECT_ROOT)
+        stage_env_timeout: dict[str, int] = {}
+        if project_config:
+            for env_name, env_cfg in (project_config.get("environments") or {}).items():
+                for phase_name in ("prepare_env", "clean_env"):
+                    action = env_cfg.get(phase_name)
+                    if action and isinstance(action, dict):
+                        timeout = action.get("timeout_seconds", 600)
+                        if env_name not in stage_env_timeout or timeout > stage_env_timeout[env_name]:
+                            stage_env_timeout[env_name] = timeout
+                        break
+
         SUB_PHASE_NAMES = ("test", "dev", "verify", "gate")
 
         tracks: dict[str, TrackState] = {}
@@ -195,11 +184,12 @@ class Orchestrator:
             track_types=track_types,
             stage_order=tuple(stage_order),
             stage_env_map=stage_env_map,
+            stage_env_timeout=stage_env_timeout,
             current_stage=first_stage,
             status="running",
         )
 
-        # 标记第一个 stage 为已 prepared（由 bootstrap 完成）
+        # 标记第一个 stage 为已 prepared（由 bootstrap 命令完成）
         if first_stage:
             self.state = self.state.replace(
                 stage_prepared={first_stage},
@@ -627,63 +617,20 @@ class Orchestrator:
             return self.next()
 
         if action.kind == "env_switch":
-            return self._handle_env_switch(action)
+            # env_switch 透传给编排器。编排器收到后应调
+            # $RUNNER env-action <change> <phase> <stage> <env>
+            # 执行完成后调 next() 继续。
+            return {
+                "action": "env_switch",
+                "phase": action.phase,
+                "stage": action.detail.get("stage", ""),
+                "env_name": action.detail.get("env_name", ""),
+                "next_stage": action.detail.get("next_stage", ""),
+                "next_env_name": action.detail.get("next_env_name", ""),
+                "hook_timeout_seconds": action.detail.get("hook_timeout_seconds", 600),
+            }
 
         return {"action": action.kind, **action.detail}
-
-    def _handle_env_switch(self, action: PipelineAction) -> dict[str, Any]:
-        """处理 env_switch action：执行 prepare_env 或 clean_env 脚本。"""
-        phase = action.phase
-        env_name = action.detail.get("env_name", "")
-        stage = action.detail.get("stage", "")
-
-        event_type = EVT_PREPARE_ENV_COMPLETED if phase == "prepare_env" else EVT_CLEAN_ENV_COMPLETED
-
-        # 执行 env hook
-        try:
-            env_result = bootstrap.execute_env_hook_inline(self.change, phase)
-        except Exception as e:
-            env_result = {"success": False, "error": str(e)}
-
-        self.event_log.append(event_type, {
-            "success": env_result.get("success", False),
-            "skipped": env_result.get("skipped", False),
-            "exit_code": env_result.get("exit_code"),
-            "log_path": env_result.get("log_path"),
-            "env_name": env_name,
-            "stage": stage,
-        })
-
-        if not env_result.get("success"):
-            if not env_result.get("skipped"):
-                return {
-                    "action": "env_hook_failed",
-                    "phase": phase,
-                    "log_path": env_result.get("log_path", ""),
-                    "exit_code": env_result.get("exit_code", -1),
-                    "fatal": True,
-                    "reason": f"env-hook {phase} failed (exit_code={env_result.get('exit_code', -1)}, env={env_name})",
-                    "error_category": env_result.get("error_category", "unknown"),
-                    "error_message": env_result.get("error_message", ""),
-                    "error_hint": env_result.get("error_hint", ""),
-                }
-
-        # 更新 stage_prepared 状态
-        new_prepared = set(self.state.stage_prepared)
-        if phase == "prepare_env":
-            new_prepared.add(stage)
-            self.state = self.state.replace(
-                current_stage=stage,
-                stage_prepared=new_prepared,
-            )
-        elif phase == "clean_env":
-            new_prepared.discard(stage)
-            self.state = self.state.replace(stage_prepared=new_prepared)
-
-        save_snapshot(self.change_root, self.state)
-
-        # 继续推进 pipeline（返回下一个 action）
-        return self.next()
 
     def _git(self, *args: str) -> subprocess.CompletedProcess:
         """执行 git 命令（在项目根目录）。"""

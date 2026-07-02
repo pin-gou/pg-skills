@@ -151,7 +151,19 @@ def render_dispatch(
     if block_contract:
         sections.append(_safe_format(block_contract, ctx))
 
-    return "\n\n---\n\n".join(sections)
+    result = "\n\n---\n\n".join(sections)
+
+    # 5. build_rules prompt injection — prepend 在 prompt 最前,
+    #    append 在 prompt 最后（晚于 sub_agent_contract 块）。
+    #    与 pg-build v1 的 _merge_prompt_injection 行为一致。
+    build_rules_prepend = (ctx.get("build_rules_prepend") or "").strip()
+    build_rules_append = (ctx.get("build_rules_append") or "").strip()
+    if build_rules_prepend:
+        result = build_rules_prepend + "\n\n---\n\n" + result
+    if build_rules_append:
+        result = result + "\n\n---\n\n" + build_rules_append
+
+    return result
 
 
 def render_dispatch_file(

@@ -524,6 +524,9 @@ fi
 | `description` | `rootCause` | 直接复用 |
 | `test_targets` | `affectedTests` (string) | 从反引号提取为 list |
 | `title/component/file/expected/actual` | 同名 | 直接复用 |
+| `auto_fixed` | 同名（缺省 `false`） | 透传，Phase 4 runner 只处理 `false` |
+| `rationale` | 同名（仅 B 类有值） | 透传 |
+| `category` | 同名（`A<id>`/`B<id>`/`C<id>`） | 透传，便于追溯 |
 
 ```bash
 mkdir -p .pg/regression
@@ -562,6 +565,9 @@ for agent in fix_results.get("agents", []):
             "test_targets": test_targets,
             "expected": uf.get("expected", ""),
             "actual": uf.get("actual", ""),
+            "auto_fixed": uf.get("auto_fixed", False),
+            "rationale": uf.get("rationale"),
+            "category": uf.get("category"),
         })
 
 suite_doc = {
@@ -746,6 +752,81 @@ regression:
 2. **保留测试意图** — 不削弱断言，不删除测试覆盖
 3. **新增 skip 禁止** — 不得以任何方式将测试标记为 skip/fixme，如果前置条件不满足，应在最终报告中记录为"无法修复的问题"
 4. **统一修复策略** — 所有问题诊断完毕后统一决定，不逐个临时决策
+
+---
+
+## 自动修复边界分类
+
+fix-test agent 必须按下表判定每条失败属于哪一类，决定自动修或上报。三类互斥，全量问题诊断完毕后统一判定。
+
+### 🟢 A 类 — 必须自动修
+
+根因明确在测试脚本本身，修复不改变被测系统契约。
+
+| ID | 类型 | 修复边界 |
+|----|------|---------|
+| A1 | 断言期望值漂移（字段引用/值不对） | 改测试侧引用，不动生产语义 |
+| A2 | 选择器过期（前端 e2e） | 改 selector，不动组件 |
+| A3 | 等待逻辑不足/过度 | 改等待条件/超时 |
+| A4 | 测试框架 API 误用 | 改用正确 API |
+| A5 | 测试数据构造错误（fixture/mock 本身写错） | 改 fixture 写法，不动种子数据 |
+| A6 | 测试隔离问题 | 改 setup/teardown |
+| A7 | 测试环境变量硬编码 | 改测试 helper 的 env 解析 |
+| A8 | 断言精度问题（浮点/时间戳/JSON 字段顺序） | 改用近似匹配 |
+
+### 🟡 B 类 — 条件性自动修（必须附 `rationale`）
+
+可能涉及测试约定或命名规范，但只要不改变"被测什么"且依据充分，可修。每条修复必须在报告里写 `### Rationale` 段，否则归 C 类。
+
+| ID | 类型 | 自动修条件 |
+|----|------|----------|
+| B1 | 断言放宽（`toBe` → `toMatchObject`） | 原始意图是"存在性/结构"而非"精确等值" |
+| B2 | 新增测试 helper（重复代码抽取） | ≥3 处重复，helper 本身有单测 |
+| B3 | 调整 mock 匹配新接口约定 | 接口已确认变化（有 issue/PR/CHANGELOG），改动不掩盖真实 bug |
+| B4 | 重命名测试内局部变量/函数 | lint/类型报错明确指向 |
+| B5 | 添加/调整 `beforeEach` 清理步骤 | 不得新增 skip，不得删断言 |
+| B6 | 加 retry 限制（应对 C10 偶发失败） | playwright `retry ≤ 1` / junit `@Retry(1)` / go `-count=1`，超过即归 C 类 |
+
+### 🔴 C 类 — 禁止自动修，必须上报为"无法修复的问题"
+
+根因不在测试脚本，或修复会丢测试意图，或属于跨域决策。`auto_fixed=false`，进 `.pg/regression/<suite>.json`，触发 Phase 4 runner。
+
+| ID | 类型 | 上报 component |
+|----|------|---------------|
+| C1 | 生产代码 bug | `production-code` |
+| C2 | 生产代码行为变更（接口语义） | `production-code` |
+| C3 | 数据库 schema 不匹配 | `production-code` 或 `environment` |
+| C4 | 环境配置错误 | `environment` |
+| C5 | 种子/测试数据缺失，或 fixture/seed 文件被改 | `test-data` |
+| C6 | 新增任何 `skip` / `fixme` / `.only` / `.todo` / `@Disabled` / `@Ignore` | — |
+| C7 | 删除或弱化断言（使其永远通过） | — |
+| C8 | 跨服务契约变更（前端期望旧 schema、后端返回新 schema） | `production-code` |
+| C9 | 第三方依赖版本/接口破坏 | `environment` 或 `production-code` |
+| C10 | 并发/资源竞争偶发失败（无法稳定复现） | `production-code` 或 `environment`（**B6 例外**） |
+| C11 | 测试覆盖率因修复而下降（删用例/合并用例） | — |
+
+### 分类决策矩阵
+
+| 类别 | 自动修 | 进 `.pg/regression/<suite>.json` | 触发 Phase 4 runner | `auto_fixed` 字段 |
+|------|------|----------------------------------|--------------------|------------------|
+| A 类 | ✅ | ❌（无需上报） | ❌ | `true` |
+| B 类 | ✅（需 rationale） | ❌（无需上报） | ❌ | `true` + `rationale` |
+| C 类 | ❌ | ✅ | ✅ | `false` |
+
+### Phase 2 收尾校验（边界守护）
+
+编排器在每个 fix-test agent 返回后、Phase 2a 提交前，**必须**执行 `pg-check-fix-test-boundary.py` 扫描 fix-test 提交的 git diff。命中以下任一硬规则 → 立即 `git checkout -- <test_files>` 回滚 → 把这些用例转写为 `unfixableIssues`（`auto_fixed: false`）上报：
+
+| 规则 | 检测内容 |
+|------|---------|
+| **C6** | diff 中出现新增 `\.skip\|\.only\|\.todo\|@Disabled\|@Ignore\|xit(\|xdescribe(` |
+| **C7** | `-` 行 `expect(`/`assert` 数量 > `+` 行对应数量 |
+| **C11** | `-` 行包含 `it(`/`test(`/`@Test`（用例被删） |
+| **C5** | 改动文件路径匹配 `**/fixtures/**`、`**/seeds/**`、`**/*.sql`、`**/test-data/**` |
+
+### schema 字段约定
+
+每条修复记录必须含 `auto_fixed` 字段（`true`|`false`），B 类额外含 `rationale` 字段。Phase 3.2 写 `.pg/regression/<suite>.json` 时透传，Phase 4 runner 只处理 `auto_fixed=false` 的 issue（已自动修的不再重复处理）。缺省值 `auto_fixed=false`（兼容旧数据）。
 
 ---
 
