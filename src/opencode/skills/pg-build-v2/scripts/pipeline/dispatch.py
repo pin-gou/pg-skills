@@ -34,6 +34,17 @@ PHASE_AGENTS: dict[str, str] = {
 }
 FINAL_GATE_AGENT = "pg-build/gate"
 
+# phase 对应的合法 status 枚举（与 reducer 状态守卫表一致）
+PHASE_ALLOWED_STATUSES: dict[str, str] = {
+    "test": "completed | failed",
+    "dev": "completed | failed",
+    "simple": "completed | failed",
+    "verify": "completed | escalate | failed",
+    "fix": "completed | failed",
+    "fix-gate": "completed | failed",
+    "gate": "pass | fail",
+}
+
 _SEQ_COUNTERS: dict[str, int] = {}
 _PROJECT_CONFIG_CACHE: dict[str, Any | None] = {}
 _PROJECT_ROOT_CACHE: str = ""
@@ -275,6 +286,7 @@ def build_ctx(
         "hooks_yaml": lazy_hooks_yaml,
         # phase
         "phase": phase,
+        "phase_allowed_statuses": PHASE_ALLOWED_STATUSES.get(phase, "completed | failed"),
         "cycle": cycle,
         "attempt": ph.attempt or 1,
         # verify / gate — report_filename 由 build_action 动态分配 seq 后覆盖

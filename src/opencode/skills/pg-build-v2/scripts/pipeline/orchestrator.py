@@ -22,6 +22,7 @@ from pipeline.events import (
     EVT_PIPELINE_COMPLETED,
     EVT_WORKFLOW_FAILED,
     EVT_FIX_CYCLE_STARTED,
+    EVT_DISPATCH_ABANDONED,
     EVT_GIT_COMMIT,
 )
 from pipeline.reducer import reduce_state
@@ -91,6 +92,8 @@ class Orchestrator:
         """返回下一个 action JSON。
 
         首次调用时检测 pipeline 配置并初始化 state（bootstrap 已由独立命令完成）。
+        
+        P3: 检查是否有上次 dispatch 尚未 record，若存在则返回 retry action 而非新 dispatch。
         """
         # bootstrap 状态检查
         if not self.state.pipeline_order:
@@ -104,6 +107,40 @@ class Orchestrator:
             return {
                 "action": "workflow_failed", "fatal": True,
                 "reason": self.state.failed_reason or "unknown",
+            }
+
+        # P3: 上次 dispatch 尚未 record → 非新 dispatch，返回 retry
+        if self.state.last_dispatch_file and self.state.current_track and self.state.current_phase:
+            rc = self.state.retry_count
+            if rc >= 3:
+                # 超过 3 次重试 → 废弃
+                self.event_log.append(EVT_DISPATCH_ABANDONED, {
+                    "track": self.state.current_track,
+                    "phase": self.state.current_phase,
+                    "dispatch_file": self.state.last_dispatch_file,
+                    "retry_count": rc,
+                })
+                self.state = self.state.replace(
+                    status="failed",
+                    failed_reason=f"dispatch abandoned after {rc} retries: "
+                                  f"{self.state.current_track}:{self.state.current_phase}",
+                    last_dispatch_file="",
+                    retry_count=0,
+                )
+                save_snapshot(self.change_root, self.state)
+                return {
+                    "action": "workflow_failed", "fatal": True,
+                    "reason": f"dispatch abandoned after {rc} retries",
+                }
+            self.state = self.state.replace(retry_count=rc + 1)
+            save_snapshot(self.change_root, self.state)
+            return {
+                "action": "retry",
+                "dispatch_file": self.state.last_dispatch_file,
+                "item": self.state.current_track,
+                "sub": self.state.current_phase,
+                "retry_count": rc + 1,
+                "max_retries": 3,
             }
 
         # 下一步 dispatch
@@ -466,7 +503,10 @@ class Orchestrator:
             self.event_log.append(EVT_FIX_CYCLE_STARTED, {"track": track, "cycle": cycle, "source_report": report_path})
 
         # 更新 state
-        self.state = new_state
+        self.state = new_state.replace(
+            last_dispatch_file="",  # P3: 清除 stale dispatch 标记
+            retry_count=0,
+        )
         save_snapshot(self.change_root, new_state)
 
         # 同步 tasks.md checkbox（Item 2）
@@ -557,10 +597,12 @@ class Orchestrator:
                 "agent": result.get("agent", ""),
                 "dispatch_file": result.get("dispatch_file", ""),
             })
-            # 更新 state 的 current_track/current_phase
+            # 更新 state 的 current_track/current_phase/last_dispatch_file
             self.state = self.state.replace(
                 current_track=action.track,
                 current_phase=action.phase,
+                last_dispatch_file=result.get("dispatch_file", ""),
+                retry_count=0,
             )
             save_snapshot(self.change_root, self.state)
             return result

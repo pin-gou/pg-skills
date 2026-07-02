@@ -247,6 +247,8 @@ class PipelineState:
     failed_reason: str | None = None
     current_track: str = ""
     current_phase: str = ""
+    last_dispatch_file: str = ""       # P3: 上次 dispatch 的文件路径（重跑检测用）
+    retry_count: int = 0               # P3: 当前 dispatch 的 retry 计数
     # stage 生命周期管理
     stage_order: tuple[str, ...] = ()               # ["dev", "integration"]
     stage_env_map: dict[str, str] = field(default_factory=dict)  # {"dev": "dev-local", "integration": "dev-3tier"}
@@ -268,6 +270,8 @@ class PipelineState:
             "failed_reason": self.failed_reason,
             "current_track": self.current_track,
             "current_phase": self.current_phase,
+            "last_dispatch_file": self.last_dispatch_file,
+            "retry_count": self.retry_count,
             "stage_order": list(self.stage_order),
             "stage_env_map": dict(self.stage_env_map),
             "stage_env_timeout": dict(self.stage_env_timeout),
@@ -310,6 +314,8 @@ class PipelineState:
             failed_reason=d.get("failed_reason"),
             current_track=d.get("current_track", ""),
             current_phase=d.get("current_phase", ""),
+            last_dispatch_file=d.get("last_dispatch_file", ""),
+            retry_count=d.get("retry_count", 0),
             stage_order=tuple(d.get("stage_order", ())),
             stage_env_map=d.get("stage_env_map", {}),
             stage_env_timeout=d.get("stage_env_timeout", {}),
@@ -332,6 +338,8 @@ class PipelineState:
             failed_reason=kwargs.get("failed_reason", self.failed_reason),
             current_track=kwargs.get("current_track", self.current_track),
             current_phase=kwargs.get("current_phase", self.current_phase),
+            last_dispatch_file=kwargs.get("last_dispatch_file", self.last_dispatch_file),
+            retry_count=kwargs.get("retry_count", self.retry_count),
             stage_order=kwargs.get("stage_order", self.stage_order),
             stage_env_map=kwargs.get("stage_env_map", self.stage_env_map),
             stage_env_timeout=kwargs.get("stage_env_timeout", self.stage_env_timeout),

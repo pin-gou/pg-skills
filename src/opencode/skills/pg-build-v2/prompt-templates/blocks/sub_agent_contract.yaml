@@ -17,7 +17,7 @@ block: |
     "summary": "一句话描述结果（<= 200 字）",
     "outputs": ["<产物文件绝对路径>", ...],
     "tasks_updated": ["<tasks.md 中的 task_id>", ...],
-    "status": "completed | failed | escalate | pass | fail",
+    "status": "{phase_allowed_statuses}",
     "evidence_paths": ["<证据文件绝对路径>", ...],
     "report_path": "<报告文件绝对路径，verify/gate 必须存在且包含 PASS/FAIL 标记>"
   }

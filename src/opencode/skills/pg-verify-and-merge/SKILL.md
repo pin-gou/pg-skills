@@ -157,6 +157,9 @@ done
 git add -A
 git diff --cached --quiet || git commit -m "style: auto-fix before merge verification"
 git push origin HEAD
+
+# 保存 feature branch 名到临时文件（Phase 4 需要，避免切换到 master 后丢失）
+echo "$CURRENT_BRANCH" > temp/feature-branch.txt
 ```
 
 **验证条件：**
@@ -164,7 +167,7 @@ git push origin HEAD
 - 受影响 track 的 lint 全部通过
 - 所有修改已提交并推送成功
 
-**输出：** 将 `CURRENT_BRANCH` 记录到上下文，供后续 phase 使用。
+**输出：** 将 `CURRENT_BRANCH` 记录到 `temp/feature-branch.txt`，供后续 phase 使用。
 
 ---
 
@@ -426,7 +429,7 @@ git push origin "$DEFAULT_BRANCH"
 ### Phase 4: 清理
 
 ```bash
-CURRENT_BRANCH=$(git branch --show-current)
+CURRENT_BRANCH=$(cat temp/feature-branch.txt 2>/dev/null || git branch --show-current)
 DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default_branch'])")
 
 # 防御性收尾：无条件切回 default_branch
