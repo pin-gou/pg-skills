@@ -21,7 +21,8 @@ prompt: |
   2. 跑 {test_commands} 单元测试（必须通过）
   3. 跑模块 lint（必须 0 警告）
   4. 启动 invoke-hook --action start 服务（如需）
-  5. 跑 tasks.md verify 章节的所有 V-* 验证项
-  6. 抓日志确认无 ERROR
-  7. 停止 invoke-hook --action stop 服务（如启动过）
-  8. 用 cat > 写盘到 2-build/{fix_report_filename}
+  5. 只跑 verify 报告中标记为 FAIL 的 V-* 验证项（不要跑全部）
+  6. 冒烟：跑核心 happy path（与 FAIL 场景相反的"成功路径"，如 200 OK 导出）
+  7. 抓日志确认无 ERROR
+  8. 停止 invoke-hook --action stop 服务（如启动过）
+  9. 用 cat > 写盘到 2-build/{fix_report_filename}

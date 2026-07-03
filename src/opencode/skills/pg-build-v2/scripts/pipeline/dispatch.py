@@ -355,7 +355,7 @@ def build_action(
     ctx["dispatch_seq"] = ds
     ctx["report_seq"] = rs
     ctx["report_filename"] = f"{rs}-{track}-{phase}.md"
-    ctx["fix_report_filename"] = f"{rs}-{track}-{phase}-fix-{cycle}.md"
+    ctx["fix_report_filename"] = f"{rs}-{track}-fix-{cycle}.md"  # v2.2: 去掉冗余 phase 字段
 
     # 写 dispatch_file
     filepath = render_dispatch_file(

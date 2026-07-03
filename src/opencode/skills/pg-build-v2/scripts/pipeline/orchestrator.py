@@ -25,6 +25,7 @@ from pipeline.events import (
     EVT_DISPATCH_ABANDONED,
     EVT_GIT_COMMIT,
     EVT_GAP_ACCEPTED,  # v2.1: fix/gate-fix 循环耗尽后接受的 gap
+    EVT_FIX_SKIPPED_VERIFY,  # v2.2
     STATUS_COMPLETED,  # v2.1: 单一来源替换字面量
     STATUS_PASS,
 )
@@ -211,6 +212,7 @@ class Orchestrator:
                 label=cfg.get("description", bare),
                 tasks_by_phase=tasks_by_phase,
                 commands=tuple(cfg.get("commands", [])),
+                fix_routing=cfg.get("fix_routing", ""),  # v2.2
             )
             if cfg.get("type") == "simple":
                 track_types[tid] = "simple"
@@ -435,6 +437,8 @@ class Orchestrator:
         summary: str = "",
         outputs: str = "",
         issues: str = "",
+        evidence_paths: list[str] | None = None,  # v2.2
+        tasks_updated: list[str] | None = None,  # v2.2
     ) -> dict[str, Any]:
         """记录一次 sub-agent 完成事件。
 
@@ -458,6 +462,8 @@ class Orchestrator:
             report_path=report_path,
             outputs=outputs,
             issues=issues,
+            evidence_paths=tuple(evidence_paths or []),  # v2.2
+            tasks_updated=tuple(tasks_updated or []),  # v2.2
         )
         if not ok:
             return {
@@ -472,7 +478,7 @@ class Orchestrator:
                 ),
             }
 
-        # 构建 record
+        # 构建 record（v2.2: 含 evidence_paths + tasks_updated）
         record = PipelineRecord(
             track=track,
             phase=phase,
@@ -480,6 +486,8 @@ class Orchestrator:
             summary=summary,
             report_path=report_path or None,
             issues=issues,
+            evidence_paths=tuple(evidence_paths or []),
+            tasks_updated=tuple(tasks_updated or []),
         )
 
         # reducer
@@ -520,6 +528,12 @@ class Orchestrator:
             verify = new_state.tracks.get(track, TrackState.create(track)).phases.get("verify", PhaseState())
             cycle = len(verify.fix_cycles)
             self.event_log.append(EVT_FIX_CYCLE_STARTED, {"track": track, "cycle": cycle, "source_report": report_path})
+
+        # v2.2: fix_skipped_verify — fix 完成后直接进 gate，跳过 verify cycle=2
+        if phase == "fix" and status == "completed":
+            t = new_state.tracks.get(track)
+            if t and (t.fix_routing == ""):  # direct_to_gate
+                self.event_log.append(EVT_FIX_SKIPPED_VERIFY, {"track": track})
 
         # 更新 state
         self.state = new_state.replace(

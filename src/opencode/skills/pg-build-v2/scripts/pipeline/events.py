@@ -40,6 +40,10 @@ ALL_STATUSES: tuple[str, ...] = (
 # sub_agent_contract.py 两处硬编码 list 不一致问题）
 STATUSES_ALL: frozenset[str] = frozenset(ALL_STATUSES)
 
+# v2.2: fix_routing 默认值
+DEFAULT_FIX_ROUTING = "direct_to_gate"
+FIX_ROUTING_RE_VERIFY = "re_verify"
+
 # Phase → 合法 status 映射（v2.1 新增）
 # 编排器在 record 时校验 sub-agent 返回的 status 是否与 phase 匹配
 PHASE_STATUS_ALLOWED: dict[str, frozenset[str]] = {
@@ -71,6 +75,8 @@ class PipelineRecord:
     issues: str = ""
     attempt: int = 1
     cycle: int = 1
+    evidence_paths: tuple[str, ...] = ()  # v2.2: evidence 文件列表
+    tasks_updated: tuple[str, ...] = ()  # v2.2: escalate 时必填（失败 V-* 的 task_id）
 
 
 @dataclass(frozen=True)
@@ -120,6 +126,7 @@ EVT_WORKFLOW_FAILED = "workflow_failed"
 EVT_DISPATCH_ABANDONED = "dispatch_abandoned"
 EVT_GIT_COMMIT = "git_commit"
 EVT_GAP_ACCEPTED = "gap_accepted"  # v2.1 新增：fix/gate-fix 循环耗尽后接受的 gap
+EVT_FIX_SKIPPED_VERIFY = "fix_skipped_verify"  # v2.2: fix 直接进 gate，跳过 verify
 
 ALL_EVENT_TYPES: tuple[str, ...] = (
     EVT_PIPELINE_STARTED, EVT_BOOTSTRAP_STEP_COMPLETED,
@@ -129,5 +136,5 @@ ALL_EVENT_TYPES: tuple[str, ...] = (
     EVT_FIX_CYCLE_STARTED, EVT_GATE_CYCLE_STARTED,
     EVT_SUB_PIPELINE_COMPLETED, EVT_TRACK_COMPLETED,
     EVT_PIPELINE_COMPLETED, EVT_WORKFLOW_FAILED, EVT_DISPATCH_ABANDONED, EVT_GIT_COMMIT,
-    EVT_GAP_ACCEPTED,
+    EVT_GAP_ACCEPTED, EVT_FIX_SKIPPED_VERIFY,
 )

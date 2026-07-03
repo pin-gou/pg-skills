@@ -32,12 +32,12 @@ class TestPgBuildResult(unittest.TestCase):
             "--status", "completed",
             "--summary", "test summary",
             "--track", "dev.backend", "--phase", "test",
+            "--outputs", "/tmp/Test.java",
         ])
         self.assertEqual(ok, 0, f"stderr: {err}")
         result = json.loads(out)
         self.assertEqual(result["status"], "completed")
         self.assertEqual(result["summary"], "test summary")
-        self.assertEqual(result["track"] if "track" in result else result["outputs"], result["outputs"])
 
     def test_agent_mode_with_evidence_and_report(self):
         with tempfile.NamedTemporaryFile(
@@ -70,6 +70,7 @@ class TestPgBuildResult(unittest.TestCase):
             "--status", "completed",
             "--summary", "test summary",
             "--track", "dev.backend", "--phase", "test",
+            "--outputs", "/tmp/Test.java",
         ])
         self.assertEqual(ok, 0, f"stderr: {err}")
         # 输出应是: completed "test summary"
@@ -77,17 +78,24 @@ class TestPgBuildResult(unittest.TestCase):
         self.assertIn("test summary", out)
 
     def test_runner_mode_with_outputs_and_issues(self):
-        ok, out, err = _run([
-            "--mode", "runner",
-            "--status", "failed",
-            "--summary", "fix failed",
-            "--track", "dev.backend", "--phase", "fix",
-            "--outputs", "/tmp/a.java,/tmp/b.java",
-            "--issues", "issue1,issue2",
-        ])
-        self.assertEqual(ok, 0, f"stderr: {err}")
-        self.assertIn("failed", out)
-        self.assertIn("/tmp/a.java", out)
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write("# Fix report")
+            tmp = f.name
+        try:
+            ok, out, err = _run([
+                "--mode", "runner",
+                "--status", "failed",
+                "--summary", "fix failed",
+                "--track", "dev.backend", "--phase", "fix",
+                "--report", tmp,
+                "--outputs", "/tmp/a.java,/tmp/b.java",
+                "--issues", "issue1,issue2",
+            ])
+            self.assertEqual(ok, 0, f"stderr: {err}")
+            self.assertIn("failed", out)
+            self.assertIn("/tmp/a.java", out)
+        finally:
+            os.unlink(tmp)
 
     # ---- 校验失败场景 ----
 

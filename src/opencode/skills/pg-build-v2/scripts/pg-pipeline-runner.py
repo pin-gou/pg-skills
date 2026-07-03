@@ -135,18 +135,49 @@ def main() -> None:
         return
 
     elif command == "record":
-        if len(sys.argv) < 4:
+        # v2.2: argparse 风格 — 仅支持 --flags
+        from argparse import ArgumentParser as _ArgParser
+        rec_parser = _ArgParser(prog="pg-pipeline-runner.py record", add_help=False)
+        rec_parser.add_argument("status", nargs="?", default="",
+                                help="record status: completed|failed|escalate|pass|fail")
+        rec_parser.add_argument("--report", default="",
+                                help="报告文件绝对路径")
+        rec_parser.add_argument("--summary", default="",
+                                help="<=200 字的一句话摘要")
+        rec_parser.add_argument("--outputs", default="",
+                                help="产物文件列表，逗号分隔")
+        rec_parser.add_argument("--issues", default="",
+                                help="问题列表，逗号分隔")
+        rec_parser.add_argument("--evidence", action="append", default=[],
+                                help="证据文件绝对路径（可多次传）")
+        rec_parser.add_argument("--tasks-updated", action="append", default=[],
+                                dest="tasks_updated",
+                                help="已更新的 task_id（可多次传）")
+        rec_args = rec_parser.parse_args(sys.argv[3:])
+
+        status = rec_args.status
+        if not status:
             _usage("record 命令缺少 <status> 参数")
             sys.exit(1)
-        status = sys.argv[3]
         if status not in VALID_STATUSES:
             _usage(f"无效 status: {status}，有效值: {', '.join(sorted(VALID_STATUSES))}")
             sys.exit(1)
-        report_path = sys.argv[4] if len(sys.argv) > 4 else ""
-        summary = sys.argv[5] if len(sys.argv) > 5 else ""
-        outputs = sys.argv[6] if len(sys.argv) > 6 else ""
-        issues = sys.argv[7] if len(sys.argv) > 7 else ""
-        result = orch.record(status, report_path, summary, outputs, issues)
+
+        # —report 不存在时立刻退出（不调 orchestrator）
+        report_path = rec_args.report
+        if report_path and not os.path.isfile(report_path):
+            print(json.dumps({
+                "action": "error", "fatal": True,
+                "reason": f"report_missing: '{report_path}' 不存在或不是文件",
+            }))
+            return
+
+        result = orch.record(
+            status, report_path, rec_args.summary,
+            rec_args.outputs, rec_args.issues,
+            evidence_paths=rec_args.evidence,
+            tasks_updated=rec_args.tasks_updated,
+        )
 
     elif command == "progress":
         result = orch.progress()

@@ -49,7 +49,8 @@ from pipeline.sub_pipeline import SubPipeline, create_fix_cycle, create_gate_fix
 
 
 def _make_track(track_id: str, status: str = "pending") -> TrackState:
-    return TrackState.create(track_id, status=status)
+    # v2.2: 显式设置 fix_routing="re_verify" 以保留旧 fix→verify 行为
+    return TrackState.create(track_id, status=status, fix_routing="re_verify")
 
 
 def _make_phase_state(status: str = "pending", attempt: int = 0) -> PhaseState:
@@ -185,6 +186,7 @@ class TestVerifyPhase(unittest.TestCase):
         record = PipelineRecord(
             track="dev.backend", phase="verify", status="escalate",
             summary="3 tests FAIL",
+            tasks_updated=("V-1", "V-2"),  # v2.2
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
@@ -205,6 +207,7 @@ class TestVerifyPhase(unittest.TestCase):
         )
         record = PipelineRecord(
             track="dev.backend", phase="verify", status="escalate",
+            tasks_updated=("V-1",),  # v2.2
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")

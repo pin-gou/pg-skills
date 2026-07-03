@@ -17,6 +17,16 @@ metadata:
 > 然后调 `env-action-result` 上报结果。这避免了 prepare_env 内部 timeout > LLM bash timeout
 > 导致中断的问题，并支持多 stage / 多 env 切换。
 
+> **v2.2 重要变更（BREAKING）**：
+> 1. `record` CLI 改为 **argparse 仅 flag 模式**，旧位置参数调用已废弃（报错提示）。
+> 2. **fix cycle 默认跳过 verify cycle=2**：fix 完成后直接 dispatch gate（`direct_to_gate`）。
+>    可通过 `tracks.<id>.fix_routing: re_verify` 回退到旧行为。
+> 3. escalate 时**强制 `tasks_updated`**，必须包含失败 V-* 的 task_id。
+> 4. **dev/test/fix 阶段强制 `--outputs`**，关闭空产物声明漏洞。
+> 5. **fix 阶段强制 `--report`**，必须写盘追溯文件。
+> 6. dispatch 文件命名规范：`{seq}-{track}-fix-{cycle}.md`（去掉冗余 phase 字段）。
+> 7. fix agent 只跑**失败的 V-* + 核心冒烟**，不再全量重跑验证。
+
 ---
 
 ## 架构概览
@@ -64,8 +74,8 @@ $RUNNER bootstrap <change>
 # 获取下一步 action
 $RUNNER next <change>
 
-# 记录 sub-agent 结果
-$RUNNER record <change> <status> [report_path] [summary] [outputs] [issues]
+# 记录 sub-agent 结果（v2.2: argparse 仅 flag 模式，旧位置参数已废弃）
+$RUNNER record <change> <status> --report <path> --summary "<摘要>" [--outputs <p1>,<p2>] [--issues <i1>,<i2>] [--evidence <e1> [--evidence <e2> ...]] [--tasks-updated <t1> [--tasks-updated <t2> ...]]
 
 # 查看进度
 $RUNNER progress <change>
@@ -199,9 +209,96 @@ runner 返回 dispatch action 带 `dispatch_file` 字段。编排器：
 | `record_received` | LLM 调 record | track, phase, status, summary |
 | `fix_cycle_started` | verify escalate | track, cycle |
 | `gate_cycle_started` | gate fail | track, cycle |
+| `fix_skipped_verify` | v2.2: fix 完成后直接进 gate | track |
 | `track_completed` | gate pass / exhausted | track, status |
 | `pipeline_completed` | final-gate pass | final_status |
 | `workflow_failed` | fatal | reason |
+
+---
+
+## v2.2 新增协议
+
+### record CLI 用法（v2.2）
+
+v2.2 起 `record` 仅支持 argparse flag 模式：
+
+```bash
+python3 scripts/pg-pipeline-runner.py record <change> <status> \
+    --report <绝对路径> \
+    --summary "<=200 字摘要" \
+    --outputs <p1>,<p2> \
+    --evidence <绝对路径> [--evidence ...] \
+    --tasks-updated <task_id> [--tasks-updated ...] \
+    --issues <问题描述>
+```
+
+**status 与 phase 对照矩阵**（同 §Record 状态守卫表）。
+
+**evidence 规则**（各 phase 要求）：
+
+| phase | evidence 必填 | report 必填 | outputs 必填 |
+|-------|:---:|:---:|:---:|
+| verify | ✅ | ✅ | ❌ |
+| gate/final-gate | ✅ | ✅ | ❌ |
+| fix | ❌ | ✅ | ✅ |
+| test | ❌ | ❌ | ✅ |
+| dev | ❌ | ❌ | ✅ |
+| simple | ❌ | ❌ | ❌ |
+
+### tasks_updated 字段
+
+- **定义**：本次 record 完成的 sub-agent 实际修改或影响的 task_id 列表（如 `["2.1", "2.3"]`）
+- **escalate 时必填**：`escalate` 必须包含失败的 V-* ID（如 `["V-backend-4", "V-backend-7"]`）
+- **其他 phase**：选填，但推荐填写以便追踪
+
+用法：
+```bash
+$RUNNER record add-user-export escalate --evidence /path/report.md --tasks-updated V-backend-4 --tasks-updated V-backend-7 --summary "..." 
+```
+
+### outputs 字段（v2.2 新增强制执行）
+
+- **test/dev/fix 阶段**：`--outputs` 必填，不可为空
+- **格式**：逗号分隔的绝对路径，如 `--outputs /project/src/Foo.java,/project/src/Bar.java`
+- **目的**：防止 sub-agent 声明"完成"但实际无任何文件改动
+
+### fix_routing 配置
+
+控制 fix cycle 完成后的流向。在 `project.yaml` 中配置：
+
+```yaml
+tracks:
+  backend:
+    modules: [backend]
+    fix_routing: direct_to_gate  # 默认值（无需显式配置）
+    # fix_routing: re_verify    # 保留旧行为：fix 后 dispatch verify cycle=2
+```
+
+| 值 | 行为 | 适用场景 |
+|-----|------|---------|
+| `direct_to_gate`（默认） | fix 完成后直接 dispatch gate | 信任 fix agent 的修复报告，节省～15min |
+| `re_verify` | fix 后 dispatch verify cycle=2 | 高风险变更，需要双重验证 |
+
+### fix dispatch 文件命名规范（v2.2）
+
+```
+# 旧命名（v2.1）
+{seq}-{track}-{phase}-fix-{cycle}.md  →  006-dev.backend-fix-fix-1.md
+
+# 新命名（v2.2）
+{seq}-{track}-fix-{cycle}.md          →  006-dev.backend-fix-1.md
+```
+
+旧命名被**废弃**但 `_collect_missing_gate_assessments` 仍兼容识别。
+
+---
+
+## 子 Pipeline 机制（v2.2 更新）
+
+| 循环 | 触发条件 | 流向 |
+|------|---------|------|
+| **fix 循环** | `verify escalate` | SubPipeline(fix) → 默认 `direct_to_gate`（跳过 verify cycle=2）；显式 `re_verify` 时仍回 verify |
+| **gate-fix 循环** | `gate fail` | SubPipeline(fix-gate, verify, gate) → 回到主 pipeline |
 
 ---
 
@@ -215,6 +312,10 @@ runner 返回 dispatch action 带 `dispatch_file` 字段。编排器：
 | `action: error` + `evidence_missing` | verify/gate 的 `evidence_paths` 为空 | 重跑验证，强调必须产出 evidence |
 | env hook 卡死循环 | 编排器忘调 `env-action-result` | 每次 bash 跑完 env hook 必调 `env-action-result` |
 | 首个 stage 没 prepare 直接 dispatch | `_first_next` 不再预设 prepared（v2.1.1） | 升级后编排器自动收到首个 env_switch |
+| `--report /tmp/nonexistent.md` → 报错 | runner 检查 report 文件是否存在 | 报告文件没写盘，或路径写错 |
+| `schema_violation: ... 要求 --outputs 非空` | dev/test/fix 阶段没传 `--outputs` | sub-agent 必须返回产物文件列表 |
+| `schema_violation: escalate 要求 --evidence 非空` | escalate 没传 `--evidence` | 必须带 verify 报告路径 |
+| fix 完成后没有 dispatch verify 而是直接 dispatch gate | v2.2 默认 `direct_to_gate` | 正常行为。如需回退，设 `fix_routing: re_verify` |
 
 ---
 

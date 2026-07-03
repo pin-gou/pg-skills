@@ -153,13 +153,20 @@ class TestSubAgentContract(unittest.TestCase):
         self.assertEqual(parse_gate_score("no score here"), None)
         self.assertEqual(parse_gate_score("gate_score: abc"), None)
 
-    def test_fix_phase_no_evidence_required(self):
-        # fix 阶段：无需 evidence / report
-        ok, reason = validate_record_args(
-            "fix", "dev.backend", "completed",
-            "summary text", "", "",
-        )
-        self.assertTrue(ok, reason)
+    def test_fix_phase_requires_report_and_outputs(self):
+        # v2.2: fix 阶段需要 report + outputs
+        report = "/tmp/__test_fix_phase_report.md"
+        try:
+            with open(report, "w") as f:
+                f.write("fix report")
+            ok, reason = validate_record_args(
+                "fix", "dev.backend", "completed",
+                "summary text", report, "/tmp/output.java",
+            )
+            self.assertTrue(ok, reason)
+        finally:
+            if os.path.isfile(report):
+                os.remove(report)
 
     def test_phase_rules_consistency(self):
         """PHASE_RULES 必须覆盖所有 phase。"""
@@ -206,6 +213,7 @@ class TestSubAgentContract(unittest.TestCase):
             ok, reason = validate_record_args(
                 "verify", "dev.backend", "escalate", "summary text",
                 tmp_report, "",
+                evidence_paths=[tmp_report],  # v2.2: escalate 需要 evidence
             )
             self.assertTrue(ok, reason)
         finally:

@@ -14,6 +14,7 @@ from typing import Any
 
 from pipeline.events import (
     STATUSES_ALL,
+    STATUS_ESCALATE,  # v2.2: escalate 校验
     PHASE_STATUS_ALLOWED,
     SUB_GATE,
     FINAL_GATE_TRACK,
@@ -38,19 +39,23 @@ PHASE_RULES: dict[str, dict[str, Any]] = {
     # track 名校验由 caller 决定
     "fix": {
         "evidence_required": False,
-        "report_required": False,
+        "report_required": True,  # v2.2: fix 阶段强制要求 report（追溯修复证据）
+        "outputs_required": True,  # v2.2: fix 阶段 outputs 必填
     },
     "test": {
         "evidence_required": False,
         "report_required": False,
+        "outputs_required": True,  # v2.2: test 阶段 outputs 必填（产物列表）
     },
     "dev": {
         "evidence_required": False,
         "report_required": False,
+        "outputs_required": True,  # v2.2: dev 阶段 outputs 必填（产物列表）
     },
     "simple": {
         "evidence_required": False,
         "report_required": False,
+        "outputs_required": False,
     },
 }
 
@@ -64,6 +69,7 @@ def validate_record_args(
     outputs: str,
     issues: str = "",
     evidence_paths: tuple[str, ...] | list[str] = (),
+    tasks_updated: tuple[str, ...] | list[str] = (),
 ) -> tuple[bool, str]:
     """校验 record CLI 参数是否满足 sub-agent 返回契约。
 
@@ -75,8 +81,8 @@ def validate_record_args(
         report_path: 验证/审查报告路径
         outputs: 产物文件列表（逗号分隔）
         issues: 问题列表（逗号分隔）
-        evidence_paths: 证据文件路径列表（CLI 不直接暴露，由 record 现场计算：
-            若 outputs 非空则视为 evidence）
+        evidence_paths: 证据文件路径列表
+        tasks_updated: v2.2 — 已更新的 task_id 列表（escalate 时必填）
 
     Returns:
         (ok, reason):
@@ -145,6 +151,27 @@ def validate_record_args(
         if not os.path.isfile(report_path):
             return False, (
                 f"report_missing: report_path 指向的文件不存在: {report_path}"
+            )
+
+    # ── v2.2: outputs 必填检查（test/dev/fix 阶段） ──
+    if rule.get("outputs_required"):
+        if not outputs or not outputs.strip():
+            return False, (
+                f"schema_violation: phase={phase} (track={track}) 要求 --outputs 非空，"
+                f"请让 sub-agent 返回产物文件列表（逗号分隔的绝对路径）"
+            )
+
+    # ── v2.2: escalate 时强制 evidence（允许 outputs/report_path fallback） ──
+    if status == STATUS_ESCALATE and phase == "verify":
+        effective_evidence = list(evidence_paths) if evidence_paths else []
+        if not effective_evidence and outputs:
+            effective_evidence = [s.strip() for s in outputs.split(",") if s.strip()]
+        if report_path and report_path not in effective_evidence:
+            effective_evidence.append(report_path)
+        if not effective_evidence:
+            return False, (
+                "schema_violation: escalate 要求 --evidence 非空（需包含 verify 报告路径），"
+                "请让 sub-agent 产出可追溯证据文件"
             )
 
     # ── v2.1: gate / final-gate 要求 summary 含 gate-score ──

@@ -198,3 +198,39 @@ def mark_phase_completed(change_root: str, track: str, phase: str) -> int:
     with open(tasks_path, "w", encoding="utf-8") as f:
         f.writelines(lines)
     return updated
+
+
+def extract_failed_v_tasks(verify_report_path: str) -> list[str]:
+    """从 verify 报告中提取 FAIL 的 V-* 验证项 ID。
+
+    解析格式（markdown 表格或列表）：
+      - V-backend-1 ✅ PASS
+      - V-backend-2 ❌ FAIL
+      - | V-backend-1 | ... | ✅ PASS |
+      - | V-backend-2 | ... | ❌ FAIL |
+
+    Args:
+        verify_report_path: verify 报告的绝对路径
+
+    Returns:
+        list of failed V-* IDs (e.g. ["V-backend-2", "V-backend-4"])
+    """
+    if not verify_report_path or not os.path.isfile(verify_report_path):
+        return []
+
+    failed: list[str] = []
+    with open(verify_report_path, encoding="utf-8") as f:
+        for line in f:
+            stripped = line.strip()
+            # 匹配 V-* 模式
+            if not stripped.startswith("|") and not stripped.startswith("- "):
+                continue
+            # 检测 FAIL/❌ FAIL
+            if "❌" in stripped or "FAIL" in stripped.upper():
+                # 提取 V-backend-N
+                import re
+                m = re.search(r'(V-[a-zA-Z0-9_-]+)', stripped)
+                if m:
+                    failed.append(m.group(1))
+
+    return failed

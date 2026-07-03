@@ -128,6 +128,7 @@ class TrackState:
     prepare_status: str = ""             # "ok" | "error" | "skipped"
     tasks_by_phase: dict[str, str] = field(default_factory=dict)
     commands: tuple[str, ...] = ()       # simple track 的命令列表
+    fix_routing: str = ""                # v2.2: "" → 默认 direct_to_gate; "re_verify" → 保留旧行为
 
     @classmethod
     def create(cls, track_id: str, **kwargs) -> "TrackState":
@@ -161,6 +162,7 @@ class TrackState:
             "prepare_status": self.prepare_status,
             "tasks_by_phase": dict(self.tasks_by_phase),
             "commands": list(self.commands),
+            "fix_routing": self.fix_routing,
         }
 
     @classmethod
@@ -196,6 +198,7 @@ class TrackState:
             prepare_status=d.get("prepare_status", ""),
             tasks_by_phase=d.get("tasks_by_phase", {}),
             commands=tuple(d.get("commands", [])),
+            fix_routing=d.get("fix_routing", ""),
         )
 
     def replace(self, **kwargs: Any) -> "TrackState":
@@ -224,6 +227,7 @@ class TrackState:
             prepare_status=kwargs.get("prepare_status", self.prepare_status),
             tasks_by_phase=kwargs.get("tasks_by_phase", self.tasks_by_phase),
             commands=kwargs.get("commands", self.commands),
+            fix_routing=kwargs.get("fix_routing", self.fix_routing),
         )
 
     def get_phase(self, phase: str) -> PhaseState:

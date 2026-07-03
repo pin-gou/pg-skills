@@ -32,6 +32,9 @@ from pipeline.events import (
     STATUS_ESCALATE,
     STATUS_PASS,
     STATUS_FAIL,
+    DEFAULT_FIX_ROUTING,  # v2.2
+    FIX_ROUTING_RE_VERIFY,  # v2.2
+    EVT_FIX_SKIPPED_VERIFY,  # v2.2
 )
 from pipeline.sub_pipeline import (
     SubPipeline,
@@ -325,6 +328,11 @@ def _handle_verify(
 
     elif record.status == STATUS_ESCALATE:
         # ESCALATE → fix 循环（或强制 gate）
+        # v2.2: escalate 必须有 tasks_updated
+        if not record.tasks_updated:
+            return _error_action(
+                f"escalate requires tasks_updated with failed V-* IDs: {track}:{record.phase}"
+            )
         verify = t.phases.get("verify", PhaseState())
         fix_cycles = len(verify.fix_cycles)
         if fix_cycles >= MAX_FIX_CYCLES:
@@ -399,11 +407,26 @@ def _handle_fix(
         dict_phases["verify"] = verify
         t = t.replace(phases=dict_phases)
 
-        # 推进子 pipeline
-        new_state = state.replace(
-            tracks={**state.tracks, track: t},
-        )
-        return _sub_pipeline_advance(new_state, sp=state.current_sub_pipeline)
+        # v2.2: 检查 fix_routing
+        sp = state.current_sub_pipeline
+        fix_routing = t.fix_routing or DEFAULT_FIX_ROUTING
+
+        if fix_routing == DEFAULT_FIX_ROUTING:
+            # direct_to_gate: fix 完成后跳过子 pipeline 的 verify，直接进 gate
+            new_state = state.replace(
+                tracks={**state.tracks, track: t},
+                current_sub_pipeline=None,
+                current_track=track,
+                current_phase="gate",
+            )
+            # 说明: gate 的 cycle 设为 1（不累加 fix 的 cycle）
+            return new_state, _dispatch_action(track, "gate", cycle=1)
+        else:
+            # re_verify: 推进子 pipeline 到 verify phase
+            new_state = state.replace(
+                tracks={**state.tracks, track: t},
+            )
+            return _sub_pipeline_advance(new_state, sp=sp)
 
     elif record.status == STATUS_FAILED:
         # fix 失败 → 重试
@@ -679,16 +702,27 @@ def _sub_pipeline_advance(
         parent_phase = sp.parent_phase
 
         if parent_phase == "verify":
-            # fix 子 pipeline 完成 → 回到 verify（dispatch 下一个 verify cycle）
+            # v2.2: fix_routing 控制 fix 完成后的流向
             t = state.tracks.get(track)
             verify = t.phases.get("verify", PhaseState()) if t else PhaseState()
-            next_cycle = len(verify.fix_cycles) + 1 if verify.fix_cycles else 1
-            new_state = state.replace(
-                current_sub_pipeline=None,
-                current_track=track,
-                current_phase="verify",
-            )
-            return new_state, _dispatch_action(track, "verify", cycle=next_cycle)
+            fix_routing = t.fix_routing if t else ""
+            fix_routing = fix_routing or DEFAULT_FIX_ROUTING
+
+            if fix_routing == DEFAULT_FIX_ROUTING:
+                new_state = state.replace(
+                    current_sub_pipeline=None,
+                    current_track=track,
+                    current_phase="gate",
+                )
+                return new_state, _dispatch_action(track, "gate", cycle=1)
+            else:
+                next_cycle = len(verify.fix_cycles) + 1 if verify.fix_cycles else 1
+                new_state = state.replace(
+                    current_sub_pipeline=None,
+                    current_track=track,
+                    current_phase="verify",
+                )
+                return new_state, _dispatch_action(track, "verify", cycle=next_cycle)
 
         elif parent_phase == "gate":
             # gate-fix 子 pipeline 完成 → 回到 gate（dispatch 下一个 gate cycle）
