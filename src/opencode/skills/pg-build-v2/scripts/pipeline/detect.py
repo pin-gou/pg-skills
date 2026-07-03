@@ -74,7 +74,8 @@ def next_pending(state: PipelineState) -> PipelineAction:
         )
 
     # 如果 stage_order 为空（向后兼容：无 stage 元数据的旧 state），跳过 stage 边界检测
-    if state.stage_order:
+    # final-gate 是特殊 track，不属于任何 stage，不做 stage 边界检测
+    if state.stage_order and first_pending_track is not None and first_pending_track != FINAL_GATE_TRACK:
         next_stage = PipelineState.extract_stage(first_pending_track)
 
         # 检测 stage 边界：需要 clean 当前 stage 的环境
