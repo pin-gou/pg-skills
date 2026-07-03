@@ -326,6 +326,41 @@ environments:
         self.assertIn("command", plan)
         self.assertIn("log_path", plan)
         self.assertNotIn("env", plan)
+        # v2.1.1 fix: env vars inlined into command via env prefix
+        self.assertIn("PG_PROJECT_ROOT=", plan["command"])
+        self.assertIn("PG_ENV=test-env", plan["command"])
+        self.assertIn("PG_HOOK_TYPE=prepare_env", plan["command"])
+        self.assertTrue(plan["command"].startswith("env "))
+
+    def test_cli_env_action_command_executable(self):
+        """内联 env 前缀的 command 可被 subprocess 执行且正确传递变量。"""
+        import subprocess
+        hook_path = os.path.join(self.tmp, ".pg", "hooks", "fake-echo-env.sh")
+        os.makedirs(os.path.dirname(hook_path), exist_ok=True)
+        with open(hook_path, "w") as f:
+            f.write("#!/bin/bash\necho \"PROJ=$PG_PROJECT_ROOT\"\necho \"ENV=$PG_ENV\"\n")
+        os.chmod(hook_path, 0o755)
+
+        project_yaml = os.path.join(self.tmp, ".pg", "project.yaml")
+        with open(project_yaml, "w", encoding="utf-8") as f:
+            f.write("environments:\n  test-env:\n    prepare_env:\n"
+                    "      script: .pg/hooks/fake-echo-env.sh\n"
+                    "      timeout_seconds: 30\n")
+        change_root = os.path.join(self.tmp, ".pg", "changes", "test-change")
+        os.makedirs(change_root, exist_ok=True)
+
+        result = bootstrap.cli_env_action("test-change", "prepare_env", "dev", "test-env")
+        self.assertTrue(result["ok"])
+        plan = result["plan"]
+        self.assertIsNotNone(plan)
+
+        proc = subprocess.run(
+            ["bash", "-c", plan["command"]],
+            capture_output=True, text=True, timeout=10,
+        )
+        self.assertEqual(proc.returncode, 0, f"stderr={proc.stderr}")
+        self.assertIn("PROJ=", proc.stdout)
+        self.assertIn("ENV=test-env", proc.stdout)
 
     def test_cli_env_action_skipped(self):
         """environment.yaml 标 skip → cli_env_action 返回 skipped=true。"""

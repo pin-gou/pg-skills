@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import json
 import os
+import shlex
 import subprocess
 import sys
 from datetime import datetime, timezone, timedelta
@@ -575,6 +576,28 @@ def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
     }
 
 
+def _inline_env_into_command(plan: dict[str, Any]) -> None:
+    """将 plan.env 中的关键变量内联到 plan.command 头部（env 前缀模式）。
+
+    v2.1.1 重构后编排器自行 bash 执行 env hook，不再通过 subprocess 传 env 字典。
+    此函数将 _build_env_hook_plan 构造的 env 覆盖变量注入 command 字符串，
+    使编排器执行 bash plan.command 时环境变量自动生效。
+    """
+    env = plan.get("env") or {}
+    override_keys = [
+        "PG_PROJECT_ROOT", "PG_SKILLS_PATH", "PG_RUN_CALLER",
+        "PG_ENV", "PG_STAGE", "PG_HOOK_TYPE", "PG_HOOK_LOG_DIR",
+        "PG_LOG_FILE", "PG_RESULT_FILE",
+    ]
+    env_parts = []
+    for k in override_keys:
+        v = env.get(k)
+        if v is not None:
+            env_parts.append(f"{k}={shlex.quote(str(v))}")
+    if env_parts:
+        plan["command"] = f"env {' '.join(env_parts)} {plan['command']}"
+
+
 def cli_bootstrap(change: str) -> dict[str, Any]:
     """CLI 入口：执行 bootstrap 副作用（不含 env hook）+ 检测 pipeline 配置。
 
@@ -624,6 +647,7 @@ def cli_bootstrap(change: str) -> dict[str, Any]:
             result["ok"] = False
             result["error"] = plan.get("error", "plan build failed")
         elif not plan.get("skipped"):
+            _inline_env_into_command(plan)
             plan_for_orchestrator = {k: v for k, v in plan.items() if k != "env"}
             result["env_hook_plan"] = plan_for_orchestrator
     except Exception as e:
@@ -692,6 +716,7 @@ def cli_env_action(change: str, phase_name: str, stage_name: str, env_name: str,
         result["skipped"] = True
         return result
 
+    _inline_env_into_command(plan)
     plan_for_orchestrator = {k: v for k, v in plan.items() if k != "env"}
     result["plan"] = plan_for_orchestrator
     result["ok"] = True
