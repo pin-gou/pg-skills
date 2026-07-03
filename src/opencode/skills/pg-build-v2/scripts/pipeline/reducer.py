@@ -54,6 +54,31 @@ MAX_FIX_CYCLES = 4  # fix 循环最大次数（verify escalate 几次后强制 g
 #   max_fix_retries = 5
 #   max_gate_fix_retries = 2
 
+
+def _now_iso() -> str:
+    """v2.1: 当前时间 ISO 格式字符串 — 给 accepted_gaps 打时间戳用。"""
+    from datetime import datetime, timezone
+    return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _make_gap_entry(
+    track: str, phase: str, cycles: int, max_cycles: int,
+    issues: str,
+) -> dict[str, Any]:
+    """v2.1: 构造 accepted_gaps 条目。
+
+    协议：fix 循环或 gate-fix 循环耗尽时，由 reducer 写入此条目到 track.accepted_gaps。
+    orchestrator 在 record 后检测 accepted_gaps 增量并写 EVT_GAP_ACCEPTED 事件。
+    """
+    return {
+        "track": track,
+        "phase": phase,
+        "cycles_attempted": cycles,
+        "max_cycles": max_cycles,
+        "issues": issues[:500] if issues else "",
+        "accepted_at": _now_iso(),
+    }
+
 # Sub-agent 映射
 PHASE_AGENTS: dict[str, str] = {
     "test":     "pg-build/test",
@@ -357,8 +382,11 @@ def _handle_fix(
     if track not in state.tracks:
         return _error_action(f"track not found: {track}")
 
+    # [v2.1 修复] 提前获取 t — 修复 UnboundLocalError：
+    # 之前只在 STATUS_COMPLETED 分支里给 t 赋值，STATUS_FAILED 分支直接使用 t 导致崩溃
+    t = state.tracks[track]
+
     if record.status == STATUS_COMPLETED:
-        t = state.tracks[track]
         verify = t.phases.get("verify", PhaseState())
         # 标记 fix_cycle 完成
         fix_cycles = list(verify.fix_cycles)
@@ -382,8 +410,22 @@ def _handle_fix(
         attempt = (t.phases.get(FIX_SUB, PhaseState()).attempt or 0) + 1
         max_retries = t.max_fix_retries if track in state.tracks else 5
         if attempt > max_retries:
-            return _fail_action(track, "fix",
-                                f"{track}:fix failed after {max_retries} attempts")
+            # [v2.1 修复 + accept_gap 协议] fix 循环耗尽 → 接受 gap，track 标记 completed
+            gap = _make_gap_entry(
+                track=track, phase="fix",
+                cycles=attempt, max_cycles=max_retries,
+                issues=record.summary or record.issues or "",
+            )
+            t = _update_phase(t, FIX_SUB, status="completed",
+                              summary=f"fix exhausted after {max_retries} cycles, gap accepted")
+            t = t.replace(status="completed", accepted_gaps=(*t.accepted_gaps, gap))
+            new_state = state.replace(
+                tracks={**state.tracks, track: t},
+                current_sub_pipeline=None,
+                current_track="",
+                current_phase="",
+            )
+            return new_state, PipelineAction(kind="advance", track=track)
         t = _update_phase(t, FIX_SUB, status="pending", attempt=attempt)
         new_state = state.replace(tracks={**state.tracks, track: t})
         return new_state, _dispatch_action(track, FIX_SUB, attempt=attempt)
@@ -402,8 +444,10 @@ def _handle_fix_gate(
     if track not in state.tracks:
         return _error_action(f"track not found: {track}")
 
+    # [v2.1 修复] 提前获取 t — 修复 STATUS_FAILED 分支 UnboundLocalError
+    t = state.tracks[track]
+
     if record.status == STATUS_COMPLETED:
-        t = state.tracks[track]
         gate = t.phases.get("gate", PhaseState())
         fix_gates = list(gate.fix_gates)
         if fix_gates:
@@ -472,10 +516,15 @@ def _handle_gate(
         max_gate = t.max_gate_fix_retries
 
         if gate_cycles >= max_gate:
-            # 耗尽 → 接受 gap，track 完成
+            # [v2.1 accept_gap 协议] 耗尽 → 接受 gap 到 track.accepted_gaps，track 完成
+            gap = _make_gap_entry(
+                track=track, phase="gate",
+                cycles=gate_cycles, max_cycles=max_gate,
+                issues=record.summary or record.issues or "",
+            )
             t = _update_phase(t, "gate", status="pass",
-                              summary=f"gate-fix exhausted after {max_gate} cycles, gaps accepted")
-            t = t.replace(status="completed")
+                              summary=f"gate-fix exhausted after {max_gate} cycles, gap accepted")
+            t = t.replace(status="completed", accepted_gaps=(*t.accepted_gaps, gap))
             new_state = state.replace(
                 tracks={**state.tracks, track: t},
                 current_track="",

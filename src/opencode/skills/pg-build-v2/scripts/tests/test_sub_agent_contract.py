@@ -166,6 +166,60 @@ class TestSubAgentContract(unittest.TestCase):
         expected = {"test", "dev", "verify", "gate", "fix", "fix-gate", "simple"}
         self.assertEqual(set(PHASE_RULES.keys()), expected)
 
+    # ============================================================
+    # v2.1 新增：问题 8 — status 与 phase 必须兼容
+    # ============================================================
+
+    def test_gate_rejects_completed_status(self):
+        """[v2.1] gate 阶段不接受 completed（gate 必须用 pass/fail）。"""
+        ok, reason = validate_record_args(
+            "gate", "dev.backend", "completed", "summary gate_score: 90, p0_failures: []",
+            "/tmp/r.md", "/tmp/ev.md",
+        )
+        self.assertFalse(ok)
+        self.assertIn("gate", reason)
+        self.assertIn("completed", reason)
+
+    def test_gate_rejects_escalate_status(self):
+        """[v2.1] gate 阶段不接受 escalate。"""
+        ok, reason = validate_record_args(
+            "gate", "dev.backend", "escalate", "summary gate_score: 90, p0_failures: []",
+            "/tmp/r.md", "/tmp/ev.md",
+        )
+        self.assertFalse(ok)
+
+    def test_test_phase_rejects_pass_status(self):
+        """[v2.1] test 阶段不接受 pass（test 必须用 completed/failed）。"""
+        ok, reason = validate_record_args(
+            "test", "dev.backend", "pass", "summary", "/tmp/r.md", "",
+        )
+        self.assertFalse(ok)
+        self.assertIn("test", reason)
+
+    def test_verify_accepts_escalate_status(self):
+        """[v2.1] verify 阶段允许 escalate（用于触发 fix 循环）。"""
+        import tempfile
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write("# FAIL\nverify escalate")
+            tmp_report = f.name
+        try:
+            ok, reason = validate_record_args(
+                "verify", "dev.backend", "escalate", "summary text",
+                tmp_report, "",
+            )
+            self.assertTrue(ok, reason)
+        finally:
+            os.unlink(tmp_report)
+
+    def test_final_gate_accepts_only_pass_fail(self):
+        """[v2.1] final-gate (track=final-gate, phase=gate) 只接受 pass/fail。"""
+        ok, reason = validate_record_args(
+            "gate", "final-gate", "completed",
+            "summary text gate_score: 90, p0_failures: []", "/tmp/r.md", "/tmp/ev.md",
+        )
+        self.assertFalse(ok, "final-gate 不应接受 completed")
+        self.assertIn("gate", reason)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -1,0 +1,134 @@
+#!/usr/bin/env python3
+"""pg-build-result — sub-agent 返回契约校验与生成工具 (v2.1 新增)。
+
+双模式：
+
+  --mode agent   : sub-agent 在返回前调用，输出完整 JSON 结构供 sub-agent 直接复制到返回值
+  --mode runner  : 编排器 LLM 在调 `pg-pipeline-runner.py record` 前调用，
+                   输出可直接拼到 record 命令后的 CLI 参数字符串
+
+两种模式都通过 sub_agent_contract.validate_record_args 校验字段，校验失败 exit 1。
+
+用法（agent 模式）：
+    pg-build-result --mode agent \\
+        --status pass \\
+        --summary "8/9 检查通过, gate_score: 91, p0_failures: []" \\
+        --track dev.frontend --phase gate \\
+        --evidence /abs/049-evidence.md \\
+        --report /abs/051-gate.md \\
+        --outputs /abs/out1.java,/abs/out2.java \\
+        --issues "G-1..."
+
+用法（runner 模式）：
+    pg-build-result --mode runner --status pass --summary "..." ...
+
+退出码：
+    0 — 校验通过，输出 JSON 或 CLI 参数字符串到 stdout
+    1 — 校验失败，错误信息到 stderr
+"""
+from __future__ import annotations
+
+import argparse
+import json
+import os
+import sys
+from typing import Any
+
+# 让脚本能从任意 cwd 调用
+_THIS_DIR = os.path.dirname(os.path.abspath(__file__))
+if _THIS_DIR not in sys.path:
+    sys.path.insert(0, _THIS_DIR)
+
+from pipeline.sub_agent_contract import validate_record_args  # noqa: E402
+
+
+def _parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(
+        prog="pg-build-result",
+        description="Sub-agent 返回契约校验与生成工具 (v2.1)",
+    )
+    p.add_argument(
+        "--mode", choices=["agent", "runner"], required=True,
+        help="agent=sub-agent 返回前; runner=编排器 record 前",
+    )
+    p.add_argument("--status", required=True,
+                   help="record status: completed|failed|escalate|pass|fail")
+    p.add_argument("--summary", required=True, help="一句话摘要（<=200 字）")
+    p.add_argument("--track", required=True, help="如 dev.backend")
+    p.add_argument("--phase", required=True,
+                   help="test|dev|verify|gate|fix|fix-gate|simple")
+    p.add_argument("--report", default="", help="报告路径（verify/gate 必须）")
+    p.add_argument(
+        "--evidence", action="append", default=[],
+        help="证据文件路径（可多次传）",
+    )
+    p.add_argument(
+        "--outputs", default="",
+        help="产物文件列表，逗号分隔",
+    )
+    p.add_argument("--issues", default="", help="问题列表，逗号分隔")
+    return p.parse_args(argv)
+
+
+def _validate(args: argparse.Namespace) -> tuple[bool, str]:
+    """委托 sub_agent_contract 校验。"""
+    return validate_record_args(
+        phase=args.phase,
+        track=args.track,
+        status=args.status,
+        summary=args.summary,
+        report_path=args.report,
+        outputs=args.outputs,
+        issues=args.issues,
+        evidence_paths=tuple(args.evidence),
+    )
+
+
+def _emit_agent_mode(args: argparse.Namespace) -> int:
+    """输出完整 JSON 结构供 sub-agent 复制到返回值。"""
+    result: dict[str, Any] = {
+        "summary": args.summary,
+        "outputs": [s.strip() for s in args.outputs.split(",") if s.strip()],
+        "tasks_updated": [],  # 由 sub-agent 自行填充
+        "status": args.status,
+        "evidence_paths": list(args.evidence),
+        "report_path": args.report,
+    }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _emit_runner_mode(args: argparse.Namespace) -> int:
+    """输出可直接拼到 `runner record` 命令后的 CLI 参数字符串。"""
+    parts: list[str] = [args.status]
+    if args.report:
+        parts.append(args.report)
+    parts.append(args.summary)
+    if args.outputs:
+        parts.append(args.outputs)
+    if args.issues:
+        parts.append(args.issues)
+    # runner record CLI: <change> <status> [report_path] [summary] [outputs] [issues]
+    # 这里只输出 status 之后的参数；编排器需要自行加上 change
+    print(" ".join(f'"{p}"' if " " in p else p for p in parts))
+    return 0
+
+
+def main() -> int:
+    args = _parse_args(sys.argv[1:])
+    ok, reason = _validate(args)
+    if not ok:
+        print(f"[pg-build-result] 校验失败:\n  {reason}", file=sys.stderr)
+        print(
+            "\n[pg-build-result] 提示: 修复参数后重试。"
+            " 字段约束见 sub_agent_contract.py 模块。",
+            file=sys.stderr,
+        )
+        return 1
+    if args.mode == "agent":
+        return _emit_agent_mode(args)
+    return _emit_runner_mode(args)
+
+
+if __name__ == "__main__":
+    sys.exit(main())

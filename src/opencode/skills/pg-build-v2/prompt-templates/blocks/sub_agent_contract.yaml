@@ -1,54 +1,100 @@
-# sub_agent_contract.yaml — sub-agent 返回契约块（v2.1 新增）
+# sub_agent_contract.yaml — sub-agent 返回契约块（v2.1 重写）
 # 此块被 base.yaml 通过 {sub_agent_contract_block} 占位符引用，
 # 注入到所有 dispatch prompt 的尾部，强制 sub-agent 按契约返回 JSON。
 #
-# 编排器在 record 阶段会按此契约校验返回值：
+# v2.1 重写要点：
+#   - 不再要求 sub-agent 手动构造 JSON（容易出错）
+#   - 改为要求 sub-agent 调用 pg-build-result 脚本生成返回值
+#   - 双模式：--mode agent 给你 JSON，--mode runner 给编排器 CLI 字符串
+#
+# 编排器在 record 阶段会按 sub_agent_contract.validate_record_args 校验返回值：
 #   - 必填字段缺失 → schema_violation (hard fail)
 #   - verify/gate/fix-gate/final-gate 的 evidence_paths 为空 → evidence_missing (hard fail)
 #   - report_path 指向的文件不存在 → report_missing (hard fail)
+#   - status 与 phase 不匹配 → schema_violation (v2.1 新增)
 
 block: |
-  ## Sub-agent 返回契约（强制）
+  ## Sub-agent 返回契约（强制 — v2.1）
 
-  **完成本任务后，必须返回以下 JSON 结构**（不要返回其他格式，否则 record 会被拒）：
+  **完成本任务后，必须通过 `pg-build-result` 脚本生成最终返回值，不要手动拼 JSON**。
+
+  ### 步骤 1: 收集必填字段
+
+  根据本任务阶段，收集以下字段：
+
+  | 字段 | 必填 | 说明 |
+  |------|------|------|
+  | `--status` | ✅ | 见下方 status 选择矩阵 |
+  | `--summary` | ✅ | 一句话中文摘要，**<= 200 字** |
+  | `--track` | ✅ | 如 `dev.backend` / `dev.frontend` |
+  | `--phase` | ✅ | `test` / `dev` / `verify` / `gate` / `fix` / `fix-gate` / `simple` |
+  | `--report` | verify/gate 必填 | 报告文件绝对路径，文件必须已写盘 |
+  | `--evidence` | verify/gate 至少 1 个 | 证据文件绝对路径（可多次传） |
+  | `--outputs` | 选填 | 产物文件列表，逗号分隔 |
+  | `--issues` | 选填 | 问题列表，逗号分隔 |
+
+  ### 步骤 2: status 选择矩阵（按 phase）
+
+  | phase | 允许的 status |
+  |-------|---------------|
+  | `test`, `dev`, `simple` | `completed` / `failed` |
+  | `verify` | `completed` / `escalate` / `failed` |
+  | `fix`, `fix-gate` | `completed` / `failed` |
+  | `gate` (含 final-gate) | `pass` / `fail` |
+
+  **错误示例**：`--phase gate --status completed` 会被拒（gate 必须用 pass/fail）。
+
+  ### 步骤 3: 调用 pg-build-result
+
+  **Agent 模式（推荐 — sub-agent 直接复制到返回值）：**
+
+  ```bash
+  python3 .opencode/skills/pg-build-v2/scripts/pg-build-result \
+      --mode agent \
+      --status <status> \
+      --summary "<=200 字摘要>" \
+      --track <dev.xxx> \
+      --phase <phase> \
+      [--report <绝对路径>] \
+      [--evidence <绝对路径>] \
+      [--evidence <绝对路径>] \
+      [--outputs <p1>,<p2>,...] \
+      [--issues "<issue1>,<issue2>,..."]
+  ```
+
+  脚本会校验所有字段。**校验失败 exit 1 + stderr 错误信息** —— 你必须修复后重试。
+
+  **Gate 阶段额外要求**：summary 末尾必须含 `gate_score: <0-100>, p0_failures: [...]`，
+  例：`"8/9 检查通过, gate_score: 91, p0_failures: []"`。
+
+  ### 步骤 4: 把脚本输出复制到 task() 返回值
+
+  脚本 stdout 输出完整 JSON：
 
   ```json
   {
-    "summary": "一句话描述结果（<= 200 字）",
-    "outputs": ["<产物文件绝对路径>", ...],
-    "tasks_updated": ["<tasks.md 中的 task_id>", ...],
-    "status": "{phase_allowed_statuses}",
-    "evidence_paths": ["<证据文件绝对路径>", ...],
-    "report_path": "<报告文件绝对路径，verify/gate 必须存在且包含 PASS/FAIL 标记>"
+    "summary": "...",
+    "outputs": [...],
+    "tasks_updated": [...],
+    "status": "...",
+    "evidence_paths": [...],
+    "report_path": "..."
   }
   ```
 
-  ### 字段约束
-
-  | 字段 | 必填 | 校验 |
-  |------|------|------|
-  | `summary` | ✅ | 1-200 字字符串 |
-  | `outputs` | ✅ | 数组（可空），元素为字符串 |
-  | `tasks_updated` | ✅ | 数组（可空），元素为字符串 |
-  | `status` | ✅ | 枚举见上 |
-  | `evidence_paths` | ✅ | 数组；verify/gate/fix-gate/final-gate **不可为空** |
-  | `report_path` | ✅ | verify/gate 必须是真实存在的文件路径 |
-
-  ### 阶段特别要求
-
-  - **test / dev / simple**：`evidence_paths` 可为空（产物即证据）
-  - **verify / gate / fix-gate / final-gate**：
-    - `evidence_paths` 必须至少包含一个真实存在的文件（测试日志 / 命令输出 / 日志片段）
-    - `report_path` 必须存在，且首行包含 `PASS` 或 `FAIL`
-  - **fix / fix-gate**：额外要求输出修复方案说明（在 `summary` 中）
+  把 `tasks_updated` 字段填充为本任务实际标记的 task_id 列表，然后把整个对象作为 task() 的返回值。
 
   ### 失败示例（这些会被拒）
 
   - 缺字段：`{"summary": "...", "outputs": [...]}` ← 缺 status
   - 证据缺失：verify agent 返回的 `evidence_paths: []` ← 触发 hard fail
-  - 报告不存在：`"report_path": "/tmp/not_exist.md"` ← 触发 hard fail
+  - 报告不存在：`--report /tmp/not_exist.md` ← 触发 report_missing
+  - status 不匹配 phase：`--phase gate --status completed` ← 触发 schema_violation
+  - gate summary 无 gate_score：`"8/9 检查通过"` ← 触发 schema_violation
 
-  ### 返回方式
+  ### 为什么用脚本而不是手写 JSON
 
-  将上述 JSON 作为 task() 的返回值整体返回（不要拆散到 summary 文本里）。
-  编排器会原样提取字段并校验。
+  1. **校验前置**：字段问题在 sub-agent 阶段就发现，不必绕回编排器
+  2. **字段一致**：避免 LLM 自然语言返回时漏字段或字段名拼错
+  3. **gate_score 强制**：脚本会拒绝没有 gate_score 的 gate 摘要
+  4. **报告路径存在性**：脚本会检查 report_path 文件真实存在

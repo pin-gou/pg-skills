@@ -24,6 +24,9 @@ from pipeline.events import (
     EVT_FIX_CYCLE_STARTED,
     EVT_DISPATCH_ABANDONED,
     EVT_GIT_COMMIT,
+    EVT_GAP_ACCEPTED,  # v2.1: fix/gate-fix 循环耗尽后接受的 gap
+    STATUS_COMPLETED,  # v2.1: 单一来源替换字面量
+    STATUS_PASS,
 )
 from pipeline.reducer import reduce_state
 from pipeline.detect import next_pending
@@ -497,6 +500,21 @@ class Orchestrator:
             if new_state.is_track_completed(track):
                 self.event_log.append(EVT_TRACK_COMPLETED, {"track": track})
 
+            # [v2.1] 检测 track.accepted_gaps 增量 → 写 EVT_GAP_ACCEPTED 事件
+            new_track = new_state.tracks.get(track, TrackState.create(track))
+            old_track = self.state.tracks.get(track, TrackState.create(track))
+            if len(new_track.accepted_gaps) > len(old_track.accepted_gaps):
+                new_gaps = new_track.accepted_gaps[len(old_track.accepted_gaps):]
+                for gap in new_gaps:
+                    self.event_log.append(EVT_GAP_ACCEPTED, {
+                        "track": gap["track"],
+                        "phase": gap["phase"],
+                        "cycles_attempted": gap["cycles_attempted"],
+                        "max_cycles": gap["max_cycles"],
+                        "issues": gap["issues"],
+                        "accepted_at": gap["accepted_at"],
+                    })
+
         if status == "escalate" and phase == "verify":
             verify = new_state.tracks.get(track, TrackState.create(track)).phases.get("verify", PhaseState())
             cycle = len(verify.fix_cycles)
@@ -510,7 +528,8 @@ class Orchestrator:
         save_snapshot(self.change_root, new_state)
 
         # 同步 tasks.md checkbox（Item 2）
-        if status in ("completed", "pass"):
+        # v2.1: 使用 STATUS_* 常量替代硬编码字面量
+        if status in (STATUS_COMPLETED, STATUS_PASS):
             try:
                 from pipeline.tasks_md import mark_phase_completed
                 mark_phase_completed(self.change_root, track, phase)

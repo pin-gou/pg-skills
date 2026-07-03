@@ -20,6 +20,13 @@ from datetime import datetime, timezone, timedelta
 from pathlib import Path
 from typing import Any
 
+# v2.1: event log 写入需要
+from pipeline.events import (
+    EVT_PREPARE_ENV_STARTED, EVT_PREPARE_ENV_COMPLETED,
+    EVT_CLEAN_ENV_STARTED, EVT_CLEAN_ENV_COMPLETED,
+)
+from pipeline.event_log import EventLog
+
 
 # Shanghai timezone
 _SHANGHAI = timezone(timedelta(hours=8))
@@ -654,6 +661,8 @@ def cli_env_action(change: str, phase_name: str, stage_name: str, env_name: str)
     与 Orchestrator._handle_env_switch 中的执行逻辑等价，
     但独立于 PipelineState，适合 CLI 调用。
 
+    v2.1 改进：把 started/completed 事件写入 pipeline.events，event-sourcing 完整可重放。
+
     Args:
         change: change name
         phase_name: "prepare_env" | "clean_env"
@@ -673,6 +682,22 @@ def cli_env_action(change: str, phase_name: str, stage_name: str, env_name: str)
         "exit_code": None,
         "error": None,
     }
+
+    # [v2.1] 构造 EventLog，写 started 事件
+    change_root = os.path.join(CHANGES_DIR, change)
+    event_log = EventLog(change_root=change_root)
+    started_type = (
+        EVT_PREPARE_ENV_STARTED if phase_name == "prepare_env"
+        else EVT_CLEAN_ENV_STARTED
+    )
+    try:
+        event_log.append(started_type, {
+            "stage": stage_name,
+            "env_name": env_name,
+        })
+    except Exception as e:
+        # event log 写入失败不应阻止 env hook 执行
+        result.setdefault("warnings", []).append(f"event_log start append failed: {e}")
 
     try:
         env_result = execute_env_hook_inline(
@@ -695,5 +720,22 @@ def cli_env_action(change: str, phase_name: str, stage_name: str, env_name: str)
             result["error"] = env_result.get("error") or f"{phase_name} failed"
     except Exception as e:
         result["error"] = f"{phase_name} exception: {e}"
+
+    # [v2.1] 写 completed 事件
+    completed_type = (
+        EVT_PREPARE_ENV_COMPLETED if phase_name == "prepare_env"
+        else EVT_CLEAN_ENV_COMPLETED
+    )
+    try:
+        event_log.append(completed_type, {
+            "stage": stage_name,
+            "env_name": env_name,
+            "exit_code": result["exit_code"],
+            "log_path": result["log_path"],
+            "ok": result["ok"],
+            "skipped": result.get("skipped", False),
+        })
+    except Exception as e:
+        result.setdefault("warnings", []).append(f"event_log complete append failed: {e}")
 
     return result

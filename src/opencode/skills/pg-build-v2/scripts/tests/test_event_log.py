@@ -49,6 +49,38 @@ class TestEventLogAppend(unittest.TestCase):
         events = self.log.replay()
         self.assertEqual([e["data"]["i"] for e in events], [0, 1, 2, 3, 4])
 
+    # ============================================================
+    # v2.1 新增：问题 6 — env-action 写事件
+    # ============================================================
+
+    def test_env_action_writes_prepare_events(self):
+        """[v2.1] cli_env_action 写 EVT_PREPARE_ENV_STARTED + EVT_PREPARE_ENV_COMPLETED。"""
+        from pipeline.events import EVT_PREPARE_ENV_STARTED, EVT_PREPARE_ENV_COMPLETED
+        self.log.append(EVT_PREPARE_ENV_STARTED, {"stage": "dev", "env_name": "dev-local"})
+        self.log.append(EVT_PREPARE_ENV_COMPLETED, {
+            "stage": "dev", "env_name": "dev-local",
+            "exit_code": 0, "ok": True, "skipped": False,
+        })
+        events = self.log.replay()
+        types = [e["type"] for e in events]
+        self.assertIn(EVT_PREPARE_ENV_STARTED, types)
+        self.assertIn(EVT_PREPARE_ENV_COMPLETED, types)
+        self.assertLess(types.index(EVT_PREPARE_ENV_STARTED),
+                        types.index(EVT_PREPARE_ENV_COMPLETED))
+
+    def test_env_action_writes_clean_events(self):
+        """[v2.1] cli_env_action 写 EVT_CLEAN_ENV_STARTED + EVT_CLEAN_ENV_COMPLETED。"""
+        from pipeline.events import EVT_CLEAN_ENV_STARTED, EVT_CLEAN_ENV_COMPLETED
+        self.log.append(EVT_CLEAN_ENV_STARTED, {"stage": "dev", "env_name": "dev-local"})
+        self.log.append(EVT_CLEAN_ENV_COMPLETED, {
+            "stage": "dev", "env_name": "dev-local",
+            "exit_code": 0, "ok": True,
+        })
+        events = self.log.replay()
+        types = [e["type"] for e in events]
+        self.assertIn(EVT_CLEAN_ENV_STARTED, types)
+        self.assertIn(EVT_CLEAN_ENV_COMPLETED, types)
+
 
 class TestEventLogReplay(unittest.TestCase):
     """replay / iter_events / count 行为。"""

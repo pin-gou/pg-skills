@@ -18,6 +18,26 @@ from pipeline.detect import next_pending
 from pipeline.orchestrator import Orchestrator
 
 
+def _make_report(content: str = "# PASS\nverification complete") -> str:
+    """生成临时 verify/gate 报告文件并返回绝对路径。
+
+    v2.1 sub_agent_contract 要求 verify/gate 阶段必须有 report_path + evidence_paths。
+    """
+    fd, path = tempfile.mkstemp(suffix=".md", prefix="integration-report-")
+    with os.fdopen(fd, "w", encoding="utf-8") as f:
+        f.write(content)
+    return path
+
+
+def _make_report_at(directory: str, filename: str, content: str = "# PASS\ngate assessment") -> str:
+    """在指定目录创建 report 文件（用于模拟 gate agent 产出 gate-assessment）。"""
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, filename)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(content)
+    return path
+
+
 def _setup_initial_state(tmp_root: str, change: str = "test-change") -> Orchestrator:
     """设置初始 state 并跳过 bootstrap。"""
     state = PipelineState(
@@ -61,13 +81,21 @@ class TestIntegrationTdvg(unittest.TestCase):
         self.assertEqual(r2["action"], "dispatch")
         self.assertEqual(r2["sub"], "verify")
 
-        # Step 3: verify completed → gate
-        r3 = self.orch.record("completed", summary="all V-* PASS")
+        # Step 3: verify completed → gate (verify 需要 report + evidence)
+        verify_report = _make_report("# PASS\nall V-* PASS")
+        r3 = self.orch.record(
+            "completed", summary="all V-* PASS",
+            report_path=verify_report, outputs=verify_report,
+        )
         self.assertEqual(r3["action"], "dispatch")
         self.assertEqual(r3["sub"], "gate")
 
-        # Step 4: gate pass → track completed → advance to next track
-        r4 = self.orch.record("pass", summary="all G-* PASS")
+        # Step 4: gate pass → track completed → advance to next track (gate 需要 report)
+        gate_report = _make_report("# PASS\nall G-* PASS")
+        r4 = self.orch.record(
+            "pass", summary="all G-* PASS gate_score: 95, p0_failures: []",
+            report_path=gate_report, outputs=gate_report,
+        )
         self.assertEqual(r4["action"], "dispatch")  # advance 内部调用 next() 返回下一个 dispatch
         self.assertEqual(r4["item"], "dev.frontend")
 
@@ -82,19 +110,52 @@ class TestIntegrationTdvg(unittest.TestCase):
 
     def test_two_tracks_then_final_gate(self):
         """两个 track 都完成 → final-gate。"""
+        # 注：orch.change_root 是 self.tmp（不是 self.change_root）。
+        # _collect_missing_gate_assessments 用 self.orch.change_root，
+        # 所以 gate-assessment 文件必须写到 self.tmp/2-build/。
+        build_dir = os.path.join(self.tmp, "2-build")
+
         # 完成 dev.backend
-        self.orch.record("completed")  # test
-        self.orch.record("completed")  # dev
-        self.orch.record("completed")  # verify
-        r1 = self.orch.record("pass")  # gate → advance 到 dev.frontend
+        self.orch.record("completed", summary="test phase 完成")  # test
+        self.orch.record("completed", summary="dev phase 完成")  # dev
+        verify_report = _make_report("# PASS\nverify 1")
+        self.orch.record(
+            "completed", summary="verify 完成",
+            report_path=verify_report, outputs=verify_report,
+        )  # verify
+        # 模拟 gate agent 产出 gate-assessment 报告（final-gate 前置门控要求）
+        _make_report_at(
+            build_dir,
+            "006-dev.backend-gate-assessment.md",
+            "# PASS\ndev.backend gate assessment",
+        )
+        gate_report = _make_report("# PASS\ngate 1")
+        r1 = self.orch.record(
+            "pass", summary="gate pass gate_score: 90, p0_failures: []",
+            report_path=gate_report, outputs=gate_report,
+        )  # gate → advance 到 dev.frontend
         self.assertEqual(r1["action"], "dispatch")
         self.assertEqual(r1["item"], "dev.frontend")
 
         # 完成 dev.frontend
-        self.orch.record("completed")  # test
-        self.orch.record("completed")  # dev
-        self.orch.record("completed")  # verify
-        r2 = self.orch.record("pass")  # gate → advance 到 final-gate
+        self.orch.record("completed", summary="test phase 完成")  # test
+        self.orch.record("completed", summary="dev phase 完成")  # dev
+        verify_report2 = _make_report("# PASS\nverify 2")
+        self.orch.record(
+            "completed", summary="verify 完成",
+            report_path=verify_report2, outputs=verify_report2,
+        )  # verify
+        # 模拟 gate agent 产出 gate-assessment 报告
+        _make_report_at(
+            build_dir,
+            "013-dev.frontend-gate-assessment.md",
+            "# PASS\ndev.frontend gate assessment",
+        )
+        gate_report2 = _make_report("# PASS\ngate 2")
+        r2 = self.orch.record(
+            "pass", summary="gate pass gate_score: 90, p0_failures: []",
+            report_path=gate_report2, outputs=gate_report2,
+        )  # gate → advance 到 final-gate
 
         # final-gate now returns dispatch_final_gate (with dispatch_file written)
         self.assertTrue(r2["action"] in ("dispatch_final_gate", "dispatch"))
@@ -102,11 +163,11 @@ class TestIntegrationTdvg(unittest.TestCase):
 
     def test_workflow_failed(self):
         """test 重试耗尽 → workflow_failed，需要 4 次（max_retries=3, 计数从0开始）。"""
-        self.orch.record("failed", issues="error 1")
-        self.orch.record("failed", issues="error 2")
-        self.orch.record("failed", issues="error 3")
+        self.orch.record("failed", summary="error 1", issues="error 1")
+        self.orch.record("failed", summary="error 2", issues="error 2")
+        self.orch.record("failed", summary="error 3", issues="error 3")
         # 第 4 次失败 → exhausted
-        r = self.orch.record("failed", issues="error 4")
+        r = self.orch.record("failed", summary="error 4", issues="error 4")
         self.assertEqual(r["action"], "workflow_failed")
         self.assertTrue(r.get("fatal", False))
 
@@ -122,22 +183,30 @@ class TestIntegrationFixCycle(unittest.TestCase):
 
     def test_verify_escalate_then_fix(self):
         """verify escalate → 创建子 pipeline。"""
-        self.orch.record("completed")  # test
-        self.orch.record("completed")  # dev
+        self.orch.record("completed", summary="test 完成")  # test
+        self.orch.record("completed", summary="dev 完成")  # dev
 
-        # verify escalate
-        r = self.orch.record("escalate", summary="3 tests FAIL")
+        # verify escalate（verify 阶段需要 report + evidence）
+        verify_report = _make_report("# FAIL\n3 tests FAIL")
+        r = self.orch.record(
+            "escalate", summary="3 tests FAIL",
+            report_path=verify_report, outputs=verify_report,
+        )
         self.assertEqual(r["action"], "dispatch")
         # 应该有子 pipeline
         self.assertIsNotNone(self.orch.state.current_sub_pipeline)
 
     def test_verify_escalate_fix_complete(self):
         """verify escalate → fix → re-verify → gate。"""
-        self.orch.record("completed")  # test
-        self.orch.record("completed")  # dev
+        self.orch.record("completed", summary="test 完成")  # test
+        self.orch.record("completed", summary="dev 完成")  # dev
 
-        # verify escalate
-        self.orch.record("escalate", summary="3 tests FAIL")
+        # verify escalate（verify 阶段需要 report + evidence）
+        verify_report = _make_report("# FAIL\n3 tests FAIL")
+        self.orch.record(
+            "escalate", summary="3 tests FAIL",
+            report_path=verify_report, outputs=verify_report,
+        )
         # 当前 dispatch 是 fix
         self.assertEqual(self.orch.state.current_phase, "fix")
 
@@ -158,12 +227,20 @@ class TestIntegrationGateFail(unittest.TestCase):
 
     def test_gate_fail_then_fix_gate(self):
         """gate fail → 创建 fix-gate 子 pipeline。"""
-        self.orch.record("completed")  # test
-        self.orch.record("completed")  # dev
-        self.orch.record("completed")  # verify
+        self.orch.record("completed", summary="test 完成")  # test
+        self.orch.record("completed", summary="dev 完成")  # dev
+        verify_report = _make_report("# PASS\nverify ok")
+        self.orch.record(
+            "completed", summary="verify 完成",
+            report_path=verify_report, outputs=verify_report,
+        )  # verify
 
-        # gate fail
-        r = self.orch.record("fail", summary="G-1 not met")
+        # gate fail（gate 阶段需要 report + evidence + gate_score）
+        gate_report = _make_report("# FAIL\nG-1 not met")
+        r = self.orch.record(
+            "fail", summary="G-1 not met gate_score: 60, p0_failures: [G-1]",
+            report_path=gate_report, outputs=gate_report,
+        )
         self.assertEqual(r["action"], "dispatch")
         self.assertIsNotNone(self.orch.state.current_sub_pipeline)
 
@@ -186,7 +263,7 @@ class TestOrchestratorProgress(unittest.TestCase):
         self.assertGreaterEqual(p["event_count"], 0)
 
     def test_progress_after_records(self):
-        self.orch.record("completed")
+        self.orch.record("completed", summary="test 完成")
         p = self.orch.progress()
         self.assertGreaterEqual(p["event_count"], 1)
 
@@ -201,33 +278,44 @@ class TestOrchestratorDispatchFile(unittest.TestCase):
         self.orch = _setup_initial_state(self.tmp, "test-change")
 
     def test_next_returns_dispatch_file(self):
-        """next() 返回的 dispatch action 包含 dispatch_file。"""
-        # 重新获取 next (因为 _setup_initial_state 已调过一次)
+        """next() 返回的 dispatch action 包含 dispatch_file。
+
+        注意：setUp 中 _setup_initial_state 已调过一次 next()，所以状态中
+        last_dispatch_file 已有值。第二次 next() 会返回 retry action，
+        但 retry action 也携带 dispatch_file。本测试既验证首次 dispatch
+        也验证 retry 行为下 dispatch_file 的存在。
+        """
         r = self.orch.next()
-        self.assertEqual(r["action"], "dispatch")
+        # 第二次 next() 因 P3 retry 机制返回 retry action（非 dispatch）
+        self.assertIn(r["action"], ("dispatch", "retry"))
         self.assertIn("dispatch_file", r,
-                      "dispatch action 必须包含 dispatch_file 字段")
+                      "next() 返回必须包含 dispatch_file 字段")
         self.assertTrue(os.path.isfile(r["dispatch_file"]),
                         f"dispatch_file 应在磁盘上存在: {r.get('dispatch_file')}")
 
     def test_record_returns_dispatch_file(self):
         """record() 返回的 dispatch action 包含 dispatch_file。"""
-        r = self.orch.record("completed")
+        r = self.orch.record("completed", summary="test 完成")
         self.assertIn("dispatch_file", r,
                       "record 返回的 dispatch action 必须包含 dispatch_file")
         self.assertTrue(os.path.isfile(r["dispatch_file"]))
 
     def test_dispatch_file_content(self):
         """dispatch_file 内容包含任务描述。"""
-        r = self.orch.record("completed")
-        if "dispatch_file" in r:
+        # 测试阶段不需要 report，但需要 summary
+        r = self.orch.record("completed", summary="test 完成")
+        # setUp 已 dispatch dev.backend:test，再次 record 可能触发 retry
+        # 改为先获取 current dispatch_file（setUp 写入的）
+        if "dispatch_file" not in r:
+            r = {"dispatch_file": self.orch.state.last_dispatch_file}
+        if "dispatch_file" in r and r["dispatch_file"]:
             with open(r["dispatch_file"], encoding="utf-8") as f:
                 content = f.read()
             self.assertIn("任务", content, "dispatch_file 应包含任务说明")
 
     def test_record_returns_commit_field(self):
         """record() 返回包含 commit 字段（auto-commit）。"""
-        r = self.orch.record("completed")
+        r = self.orch.record("completed", summary="test 完成")
         # 测试在非 git 目录中运行时，commit 字段仍然存在（attempted=true）
         self.assertIn("commit", r, "record 返回应包含 commit 字段")
         self.assertTrue(r["commit"]["attempted"])

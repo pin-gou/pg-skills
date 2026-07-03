@@ -36,6 +36,23 @@ ALL_STATUSES: tuple[str, ...] = (
     STATUS_COMPLETED, STATUS_FAILED, STATUS_ESCALATE, STATUS_PASS, STATUS_FAIL,
 )
 
+# frozenset 版本：用于 O(1) 校验（v2.1 修复 — 消除 pg-pipeline-runner.py 与
+# sub_agent_contract.py 两处硬编码 list 不一致问题）
+STATUSES_ALL: frozenset[str] = frozenset(ALL_STATUSES)
+
+# Phase → 合法 status 映射（v2.1 新增）
+# 编排器在 record 时校验 sub-agent 返回的 status 是否与 phase 匹配
+PHASE_STATUS_ALLOWED: dict[str, frozenset[str]] = {
+    SUB_TEST:     frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_DEV:      frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_SIMPLE:   frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_VERIFY:   frozenset({STATUS_COMPLETED, STATUS_ESCALATE, STATUS_FAILED}),
+    SUB_FIX:      frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_FIX_GATE: frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_GATE:     frozenset({STATUS_PASS, STATUS_FAIL}),
+    # final-gate 用 phase="gate" 但 track="final-gate"，由 caller 区分
+}
+
 
 # Phase type of final-gate (特殊 item)
 FINAL_GATE_TRACK = "final-gate"
@@ -102,6 +119,7 @@ EVT_PIPELINE_COMPLETED = "pipeline_completed"
 EVT_WORKFLOW_FAILED = "workflow_failed"
 EVT_DISPATCH_ABANDONED = "dispatch_abandoned"
 EVT_GIT_COMMIT = "git_commit"
+EVT_GAP_ACCEPTED = "gap_accepted"  # v2.1 新增：fix/gate-fix 循环耗尽后接受的 gap
 
 ALL_EVENT_TYPES: tuple[str, ...] = (
     EVT_PIPELINE_STARTED, EVT_BOOTSTRAP_STEP_COMPLETED,
@@ -111,4 +129,5 @@ ALL_EVENT_TYPES: tuple[str, ...] = (
     EVT_FIX_CYCLE_STARTED, EVT_GATE_CYCLE_STARTED,
     EVT_SUB_PIPELINE_COMPLETED, EVT_TRACK_COMPLETED,
     EVT_PIPELINE_COMPLETED, EVT_WORKFLOW_FAILED, EVT_DISPATCH_ABANDONED, EVT_GIT_COMMIT,
+    EVT_GAP_ACCEPTED,
 )

@@ -453,6 +453,141 @@ class TestDetect(unittest.TestCase):
                          "simple track 完成后应跳到下一 track")
         self.assertEqual(action.phase, "test")
 
+    # ============================================================
+    # v2.1 新增：问题 2 修复回归测试
+    # ============================================================
+
+    def test_fix_status_failed_does_not_crash(self):
+        """[v2.1 回归] _handle_fix 在 STATUS_FAILED 分支不应崩溃 (UnboundLocalError)。"""
+        from pipeline.events import STATUS_FAILED
+        fix_phase = PhaseState(status="running", attempt=1)
+        verify_phase = PhaseState(status="running", fix_cycles=(
+            {"cycle": 1, "status": "running"},
+        ))
+        track = TrackState.create("dev.backend", max_fix_retries=3)
+        ph = dict(track.phases)
+        ph["fix"] = fix_phase
+        ph["verify"] = verify_phase
+        track = track.replace(phases=ph)
+        state = PipelineState(
+            change="x",
+            pipeline_order=("dev.backend",),
+            current_track="dev.backend",
+            current_phase="fix",
+            status="running",
+            tracks={"dev.backend": track},
+        )
+        record = PipelineRecord(
+            track="dev.backend", phase="fix", status=STATUS_FAILED,
+            summary="fix failed due to cross-track issue",
+        )
+        new_state, action = reduce_state(state, record)
+        self.assertNotEqual(action.kind, "error",
+                            "fix STATUS_FAILED 应被 reducer 接受，不应返回 error")
+        self.assertEqual(action.kind, "dispatch")
+        self.assertEqual(action.track, "dev.backend")
+        self.assertEqual(action.phase, "fix")
+        self.assertEqual(action.attempt, 2,
+                         "fix STATUS_FAILED 应递增 attempt 到 2")
+
+    def test_fix_gate_status_failed_does_not_crash(self):
+        """[v2.1 回归] _handle_fix_gate 在 STATUS_FAILED 分支不应崩溃。"""
+        from pipeline.events import STATUS_FAILED
+        fix_gate_phase = PhaseState(status="running", attempt=1)
+        gate_phase = PhaseState(status="running")
+        track = TrackState.create("dev.backend", max_fix_retries=3)
+        ph = dict(track.phases)
+        ph["fix-gate"] = fix_gate_phase
+        ph["gate"] = gate_phase
+        track = track.replace(phases=ph)
+        state = PipelineState(
+            change="x",
+            pipeline_order=("dev.backend",),
+            current_track="dev.backend",
+            current_phase="fix-gate",
+            status="running",
+            tracks={"dev.backend": track},
+        )
+        record = PipelineRecord(
+            track="dev.backend", phase="fix-gate", status=STATUS_FAILED,
+            summary="fix-gate failed",
+        )
+        new_state, action = reduce_state(state, record)
+        self.assertNotEqual(action.kind, "error")
+        self.assertEqual(action.kind, "dispatch")
+        self.assertEqual(action.attempt, 2)
+
+    def test_gate_fail_exhausted_accepts_gap(self):
+        """[v2.1] gate 循环耗尽后接受 gap 到 track.accepted_gaps。"""
+        from pipeline.events import STATUS_FAIL
+        gate_phase = PhaseState(
+            status="running",
+            gate_cycles=(
+                {"cycle": 1, "status": "fail"},
+                {"cycle": 2, "status": "fail"},
+            ),
+        )
+        track = TrackState.create("dev.backend", max_gate_fix_retries=2)
+        ph = dict(track.phases)
+        ph["gate"] = gate_phase
+        track = track.replace(phases=ph)
+        state = PipelineState(
+            change="x",
+            pipeline_order=("dev.backend",),
+            current_track="dev.backend",
+            current_phase="gate",
+            status="running",
+            tracks={"dev.backend": track},
+        )
+        record = PipelineRecord(
+            track="dev.backend", phase="gate", status=STATUS_FAIL,
+            summary="", issues="G-1,scope creep",
+        )
+        new_state, action = reduce_state(state, record)
+        self.assertEqual(action.kind, "advance")
+        new_track = new_state.tracks["dev.backend"]
+        self.assertEqual(new_track.status, "completed")
+        self.assertEqual(len(new_track.accepted_gaps), 1)
+        gap = new_track.accepted_gaps[0]
+        self.assertEqual(gap["phase"], "gate")
+        self.assertEqual(gap["cycles_attempted"], 2)
+        self.assertEqual(gap["max_cycles"], 2)
+        self.assertIn("scope creep", gap["issues"])
+        self.assertIn("accepted_at", gap)
+
+    def test_fix_status_failed_exhausted_accepts_gap(self):
+        """fix 循环耗尽后接受 gap 到 track.accepted_gaps（v2.1 accept_gap 协议）。"""
+        from pipeline.events import STATUS_FAILED
+        fix_phase = PhaseState(status="running", attempt=3)
+        track = TrackState.create("dev.backend", max_fix_retries=3)
+        ph = dict(track.phases)
+        ph["fix"] = fix_phase
+        track = track.replace(phases=ph)
+        state = PipelineState(
+            change="x",
+            pipeline_order=("dev.backend",),
+            current_track="dev.backend",
+            current_phase="fix",
+            status="running",
+            tracks={"dev.backend": track},
+        )
+        record = PipelineRecord(
+            track="dev.backend", phase="fix", status=STATUS_FAILED,
+            summary="fix exhausted",
+            issues="G-1,G-2",
+        )
+        new_state, action = reduce_state(state, record)
+        self.assertEqual(action.kind, "advance",
+                         f"expected advance (accept_gap), got {action.kind}")
+        new_track = new_state.tracks["dev.backend"]
+        self.assertEqual(new_track.status, "completed")
+        self.assertEqual(len(new_track.accepted_gaps), 1)
+        gap = new_track.accepted_gaps[0]
+        self.assertEqual(gap["phase"], "fix")
+        self.assertEqual(gap["cycles_attempted"], 4)
+        self.assertEqual(gap["max_cycles"], 3)
+        self.assertIn("fix exhausted", gap["issues"])
+
 
 if __name__ == "__main__":
     unittest.main()

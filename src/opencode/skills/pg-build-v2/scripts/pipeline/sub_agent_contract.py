@@ -12,6 +12,13 @@ from __future__ import annotations
 import os
 from typing import Any
 
+from pipeline.events import (
+    STATUSES_ALL,
+    PHASE_STATUS_ALLOWED,
+    SUB_GATE,
+    FINAL_GATE_TRACK,
+)
+
 
 # 各 phase 的额外要求
 PHASE_RULES: dict[str, dict[str, Any]] = {
@@ -86,21 +93,30 @@ def validate_record_args(
             f"schema_violation: summary 长度 {len(summary)} 超过 200 字上限"
         )
 
-    # ── status 必须合法 ──
-    ALLOWED_STATUSES = ("completed", "failed", "escalate", "pass", "fail")
-    if status not in ALLOWED_STATUSES:
+    # ── status 必须合法（v2.1: 从 pipeline.events.STATUSES_ALL 单一来源）──
+    if status not in STATUSES_ALL:
         return False, (
-            f"schema_violation: status={status!r} 不在 {ALLOWED_STATUSES}"
+            f"schema_violation: status={status!r} 不在 {sorted(STATUSES_ALL)}"
         )
 
     # ── phase-specific 规则 ──
     # final-gate 的 phase 是 "gate" 但 track 是 "final-gate"，
     # 二者规则一致：都要 evidence + report_path
-    if track == "final-gate":
-        rule_track = "gate"  # final-gate 复用 gate 的规则
+    if track == FINAL_GATE_TRACK:
+        rule_track = SUB_GATE  # final-gate 复用 gate 的规则
     else:
         rule_track = phase
     rule = PHASE_RULES.get(rule_track, {})
+
+    # ── v2.1: status 必须与 phase 兼容 ──
+    # final-gate 用 phase="gate" 但 track="final-gate"，
+    # 二者都用同一 PHASE_STATUS_ALLOWED["gate"] 规则集（pass/fail）
+    allowed_for_phase = PHASE_STATUS_ALLOWED.get(rule_track, frozenset())
+    if allowed_for_phase and status not in allowed_for_phase:
+        return False, (
+            f"schema_violation: phase={phase} (track={track}) 不允许 status={status!r},"
+            f" 允许 {sorted(allowed_for_phase)}"
+        )
 
     # evidence 检查：verify / gate / fix-gate / final-gate 要求 evidence 非空
     # CLI 协议下 evidence = outputs + report_path
@@ -132,7 +148,7 @@ def validate_record_args(
             )
 
     # ── v2.1: gate / final-gate 要求 summary 含 gate-score ──
-    if rule_track == "gate":
+    if rule_track == SUB_GATE:
         score = parse_gate_score(summary)
         if score is None:
             return False, (

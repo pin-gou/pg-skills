@@ -23,11 +23,12 @@ if _THIS_DIR not in sys.path:
 
 from pipeline.orchestrator import Orchestrator
 from pipeline.replay import verify_snapshot_matches_replay
+from pipeline.events import STATUSES_ALL  # v2.1: 单一来源 — 消除与 sub_agent_contract.py 不一致
 import bootstrap as _bootstrap
 
 
 VALID_COMMANDS = {"next", "record", "progress", "replay", "verify-replay", "bootstrap", "env-action"}
-VALID_STATUSES = {"completed", "failed", "escalate", "pass", "fail"}
+VALID_STATUSES = STATUSES_ALL  # v2.1: 从 pipeline.events 导入，避免硬编码
 
 
 def main() -> None:
