@@ -1,10 +1,17 @@
 """Bootstrap — pipeline 启动副作用。
 
-4 个步骤（v2.1 起 context-chain.md 被 pipeline.events 取代）：
+v2.1.1 重构：
+  - cli_bootstrap / cli_env_action 改为只返回 plan，不执行 env hook。
+  - 编排器按 plan 自己 bash 执行 env hook（解决 LLM 端 bash timeout
+    截断 prepare_env 内部 timeout 的问题）。
+  - 编排器执行完调 cli_env_action_result 写 *_COMPLETED event + 更新 state。
+
+5 个步骤：
   1. migrate_legacy_state_files — 创建 2-build/，迁移遗留 state 文件
-  2. _ensure_feature_branch — git checkout -b feat/pg/<change>
-  3. _maybe_bootstrap_init_commit — git add -A + commit（仅首次）
-  4. execute_env_hook_inline — 运行 prepare_env 脚本（v2 内联）
+  2. ensure_feature_branch — git checkout -b feat/pg/<change>
+  3. auto_commit_on_init — git add -A + commit（仅首次）
+  4. cli_bootstrap 解析 env_hook_plan（不执行）/ cli_env_action 解析 plan
+  5. cli_env_action_result 写 completed event + 更新 stage_prepared/current_stage
 
 所有步骤容错：失败写 event log 但不阻塞 dispatch。
 env-hook 是唯一可能抛出异常（EnvHookError）的步骤。
@@ -76,14 +83,7 @@ APPLY_DIR = "2-build"
 # ============================================================
 
 def migrate_legacy_state_files(change: str) -> list[str]:
-    """把 change 根目录遗留的 .pipeline-state.json 等移到 2-build/。
-
-    Args:
-        change: change name（从 CHANGES_DIR 拼接路径）
-
-    Returns:
-        list of moved file descriptions
-    """
+    """把 change 根目录遗留的 .pipeline-state.json 等移到 2-build/。"""
     return _migrate_files_impl(os.path.join(CHANGES_DIR, change))
 
 
@@ -110,11 +110,6 @@ def _migrate_files_impl(change_root: str) -> list[str]:
 
 
 # ============================================================
-# 步骤 2: （已删除 — v2.1 起 context-chain.md 被 pipeline.events 取代）
-# ============================================================
-
-
-# ============================================================
 # 步骤 3: 确保 feature branch
 # ============================================================
 
@@ -128,11 +123,7 @@ def _git(*args: str, capture: bool = True) -> subprocess.CompletedProcess:
 
 
 def ensure_feature_branch(change: str) -> dict[str, Any]:
-    """创建 feat/pg/{change} 分支（如果不在该分支上）。
-
-    Returns:
-        {"branch": "...", "action": "created|checked_out|already_on"}
-    """
+    """创建 feat/pg/{change} 分支（如果不在该分支上）。"""
     expected = f"feat/pg/{change}"
     branch = _git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
 
@@ -154,12 +145,7 @@ def ensure_feature_branch(change: str) -> dict[str, Any]:
 # ============================================================
 
 def auto_commit_on_init(change: str) -> dict[str, Any]:
-    """执行 bootstrap init commit。
-
-    Returns:
-        {"attempted": bool, "committed": bool, "sha": str|None, "message": str, "reason": str|None}
-    """
-    # 检查工作区是否干净
+    """执行 bootstrap init commit。"""
     status = _git("status", "--porcelain").stdout.strip()
     if not status:
         return {
@@ -192,72 +178,86 @@ def auto_commit_on_init(change: str) -> dict[str, Any]:
 
 
 def maybe_bootstrap_init_commit(change: str, init_committed: bool) -> dict[str, Any] | None:
-    """仅首次执行 init commit。
-
-    Args:
-        change: change name
-        init_committed: 是否已经执行过
-
-    Returns:
-        init_commit 结果 dict（仅首次返回），后续返回 None
-    """
+    """仅首次执行 init commit。"""
     if init_committed:
         return None
     return auto_commit_on_init(change)
 
 
 # ============================================================
-# 步骤 5: prepare_env 内联执行
+# 步骤 5: prepare_env / clean_env 计划 + 执行 (v2.1.1 重构)
+# ============================================================
+#
+# v2.1.1 重构：把"解析 env hook 命令"和"执行 env hook 命令"拆开。
+#   - _build_env_hook_plan() — 纯函数，从 project.yaml / execution-manifest /
+#     environment.yaml 解析出 (command, env_name, stage_name, timeout_seconds,
+#     log_path, env) 等；不执行。
+#   - _execute_plan() — 复用 _build_env_hook_plan() 获取 plan，然后同步执行。
+#   - execute_env_hook_inline() — 旧 API 的兼容包装。
+#   - cli_bootstrap / cli_env_action 改为只返回 plan，**不执行**。
+#     编排器按 plan 自己 bash 执行（这样 env hook 真在 LLM 的 bash timeout
+#     下运行，避免 prepare_env 内部 timeout > LLM bash timeout 导致中断）。
+#   - cli_env_action_result() — 编排器执行完 bash 后调用，写 *_COMPLETED
+#     event + 更新 stage_prepared / current_stage。
 # ============================================================
 
-def execute_env_hook_inline(
+
+def _build_env_hook_plan(
     change: str,
-    phase_name: str = "prepare_env",
+    phase_name: str,
     explicit_env_name: str | None = None,
     explicit_stage_name: str | None = None,
+    explicit_timeout: int | None = None,
 ) -> dict[str, Any]:
-    """执行 prepare_env / clean_env 脚本。
-
-    Args:
-        change: change name
-        phase_name: "prepare_env" | "clean_env"
-        explicit_env_name: 显式 env 名（来自 env_switch action detail，跳过自动检测）
-        explicit_stage_name: 显式 stage 名（同上）
+    """解析 env hook 执行计划（纯函数，不执行任何 subprocess）。
 
     Returns:
-        {"success": bool, "skipped": bool, "log_path": str|None, "exit_code": int|None, ...}
+        {
+          "ok": bool,
+          "skipped": bool,
+          "command": str,
+          "env_name": str,
+          "stage_name": str,
+          "timeout_seconds": int,
+          "log_path": str,
+          "result_file": str,
+          "hook_log_dir": str,
+          "env": dict,
+          "error": str|None,
+        }
     """
     if phase_name not in ("prepare_env", "clean_env"):
-        return {"success": False, "skipped": False, "error": f"invalid phase: {phase_name}"}
+        return {"ok": False, "skipped": False, "error": f"invalid phase: {phase_name}"}
 
-    # 读取 project.yaml 获取 env 配置
     config_path = os.path.join(PROJECT_ROOT, ".pg", "project.yaml")
     if not os.path.isfile(config_path):
-        return {"success": True, "skipped": True, "error": None}
-    try:
-        import yaml
-        with open(config_path, encoding="utf-8") as f:
-            config = yaml.safe_load(f) or {}
-    except Exception as e:
-        return {"success": False, "skipped": False, "error": f"load_config failed: {e}"}
+        return {"ok": True, "skipped": True}
 
-    # 确定 env_name / stage_name
-    # 优先级: 显式参数 > manifest 自动检测 > project.yaml fallback
+    try:
+        import yaml as _yaml
+        with open(config_path, encoding="utf-8") as f:
+            config = _yaml.safe_load(f) or {}
+    except Exception as e:
+        return {"ok": False, "skipped": False, "error": f"load_config failed: {e}"}
+
     env_name = explicit_env_name
     stage_name = explicit_stage_name
 
     if not env_name:
-        # 从 execution-manifest.yaml 读取 env 名
         manifest_path = os.path.join(CHANGES_DIR, change, "execution-manifest.yaml")
         if os.path.isfile(manifest_path):
             try:
-                import yaml as _yaml2
                 with open(manifest_path, encoding="utf-8") as f:
-                    manifest = _yaml2.safe_load(f) or {}
+                    manifest = _yaml.safe_load(f) or {}
+                # 关键修复：按 stage 顺序查找，只取匹配 explicit_stage_name 的，
+                # 避免"第一个有 env 的 stage"覆盖其他 stage。
                 for s in manifest.get("stages", []):
+                    sn = s.get("name", "")
+                    if explicit_stage_name and sn != explicit_stage_name:
+                        continue
                     env = s.get("environment")
                     if env and s.get("tracks"):
-                        stage_name = s.get("name", "")
+                        stage_name = stage_name or sn
                         env_name = env if isinstance(env, str) else env.get("name", "")
                         if env_name:
                             break
@@ -265,25 +265,25 @@ def execute_env_hook_inline(
                 pass
 
     if not env_name:
-        # fallback: 从 project.yaml stages 读取 env 名
         for s in config.get("stages") or []:
+            if explicit_stage_name and s.get("name") != explicit_stage_name:
+                continue
             if s.get("tracks") and (s.get("environment") or {}).get("required", False):
-                stage_name = s.get("name")
+                stage_name = stage_name or s.get("name")
                 env_name = s.get("environment", {}).get("name")
                 break
 
     if not env_name:
-        return {"success": True, "skipped": True}
+        return {"ok": True, "skipped": True}
 
-    # 读取 environment.yaml 获取实际 env 映射
     env_yaml_path = os.path.join(CHANGES_DIR, change, "environment.yaml")
     if os.path.isfile(env_yaml_path):
         try:
             with open(env_yaml_path, encoding="utf-8") as f:
-                env_map = yaml.safe_load(f) or {}
+                env_map = _yaml.safe_load(f) or {}
             mapped = env_map.get(stage_name, env_name)
             if mapped == "skip":
-                return {"success": True, "skipped": True}
+                return {"ok": True, "skipped": True}
             if mapped:
                 env_name = mapped
         except Exception:
@@ -292,21 +292,19 @@ def execute_env_hook_inline(
     env_cfg = (config.get("environments") or {}).get(env_name, {})
     action = env_cfg.get(phase_name)
     if not action:
-        return {"success": True, "skipped": True}
+        return {"ok": True, "skipped": True}
 
     script_path = action.get("script")
     if not script_path:
-        return {"success": False, "skipped": False,
+        return {"ok": False, "skipped": False,
                 "error": f"environment {env_name}.{phase_name} has no script"}
 
     if not os.path.isabs(script_path):
         script_path = os.path.join(PROJECT_ROOT, script_path)
 
-    # 构建命令
     args = action.get("args") or []
     cmd = f"bash {script_path}" + (" " + " ".join(str(a) for a in args) if args else "")
 
-    # 日志路径
     log_path = os.path.join(
         CHANGES_DIR, change, APPLY_DIR,
         f"{phase_name}-{_now_iso().replace(':', '-')}.log"
@@ -317,7 +315,6 @@ def execute_env_hook_inline(
     )
     hook_log_dir = os.path.join(CHANGES_DIR, change, APPLY_DIR, "logs")
 
-    # 构建 hooks 协议环境变量（与 pg-run-hook.py 的 build_env() 一致）
     _env = os.environ.copy()
     _env.setdefault("PG_PROJECT_ROOT", PROJECT_ROOT)
     _env.setdefault("PG_SKILLS_PATH", os.path.join(PROJECT_ROOT, ".pg", "skills"))
@@ -329,8 +326,35 @@ def execute_env_hook_inline(
     _env["PG_LOG_FILE"] = log_path
     _env["PG_RESULT_FILE"] = result_file
 
-    # 执行
-    timeout = action.get("timeout_seconds") or 600
+    timeout = explicit_timeout or action.get("timeout_seconds") or 600
+
+    return {
+        "ok": True,
+        "skipped": False,
+        "command": cmd,
+        "env_name": env_name,
+        "stage_name": stage_name or "",
+        "timeout_seconds": timeout,
+        "log_path": log_path,
+        "result_file": result_file,
+        "hook_log_dir": hook_log_dir,
+        "env": _env,
+    }
+
+
+def _execute_plan(plan: dict[str, Any], phase_name: str) -> dict[str, Any]:
+    """按 plan 同步执行 env hook。供单测 / 内部使用，CLI 入口不再调用。"""
+    if plan.get("skipped"):
+        return {"success": True, "skipped": True, "log_path": None, "exit_code": None}
+
+    if not plan.get("ok"):
+        return {"success": False, "skipped": False, "error": plan.get("error")}
+
+    cmd = plan["command"]
+    log_path = plan["log_path"]
+    timeout = plan["timeout_seconds"]
+    _env = plan["env"]
+
     try:
         os.makedirs(os.path.dirname(log_path), exist_ok=True)
         proc = subprocess.run(
@@ -356,14 +380,14 @@ def execute_env_hook_inline(
         "skipped": False,
         "log_path": log_path,
         "exit_code": exit_code,
-        "env_name": env_name,
-        "phase_item": f"{stage_name}.{phase_name}",
+        "env_name": plan["env_name"],
+        "phase_item": f"{plan['stage_name']}.{phase_name}",
         "error": None if success else f"exit_code={exit_code}, log={log_path}",
         "hook_result": None,
     }
 
-    # 读取 hook 写入的 result.json（hooks 协议要求）
-    if os.path.isfile(result_file):
+    result_file = plan.get("result_file", "")
+    if result_file and os.path.isfile(result_file):
         try:
             with open(result_file, encoding="utf-8") as f:
                 hook_result = json.load(f)
@@ -380,6 +404,24 @@ def execute_env_hook_inline(
     return result
 
 
+def execute_env_hook_inline(
+    change: str,
+    phase_name: str = "prepare_env",
+    explicit_env_name: str | None = None,
+    explicit_stage_name: str | None = None,
+) -> dict[str, Any]:
+    """同步执行 env hook（保留旧接口，cli_* 不再调用）。
+
+    新代码应使用 _build_env_hook_plan() 解析，由编排器自行 bash 执行。
+    """
+    plan = _build_env_hook_plan(
+        change, phase_name,
+        explicit_env_name=explicit_env_name,
+        explicit_stage_name=explicit_stage_name,
+    )
+    return _execute_plan(plan, phase_name)
+
+
 # ============================================================
 # 启动入口：run_bootstrap
 # ============================================================
@@ -389,16 +431,10 @@ def run_bootstrap(
     init_committed: bool = False,
     event_log=None,
 ) -> dict[str, Any]:
-    """执行完整的 5 步 bootstrap。
+    """执行完整的 bootstrap 副作用。
 
-    Args:
-        change: change name
-        init_committed: 是否已 init commit（从 state 读取）
-        event_log: EventLog 实例（可选，写入 bootstrap 事件）
-
-    Returns:
-        {"ok": bool, "init_commit": dict|None, "env_hook": dict|None,
-         "prepare_env_failed": bool, "prepare_env_log_path": str|None}
+    v2.1.1: prepare_env 不再同步执行。env hook 由编排器在 next() 后调
+    env-action-result 推进。
     """
     result: dict[str, Any] = {
         "ok": True,
@@ -415,7 +451,6 @@ def run_bootstrap(
             except Exception:
                 pass
 
-    # 步骤 1: migrate
     try:
         moved = migrate_legacy_state_files(change)
         if moved:
@@ -423,16 +458,12 @@ def run_bootstrap(
     except Exception as e:
         _log("bootstrap_step_completed", {"step": 1, "error": str(e)})
 
-    # 步骤 2: （已删除 — v2.1 起 context-chain.md 被 pipeline.events 取代）
-
-    # 步骤 3: feature branch
     try:
         branch_result = ensure_feature_branch(change)
         _log("bootstrap_step_completed", {"step": 3, "detail": branch_result})
     except Exception as e:
         _log("bootstrap_step_completed", {"step": 3, "error": str(e)})
 
-    # 步骤 4: init commit
     try:
         init_commit = maybe_bootstrap_init_commit(change, init_committed)
         if init_commit is not None:
@@ -445,58 +476,17 @@ def run_bootstrap(
     except Exception as e:
         _log("bootstrap_step_completed", {"step": 4, "error": str(e)})
 
-    # 步骤 5: prepare_env
-    try:
-        env_result = execute_env_hook_inline(change, "prepare_env")
-        result["env_hook"] = env_result
-        if env_result.get("log_path"):
-            result["prepare_env_log_path"] = env_result["log_path"]
-
-        if not env_result.get("success"):
-            result["prepare_env_failed"] = True
-            if not env_result.get("skipped"):
-                result["ok"] = False
-                _log("prepare_env_completed", {
-                    "success": False, "exit_code": env_result.get("exit_code"),
-                    "log_path": env_result.get("log_path"),
-                    "error_category": env_result.get("error_category", "unknown"),
-                    "error_message": env_result.get("error_message", ""),
-                    "error_hint": env_result.get("error_hint", ""),
-                })
-                raise EnvHookError(
-                    phase_name="prepare_env",
-                    log_path=env_result.get("log_path") or "",
-                    exit_code=env_result.get("exit_code") or -1,
-                    error_category=env_result.get("error_category", "unknown"),
-                    error_message=env_result.get("error_message", ""),
-                    error_hint=env_result.get("error_hint", ""),
-                )
-        else:
-            _log("prepare_env_completed", {
-                "success": True, "skipped": env_result.get("skipped", False),
-                "log_path": env_result.get("log_path"),
-            })
-    except EnvHookError:
-        raise
-    except Exception as e:
-        _log("bootstrap_step_completed", {"step": 5, "error": str(e)})
+    # 步骤 5: prepare_env — v2.1.1: 不再同步执行
 
     return result
 
 
 # ============================================================
-# CLI 入口：cli_bootstrap / cli_env_action
+# CLI 入口：cli_bootstrap / cli_env_action / cli_env_action_result
 # ============================================================
 
 def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
-    """从 execution-manifest.yaml + project.yaml 检测 pipeline 配置。
-
-    纯文件系统操作，与 Orchestrator.state 无关。
-    供 cli_bootstrap 命令使用。
-
-    Returns:
-        {"pipeline_order": [...], "track_configs": {...}, "stage_order": [...], "stage_env_map": {...}}
-    """
+    """从 execution-manifest.yaml + project.yaml 检测 pipeline 配置。"""
     from pipeline.events import FINAL_GATE_TRACK
     order: list[str] = []
     track_configs: dict[str, dict] = {}
@@ -504,7 +494,6 @@ def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
     stage_env_map: dict[str, str] = {}
     config_path = os.path.join(PROJECT_ROOT, ".pg", "project.yaml")
 
-    # 从 execution-manifest.yaml 读 stage order + env 映射
     manifest_path = os.path.join(CHANGES_DIR, change, "execution-manifest.yaml")
     if os.path.isfile(manifest_path):
         try:
@@ -534,7 +523,6 @@ def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
         except Exception:
             pass
 
-    # fallback: project.yaml
     if not order and os.path.isfile(config_path):
         try:
             import yaml as _yaml
@@ -555,7 +543,6 @@ def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
     if not stage_order:
         stage_order.append("dev")
 
-    # 从 project.yaml 读 track 级配置
     if os.path.isfile(config_path):
         try:
             import yaml as _yaml
@@ -589,28 +576,31 @@ def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
 
 
 def cli_bootstrap(change: str) -> dict[str, Any]:
-    """CLI 入口：执行 bootstrap 5 步 + 检测 pipeline 配置。
+    """CLI 入口：执行 bootstrap 副作用（不含 env hook）+ 检测 pipeline 配置。
 
-    与 Orchestrator._first_next 中的 bootstrap 逻辑等价，
-    但独立于 PipelineState 和 EventLog，适合 CLI 调用。
+    v2.1.1 重构：
+      - bootstrap 不再同步执行 prepare_env。env hook 拆到首次 `next()` 返回的
+        `env_switch` action，由编排器按 plan 自己 bash 执行。
 
     Returns:
-        {"action": "bootstrap_result", "ok": bool, "init_commit": dict|None,
-         "env_hook": dict|None, "pipeline_config": dict|None,
-         "error": str|None}
+        {
+          "action": "bootstrap_result",
+          "ok": bool,
+          "init_commit": dict|None,
+          "env_hook_plan": dict|None,
+          "pipeline_config": dict|None,
+          "error": str|None,
+        }
     """
     result: dict[str, Any] = {
         "action": "bootstrap_result",
         "ok": True,
         "init_commit": None,
-        "env_hook": None,
+        "env_hook_plan": None,
         "pipeline_config": None,
         "error": None,
-        "prepare_env_failed": False,
-        "prepare_env_log_path": None,
     }
 
-    # 步骤 1-4: migrate, feature branch, init commit
     try:
         moved = migrate_legacy_state_files(change)
     except Exception as e:
@@ -621,8 +611,6 @@ def cli_bootstrap(change: str) -> dict[str, Any]:
     except Exception as e:
         result["error"] = f"branch failed: {e}"
 
-    # init commit: 从 state 读取 init_committed 状态。CLI 模式无 state，
-    # 每次尝试提交（幂等：git commit 在工作区干净时跳过）
     try:
         init_commit = auto_commit_on_init(change)
         if init_commit.get("committed") or init_commit.get("reason"):
@@ -630,22 +618,18 @@ def cli_bootstrap(change: str) -> dict[str, Any]:
     except Exception as e:
         result["error"] = f"init_commit failed: {e}"
 
-    # 步骤 5: prepare_env
     try:
-        env_result = execute_env_hook_inline(change, "prepare_env")
-        result["env_hook"] = env_result
-        if env_result.get("log_path"):
-            result["prepare_env_log_path"] = env_result["log_path"]
-        if not env_result.get("success") and not env_result.get("skipped"):
-            result["prepare_env_failed"] = True
+        plan = _build_env_hook_plan(change, "prepare_env")
+        if not plan.get("ok"):
             result["ok"] = False
-            result["error"] = env_result.get("error") or f"prepare_env failed (exit_code={env_result.get('exit_code')})"
+            result["error"] = plan.get("error", "plan build failed")
+        elif not plan.get("skipped"):
+            plan_for_orchestrator = {k: v for k, v in plan.items() if k != "env"}
+            result["env_hook_plan"] = plan_for_orchestrator
     except Exception as e:
-        result["prepare_env_failed"] = True
         result["ok"] = False
-        result["error"] = f"prepare_env exception: {e}"
+        result["error"] = f"plan build exception: {e}"
 
-    # 检测 pipeline 配置（不依赖 Orchestrator）
     try:
         pipeline_config = _detect_pipeline_config_from_disk(change)
         result["pipeline_config"] = pipeline_config
@@ -655,35 +639,24 @@ def cli_bootstrap(change: str) -> dict[str, Any]:
     return result
 
 
-def cli_env_action(change: str, phase_name: str, stage_name: str, env_name: str) -> dict[str, Any]:
-    """CLI 入口：执行一次 env hook（prepare_env / clean_env）。
+def cli_env_action(change: str, phase_name: str, stage_name: str, env_name: str,
+                   hook_timeout_seconds: int | None = None) -> dict[str, Any]:
+    """CLI 入口：解析 env hook 执行 plan（不执行），写 *_STARTED 事件。
 
-    与 Orchestrator._handle_env_switch 中的执行逻辑等价，
-    但独立于 PipelineState，适合 CLI 调用。
-
-    v2.1 改进：把 started/completed 事件写入 pipeline.events，event-sourcing 完整可重放。
-
-    Args:
-        change: change name
-        phase_name: "prepare_env" | "clean_env"
-        stage_name: 当前 stage 名称
-        env_name: 环境名称
-
-    Returns:
-        {"action": "env_action_result", "ok": bool, ...}
+    v2.1.1 重构：不再执行 env hook。编排器收到 plan 后自己 bash 执行。
     """
     result: dict[str, Any] = {
-        "action": "env_action_result",
+        "action": "env_action_plan",
         "ok": False,
         "phase": phase_name,
         "stage": stage_name,
         "env_name": env_name,
-        "log_path": None,
-        "exit_code": None,
+        "plan": None,
+        "skipped": False,
         "error": None,
+        "started_event_ts": None,
     }
 
-    # [v2.1] 构造 EventLog，写 started 事件
     change_root = os.path.join(CHANGES_DIR, change)
     event_log = EventLog(change_root=change_root)
     started_type = (
@@ -691,51 +664,121 @@ def cli_env_action(change: str, phase_name: str, stage_name: str, env_name: str)
         else EVT_CLEAN_ENV_STARTED
     )
     try:
-        event_log.append(started_type, {
+        ev = event_log.append(started_type, {
             "stage": stage_name,
             "env_name": env_name,
         })
+        result["started_event_ts"] = ev.get("ts")
     except Exception as e:
-        # event log 写入失败不应阻止 env hook 执行
         result.setdefault("warnings", []).append(f"event_log start append failed: {e}")
 
     try:
-        env_result = execute_env_hook_inline(
+        plan = _build_env_hook_plan(
             change, phase_name,
             explicit_env_name=env_name,
             explicit_stage_name=stage_name,
+            explicit_timeout=hook_timeout_seconds,
         )
-        result["log_path"] = env_result.get("log_path")
-        result["exit_code"] = env_result.get("exit_code")
-        result["error_category"] = env_result.get("error_category", "unknown")
-        result["error_message"] = env_result.get("error_message", "")
-        result["error_hint"] = env_result.get("error_hint", "")
-
-        if env_result.get("success"):
-            result["ok"] = True
-        elif env_result.get("skipped"):
-            result["ok"] = True
-            result["skipped"] = True
-        else:
-            result["error"] = env_result.get("error") or f"{phase_name} failed"
     except Exception as e:
-        result["error"] = f"{phase_name} exception: {e}"
+        result["error"] = f"plan build exception: {e}"
+        return result
 
-    # [v2.1] 写 completed 事件
+    if not plan.get("ok"):
+        result["error"] = plan.get("error", "plan build failed")
+        return result
+
+    if plan.get("skipped"):
+        result["ok"] = True
+        result["skipped"] = True
+        return result
+
+    plan_for_orchestrator = {k: v for k, v in plan.items() if k != "env"}
+    result["plan"] = plan_for_orchestrator
+    result["ok"] = True
+    return result
+
+
+def cli_env_action_result(
+    change: str,
+    phase_name: str,
+    stage_name: str,
+    env_name: str,
+    ok: bool,
+    log_path: str = "",
+    exit_code: int | None = None,
+    started_event_ts: str | None = None,
+    error: str | None = None,
+) -> dict[str, Any]:
+    """CLI 入口：env hook 执行完毕，编排器汇报结果。
+
+    v2.1.1 新增：编排器在 bash 执行完 env hook 后调用本命令：
+      - 写 *_COMPLETED event
+      - 更新 state (stage_prepared / current_stage)
+      - 写 pipeline.snapshot.json
+    """
+    from pipeline.snapshot import load_snapshot, save_snapshot
+    from pipeline.state import PipelineState
+
+    result: dict[str, Any] = {
+        "action": "env_action_result",
+        "ok": False,
+        "phase": phase_name,
+        "stage": stage_name,
+        "env_name": env_name,
+        "stage_prepared": [],
+        "current_stage": "",
+        "error": None,
+    }
+
+    change_root = os.path.join(CHANGES_DIR, change)
+    event_log = EventLog(change_root=change_root)
+
     completed_type = (
         EVT_PREPARE_ENV_COMPLETED if phase_name == "prepare_env"
         else EVT_CLEAN_ENV_COMPLETED
     )
+    completed_data: dict[str, Any] = {
+        "stage": stage_name,
+        "env_name": env_name,
+        "exit_code": exit_code,
+        "log_path": log_path,
+        "ok": ok,
+    }
+    if started_event_ts:
+        completed_data["started_ts"] = started_event_ts
     try:
-        event_log.append(completed_type, {
-            "stage": stage_name,
-            "env_name": env_name,
-            "exit_code": result["exit_code"],
-            "log_path": result["log_path"],
-            "ok": result["ok"],
-            "skipped": result.get("skipped", False),
-        })
+        event_log.append(completed_type, completed_data)
     except Exception as e:
         result.setdefault("warnings", []).append(f"event_log complete append failed: {e}")
 
+    if not ok:
+        result["ok"] = False
+        result["error"] = error or f"{phase_name} failed (exit_code={exit_code})"
+        return result
+
+    state = load_snapshot(change_root) or PipelineState(change=change)
+    new_prepared = set(state.stage_prepared)
+    new_current = state.current_stage
+
+    if phase_name == "prepare_env":
+        if stage_name:
+            new_prepared.add(stage_name)
+        new_current = stage_name
+    elif phase_name == "clean_env":
+        if stage_name:
+            new_prepared.discard(stage_name)
+
+    new_state = state.replace(
+        stage_prepared=new_prepared,
+        current_stage=new_current,
+    )
+    try:
+        save_snapshot(change_root, new_state)
+    except Exception as e:
+        result["error"] = f"save_snapshot failed: {e}"
+        return result
+
+    result["ok"] = True
+    result["stage_prepared"] = sorted(new_prepared)
+    result["current_stage"] = new_current
     return result

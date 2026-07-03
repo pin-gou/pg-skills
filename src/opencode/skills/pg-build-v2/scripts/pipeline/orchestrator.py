@@ -229,11 +229,12 @@ class Orchestrator:
             status="running",
         )
 
-        # 标记第一个 stage 为已 prepared（由 bootstrap 命令完成）
-        if first_stage:
-            self.state = self.state.replace(
-                stage_prepared={first_stage},
-            )
+        # v2.1.1: 不再预设 stage_prepared={first_stage}。
+        # 之前 bootstrap 命令同步执行 prepare_env 并把 first_stage 标为已 prepared，
+        # 但这与 "bootstrap 不再执行 env hook" 的新协议冲突 —— 现在 first_stage
+        # 的 prepare_env 由首次 next() 返回的 env_switch action 触发，编排器按 plan
+        # 自己 bash 执行后调 env-action-result 才会把 first_stage 加进 stage_prepared。
+        # 这样多 stage 流程的 stage_prepared 状态机才能正确推进。
 
         save_snapshot(self.change_root, self.state)
         self.event_log.append(EVT_PIPELINE_STARTED, {
