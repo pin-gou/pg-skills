@@ -45,7 +45,7 @@ def parse_playwright_output(log_path):
         summary["did_not_run"] = int(m_dnr.group(1))
 
     failure_pattern = re.compile(
-        r'^\s+\[([^\]]+)\]\s+›\s+(tests/e2e/[^\s]+?\.spec\.ts):(\d+):(\d+)\s+›\s+(.+)$',
+        r'^\s+\[([^\]]+)\]\s*\u203a\s*(tests/e2e/[^\s]+?\.spec\.ts):(\d+):(\d+)\s*\u203a\s*(.+)$',
         re.MULTILINE
     )
     failures = []
@@ -70,7 +70,33 @@ def parse_playwright_output(log_path):
             "line": f["line"]
         })
 
-    return {"summary": summary, "failedUnits": list(scripts.values())}
+    skip_pattern = re.compile(
+        r'^\s+-\s+\d+\s+\[([^\]]+)\]\s*\u203a\s*(tests/e2e/[^\s]+?\.spec\.ts):(\d+):(\d+)\s*\u203a\s*(.+)$',
+        re.MULTILINE
+    )
+    skipped = []
+    for m in skip_pattern.finditer(content):
+        skipped.append({
+            "project": m.group(1),
+            "script": m.group(2),
+            "line": int(m.group(3)),
+            "test_name": m.group(5).strip()
+        })
+
+    skip_units = OrderedDict()
+    for s in skipped:
+        script = s["script"]
+        if script not in skip_units:
+            skip_units[script] = {"target": script, "count": 0, "issues": []}
+        skip_units[script]["count"] += 1
+        skip_units[script]["issues"].append({
+            "status": "skipped",
+            "project": s["project"],
+            "test": s["test_name"],
+            "line": s["line"]
+        })
+
+    return {"summary": summary, "failedUnits": list(scripts.values()), "skippedUnits": list(skip_units.values())}
 
 
 # ==================== Parse: Maven Surefire ====================
@@ -97,19 +123,15 @@ def parse_maven_output(log_path):
     if m_skipped:
         summary["skipped"] = int(m_skipped.group(1))
 
-    # Extract failure/error lines grouped by test class
-    # Format: [ERROR]   ClassName.methodName:line -> ErrorMessage
-    # Format: [ERROR]   ClassName.testMethod -> ErrorMessage
     failure_pattern = re.compile(
         r'^\[ERROR\]\s+(?:Failures:\s+)?'
         r'(?:com\.example\.[^\s]+\.)?'
-        r'(\w+Test)\.(\w+)'          # ClassName.methodName
-        r'(?::(\d+))?\s*'            # optional line
-        r'(?:»\s*)?(.+)$',           # error message
+        r'(\w+Test)\.(\w+)'
+        r'(?::(\d+))?\s*'
+        r'(?:»\s*)?(.+)$',
         re.MULTILINE
     )
 
-    # Collect failures grouped by class
     class_groups = OrderedDict()
     for m in failure_pattern.finditer(content):
         class_name = m.group(1)
@@ -117,8 +139,6 @@ def parse_maven_output(log_path):
         line = int(m.group(3)) if m.group(3) else 0
         error_msg = m.group(4).strip()
 
-        # Only include full class name for uniqueness
-        # Find the full class name by looking at context
         full_class = None
         for line in content.split('\n'):
             if class_name in line and 'test' in line.lower():

@@ -101,7 +101,7 @@ regression:
 ## 整体流程
 
 ```
-Phase 0: 前置检查 → Phase 1: 执行测试并按单元分组 → Phase 2: 按 concurrency 并行/串行调度 fix-test agent → Phase 3: 导出 JSON 问题清单 + 汇总报告 → [可选] Phase 4: 启动 runner 修复生产代码
+Phase 0: 前置检查 → Phase 1: 执行测试并按单元分组 → Phase 2: 按 concurrency 并行/串行调度 fix-test agent → Phase 2a: 提交测试脚本修改 → Phase 2b: 分析跳过用例 → Phase 3: 导出 JSON 问题清单 + 汇总报告 → [可选] Phase 4: 启动 runner 修复生产代码
 ```
 
 ---
@@ -292,13 +292,22 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-test-results.py parse \
 
 ```json
 {
-  "summary": { "total": <N>, "passed": <N>, "failed": <N>, "skipped": <N> },
+  "summary": { "total": <N>, "passed": <N>, "failed": <N>, "skipped": <N>, "did_not_run": <N> },
   "failedUnits": [
     {
       "target": "<groupBy 决定的单元标识>",
       "count": <失败数>,
       "issues": [
         { "status": "failed|error", "test": "<测试名>", "line": <行号> }
+      ]
+    }
+  ],
+  "skippedUnits": [
+    {
+      "target": "tests/e2e/specs/xxx.spec.ts",
+      "count": <跳过数>,
+      "issues": [
+        { "status": "skipped", "project": "<project名>", "test": "<测试名>", "line": <行号> }
       ]
     }
   ]
@@ -480,6 +489,67 @@ fi
 ```
 
 > **为什么直接 push 到 master 而非创建 PR**：测试脚本修改风险低、不碰生产逻辑，直接提交效率更高。生产代码修复在 Phase 4 中通过独立分支+PR 走 code review。
+
+---
+
+### Phase 2b: 分析跳过用例（skippedUnits）
+
+Phase 1.2 输出的 `phase1-failures.json` 现在包含 `skippedUnits` 字段（按文件分组的跳过测试清单）。编排器在 Phase 2a 之后、Phase 3 之前，**必须**读取并分析跳过用例。
+
+#### 2b.1 读取 skippedUnits
+
+```bash
+SKIPPED_COUNT=$(python3 -c "
+import json
+data = json.load(open('${RUN_DIR}/temp/{suite}-phase1-failures.json'))
+sku = data.get('skippedUnits', [])
+print(sum(u['count'] for u in sku))
+")
+echo "📊 跳过用例总数: $SKIPPED_COUNT"
+```
+
+如果 `SKIPPED_COUNT == 0`，跳过本阶段剩余步骤。
+
+#### 2b.2 按 skip 原因分类
+
+编排器读取每个 `skippedUnits[i].target`（测试文件路径），对照以下规则分类：
+
+| 分类 | 判定条件 | 示例 skip 原因 |
+|------|---------|---------------|
+| **C5 — 测试数据缺失** | 原因包含 "无"、"需要"、"不存在"、"没有可用"、"无法获取"、"列表为空" | "无可用资源池", "需要 DISCONNECTED 的测试主机数据", "主机列表为空" |
+| **C2 — 生产代码未实现** | 原因包含 "尚未实现"、"不存在"、"未实现"、"缺失" | "物理主机 tab 尚未实现", "项目详情页 tab 尚未实现" |
+| **C10 — 环境/资源不足** | 原因包含 "无 token"、"无有效"、"少于" | "无 token 时应显示生成按钮", "主机数量少于 2" |
+| **其他** | 不属于以上三类 | 空原因或未知原因 |
+
+#### 2b.3 生成 skipped 分析报告
+
+将跳过用例的分析结果写入 `${RUN_DIR}/temp/{suite}-phase2b-skipped-analysis.json`：
+
+```json
+{
+  "total_skipped": 70,
+  "categories": {
+    "C5_test_data_missing": 36,
+    "C2_production_code": 7,
+    "C10_environment": 0,
+    "other": 0
+  },
+  "detail": [
+    {
+      "target": "tests/e2e/specs/admin/maintenance/host-offline-status-badge.spec.ts",
+      "count": 4,
+      "category": "C5",
+      "reasons": ["需要 DISCONNECTED 的测试主机数据", "需要 AGENT_DOWN 的测试主机数据"]
+    }
+  ]
+}
+```
+
+#### 2b.4 合并到问题清单
+
+C2 类（生产代码未实现）的跳过用例，应追加到 Phase 3 的 `unfixableIssues` 中，走生产代码修复流程。
+C5 类（测试数据缺失）的跳过用例，写入 `skipped_targets` 以记录已知跳过。
+C10 类（环境不足）的跳过用例，仅记录在报告中，不阻断流程。
 
 ---
 
