@@ -51,7 +51,7 @@ header_env: |
   ```
   python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
     --session {_change} --env {env_name} --role <ROLE> --instance <INSTANCE> \
-    --action <ACTION> [--tail-lines <N>] [--skill pg-build]
+    --action <ACTION> [--tail-lines <N>] --skill pg-build
   ```
 
   | action | 用途 |
