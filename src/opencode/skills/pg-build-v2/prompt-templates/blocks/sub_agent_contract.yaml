@@ -14,9 +14,18 @@
 #   - status 与 phase 不匹配 → schema_violation (v2.1 新增)
 
 block: |
-  ## Sub-agent 返回契约（强制 — v2.1）
+  ## Sub-agent 返回契约（强制 — v2.4）
 
   **完成本任务后，必须通过 `pg-build-result` 脚本生成最终返回值，不要手动拼 JSON**。
+
+  ### ⚠️ 强制落盘（v2.4 新增 — 重试 + fatal 保护）
+
+  **必须**调用 `pg-build-result --output-path <result.json>` 把结果写到指定文件。
+  - 不调用 = 编排器视为未完成 → **重试一次**
+  - 重试后仍未生成 result.json = 编排器 **fatal 停止**
+
+  result.json 路径由编排器注入到你的 dispatch prompt（变量 `{result_json_path}`），
+  典型格式：`<change_dir>/2-build/<seq>-<track>-<phase>.result.json`
 
   ### 步骤 1: 收集必填字段
 
@@ -49,7 +58,7 @@ block: |
 
   ### 步骤 3: 调用 pg-build-result
 
-  **Agent 模式（推荐 — sub-agent 直接复制到返回值）：**
+  **Agent 模式（v2.4 — 必须含 --output-path 强制落盘）：**
 
   ```bash
   python3 .opencode/skills/pg-build-v2/scripts/pg-build-result \
@@ -58,6 +67,8 @@ block: |
       --summary "<=200 字摘要>" \
       --track <dev.xxx> \
       --phase <phase> \
+      --output-path {result_json_path} \
+      --require-output \
       [--report <绝对路径>] \
       [--evidence <绝对路径>] \
       [--evidence <绝对路径>] \
@@ -66,6 +77,11 @@ block: |
       [--tasks-updated <task_id>] \
       [--tasks-updated <task_id>]
   ```
+
+  **占位符**：
+  - `{result_json_path}` — 由编排器注入的 result JSON 落盘绝对路径（如 `2-build/002-dev.backend-dev.result.json`）
+  - 脚本会用 `{result_json_path}` 写入 JSON，**并在写入失败时 exit 2**
+  - 编排器会**检查该文件是否存在**——缺失 = 任务失败
 
   脚本会校验所有字段。**校验失败 exit 1 + stderr 错误信息** —— 你必须修复后重试。
 
