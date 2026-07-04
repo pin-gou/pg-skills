@@ -73,8 +73,9 @@ $RUNNER env-action-result <change> --phase prepare_env|clean_env --stage <stage>
 ### Dispatch 协议
 
 runner 返回 dispatch action 带 `dispatch_file` 字段。编排器：
-1. **绝不允许读取或修改 dispatch_file 内容**。只需把文件路径传给 sub-agent。
-2. 正确用法：`task(prompt="读取 {dispatch_file} 并执行任务，完成后用 pg-build-result 脚本生成返回 JSON")`
+1. **绝不允许读取 dispatch_file 内容**。只需把文件路径传给 sub-agent。
+2. 正确用法：`task(prompt="读取 {dispatch_file} 并执行任务，完成后用 pg-build-result 脚本生成返回 JSON")`。
+   错误用法：调用 task 工具时，提示词的内容比 `读取 {dispatch_file} 并执行任务，完成后用 pg-build-result 脚本生成返回 JSON` 更多，比如将 `dispatch_file` 进行摘要后放在提示词里。sub agent 会自己阅读 dispatch_file 全文，编排器不要对提示词做无意义的修改。
 
 ### Sub-agent 返回契约
 
