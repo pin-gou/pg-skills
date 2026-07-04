@@ -38,10 +38,9 @@ if (!change_name) {
 ## 执行步骤
 
 1. 使用 Skill tool 加载 `pg-build-v2` skill
-2. 读取 `.pg/changes/{change_name}/tasks.md` 获取任务清单
-3. 调用 runner 编排 pipeline：`python3 .opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py next {change_name}`
-4. 按 next 返回的 action 派送 sub-agent 并 record 结果
-5. 循环至 pipeline 完成
+2. 调用 runner 编排 pipeline：`python3 .opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py next {change_name}`
+3. 按 next 返回的 action 派送 sub-agent 并 record 结果（派送时只传 dispatch_file 路径，不得读取其内容）
+4. 循环至 pipeline 完成
 
 **示例**:
 ```
