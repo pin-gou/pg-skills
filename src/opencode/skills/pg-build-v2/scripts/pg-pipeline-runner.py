@@ -4,7 +4,7 @@
 用法：
   python3 pg-pipeline-runner.py bootstrap <change>
   python3 pg-pipeline-runner.py next <change>
-  python3 pg-pipeline-runner.py record <change> --status <status> [--report <path>] [--summary <文本>] [--outputs <p1,p2>] [--issues <i1,i2>] [--evidence <e>] [--tasks-updated <t>]
+  python3 pg-pipeline-runner.py record <change> --status <status> [--report <path>] [--summary <文本>] [--outputs <p1,p2>] [--issues <i1,i2>] [--evidence <e>] [--tasks-updated <t1,t2,...|--tasks-updated t1 --tasks-updated t2>]
   python3 pg-pipeline-runner.py progress <change>
   python3 pg-pipeline-runner.py env-action <change> --phase <prepare_env|clean_env> --stage <stage> --env <env> [--timeout <seconds>]
   python3 pg-pipeline-runner.py env-action-result <change> --phase <prepare_env|clean_env> --stage <stage> --env <env> --success <true|false> [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]
@@ -158,7 +158,7 @@ def main() -> None:
                                 help="证据文件绝对路径（可多次传）")
         rec_parser.add_argument("--tasks-updated", action="append", default=[],
                                 dest="tasks_updated",
-                                help="已更新的 task_id（可多次传）")
+                                help="已更新的 task_id。支持两种格式：1) 逗号分隔: --tasks-updated \"1.1,1.2,1.3\"  2) 多次传参: --tasks-updated 1.1 --tasks-updated 1.2。两种格式可混用")
         rec_args = rec_parser.parse_args(sys.argv[3:])
         status = rec_args.status
 
@@ -171,11 +171,19 @@ def main() -> None:
             }))
             return
 
+        # 归一化 --tasks-updated：支持逗号分隔和重复 flag 两种格式，可混用
+        normalized_tasks: list[str] = []
+        for item in rec_args.tasks_updated:
+            for part in item.split(","):
+                part = part.strip()
+                if part:
+                    normalized_tasks.append(part)
+
         result = orch.record(
             status, report_path, rec_args.summary,
             rec_args.outputs, rec_args.issues,
             evidence_paths=rec_args.evidence,
-            tasks_updated=rec_args.tasks_updated,
+            tasks_updated=normalized_tasks,
         )
 
     elif command == "progress":
@@ -190,7 +198,7 @@ def _usage(msg: str = "") -> None:
     print("用法:", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py bootstrap <change>                                          # 执行 bootstrap 副作用", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py next <change>                                              # 获取下一步 action", file=sys.stderr)
-    print("  python3 pg-pipeline-runner.py record <change> --status <status> [--report <path>] [--summary <文本>] [--outputs <...>] [--issues <...>] [--evidence <...>] [--tasks-updated <...>]", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py record <change> --status <status> [--report <path>] [--summary <文本>] [--outputs <...>] [--issues <...>] [--evidence <...>] [--tasks-updated <t1,t2,...|--tasks-updated t1 --tasks-updated t2>]", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py progress <change>                                           # 查看进度", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py env-action <change> --phase prepare_env|clean_env --stage <stage> --env <env> [--timeout <秒>]", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py env-action-result <change> --phase prepare_env|clean_env --stage <stage> --env <env> --success true|false [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]", file=sys.stderr)
@@ -200,6 +208,11 @@ def _usage(msg: str = "") -> None:
     print("record --status: completed | failed | escalate | pass | fail", file=sys.stderr)
     print("env-action --phase: prepare_env | clean_env", file=sys.stderr)
     print("env-action-result --success: true | false   # 布尔值，表示 hook 是否成功执行", file=sys.stderr)
+    print(file=sys.stderr)
+    print("# --tasks-updated 支持两种传参格式：", file=sys.stderr)
+    print("#   1. 逗号分隔: --tasks-updated \"1.1,1.2,1.3\"", file=sys.stderr)
+    print("#   2. 多次传参: --tasks-updated 1.1 --tasks-updated 1.2", file=sys.stderr)
+    print("#   两种格式可在同一命令中混用", file=sys.stderr)
     print(file=sys.stderr)
     print("# 字段语义注解（避免混淆）：", file=sys.stderr)
     print("#   record --status              事件 outcome (completed/failed/escalate/pass/fail)", file=sys.stderr)
