@@ -498,10 +498,14 @@ class Orchestrator:
 
         # 同步 tasks.md checkbox（Item 2）
         # v2.1: 使用 STATUS_* 常量替代硬编码字面量
+        # v2.2+: 优先使用 tasks_updated 做精准标记，空列表时 fallback 到全段标记
         if status in (STATUS_COMPLETED, STATUS_PASS):
             try:
-                from pipeline.tasks_md import mark_phase_completed
-                mark_phase_completed(self.change_root, track, phase)
+                from pipeline.tasks_md import mark_tasks_by_ids, mark_phase_completed
+                if tasks_updated:
+                    mark_tasks_by_ids(self.change_root, track, phase, tasks_updated)
+                else:
+                    mark_phase_completed(self.change_root, track, phase)
             except Exception:
                 pass
 

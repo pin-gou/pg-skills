@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 import re
+import re
 from typing import Any
 
 from pipeline.state import PipelineState, TrackState, PhaseState, SUB_PHASES
@@ -197,6 +198,27 @@ def mark_phase_completed(change_root: str, track: str, phase: str) -> int:
 
     with open(tasks_path, "w", encoding="utf-8") as f:
         f.writelines(lines)
+    return updated
+
+
+def mark_tasks_by_ids(
+    change_root: str, track: str, phase: str,
+    task_ids: list[str],
+) -> int:
+    """按 task_id 列表精准标记 checkbox。
+
+    支持 "X.Y" 格式（如 "1.1", "1.3"），跳过非数字格式。
+    Returns:
+        number of checkboxes updated
+    """
+    updated = 0
+    for tid in task_ids:
+        m = re.match(r'^(\d+)\.(\d+)$', tid.strip())
+        if not m:
+            continue
+        task_y = int(m.group(2))
+        if mark_task(change_root, track, phase, task_y):
+            updated += 1
     return updated
 
 

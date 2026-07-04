@@ -166,14 +166,6 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 5. 运行 `{module_details[0].lint}`（如有）验证代码质量
 6. 运行 `{stage.test_commands[0]}` 验证所有测试通过（test 阶段会自然触发编译）
 
-## 后置步骤：更新 tasks.md
-
-完成所有任务后，**必须立即**将 tasks.md 中对应的任务标记为已完成（`- [ ]` → `- [x]`），然后才能报告完成。
-
-**红线：仅允许 checkbox 变更（`- [ ]` → `- [x]`）。严禁修改 tasks.md 的任何其他内容**——包括任务描述措辞、子条目增删、章节标题、章节结构。如有实现决策需记录，应写入独立 notes 文件。
-
-编排器会负责追加 context-chain 记录，无需 agent 操作。
-
 ---
 
 ## 代码查找：优先使用 explore agent
