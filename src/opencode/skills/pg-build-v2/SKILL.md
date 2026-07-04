@@ -91,6 +91,41 @@ runner 返回 dispatch action 带 `dispatch_file` 字段。编排器：
 }
 ```
 
+### v2.4 result.json 强制落盘
+
+v2.4 起，sub-agent 不仅要返回 JSON，**还必须把 JSON 落盘到 dispatch_file 同前缀的 result.json**：
+
+| dispatch_file | result.json |
+|---------------|-------------|
+| `2-build/002-dev.backend-dev-dispatch.md` | `2-build/002-dev.backend-dev-result.json` |
+| `2-build/018-dev.frontend-fix-dispatch-2.md` | `2-build/018-dev.frontend-fix-result-2.json` |
+| `2-build/028-final-gate-gate-dispatch.md` | `2-build/028-final-gate-gate-result.json` |
+
+**保护流程**（编排器侧）：
+1. 派遣 sub-agent（dispatch_file 路径传过去）
+2. 检查 `expected_result_path` 是否落盘
+3. **缺失 → 编排器自动重试一次**（重新派送同 dispatch_file，prompt 追加"上次未生成 result.json"）
+4. **重试后仍缺失 → fatal** `result_json_missing_after_retry`，pipeline 停止
+
+**sub-agent 必须执行的命令**（从 dispatch prompt 中 `{result_json_path}` 占位符取值）：
+
+```bash
+python3 .opencode/skills/pg-build-v2/scripts/pg-build-result \
+    --mode agent \
+    --status <status> \
+    --summary "<=200 字>" \
+    --track <dev.xxx> --phase <phase> \
+    --output-path {result_json_path} \
+    --require-output \
+    [--report <路径>] [--evidence <路径>] \
+    [--outputs <p1>,<p2>] [--tasks-updated <id>] ...
+```
+
+**关键约束**：
+- `--output-path` 与 `--require-output` 必须同时提供
+- 写入失败 → 脚本 exit 2，sub-agent 应修复后重试
+- **禁止**仅返回 stdout JSON 而不落盘（编排器会视为未完成）
+
 ## Record 状态守卫
 
 | sub | 允许 status |
@@ -153,6 +188,8 @@ reducer 返回 `kind="error"` 时：
 | `错误: 无效 success: <X>` | `--success` 字段被填了非布尔值（如 true/false 之外的字符串） | `--success` 是布尔值（true\|false），与 `--status`（completed/failed/...）和 sub-agent 的 status 字段解耦；应明确区分两个字段 |
 | `schema_violation: ... 要求 --outputs 非空` | dev/test/fix 没传 `--outputs` | sub-agent 必须返回产物列表 |
 | `schema_violation: ... 要求 summary 中含 'gate_score: <0-100>'` | gate/final-gate 阶段 summary 缺评分 | 确保 summary 含 `gate_score: <0-100>, p0_failures: [...]` |
+| `result_json_missing_after_retry` (v2.4) | sub-agent 未调用 `pg-build-result --output-path` | 检查 dispatch prompt 中 `{result_json_path}` 占位符是否被替换；sub-agent 必须执行 `pg-build-result --mode agent --output-path <path> --require-output` |
+| `pg-build-result` exit 2 (v2.4) | `--require-output` 模式下写入失败 | 检查 `--output-path` 目录是否存在、是否可写；路径必须是绝对路径 |
 
 ## 完整代码参考
 
@@ -164,3 +201,8 @@ reducer 返回 `kind="error"` 时：
 - **Dispatch**: `scripts/pipeline/dispatch.py` (构建 action JSON + dispatch file)
 - **Bootstrap**: `scripts/bootstrap.py` (pipeline 启动副作用)
 - **Templates**: `prompt-templates/*.yaml` (8 个 phase 模板)
+- **v2.4 result.json 落盘**:
+  - `scripts/pg-build-result` (`--output-path` / `--require-output` 参数)
+  - `scripts/pipeline/orchestrator.py:_derive_result_path` (dispatch_file → result.json 派生)
+  - `scripts/pipeline/dispatch.py` (返回 `expected_result_path` 字段)
+  - `prompt-templates/blocks/sub_agent_contract.yaml` (强制落盘指令块)
