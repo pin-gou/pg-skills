@@ -371,6 +371,15 @@ def build_action(
         dispatch_seq=ds,
     )
 
+    # v2.4: 派生 result JSON 路径（与 dispatch_file 同前缀，扩展名 .result.json）
+    # dispatch_file 命名规则: <seq>-<track>-<phase>-dispatch[-cycle].md
+    # result 命名规则:     <seq>-<track>-<phase>-result[-cycle].json
+    result_prefix = f"{ds}-{track}-{phase}-result"
+    if cycle > 1:
+        result_prefix += f"-{cycle}"
+    expected_result_path = os.path.join(change_root, "2-build", f"{result_prefix}.json")
+    ctx["result_json_path"] = expected_result_path  # 注入 prompt，供 sub-agent 使用
+
     result: dict[str, Any] = {
         "action": "dispatch",
         "item": track,
@@ -380,6 +389,7 @@ def build_action(
         "dispatch_seq": ds,
         "report_seq": rs,
         "dispatch_file": filepath,
+        "expected_result_path": expected_result_path,  # v2.4 新增
     }
     return result
 
@@ -423,6 +433,12 @@ def build_final_gate_action(
         dispatch_seq=ds,
     )
 
+    # v2.4: 派生 final-gate result JSON 路径
+    expected_result_path = os.path.join(
+        change_root, "2-build", f"{ds}-final-gate-gate-result.json"
+    )
+    ctx["result_json_path"] = expected_result_path
+
     return {
         "action": "dispatch_final_gate",
         "item": "final-gate",
@@ -430,4 +446,5 @@ def build_final_gate_action(
         "dispatch_seq": ds,
         "report_seq": rs,
         "dispatch_file": filepath,
+        "expected_result_path": expected_result_path,  # v2.4 新增
     }

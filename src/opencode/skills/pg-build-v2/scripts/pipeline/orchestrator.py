@@ -53,6 +53,79 @@ def _change_root(change: str) -> str:
     return os.path.join(CHANGES_DIR, change)
 
 
+def _derive_result_path(state: PipelineState, track: str, phase: str) -> str:
+    """v2.4 新增：派生当前 track/phase 对应的 result JSON 路径。
+
+    实现方式：扫描 2-build/ 找最新匹配的 `<seq>-<track>-<phase>-dispatch[-cycle].md`，
+    提取 seq 和 cycle，构造对应的 result.json 路径。
+
+    命名规则（与 dispatch.py 一致）：
+      - 普通 phase: <seq>-<track>-<phase>-result.json
+      - fix phase 加 cycle: <seq>-<track>-phase-result-<cycle>.json
+      - final-gate: <seq>-final-gate-gate-result.json
+
+    Args:
+        state: 当前 PipelineState（提供 change name）
+        track: 当前 track id
+        phase: 当前 phase
+
+    Returns:
+        expected_result_path 绝对路径（不含则返回空字符串）
+    """
+    if not track or not phase or not state.change:
+        return ""
+
+    build_dir = os.path.join(_change_root(state.change), "2-build")
+    if not os.path.isdir(build_dir):
+        return ""
+
+    # 扫描 2-build/ 下匹配 "<seq>-<track>-<phase>-dispatch[-cycle].md" 的最新文件
+    if track == FINAL_GATE_TRACK:
+        prefix_check = "final-gate-gate-dispatch"
+    else:
+        prefix_check = f"{track}-{phase}-dispatch"
+
+    matches: list[tuple[int, int, str]] = []  # (seq, cycle, filename)
+    seq_re = __import__("re").compile(r"^(\d{3})-(.+)$")
+    for fname in os.listdir(build_dir):
+        if not fname.endswith(".md"):
+            continue
+        m = seq_re.match(fname)
+        if not m:
+            continue
+        rest = m.group(2)
+        if not rest.startswith(prefix_check):
+            continue
+
+        # 提取 cycle (suffix -<n> 在 .md 前)
+        body = rest[:-3]  # 去 .md
+        cycle = 1
+        # body 形如 "<track>-<phase>-dispatch[-<cycle>]"
+        if "-" in body:
+            parts = body.rsplit("-", 1)
+            if parts[1].isdigit():
+                cycle = int(parts[1])
+        matches.append((int(m.group(1)), cycle, fname))
+
+    if not matches:
+        return ""
+
+    # 取最大 seq (优先) + 最大 cycle
+    matches.sort(key=lambda x: (x[0], x[1]))
+    ds, cycle, _ = matches[-1]
+
+    # 构造 result.json 路径
+    if track == FINAL_GATE_TRACK:
+        filename = f"{ds:03d}-final-gate-gate-result.json"
+    else:
+        prefix = f"{ds:03d}-{track}-{phase}-result"
+        if cycle > 1:
+            prefix += f"-{cycle}"
+        filename = f"{prefix}.json"
+
+    return os.path.join(build_dir, filename)
+
+
 class Orchestrator:
     """Pipeline 编排器。
 
@@ -404,6 +477,33 @@ class Orchestrator:
         if not track or not phase:
             return {"action": "error", "fatal": False,
                     "reason": "No active item to record"}
+
+        # ── v2.4: result JSON 落盘校验 ──
+        # 派生 expected_result_path（与 dispatch.py 命名规则一致）
+        expected_result_path = _derive_result_path(self.state, track, phase)
+        if expected_result_path and not os.path.isfile(expected_result_path):
+            # v2.4: 触发 fatal（编排器已重试一次，这里是第二次检查）
+            return {
+                "action": "error",
+                "fatal": True,
+                "reason": (
+                    f"result_json_missing_after_retry: "
+                    f"sub-agent 未生成 {expected_result_path}\n"
+                    f"重试一次后仍缺失。sub-agent 必须调用:\n"
+                    f"  pg-build-result --output-path {expected_result_path} --require-output ..."
+                ),
+                "phase": phase,
+                "track": track,
+                "hint": (
+                    "v2.4 保护规则：编排器在 dispatch 后检查 "
+                    "<seq>-<track>-<phase>.result.json 是否落盘。\n"
+                    "重试后仍缺失 = sub-agent 未执行 pg-build-result 脚本。\n"
+                    "修复方法：sub-agent 必须调用:\n"
+                    f"  python3 .opencode/skills/pg-build-v2/scripts/pg-build-result "
+                    f"--mode agent --output-path {expected_result_path} --require-output "
+                    f"--status <status> --summary \"<summary>\" ..."
+                ),
+            }
 
         # ── Sub-agent 返回契约校验（v2.1）──
         # 失败时不推进 state、不写 event log，直接返回 error action
