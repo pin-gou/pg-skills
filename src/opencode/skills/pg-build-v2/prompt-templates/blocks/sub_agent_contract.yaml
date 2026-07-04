@@ -28,7 +28,7 @@ block: |
   | `--summary` | ✅ | 一句话中文摘要，**<= 200 字** |
   | `--track` | ✅ | 如 `dev.backend` / `dev.frontend` |
   | `--phase` | ✅ | `test` / `dev` / `verify` / `gate` / `fix` / `fix-gate` / `simple` |
-  | `--report` | verify/gate 必填 | 报告文件绝对路径，文件必须已写盘 |
+  | `--report` | verify/gate 必填 | 报告文件绝对路径，**文件必须已写盘**（生成后需 `ls` / `cat` 验证文件确实存在） |
   | `--evidence` | verify/gate 至少 1 个 | 证据文件绝对路径（可多次传） |
   | `--outputs` | 选填 | 产物文件列表，逗号分隔 |
   | `--issues` | 选填 | 问题列表，逗号分隔 |
@@ -91,6 +91,7 @@ block: |
   - 报告不存在：`--report /tmp/not_exist.md` ← 触发 report_missing
   - status 不匹配 phase：`--phase gate --status completed` ← 触发 schema_violation
   - gate summary 无 gate_score：`"8/9 检查通过"` ← 触发 schema_violation
+  - 空 report_path：`"report_path": ""` ← 后续 verify/gate 阶段可能因缺少历史报告而中断
 
   ### 为什么用脚本而不是手写 JSON
 

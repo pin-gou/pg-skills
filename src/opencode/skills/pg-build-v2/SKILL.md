@@ -40,9 +40,11 @@ RUNNER="python3 .opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py"
 $RUNNER bootstrap <change>
 $RUNNER next <change>
 $RUNNER record <change> <status> --report <path> --summary "<摘要>" [--outputs <p1>,<p2>] [--issues <i1>,<i2>] [--evidence <e1> [--evidence <e2> ...]] [--tasks-updated <t1> [--tasks-updated <t2> ...]]
+  > **注意**：gate/final-gate 阶段的 `--summary` 必须包含 `gate_score: <0-100>`，例：`--summary "8/9 检查通过, gate_score: 91, p0_failures: []"`
 $RUNNER progress <change>
 $RUNNER env-action <change> <phase> <stage> <env> [hook_timeout_seconds]
 $RUNNER env-action-result <change> <phase> <stage> <env> <ok> [log_path] [exit_code] [started_ts] [error]
+  > **注意**：`<phase>` 参数必须填 `prepare_env` 或 `clean_env`（不是 stage 名）
 ```
 
 **status**: `completed | failed | escalate | pass | fail`
@@ -55,11 +57,11 @@ $RUNNER env-action-result <change> <phase> <stage> <env> <ok> [log_path] [exit_c
 
 ```
 循环:
-  0. $RUNNER bootstrap <change>  → 若返回 env_hook_plan，bash 执行后调 env-action-result
+  0. $RUNNER bootstrap <change>  → 若返回 env_hook_plan，bash 执行后调 env-action-result（phase 填 prepare_env/clean_env）
   1. $RUNNER next <change>       → 检查 action 字段
   2. switch(action):
        "env_switch"        → env-action → bash exec → env-action-result → 回 next
-       "dispatch"          → 派遣 sub-agent，传 dispatch_file 路径（绝不读其内容）
+       "dispatch"          → 派遣 sub-agent，传 dispatch_file 路径（不可修改）
        "dispatch_final_gate" → 派遣 pg-build/gate agent
        "advance"           → 回步骤 1
        "done"              → 触发 verify-and-merge
@@ -69,7 +71,7 @@ $RUNNER env-action-result <change> <phase> <stage> <env> <ok> [log_path] [exit_c
 ### Dispatch 协议
 
 runner 返回 dispatch action 带 `dispatch_file` 字段。编排器：
-1. **绝不读取 dispatch_file 内容**
+1. **绝不允许修改 dispatch_file 内容**（可读取用于诊断，但绝不改动）
 2. 正确用法：`task(prompt="任务指令在 {dispatch_file} 中，请读取并执行，完成后返回 JSON")`
 
 ### Sub-agent 返回契约
@@ -146,6 +148,7 @@ reducer 返回 `kind="error"` 时：
 | `--report /tmp/nonexistent.md` → 报错 | 报告文件不存在 | 确认文件已写盘 |
 | env hook 卡死循环 | 编排器忘调 `env-action-result` | 每次 bash 执行后必调此命令 |
 | `schema_violation: ... 要求 --outputs 非空` | dev/test/fix 没传 `--outputs` | sub-agent 必须返回产物列表 |
+| `schema_violation: ... 要求 summary 中含 'gate_score: <0-100>'` | gate/final-gate 阶段 summary 缺评分 | 确保 summary 含 `gate_score: <0-100>, p0_failures: [...]` |
 
 ## 完整代码参考
 

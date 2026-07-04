@@ -220,7 +220,9 @@ enabled_stages:
 
 > **重要**：生成前先读 [./references/orchestration-model.md](./references/orchestration-model.md)「Track 类型」段确认每个 track 是 standard 还是 simple。**simple track 只生成 1 个章节**（canonical form heading 含 `(simple track: 派遣 pg-build/simple agent 执行 commands)` + body 单 `- 无` 行），不走 4 子章节（test/dev/verify/gate）模板。
 
-**生成算法**（stages × tracks 二维展开 + track 类型分流）：见 [./references/tasks-templates.md](./references/tasks-templates.md)。
+**生成算法**（两阶段骨架填充法）：见 [./references/tasks-templates.md](./references/tasks-templates.md)。
+
+**操作方法**：LLM 遵行两阶段法——先按 `stage.tracks` 数组顺序机械生成所有章节标题骨架（simple=1 个 heading，standard=4 个 heading，N 连续递增），heading 骨架确认无误后再逐个填充 body 内容。禁止在填充阶段调整 heading 顺序、跳过非 affected track 或调换 simple/standard 先后顺序。
 
 核心规则摘要：
 - **environment 选择**：LLM 根据 project.yaml 中 stage 的 `environment.selection_rules` 选择环境后在顶部 block quote 留一行 `> - **environment 选择**：{stage} → {env}`（仅人类参考，CLI 工具 pg-gen-manifest.py 会解析此行的 stage 到 env 映射）
@@ -231,6 +233,7 @@ enabled_stages:
 - simple track 章节标题使用 `## <N>. {stage.name}.{track_id} - {stage.name} {track_id}  (simple track: 派遣 pg-build/simple agent 执行 commands)` 格式
 - 任务编号使用 `- [ ] <N>.<M>` 格式
 - 不在 `affected_tracks` 中的 track 所有任务写 `- 无`
+- **track 级 `on_conditions`**：若 track 定义了 `on_conditions`，所有条件未命中时该 track 不生成任何章节（完全跳过，不占章节号）
 - 所有 stage 结束后必须追加 `final-gate` 章节
 
 **约束**（来自统一配置 `rules.tasks`）：

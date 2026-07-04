@@ -512,6 +512,33 @@ def _parse_tasks_md_track_ids(tasks_md_path):
     return result
 
 
+def _parse_manifest_track_ids(manifest_path):
+    """Extract qualified track_ids from execution-manifest.yaml.
+
+    Parses stages[].tracks[].id and prefixes with stage name.
+    Excludes final_gate section (not a track).
+    Returns a list preserving manifest order, deduplicated.
+    """
+    if not os.path.isfile(manifest_path):
+        return []
+    try:
+        with open(manifest_path, encoding="utf-8") as f:
+            manifest = yaml.safe_load(f) or {}
+        result = []
+        seen = set()
+        for stage in manifest.get("stages", []):
+            stage_name = stage.get("name", "")
+            for t in stage.get("tracks", []):
+                tid = t["id"] if isinstance(t, dict) else t
+                qualified = f"{stage_name}.{tid}" if stage_name else tid
+                if qualified not in seen:
+                    seen.add(qualified)
+                    result.append(qualified)
+        return result
+    except Exception:
+        return []
+
+
 def _git_diff_names(default_branch):
     """Return the set of changed file paths between origin/<default> and HEAD.
 
@@ -530,17 +557,23 @@ def _git_diff_names(default_branch):
 def _infer_affected_tracks(config, change_dir, default_branch, explicit=None):
     """Infer the set of tracks affected by a change.
 
-    3-layer fallback (first hit wins, simple tracks always filtered):
+    4-layer fallback (first hit wins, simple tracks always filtered):
       1. explicit (CLI --affected-tracks) → use as-is, still filter simple
-      2. tasks.md ## headings → dedup, filter simple
-      3. git diff → tracks.<t>.root path prefix match, filter simple
-      4. regression.suite keys → filter simple (last resort)
+      2. execution-manifest.yaml → tracks in stages[].tracks[].id (already filtered by gen script)
+      3. tasks.md ## headings → dedup, filter simple
+      4. git diff → tracks.<t>.root path prefix match, filter simple
+      5. regression.suite keys → filter simple (last resort)
 
     Returns a list of track_id strings, in first-seen order.
     """
     if explicit:
         candidate_iter = (t.strip() for t in explicit.split(",") if t.strip())
         return [t for t in candidate_iter if not _is_simple_track(config, t)]
+
+    manifest_path = os.path.join(change_dir, "execution-manifest.yaml")
+    manifest_tracks = _parse_manifest_track_ids(manifest_path)
+    if manifest_tracks:
+        return [t for t in manifest_tracks if not _is_simple_track(config, t)]
 
     tasks_md = os.path.join(change_dir, "tasks.md")
     track_ids = _parse_tasks_md_track_ids(tasks_md)
@@ -717,6 +750,8 @@ def cmd_pg_verify_and_merge(args, config, project_root):
                                       explicit=explicit)
     if explicit_given:
         source = "cli"
+    elif _parse_manifest_track_ids(os.path.join(change_dir, "execution-manifest.yaml")):
+        source = "manifest"
     elif _parse_tasks_md_track_ids(os.path.join(change_dir, "tasks.md")):
         source = "tasks_md"
     elif _git_diff_names(default_branch) is not None:

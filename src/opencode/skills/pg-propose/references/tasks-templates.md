@@ -8,64 +8,89 @@ tasks.md 的章节顺序由 **stages × tracks** 二维展开驱动。
 
 ---
 
-## 生成算法（stages × tracks 二维展开）
+## 生成算法（两阶段骨架填充法）
 
-```python
-# 阶段零：决定哪些 stage 实际启用（受 on_conditions 控制）
-# 见 references/orchestration-model.md「on_conditions & stage 动态启用」段
-enabled_stages = []
-for stage in config.stages:
-    on_conditions = stage.get("on_conditions")
-    if not on_conditions:
-        # 无 on_conditions = 常驻 stage，永远启用
-        enabled_stages.append(stage)
-        continue
-    # LLM 推理（pg-propose 阶段 2c.5）
-    if any(evaluate_condition(c, affected_paths, proposal_text) for c in on_conditions):
-        enabled_stages.append(stage)
+### 阶段零：决定 enabled_stages（受 on_conditions 控制）
 
-# 阶段一：按 enabled_stages 顺序、每个 stage 的 tracks 顺序生成章节
+on_conditions 评估逻辑不变，与之前相同——详见 [./orchestration-model.md](./orchestration-model.md)「on_conditions & stage 动态启用」段。
+
+最终输出 `enabled_stages` 列表（常驻 stage + 触发的 stage）。
+
+### 阶段一：生成章节标题骨架（机械顺序，无分支）
+
+按 `enabled_stages` 顺序，对每个 stage 严格按 `stage.tracks` 数组顺序执行，**禁止按 affected_tracks 分组、禁止跳过非 affected track、禁止调换 simple/standard 先后顺序**：
+
+```
 N = 1
-chapters = []
+skeleton = []
 
-for stage in enabled_stages:  # 改用 enabled_stages 而非 config.stages
-    for track_id in stage.tracks:
-        # ---- 关键改动: 按 track 类型分流 ----
-        # standard track: 走 4 子章节模板 (test/dev/verify/gate)
-        # simple track:   走 1 个 simple 章节模板 (派遣 pg-build/simple agent 执行 commands)
-        # 详见 orchestration-model.md「Track 类型」段
-        track_cfg = (config.get("tracks") or {}).get(track_id) or {}
+for stage in enabled_stages:
+    for track_id in stage.tracks:   # ← 严格按 config 数组顺序，禁止重排
+        track_cfg = config.tracks[track_id]
+
+        # track 级 on_conditions: 所有条件未命中则跳过该 track (参考 orchestration-model.md)
+        track_on_conditions = track_cfg.get("on_conditions", [])
+        if track_on_conditions and not any(evaluate_condition(c, affected_paths, proposal_text) for c in track_on_conditions):
+            continue
+
         is_simple = track_cfg.get("type") == "simple"
 
         if is_simple:
-            # simple track: 无论是否在 affected_tracks 中, 都生成 1 个章节
-            # runner 在 cmd_next 时会改写为 canonical form (已对齐)
-            chapters.append(generate_simple_chapter(N, track_id, stage))
-            N += 1
-            continue
-
-        # 标准 track: 检查是否在 affected_tracks (real-integration 总是算)
-        is_affected = track_id in affected_tracks or track_id == "real-integration"
-        if is_affected:
-            # 每个 track 生成 4 个子章节
-            chapters.append(generate_chapter(N, track_id, stage, "test"))
-            N += 1
-            chapters.append(generate_chapter(N, track_id, stage, "dev"))
-            N += 1
-            chapters.append(generate_chapter(N, track_id, stage, "verify"))
-            N += 1
-            chapters.append(generate_chapter(N, track_id, stage, "gate"))
+            # simple track: 1 个 heading，无论是否在 affected_tracks 中
+            heading = "## {N}. {stage.name}.{track_id} - {stage.name} {track_id}"
+            skeleton.append(heading)
             N += 1
         else:
-            # 未改动 track：每个子章节写 "- 无"
+            # standard track: 4 个 heading（test/dev/verify/gate）
             for sub in ["test", "dev", "verify", "gate"]:
-                chapters.append(generate_empty_chapter(N, track_id, sub))
+                label = "{stage.name} 测试先行（{stage.test_key}）" if sub == "test" \
+                   else "{stage.name} 实现开发" if sub == "dev" \
+                   else "{stage.name} 集成验证" if sub == "verify" \
+                   else "{stage.name} 门控审查"
+                heading = "## {N}. {stage.name}.{track_id}:{sub} - {label}"
+                skeleton.append(heading)
                 N += 1
 
-# 阶段二：final-gate 章节强制追加
-chapters.append(generate_final_gate(N))
-N += 1
+# 追加 final-gate
+skeleton.append("## {N}. final-gate - 最终门控审查")
 ```
+
+**输出**：仅含 `##` 标题行的 tasks.md 骨架，body 为空。
+
+**track 级 `on_conditions`**：如果某 track 在 config 中定义了 `on_conditions`，上述骨架循环会在进入该 track 时先评估所有条件（LLM 推理，路径 + 语义维度，OR 语义）。所有条件均未命中 → 该 track 的 heading 完全跳过（不占章节号，不影响后续 track 的 N）。无 `on_conditions` 的 track 行为不变（always generate）。
+
+### 阶段二：按骨架顺序逐个填充 body
+
+阶段一的 heading（含编号 N、track_id、sub 前缀、标签）**禁止修改**，只填充 body：
+
+```
+final_lines = []
+
+for heading in skeleton:
+    parse track_id and sub from heading
+
+    if heading is final-gate:
+        fill final-gate template body
+        continue
+
+    is_simple = config.tracks[track_id].type == "simple"
+    if is_simple:
+        body = "- [ ] {N}.1 执行 tracks.{track_id}.commands（runner 派遣 pg-build/simple agent 按序执行）"
+    else:
+        is_affected = track_id in affected_tracks
+        if is_affected:
+            body = fill_real_tasks(track_id, stage, sub)  # 用具体实现任务替换
+        else:
+            body = "- 无"
+
+    final_lines.append(heading + "\n\n" + body)
+```
+
+**硬约束**：阶段一的 heading **禁止**被阶段二修改。填充 body 时禁止改变标题文本、编号、标签。
+
+### 阶段二各子章节模板
+
+standard track 各 sub 的 body 内容参照下方「各子章节模板」段填充。
 
 ### 关键变化（v3.0 升级）
 
@@ -128,7 +153,9 @@ N += 1
 - 每个 track 生成 4 个子章节：`test`、`dev`、`verify`、`gate`
 - 每个章节使用 `## <N>. {stage.name}.{track_id}:{sub} - <label>` 格式
 - 任务编号使用 `- [ ] <N>.<M>` 格式（N=章节号，M=任务序号，从 1 开始）
-- 不在 `affected_tracks` 中的 track 所有任务写 `- 无`
+- **章节标题必须按阶段一的骨架原样输出，禁止修改**——禁止按 affected_tracks 分组重排、禁止跳过非 affected track、禁止调换 simple/standard 先后顺序
+- 每个 track 在 `stage.tracks` 中**必然**有对应的 heading 章节（standard=4 个，simple=1 个），除非该 track 定义了 `on_conditions` 且所有条件均未命中（此时完全跳过，不占章节号）
+- 不在 `affected_tracks` 中的 standard track 所有任务写 `- 无`
 - 所有 track 结束后必须追加 `final-gate` 章节（用于归档前对跨 stage 依赖项的最终审查）
 
 ---

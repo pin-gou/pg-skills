@@ -41,16 +41,17 @@ manager agent **无需显式传入** `AffectedTracks`（除非有特殊原因要
 
 ### AffectedTracks 推断（自动）
 
-**3 层 fallback**，第一个命中的优先：
+**4 层 fallback**，第一个命中的优先：
 
 1. **CLI 参数**：`pg-parse-config.py pg-verify-and-merge --affected-tracks backend,frontend`（manager agent 显式覆盖时使用）
-2. **`tasks.md` 章节号**：读 `<change>/tasks.md` 的 `## {N}. {stage.name}.{track_id} ...` 二级章节，提取所有 `track_id` 并去重
-3. **`git diff` 路径前缀匹配**：`git diff origin/<Git.default_branch> HEAD --name-only` 与 `tracks.<t>.modules[*].root` 做前缀匹配
-4. **`regression.suite` keys 兜底**：所有 `regression.suite.<n>` 的 key（去掉 simple track）
+2. **`execution-manifest.yaml` tracks**：读 `<change>/execution-manifest.yaml` 的 `stages[].tracks[].id`，拼为 `dev.frontend` 格式（pg-gen-manifest.py 已自动过滤全部 `- 无` 的 track，比 tasks.md 更精确）
+3. **`tasks.md` 章节号**：读 `<change>/tasks.md` 的 `## {N}. {stage.name}.{track_id} ...` 二级章节，提取所有 `track_id` 并去重
+4. **`git diff` 路径前缀匹配**：`git diff origin/<Git.default_branch> HEAD --name-only` 与 `tracks.<t>.modules[*].root` 做前缀匹配
+5. **`regression.suite` keys 兜底**：所有 `regression.suite.<n>` 的 key（去掉 simple track）
 
-**Simple track 永远过滤**：`tracks.<t>.type == "simple"` 的 track（如 `openapi-gen`）在所有 4 层路径中都会被剔除，因为它们跑 commands 不跑 TDVG，没有 regression.suite 对应。simple track 的代码生成已经在 pg-build 阶段由 runner 直接验证过。
+**Simple track 永远过滤**：`tracks.<t>.type == "simple"` 的 track（如 `openapi-gen`）在所有 5 层路径中都会被剔除，因为它们跑 commands 不跑 TDVG，没有 regression.suite 对应。simple track 的代码生成已经在 pg-build 阶段由 runner 直接验证过。
 
-**输出位置**：`pg-parse-config.py pg-verify-and-merge` 输出的 `__meta.affected_tracks` 数组 + `__meta.affected_tracks_source` 字符串（`cli` / `tasks_md` / `git_diff` / `suite_keys`），方便 manager agent 调试。
+**输出位置**：`pg-parse-config.py pg-verify-and-merge` 输出的 `__meta.affected_tracks` 数组 + `__meta.affected_tracks_source` 字符串（`cli` / `manifest` / `tasks_md` / `git_diff` / `suite_keys`），方便 manager agent 调试。
 
 ## 配置依赖
 
