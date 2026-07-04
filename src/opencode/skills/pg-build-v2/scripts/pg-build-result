@@ -104,18 +104,18 @@ def _emit_agent_mode(args: argparse.Namespace) -> int:
 
 
 def _emit_runner_mode(args: argparse.Namespace) -> int:
-    """输出可直接拼到 `runner record` 命令后的 CLI 参数字符串。"""
-    parts: list[str] = [args.status]
+    """输出可直接拼到 `runner record <change>` 命令后的 CLI 参数字符串。"""
+    parts: list[str] = [f"--status {args.status}"]
     if args.report:
-        parts.append(args.report)
-    parts.append(args.summary)
+        parts.append(f"--report {args.report}")
+    parts.append(f"--summary \"{args.summary}\"")
     if args.outputs:
-        parts.append(args.outputs)
+        parts.append(f"--outputs {args.outputs}")
     if args.issues:
-        parts.append(args.issues)
-    # runner record CLI: <change> <status> [report_path] [summary] [outputs] [issues]
-    # 这里只输出 status 之后的参数；编排器需要自行加上 change
-    print(" ".join(f'"{p}"' if " " in p else p for p in parts))
+        parts.append(f"--issues {args.issues}")
+    # runner record CLI: <change> --status <status> [--report <path>] [--summary <文本>] ...
+    # 这里只输出 --status 之后的参数；编排器需要自行加上 change
+    print(" ".join(p for p in parts))
     return 0
 
 

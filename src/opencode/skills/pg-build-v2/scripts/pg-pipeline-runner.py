@@ -4,14 +4,15 @@
 用法：
   python3 pg-pipeline-runner.py bootstrap <change>
   python3 pg-pipeline-runner.py next <change>
-  python3 pg-pipeline-runner.py record <change> <status> [report_path] [summary] [outputs] [issues]
+  python3 pg-pipeline-runner.py record <change> --status <status> [--report <path>] [--summary <文本>] [--outputs <p1,p2>] [--issues <i1,i2>] [--evidence <e>] [--tasks-updated <t>]
   python3 pg-pipeline-runner.py progress <change>
-  python3 pg-pipeline-runner.py env-action <change> <phase> <stage> <env> [hook_timeout_seconds]
-  python3 pg-pipeline-runner.py env-action-result <change> <phase> <stage> <env> <ok> [log_path] [exit_code] [started_ts] [error]
+  python3 pg-pipeline-runner.py env-action <change> --phase <prepare_env|clean_env> --stage <stage> --env <env> [--timeout <seconds>]
+  python3 pg-pipeline-runner.py env-action-result <change> --phase <prepare_env|clean_env> --stage <stage> --env <env> --success <true|false> [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]
 """
 
 from __future__ import annotations
 
+import argparse
 import json
 import os
 import sys
@@ -59,58 +60,56 @@ def main() -> None:
     # ── env-action 命令（独立命令，不依赖 Orchestrator）──
     # v2.1.1: 只返回 plan，**不执行**。编排器按 plan 自己 bash 执行。
     if command == "env-action":
-        if len(sys.argv) < 5:
-            _usage("env-action 命令缺少参数: <change> <phase> <stage> <env> [hook_timeout_seconds]")
-            sys.exit(1)
-        phase_name = sys.argv[3]
-        if phase_name not in ("prepare_env", "clean_env"):
-            _usage(f"无效 phase: {phase_name}，有效值: prepare_env | clean_env")
-            sys.exit(1)
-        stage_name = sys.argv[4]
-        env_name = sys.argv[5] if len(sys.argv) > 5 else ""
-        hook_timeout = int(sys.argv[6]) if len(sys.argv) > 6 and sys.argv[6] else None
+        ea_parser = argparse.ArgumentParser(prog="pg-pipeline-runner.py env-action", add_help=False)
+        ea_parser.add_argument("change", nargs="?", default=change)
+        ea_parser.add_argument("--phase", required=True, choices=("prepare_env", "clean_env"),
+                               help="环境 hook 阶段 (prepare_env|clean_env)")
+        ea_parser.add_argument("--stage", required=True, help="阶段名 (如 dev)")
+        ea_parser.add_argument("--env", required=True, help="环境名 (如 dev-local)")
+        ea_parser.add_argument("--timeout", type=int, default=None, help="hook 超时秒数")
+        ea_args = ea_parser.parse_args(sys.argv[3:])
         result = _bootstrap.cli_env_action(
-            change, phase_name, stage_name, env_name,
-            hook_timeout_seconds=hook_timeout,
+            change, ea_args.phase, ea_args.stage, ea_args.env,
+            hook_timeout_seconds=ea_args.timeout,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
-    # ── env-action-result 命令（编排器在 bash 执行完 env hook 后调用）──
+# ── env-action-result 命令（编排器在 bash 执行完 env hook 后调用）──
     if command == "env-action-result":
-        if len(sys.argv) < 7:
-            _usage("env-action-result 命令缺少参数: <change> <phase> <stage> <env> <success> [log_path] [exit_code] [started_ts] [error]\n"
-                   "  注：<success> 是布尔值 true|false，表示 hook 是否成功执行（与 record 的 <status> 字段不同）")
-            sys.exit(1)
-        phase_name = sys.argv[3]
-        if phase_name not in ("prepare_env", "clean_env"):
-            _usage(f"无效 phase: {phase_name}，有效值: prepare_env | clean_env")
-            sys.exit(1)
-        stage_name = sys.argv[4]
-        env_name = sys.argv[5]
-        success_str = sys.argv[6].lower()
+        ear_parser = argparse.ArgumentParser(prog="pg-pipeline-runner.py env-action-result", add_help=False)
+        ear_parser.add_argument("change", nargs="?", default=change)
+        ear_parser.add_argument("--phase", required=True, choices=("prepare_env", "clean_env"),
+                                help="环境 hook 阶段")
+        ear_parser.add_argument("--stage", required=True, help="阶段名 (如 dev)")
+        ear_parser.add_argument("--env", required=True, help="环境名 (如 dev-local)")
+        ear_parser.add_argument("--success", required=True,
+                                help="布尔值 true|false — hook 是否成功执行")
+        ear_parser.add_argument("--log-path", default="", help="hook 日志文件路径")
+        ear_parser.add_argument("--exit-code", type=int, default=None, help="hook 进程退出码")
+        ear_parser.add_argument("--started-ts", default="", help="hook 启动时间戳")
+        ear_parser.add_argument("--error", default="", help="hook 错误信息")
+        ear_args = ear_parser.parse_args(sys.argv[3:])
+
+        success_str = ear_args.success.lower()
         if success_str in ("true", "1"):
             success = True
         elif success_str in ("false", "0"):
             success = False
         else:
-            _usage(f"无效 success: {sys.argv[6]}。\n"
+            _usage(f"无效 success: {ear_args.success}。\n"
                    f"  提示：success 是布尔值 (true|false)，表示 hook 是否成功执行。\n"
-                   f"       与 record 命令的 <status> 字段 (completed/failed/...) 含义不同，\n"
+                   f"       与 --status (completed/failed/...) 含义不同，\n"
                    f"       与 sub-agent 返回 JSON 的 status 字段也不同。\n"
                    f"  有效值: true | false")
             sys.exit(1)
-        log_path = sys.argv[7] if len(sys.argv) > 7 else ""
-        exit_code = int(sys.argv[8]) if len(sys.argv) > 8 and sys.argv[8] else None
-        started_ts = sys.argv[9] if len(sys.argv) > 9 else ""
-        error = sys.argv[10] if len(sys.argv) > 10 else ""
         result = _bootstrap.cli_env_action_result(
-            change, phase_name, stage_name, env_name,
+            change, ear_args.phase, ear_args.stage, ear_args.env,
             success=success,
-            log_path=log_path,
-            exit_code=exit_code,
-            started_event_ts=started_ts or None,
-            error=error or None,
+            log_path=ear_args.log_path,
+            exit_code=ear_args.exit_code,
+            started_event_ts=ear_args.started_ts or None,
+            error=ear_args.error or None,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
@@ -143,10 +142,9 @@ def main() -> None:
         return
 
     elif command == "record":
-        # v2.2: argparse 风格 — 仅支持 --flags
-        from argparse import ArgumentParser as _ArgParser
-        rec_parser = _ArgParser(prog="pg-pipeline-runner.py record", add_help=False)
-        rec_parser.add_argument("status", nargs="?", default="",
+        rec_parser = argparse.ArgumentParser(prog="pg-pipeline-runner.py record", add_help=False)
+        rec_parser.add_argument("change", nargs="?", default=change)
+        rec_parser.add_argument("--status", required=True, choices=tuple(sorted(VALID_STATUSES)),
                                 help="record status: completed|failed|escalate|pass|fail")
         rec_parser.add_argument("--report", default="",
                                 help="报告文件绝对路径")
@@ -162,14 +160,7 @@ def main() -> None:
                                 dest="tasks_updated",
                                 help="已更新的 task_id（可多次传）")
         rec_args = rec_parser.parse_args(sys.argv[3:])
-
         status = rec_args.status
-        if not status:
-            _usage("record 命令缺少 <status> 参数")
-            sys.exit(1)
-        if status not in VALID_STATUSES:
-            _usage(f"无效 status: {status}，有效值: {', '.join(sorted(VALID_STATUSES))}")
-            sys.exit(1)
 
         # —report 不存在时立刻退出（不调 orchestrator）
         report_path = rec_args.report
@@ -197,23 +188,23 @@ def _usage(msg: str = "") -> None:
     if msg:
         print(f"错误: {msg}", file=sys.stderr)
     print("用法:", file=sys.stderr)
-    print("  python3 pg-pipeline-runner.py bootstrap <change>       # 执行 bootstrap 副作用（不含 env hook） + 检测配置", file=sys.stderr)
-    print("  python3 pg-pipeline-runner.py next <change>           # 获取下一步 action", file=sys.stderr)
-    print("  python3 pg-pipeline-runner.py record <change> <status> [report_path] [summary] [outputs] [issues]", file=sys.stderr)
-    print("  python3 pg-pipeline-runner.py progress <change>        # 查看进度", file=sys.stderr)
-    print("  python3 pg-pipeline-runner.py env-action <change> <phase> <stage> <env> [hook_timeout_seconds] # 返回 env hook plan（不执行）", file=sys.stderr)
-    print("  python3 pg-pipeline-runner.py env-action-result <change> <phase> <stage> <env> <success:true|false> [log_path] [exit_code] [started_ts] [error] # env hook 执行完上报", file=sys.stderr)
-    print("  python3 pg-pipeline-runner.py replay <change>          # v2.1: 从 events 重建 state", file=sys.stderr)
-    print("  python3 pg-pipeline-runner.py verify-replay <change>   # v2.1: 对比 snapshot vs replay", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py bootstrap <change>                                          # 执行 bootstrap 副作用", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py next <change>                                              # 获取下一步 action", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py record <change> --status <status> [--report <path>] [--summary <文本>] [--outputs <...>] [--issues <...>] [--evidence <...>] [--tasks-updated <...>]", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py progress <change>                                           # 查看进度", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py env-action <change> --phase prepare_env|clean_env --stage <stage> --env <env> [--timeout <秒>]", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py env-action-result <change> --phase prepare_env|clean_env --stage <stage> --env <env> --success true|false [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py replay <change>                                             # 从 events 重建 state", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py verify-replay <change>                                      # 对比 snapshot vs replay", file=sys.stderr)
     print(file=sys.stderr)
-    print("status: completed | failed | escalate | pass | fail", file=sys.stderr)
-    print("env-action phase: prepare_env | clean_env", file=sys.stderr)
-    print("env-action-result success: true | false   # 布尔值，表示 hook 是否成功执行", file=sys.stderr)
+    print("record --status: completed | failed | escalate | pass | fail", file=sys.stderr)
+    print("env-action --phase: prepare_env | clean_env", file=sys.stderr)
+    print("env-action-result --success: true | false   # 布尔值，表示 hook 是否成功执行", file=sys.stderr)
     print(file=sys.stderr)
     print("# 字段语义注解（避免混淆）：", file=sys.stderr)
-    print("#   record <status>                事件 outcome (completed/failed/escalate/pass/fail)", file=sys.stderr)
-    print("#   env-action-result <success>    hook 执行结果 (true|false 布尔值)", file=sys.stderr)
-    print("#   sub-agent 返回 status          任务执行结果 (completed/failed/escalate/pass/fail)", file=sys.stderr)
+    print("#   record --status              事件 outcome (completed/failed/escalate/pass/fail)", file=sys.stderr)
+    print("#   env-action-result --success  hook 执行结果 (true|false 布尔值)", file=sys.stderr)
+    print("#   sub-agent 返回 status        任务执行结果 (completed/failed/escalate/pass/fail)", file=sys.stderr)
 
 
 if __name__ == "__main__":

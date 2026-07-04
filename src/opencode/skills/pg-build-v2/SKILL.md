@@ -39,15 +39,14 @@ RUNNER="python3 .opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py"
 
 $RUNNER bootstrap <change>
 $RUNNER next <change>
-$RUNNER record <change> <status> --report <path> --summary "<摘要>" [--outputs <p1>,<p2>] [--issues <i1>,<i2>] [--evidence <e1> [--evidence <e2> ...]] [--tasks-updated <t1> [--tasks-updated <t2> ...]]
+$RUNNER record <change> --status <status> --report <path> --summary "<摘要>" [--outputs <p1>,<p2>] [--issues <i1>,<i2>] [--evidence <e1> [--evidence <e2> ...]] [--tasks-updated <t1> [--tasks-updated <t2> ...]]
   > **注意**：gate/final-gate 阶段的 `--summary` 必须包含 `gate_score: <0-100>`，例：`--summary "8/9 检查通过, gate_score: 91, p0_failures: []"`
 $RUNNER progress <change>
-$RUNNER env-action <change> <phase> <stage> <env> [hook_timeout_seconds]
-$RUNNER env-action-result <change> <phase> <stage> <env> <success> [log_path] [exit_code] [started_ts] [error]
-  注：<success> 是布尔值 true|false，表示 hook 是否执行成功。
-     与 record 的 <status> 字段（completed/failed/...）和 sub-agent 返回 JSON 的 status 字段含义都不同。
-     v2.x 破坏性变更：不再接受 ok|failed 字符串。
-  > **注意**：`<phase>` 参数必须填 `prepare_env` 或 `clean_env`（不是 stage 名）
+$RUNNER env-action <change> --phase prepare_env|clean_env --stage <stage> --env <env> [--timeout <seconds>]
+$RUNNER env-action-result <change> --phase prepare_env|clean_env --stage <stage> --env <env> --success true|false [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]
+  注：--success 是布尔值 true|false，表示 hook 是否成功执行。
+      与 record 的 --status 字段（completed/failed/...）和 sub-agent 返回 JSON 的 status 字段含义都不同。
+  > **注意**：`--phase` 参数必须填 `prepare_env` 或 `clean_env`（不是 stage 名）
 ```
 
 **status**: `completed | failed | escalate | pass | fail`
@@ -150,8 +149,7 @@ reducer 返回 `kind="error"` 时：
 | `action: error` + `evidence_missing` | verify/gate 的 `evidence_paths` 为空 | 重跑验证，强调产出 evidence |
 | `--report /tmp/nonexistent.md` → 报错 | 报告文件不存在 | 确认文件已写盘 |
 | env hook 卡死循环 | 编排器忘调 `env-action-result` | 每次 bash 执行后必调此命令 |
-| `错误: 无效 success: <X>` | success 字段被填了非布尔值（如 true/false 之外的字符串） | success 是布尔值（true\|false），与 record 的 status 字段（completed/failed/...）和 sub-agent 的 status 字段解耦；如果 LLM 把 status 词误填进 success，应明确区分两个字段语义 |
-| `TypeError: unexpected keyword 'ok'` | 旧调用仍传 `ok=True` | v2.x 破坏性变更：cli_env_action_result 参数名 ok → success，需同步更新所有调用方 |
+| `错误: 无效 success: <X>` | `--success` 字段被填了非布尔值（如 true/false 之外的字符串） | `--success` 是布尔值（true\|false），与 `--status`（completed/failed/...）和 sub-agent 的 status 字段解耦；应明确区分两个字段 |
 | `schema_violation: ... 要求 --outputs 非空` | dev/test/fix 没传 `--outputs` | sub-agent 必须返回产物列表 |
 | `schema_violation: ... 要求 summary 中含 'gate_score: <0-100>'` | gate/final-gate 阶段 summary 缺评分 | 确保 summary 含 `gate_score: <0-100>, p0_failures: [...]` |
 

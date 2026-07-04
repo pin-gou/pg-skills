@@ -502,7 +502,9 @@ environments:
         runner_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pg-pipeline-runner.py"))
         result = subprocess.run(
             [sys.executable, runner_path,
-             "env-action-result", "test-change", "prepare_env", "dev", "dev-local", "ok"],
+             "env-action-result", "test-change",
+             "--phase", "prepare_env", "--stage", "dev", "--env", "dev-local",
+             "--success", "ok"],
             capture_output=True, text=True,
         )
         # 期望 argparse 拒绝
@@ -516,7 +518,9 @@ environments:
         runner_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pg-pipeline-runner.py"))
         result = subprocess.run(
             [sys.executable, runner_path,
-             "env-action-result", "test-change", "prepare_env", "dev", "dev-local", "failed"],
+             "env-action-result", "test-change",
+             "--phase", "prepare_env", "--stage", "dev", "--env", "dev-local",
+             "--success", "failed"],
             capture_output=True, text=True,
         )
         # 期望 argparse 拒绝

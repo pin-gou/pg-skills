@@ -665,7 +665,7 @@ class Orchestrator:
 
         if action.kind == "env_switch":
             # env_switch 透传给编排器。编排器收到后应调
-            # $RUNNER env-action <change> <phase> <stage> <env>
+            # $RUNNER env-action <change> --phase <phase> --stage <stage> --env <env>
             # 执行完成后调 next() 继续。
             return {
                 "action": "env_switch",
