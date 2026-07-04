@@ -29,6 +29,7 @@ class TestRecordFlagsDevOutputsRequired(unittest.TestCase):
     def test_dev_with_outputs_accepted(self):
         ok, reason = validate_record_args(
             "dev", "dev.backend", "completed", "summary", "", "/tmp/Foo.java",
+            tasks_updated=["2.1"],  # v2.3: dev 必填
         )
         self.assertTrue(ok, reason)
 
@@ -46,6 +47,7 @@ class TestRecordFlagsTestOutputsRequired(unittest.TestCase):
     def test_test_with_outputs_accepted(self):
         ok, reason = validate_record_args(
             "test", "dev.backend", "completed", "summary", "", "/tmp/Test.java",
+            tasks_updated=["1.1"],  # v2.3: test 必填
         )
         self.assertTrue(ok, reason)
 
@@ -115,6 +117,7 @@ class TestRecordFlagsTasksUpdated(unittest.TestCase):
                 "verify", "dev.backend", "escalate",
                 "V-4 FAIL", report, "/tmp/output.java",
                 evidence_paths=[report],
+                tasks_updated=["V-4"],  # v2.3: escalate 必填
             )
             self.assertTrue(ok, reason)
         finally:

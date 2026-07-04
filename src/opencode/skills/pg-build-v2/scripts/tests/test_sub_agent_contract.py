@@ -40,6 +40,7 @@ class TestSubAgentContract(unittest.TestCase):
         ok, reason = validate_record_args(
             "test", "dev.backend", "completed",
             "summary text", "/tmp/x", "/tmp/output.java",
+            tasks_updated=["1.1"],
         )
         self.assertTrue(ok, reason)
 
@@ -47,6 +48,7 @@ class TestSubAgentContract(unittest.TestCase):
         ok, reason = validate_record_args(
             "dev", "dev.backend", "completed",
             "summary text", "", "/tmp/output.java",
+            tasks_updated=["2.1"],
         )
         self.assertTrue(ok, reason)
 
@@ -154,7 +156,7 @@ class TestSubAgentContract(unittest.TestCase):
         self.assertEqual(parse_gate_score("gate_score: abc"), None)
 
     def test_fix_phase_requires_report_and_outputs(self):
-        # v2.2: fix 阶段需要 report + outputs
+        # v2.2: fix 阶段需要 report + outputs；v2.3: 还需要 tasks_updated
         report = "/tmp/__test_fix_phase_report.md"
         try:
             with open(report, "w") as f:
@@ -162,6 +164,7 @@ class TestSubAgentContract(unittest.TestCase):
             ok, reason = validate_record_args(
                 "fix", "dev.backend", "completed",
                 "summary text", report, "/tmp/output.java",
+                tasks_updated=["V-backend-6"],
             )
             self.assertTrue(ok, reason)
         finally:
@@ -214,6 +217,7 @@ class TestSubAgentContract(unittest.TestCase):
                 "verify", "dev.backend", "escalate", "summary text",
                 tmp_report, "",
                 evidence_paths=[tmp_report],  # v2.2: escalate 需要 evidence
+                tasks_updated=["V-backend-6"],  # v2.3: escalate 必填
             )
             self.assertTrue(ok, reason)
         finally:
@@ -227,6 +231,161 @@ class TestSubAgentContract(unittest.TestCase):
         )
         self.assertFalse(ok, "final-gate 不应接受 completed")
         self.assertIn("gate", reason)
+
+    # ============================================================
+    # v2.3 新增：tasks_updated 必填校验
+    # ============================================================
+
+    def test_test_phase_requires_tasks_updated(self):
+        """[v2.3] test 阶段必填 tasks_updated。"""
+        ok, reason = validate_record_args(
+            "test", "dev.backend", "completed",
+            "summary", "", "/tmp/output.java",
+            tasks_updated=(),
+        )
+        self.assertFalse(ok)
+        self.assertIn("tasks-updated", reason)
+        self.assertIn("test", reason)
+
+    def test_test_phase_blank_string_rejected(self):
+        """[v2.3] test 阶段空字符串也算未填。"""
+        ok, reason = validate_record_args(
+            "test", "dev.backend", "completed",
+            "summary", "", "/tmp/output.java",
+            tasks_updated=["", "  "],
+        )
+        self.assertFalse(ok)
+        self.assertIn("tasks-updated", reason)
+
+    def test_test_phase_accepts_tasks_updated(self):
+        ok, reason = validate_record_args(
+            "test", "dev.backend", "completed",
+            "summary", "", "/tmp/output.java",
+            tasks_updated=["10.1", "10.2"],
+        )
+        self.assertTrue(ok, reason)
+
+    def test_dev_phase_requires_tasks_updated(self):
+        ok, reason = validate_record_args(
+            "dev", "dev.backend", "completed",
+            "summary", "", "/tmp/output.java",
+            tasks_updated=(),
+        )
+        self.assertFalse(ok)
+        self.assertIn("dev", reason)
+        self.assertIn("tasks-updated", reason)
+
+    def test_dev_phase_accepts_tasks_updated(self):
+        ok, reason = validate_record_args(
+            "dev", "dev.backend", "completed",
+            "summary", "", "/tmp/output.java",
+            tasks_updated=["2.1"],
+        )
+        self.assertTrue(ok, reason)
+
+    def test_fix_phase_requires_tasks_updated(self):
+        report = "/tmp/__test_fix_phase_tasks_report.md"
+        try:
+            with open(report, "w") as f:
+                f.write("fix report")
+            ok, reason = validate_record_args(
+                "fix", "dev.backend", "completed",
+                "summary", report, "/tmp/output.java",
+                tasks_updated=(),
+            )
+            self.assertFalse(ok)
+            self.assertIn("fix", reason)
+            self.assertIn("tasks-updated", reason)
+        finally:
+            if os.path.isfile(report):
+                os.remove(report)
+
+    def test_fix_phase_accepts_v_id(self):
+        report = "/tmp/__test_fix_phase_tasks_v_report.md"
+        try:
+            with open(report, "w") as f:
+                f.write("fix report")
+            ok, reason = validate_record_args(
+                "fix", "dev.backend", "completed",
+                "summary", report, "/tmp/output.java",
+                tasks_updated=["V-backend-6"],
+            )
+            self.assertTrue(ok, reason)
+        finally:
+            if os.path.isfile(report):
+                os.remove(report)
+
+    def test_fix_gate_phase_requires_tasks_updated(self):
+        report = "/tmp/__test_fix_gate_tasks_report.md"
+        try:
+            with open(report, "w") as f:
+                f.write("fix-gate report")
+            ok, reason = validate_record_args(
+                "fix-gate", "dev.backend", "completed",
+                "summary", report, "",
+                evidence_paths=[report],
+                tasks_updated=(),
+            )
+            self.assertFalse(ok)
+            self.assertIn("fix-gate", reason)
+            self.assertIn("tasks-updated", reason)
+        finally:
+            if os.path.isfile(report):
+                os.remove(report)
+
+    def test_simple_phase_no_tasks_updated_ok(self):
+        ok, reason = validate_record_args(
+            "simple", "dev.openapi-gen", "completed",
+            "summary", "", "",
+        )
+        self.assertTrue(ok, reason)
+
+    def test_verify_completed_no_tasks_updated_ok(self):
+        """[v2.3] verify completed 不必填。"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write("# PASS")
+            tmp = f.name
+        try:
+            ok, reason = validate_record_args(
+                "verify", "dev.backend", "completed",
+                "summary", tmp, "",
+                evidence_paths=[tmp],
+            )
+            self.assertTrue(ok, reason)
+        finally:
+            os.unlink(tmp)
+
+    def test_verify_escalate_requires_tasks_updated(self):
+        """[v2.3] verify escalate 必填。"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write("# FAIL")
+            tmp = f.name
+        try:
+            ok, reason = validate_record_args(
+                "verify", "dev.backend", "escalate",
+                "summary", tmp, "",
+                evidence_paths=[tmp],
+                tasks_updated=(),
+            )
+            self.assertFalse(ok)
+            self.assertIn("escalate", reason)
+            self.assertIn("tasks-updated", reason)
+        finally:
+            os.unlink(tmp)
+
+    def test_gate_phase_no_tasks_updated_ok(self):
+        """[v2.3] gate 不必填。"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".md", delete=False) as f:
+            f.write("# PASS")
+            tmp = f.name
+        try:
+            ok, reason = validate_record_args(
+                "gate", "dev.backend", "pass",
+                "summary gate_score: 90, p0_failures: []", tmp, "/tmp/ev.md",
+            )
+            self.assertTrue(ok, reason)
+        finally:
+            os.unlink(tmp)
 
 
 if __name__ == "__main__":

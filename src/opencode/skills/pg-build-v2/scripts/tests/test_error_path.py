@@ -139,7 +139,9 @@ class TestOrchestratorErrorPathNoSideEffects(unittest.TestCase):
         )
 
         self.assertEqual(result["action"], "error")
-        self.assertEqual(result.get("fatal", True), False)
+        # v2.3: schema 校验（输入层）→ fatal=True；reducer 错误（业务层）→ fatal=False
+        self.assertTrue(result.get("fatal", False),
+                        "v2.3: schema 校验错误应 fatal=True（输入层错误必须修正）")
 
         snapshot_after = load_snapshot(self.tmp)
         self.assertIn("dev.backend", snapshot_after.tracks,

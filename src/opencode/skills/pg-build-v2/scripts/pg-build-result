@@ -67,6 +67,10 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="产物文件列表，逗号分隔",
     )
     p.add_argument("--issues", default="", help="问题列表，逗号分隔")
+    p.add_argument(
+        "--tasks-updated", action="append", default=[],
+        help="task_id 列表（可多次传：--tasks-updated 1.1 --tasks-updated 2.1）"
+    )
     return p.parse_args(argv)
 
 
@@ -81,6 +85,7 @@ def _validate(args: argparse.Namespace) -> tuple[bool, str]:
         outputs=args.outputs,
         issues=args.issues,
         evidence_paths=tuple(args.evidence),
+        tasks_updated=tuple(args.tasks_updated),
     )
 
 
@@ -89,7 +94,7 @@ def _emit_agent_mode(args: argparse.Namespace) -> int:
     result: dict[str, Any] = {
         "summary": args.summary,
         "outputs": [s.strip() for s in args.outputs.split(",") if s.strip()],
-        "tasks_updated": [],  # 由 sub-agent 自行填充
+        "tasks_updated": list(args.tasks_updated),
         "status": args.status,
         "evidence_paths": list(args.evidence),
         "report_path": args.report,

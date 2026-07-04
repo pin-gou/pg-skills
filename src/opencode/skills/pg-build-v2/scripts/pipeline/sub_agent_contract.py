@@ -22,18 +22,25 @@ from pipeline.events import (
 
 
 # 各 phase 的额外要求
+# tasks_updated_required:
+#   True         -> 必填
+#   False        -> 选填
+#   "escalate_only" -> 仅当 status=escalate 时必填
 PHASE_RULES: dict[str, dict[str, Any]] = {
     "verify": {
         "evidence_required": True,
         "report_required": True,
+        "tasks_updated_required": "escalate_only",
     },
     "gate": {
         "evidence_required": True,
         "report_required": True,
+        "tasks_updated_required": False,
     },
     "fix-gate": {
         "evidence_required": True,
         "report_required": True,
+        "tasks_updated_required": True,
     },
     # final-gate 的 phase 也是 "gate"，但 track 是 "final-gate"
     # track 名校验由 caller 决定
@@ -41,23 +48,34 @@ PHASE_RULES: dict[str, dict[str, Any]] = {
         "evidence_required": False,
         "report_required": True,  # v2.2: fix 阶段强制要求 report（追溯修复证据）
         "outputs_required": True,  # v2.2: fix 阶段 outputs 必填
+        "tasks_updated_required": True,
     },
     "test": {
         "evidence_required": False,
         "report_required": False,
         "outputs_required": True,  # v2.2: test 阶段 outputs 必填（产物列表）
+        "tasks_updated_required": True,
     },
     "dev": {
         "evidence_required": False,
         "report_required": False,
         "outputs_required": True,  # v2.2: dev 阶段 outputs 必填（产物列表）
+        "tasks_updated_required": True,
     },
     "simple": {
         "evidence_required": False,
         "report_required": False,
         "outputs_required": False,
+        "tasks_updated_required": False,
     },
 }
+
+
+def _is_empty_tasks(tasks_updated) -> bool:
+    """严格空检测：空数组 / 单空字符串 / 全空白字符串都视为未填。"""
+    if not tasks_updated:
+        return True
+    return all(not (t and t.strip()) for t in tasks_updated)
 
 
 def validate_record_args(
@@ -159,6 +177,28 @@ def validate_record_args(
             return False, (
                 f"schema_violation: phase={phase} (track={track}) 要求 --outputs 非空，"
                 f"请让 sub-agent 返回产物文件列表（逗号分隔的绝对路径）"
+            )
+
+    # ── v2.3: tasks_updated 必填检查（按 phase 区分）──
+    tasks_required = rule.get("tasks_updated_required")
+    if tasks_required == "escalate_only":
+        if status == STATUS_ESCALATE and _is_empty_tasks(tasks_updated):
+            return False, (
+                "schema_violation: verify escalate 要求 --tasks-updated 非空，"
+                "请填写失败的 V-* ID 列表。Example: --tasks-updated 'V-backend-1,V-backend-3'"
+            )
+    elif tasks_required is True:
+        if _is_empty_tasks(tasks_updated):
+            guidance = {
+                "test": "test 红 phase 必填 --tasks-updated 列出覆盖的 task_id。Example: --tasks-updated '10.1,10.2'",
+                "dev":  "dev phase 必填 --tasks-updated 列出实现的 task_id。Example: --tasks-updated '2.1,2.3'",
+                "fix":  "fix phase 必填 --tasks-updated 列出修复的 V-* 或 task_id。Example: --tasks-updated 'V-backend-6,3.9'",
+                "fix-gate": "fix-gate phase 必填 --tasks-updated 列出修复的 task_id。",
+            }
+            return False, (
+                f"schema_violation: phase={phase} (track={track}) 必填 --tasks-updated 非空。"
+                f"{guidance.get(phase, '')} "
+                f"原因：空值会触发 orchestrator 全段标记 fallback，污染 tasks.md。"
             )
 
     # ── v2.2: escalate 时强制 evidence（允许 outputs/report_path fallback） ──

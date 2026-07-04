@@ -32,6 +32,9 @@ block: |
   | `--evidence` | verify/gate 至少 1 个 | 证据文件绝对路径（可多次传） |
   | `--outputs` | 选填 | 产物文件列表，逗号分隔 |
   | `--issues` | 选填 | 问题列表，逗号分隔 |
+  | `--tasks-updated` | **必填** (`test` / `dev` / `fix` / `fix-gate`) | task_id 列表；可多次传或逗号分隔 |
+  | `--tasks-updated` | **必填** (`verify` 且 `status=escalate`) | 失败 V-* ID 列表 |
+  | `--tasks-updated` | 选填 (`verify completed` / `gate` / `simple`) | 不必填 |
 
   ### 步骤 2: status 选择矩阵（按 phase）
 
@@ -59,7 +62,9 @@ block: |
       [--evidence <绝对路径>] \
       [--evidence <绝对路径>] \
       [--outputs <p1>,<p2>,...] \
-      [--issues "<issue1>,<issue2>,..."]
+      [--issues "<issue1>,<issue2>,"]
+      [--tasks-updated <task_id>] \
+      [--tasks-updated <task_id>]
   ```
 
   脚本会校验所有字段。**校验失败 exit 1 + stderr 错误信息** —— 你必须修复后重试。
@@ -99,3 +104,17 @@ block: |
   2. **字段一致**：避免 LLM 自然语言返回时漏字段或字段名拼错
   3. **gate_score 强制**：脚本会拒绝没有 gate_score 的 gate 摘要
   4. **报告路径存在性**：脚本会检查 report_path 文件真实存在
+
+  ### ⚠️ MANDATORY: tasks_updated 字段约束（v2.3 新增）
+
+  **以下 phase 必须传 --tasks-updated 非空**，否则脚本会 exit 1：
+    - `test` —— 列出覆盖的 task_id（红 phase 即认为任务完成）
+    - `dev` —— 列出实现的 task_id
+    - `fix` / `fix-gate` —— 列出修复的 V-* 或 task_id
+    - `verify --status=escalate` —— 列出失败的 V-* ID
+
+  **以下 phase 不必传**：
+    - `verify --status=completed` / `gate` / `final-gate` / `simple`
+
+  传法：可多次 `--tasks-updated X`，或逗号分隔。空值 `[""]` `[" "]` 也算未填。
+  绕过脚本手写 JSON 不会被这里拦截（因为脚本不参与），但 orchestrator 的 `mark_all_tasks_in_phase` fallback 会污染 tasks.md，且不会给出清晰的错误提示。**请务必调用脚本**。

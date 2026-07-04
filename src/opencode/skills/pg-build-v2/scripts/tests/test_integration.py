@@ -72,12 +72,14 @@ class TestIntegrationTdvg(unittest.TestCase):
         track = "dev.backend"
 
         # Step 1: test completed → dev
-        r1 = self.orch.record("completed", summary="10 tests PASS", outputs="/tmp/Test.java")
+        r1 = self.orch.record("completed", summary="10 tests PASS", outputs="/tmp/Test.java",
+                              tasks_updated=["1.1"])
         self.assertEqual(r1["action"], "dispatch")
         self.assertEqual(r1["sub"], "dev")
 
         # Step 2: dev completed → verify
-        r2 = self.orch.record("completed", summary="impl done", outputs="/tmp/Impl.java")
+        r2 = self.orch.record("completed", summary="impl done", outputs="/tmp/Impl.java",
+                              tasks_updated=["2.1"])
         self.assertEqual(r2["action"], "dispatch")
         self.assertEqual(r2["sub"], "verify")
 
@@ -116,8 +118,10 @@ class TestIntegrationTdvg(unittest.TestCase):
         build_dir = os.path.join(self.tmp, "2-build")
 
         # 完成 dev.backend
-        self.orch.record("completed", summary="test phase 完成", outputs="/tmp/Test.java")  # test
-        self.orch.record("completed", summary="dev phase 完成", outputs="/tmp/Dev.java")  # dev
+        self.orch.record("completed", summary="test phase 完成", outputs="/tmp/Test.java",
+                         tasks_updated=["1.1"])  # test
+        self.orch.record("completed", summary="dev phase 完成", outputs="/tmp/Dev.java",
+                         tasks_updated=["2.1"])  # dev
         verify_report = _make_report("# PASS\nverify 1")
         self.orch.record(
             "completed", summary="verify 完成",
@@ -138,8 +142,10 @@ class TestIntegrationTdvg(unittest.TestCase):
         self.assertEqual(r1["item"], "dev.frontend")
 
         # 完成 dev.frontend
-        self.orch.record("completed", summary="test phase 完成", outputs="/tmp/FrontTest.java")  # test
-        self.orch.record("completed", summary="dev phase 完成", outputs="/tmp/FrontDev.java")  # dev
+        self.orch.record("completed", summary="test phase 完成", outputs="/tmp/FrontTest.java",
+                         tasks_updated=["10.1"])  # test
+        self.orch.record("completed", summary="dev phase 完成", outputs="/tmp/FrontDev.java",
+                         tasks_updated=["11.1"])  # dev
         verify_report2 = _make_report("# PASS\nverify 2")
         self.orch.record(
             "completed", summary="verify 完成",
@@ -163,11 +169,15 @@ class TestIntegrationTdvg(unittest.TestCase):
 
     def test_workflow_failed(self):
         """test 重试耗尽 → workflow_failed，需要 4 次（max_retries=3, 计数从0开始）。"""
-        self.orch.record("failed", summary="error 1", issues="error 1", outputs="/tmp/Test.java")
-        self.orch.record("failed", summary="error 2", issues="error 2", outputs="/tmp/Test.java")
-        self.orch.record("failed", summary="error 3", issues="error 3", outputs="/tmp/Test.java")
+        self.orch.record("failed", summary="error 1", issues="error 1",
+                         outputs="/tmp/Test.java", tasks_updated=["1.1"])
+        self.orch.record("failed", summary="error 2", issues="error 2",
+                         outputs="/tmp/Test.java", tasks_updated=["1.1"])
+        self.orch.record("failed", summary="error 3", issues="error 3",
+                         outputs="/tmp/Test.java", tasks_updated=["1.1"])
         # 第 4 次失败 → exhausted
-        r = self.orch.record("failed", summary="error 4", issues="error 4", outputs="/tmp/Test.java")
+        r = self.orch.record("failed", summary="error 4", issues="error 4",
+                             outputs="/tmp/Test.java", tasks_updated=["1.1"])
         self.assertEqual(r["action"], "workflow_failed")
         self.assertTrue(r.get("fatal", False))
 
@@ -183,8 +193,10 @@ class TestIntegrationFixCycle(unittest.TestCase):
 
     def test_verify_escalate_then_fix(self):
         """verify escalate → 创建子 pipeline。"""
-        self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java")  # test
-        self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java")  # dev
+        self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java",
+                         tasks_updated=["1.1"])  # test
+        self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java",
+                         tasks_updated=["2.1"])  # dev
 
         # verify escalate（verify 阶段需要 report + evidence）
         verify_report = _make_report("# FAIL\n3 tests FAIL")
@@ -200,8 +212,10 @@ class TestIntegrationFixCycle(unittest.TestCase):
 
     def test_verify_escalate_fix_complete(self):
         """verify escalate → fix → re-verify → gate。"""
-        self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java")  # test
-        self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java")  # dev
+        self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java",
+                         tasks_updated=["1.1"])  # test
+        self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java",
+                         tasks_updated=["2.1"])  # dev
 
         # verify escalate（verify 阶段需要 report + evidence）
         verify_report = _make_report("# FAIL\n3 tests FAIL")
@@ -219,6 +233,7 @@ class TestIntegrationFixCycle(unittest.TestCase):
         r = self.orch.record(
             "completed", summary="fixed all",
             report_path=fix_report, outputs=fix_report,
+            tasks_updated=["V-1"],  # v2.3: fix 必填
         )
         # 子 pipeline 完成 → advance 到 verify
         self.assertEqual(r["action"], "dispatch")
@@ -235,8 +250,10 @@ class TestIntegrationGateFail(unittest.TestCase):
 
     def test_gate_fail_then_fix_gate(self):
         """gate fail → 创建 fix-gate 子 pipeline。"""
-        self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java")  # test
-        self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java")  # dev
+        self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java",
+                         tasks_updated=["1.1"])  # test
+        self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java",
+                         tasks_updated=["2.1"])  # dev
         verify_report = _make_report("# PASS\nverify ok")
         self.orch.record(
             "completed", summary="verify 完成",
@@ -271,7 +288,8 @@ class TestOrchestratorProgress(unittest.TestCase):
         self.assertGreaterEqual(p["event_count"], 0)
 
     def test_progress_after_records(self):
-        self.orch.record("completed", summary="test 完成")
+        self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java",
+                         tasks_updated=["1.1"])
         p = self.orch.progress()
         self.assertGreaterEqual(p["event_count"], 1)
 
@@ -303,7 +321,8 @@ class TestOrchestratorDispatchFile(unittest.TestCase):
 
     def test_record_returns_dispatch_file(self):
         """record() 返回的 dispatch action 包含 dispatch_file。"""
-        r = self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java")
+        r = self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java",
+                             tasks_updated=["1.1"])
         self.assertIn("dispatch_file", r,
                       "record 返回的 dispatch action 必须包含 dispatch_file")
         self.assertTrue(os.path.isfile(r["dispatch_file"]))
@@ -311,7 +330,8 @@ class TestOrchestratorDispatchFile(unittest.TestCase):
     def test_dispatch_file_content(self):
         """dispatch_file 内容包含任务描述。"""
         # 测试阶段不需要 report，但需要 summary
-        r = self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java")
+        r = self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java",
+                             tasks_updated=["1.1"])
         # setUp 已 dispatch dev.backend:test，再次 record 可能触发 retry
         # 改为先获取 current dispatch_file（setUp 写入的）
         if "dispatch_file" not in r:
@@ -323,7 +343,8 @@ class TestOrchestratorDispatchFile(unittest.TestCase):
 
     def test_record_returns_commit_field(self):
         """record() 返回包含 commit 字段（auto-commit）。"""
-        r = self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java")
+        r = self.orch.record("completed", summary="test 完成", outputs="/tmp/Test.java",
+                             tasks_updated=["1.1"])
         # 测试在非 git 目录中运行时，commit 字段仍然存在（attempted=true）
         self.assertIn("commit", r, "record 返回应包含 commit 字段")
         self.assertTrue(r["commit"]["attempted"])
