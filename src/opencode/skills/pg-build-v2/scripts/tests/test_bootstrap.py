@@ -388,7 +388,7 @@ environments:
 
         result = bootstrap.cli_env_action_result(
             "test-change", "prepare_env", "dev", "dev-local",
-            ok=True, log_path="/tmp/fake.log", exit_code=0,
+            success=True, log_path="/tmp/fake.log", exit_code=0,
         )
         self.assertTrue(result["ok"])
         self.assertIn("dev", result["stage_prepared"])
@@ -408,7 +408,7 @@ environments:
 
         result = bootstrap.cli_env_action_result(
             "test-change", "clean_env", "dev", "dev-local",
-            ok=True, log_path="/tmp/fake.log", exit_code=0,
+            success=True, log_path="/tmp/fake.log", exit_code=0,
         )
         self.assertTrue(result["ok"])
         self.assertNotIn("dev", result["stage_prepared"])
@@ -429,7 +429,7 @@ environments:
 
         result = bootstrap.cli_env_action_result(
             "test-change", "prepare_env", "integration", "dev-3tier",
-            ok=False, log_path="/tmp/fake.log", exit_code=1,
+            success=False, log_path="/tmp/fake.log", exit_code=1,
             error="synthetic failure",
         )
         self.assertFalse(result["ok"])
@@ -455,7 +455,7 @@ environments:
         # 1) prepare_env dev
         r1 = bootstrap.cli_env_action_result(
             "test-change", "prepare_env", "dev", "dev-local",
-            ok=True, log_path="/tmp/1.log", exit_code=0,
+            success=True, log_path="/tmp/1.log", exit_code=0,
         )
         self.assertTrue(r1["ok"])
         self.assertEqual(r1["stage_prepared"], ["dev"])
@@ -464,7 +464,7 @@ environments:
         # 2) clean_env dev (dev 的工作完成后)
         r2 = bootstrap.cli_env_action_result(
             "test-change", "clean_env", "dev", "dev-local",
-            ok=True, log_path="/tmp/2.log", exit_code=0,
+            success=True, log_path="/tmp/2.log", exit_code=0,
         )
         self.assertTrue(r2["ok"])
         self.assertEqual(r2["stage_prepared"], [])
@@ -473,7 +473,7 @@ environments:
         # 3) prepare_env integration
         r3 = bootstrap.cli_env_action_result(
             "test-change", "prepare_env", "integration", "dev-3tier",
-            ok=True, log_path="/tmp/3.log", exit_code=0,
+            success=True, log_path="/tmp/3.log", exit_code=0,
         )
         self.assertTrue(r3["ok"])
         self.assertEqual(sorted(r3["stage_prepared"]), ["integration"])
@@ -483,6 +483,43 @@ environments:
         self.assertIsNotNone(final)
         self.assertEqual(final.stage_prepared, {"integration"})
         self.assertEqual(final.current_stage, "integration")
+
+    def test_cli_env_action_result_param_renamed(self):
+        """v2.x: 参数名 ok → success，向后不兼容（破坏性变更）"""
+        # 旧调用 ok=True 必须报错（TypeError: unexpected keyword）
+        with self.assertRaises(TypeError):
+            bootstrap.cli_env_action_result(
+                "test-change", "prepare_env", "dev", "dev-local",
+                ok=True, log_path="/tmp/fake.log", exit_code=0,
+            )
+
+    def test_runner_env_action_result_rejects_ok_string(self):
+        """runner CLI: 不再兼容 'ok' 字符串（破坏性变更）"""
+        import subprocess
+        import sys
+        runner_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pg-pipeline-runner.py"))
+        result = subprocess.run(
+            [sys.executable, runner_path,
+             "env-action-result", "test-change", "prepare_env", "dev", "dev-local", "ok"],
+            capture_output=True, text=True,
+        )
+        # 期望 argparse 拒绝
+        self.assertIn("无效 success", result.stderr)
+        self.assertNotEqual(result.returncode, 0)
+
+    def test_runner_env_action_result_rejects_failed_string(self):
+        """runner CLI: 不再兼容 'failed' 字符串（破坏性变更）"""
+        import subprocess
+        import sys
+        runner_path = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "pg-pipeline-runner.py"))
+        result = subprocess.run(
+            [sys.executable, runner_path,
+             "env-action-result", "test-change", "prepare_env", "dev", "dev-local", "failed"],
+            capture_output=True, text=True,
+        )
+        # 期望 argparse 拒绝
+        self.assertIn("无效 success", result.stderr)
+        self.assertNotEqual(result.returncode, 0)
 
     def test_cli_bootstrap_detect_config_no_manifest(self):
         """无 manifest 时 pipeline_config 为默认值。"""

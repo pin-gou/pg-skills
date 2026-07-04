@@ -728,7 +728,7 @@ def cli_env_action_result(
     phase_name: str,
     stage_name: str,
     env_name: str,
-    ok: bool,
+    success: bool,
     log_path: str = "",
     exit_code: int | None = None,
     started_event_ts: str | None = None,
@@ -737,9 +737,11 @@ def cli_env_action_result(
     """CLI 入口：env hook 执行完毕，编排器汇报结果。
 
     v2.1.1 新增：编排器在 bash 执行完 env hook 后调用本命令：
-      - 写 *_COMPLETED event
+      - 写 *_COMPLETED event（event schema 中字段名为 ok: bool，保留历史兼容）
       - 更新 state (stage_prepared / current_stage)
       - 写 pipeline.snapshot.json
+
+    v2.x 变更：参数 ok → success（与 CLI 入参名对齐）。
     """
     from pipeline.snapshot import load_snapshot, save_snapshot
     from pipeline.state import PipelineState
@@ -767,7 +769,7 @@ def cli_env_action_result(
         "env_name": env_name,
         "exit_code": exit_code,
         "log_path": log_path,
-        "ok": ok,
+        "ok": success,  # event schema 字段名保留 "ok"（pipeline.events 历史兼容）
     }
     if started_event_ts:
         completed_data["started_ts"] = started_event_ts
@@ -776,7 +778,7 @@ def cli_env_action_result(
     except Exception as e:
         result.setdefault("warnings", []).append(f"event_log complete append failed: {e}")
 
-    if not ok:
+    if not success:
         result["ok"] = False
         result["error"] = error or f"{phase_name} failed (exit_code={exit_code})"
         return result

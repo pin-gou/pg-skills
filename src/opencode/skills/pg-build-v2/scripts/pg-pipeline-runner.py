@@ -79,7 +79,8 @@ def main() -> None:
     # ── env-action-result 命令（编排器在 bash 执行完 env hook 后调用）──
     if command == "env-action-result":
         if len(sys.argv) < 7:
-            _usage("env-action-result 命令缺少参数: <change> <phase> <stage> <env> <ok> [log_path] [exit_code] [started_ts] [error]")
+            _usage("env-action-result 命令缺少参数: <change> <phase> <stage> <env> <success> [log_path] [exit_code] [started_ts] [error]\n"
+                   "  注：<success> 是布尔值 true|false，表示 hook 是否成功执行（与 record 的 <status> 字段不同）")
             sys.exit(1)
         phase_name = sys.argv[3]
         if phase_name not in ("prepare_env", "clean_env"):
@@ -87,18 +88,25 @@ def main() -> None:
             sys.exit(1)
         stage_name = sys.argv[4]
         env_name = sys.argv[5]
-        ok_str = sys.argv[6]
-        if ok_str not in ("ok", "failed"):
-            _usage(f"无效 ok: {ok_str}，有效值: ok | failed")
+        success_str = sys.argv[6].lower()
+        if success_str in ("true", "1"):
+            success = True
+        elif success_str in ("false", "0"):
+            success = False
+        else:
+            _usage(f"无效 success: {sys.argv[6]}。\n"
+                   f"  提示：success 是布尔值 (true|false)，表示 hook 是否成功执行。\n"
+                   f"       与 record 命令的 <status> 字段 (completed/failed/...) 含义不同，\n"
+                   f"       与 sub-agent 返回 JSON 的 status 字段也不同。\n"
+                   f"  有效值: true | false")
             sys.exit(1)
-        ok = (ok_str == "ok")
         log_path = sys.argv[7] if len(sys.argv) > 7 else ""
         exit_code = int(sys.argv[8]) if len(sys.argv) > 8 and sys.argv[8] else None
         started_ts = sys.argv[9] if len(sys.argv) > 9 else ""
         error = sys.argv[10] if len(sys.argv) > 10 else ""
         result = _bootstrap.cli_env_action_result(
             change, phase_name, stage_name, env_name,
-            ok=ok,
+            success=success,
             log_path=log_path,
             exit_code=exit_code,
             started_event_ts=started_ts or None,
@@ -194,13 +202,18 @@ def _usage(msg: str = "") -> None:
     print("  python3 pg-pipeline-runner.py record <change> <status> [report_path] [summary] [outputs] [issues]", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py progress <change>        # 查看进度", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py env-action <change> <phase> <stage> <env> [hook_timeout_seconds] # 返回 env hook plan（不执行）", file=sys.stderr)
-    print("  python3 pg-pipeline-runner.py env-action-result <change> <phase> <stage> <env> <ok> [log_path] [exit_code] [started_ts] [error] # env hook 执行完上报", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py env-action-result <change> <phase> <stage> <env> <success:true|false> [log_path] [exit_code] [started_ts] [error] # env hook 执行完上报", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py replay <change>          # v2.1: 从 events 重建 state", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py verify-replay <change>   # v2.1: 对比 snapshot vs replay", file=sys.stderr)
     print(file=sys.stderr)
     print("status: completed | failed | escalate | pass | fail", file=sys.stderr)
     print("env-action phase: prepare_env | clean_env", file=sys.stderr)
-    print("env-action-result ok: ok | failed", file=sys.stderr)
+    print("env-action-result success: true | false   # 布尔值，表示 hook 是否成功执行", file=sys.stderr)
+    print(file=sys.stderr)
+    print("# 字段语义注解（避免混淆）：", file=sys.stderr)
+    print("#   record <status>                事件 outcome (completed/failed/escalate/pass/fail)", file=sys.stderr)
+    print("#   env-action-result <success>    hook 执行结果 (true|false 布尔值)", file=sys.stderr)
+    print("#   sub-agent 返回 status          任务执行结果 (completed/failed/escalate/pass/fail)", file=sys.stderr)
 
 
 if __name__ == "__main__":
