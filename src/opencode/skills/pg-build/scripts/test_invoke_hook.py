@@ -16,7 +16,7 @@ Covers:
 - args rendering: {role}/{instance.name}/{instance.host} placeholders
 - Option Y: --tail-lines appended as last 2 args (logs/tail only)
 - No --tail-lines: project.yaml args used verbatim
-- log_path format: role.<role>.<action>@<instance>.log under 2-build/<env>/logs
+- log_path format: role.<role>.<action>@<instance>.log under 2-build/<env>-logs
 - env-level prepare_env / clean_env: log_path is env.<action>.log
 - hook_type equals --action value
 - Thin wrapper (pg-pipeline-runner.py invoke-hook) preserves all above behavior
@@ -274,7 +274,7 @@ class TestV4Protocol(unittest.TestCase):
                         f"expected auto-<date>-<pid>, got {spec['session']!r}")
         # 旧 'change' key 保留作 alias
         self.assertEqual(spec["change"], spec["session"])
-        # log_path 落到 .pg/ad-hoc/<session>/<env>/logs/...
+        # log_path 落到 .pg/ad-hoc/<session>/<env>-logs/...
         self.assertIn("/.pg/ad-hoc/", spec["log_path"])
         self.assertIn(spec["session"], spec["log_path"])
 
@@ -453,7 +453,7 @@ class TestSpecRendering(unittest.TestCase):
         self.assertEqual(spec["instance_host"], "localhost")
 
     def test_log_path_format(self):
-        # v4: 无 --skill / --caller → caller 默认 'ad-hoc' → .pg/ad-hoc/<session>/<env>/logs/...
+        # v4: 无 --skill / --caller → caller 默认 'ad-hoc' → .pg/ad-hoc/<session>/<env>-logs/...
         self._invoke_ok(
             "--session", "add-host-memory-overview",
             "--env", "dev-local",
@@ -462,13 +462,13 @@ class TestSpecRendering(unittest.TestCase):
         )
         expected = os.path.join(
             PROJECT_ROOT,
-            ".pg/ad-hoc/add-host-memory-overview/dev-local/logs",
+            ".pg/ad-hoc/add-host-memory-overview/dev-local-logs",
             "role.backend.start@backend-1.log",
         )
         self.assertEqual(self.captured_spec["log_path"], expected)
 
     def test_log_path_pg_regression_skill(self):
-        # pg-regression → .pg/regression/<session>/<env>/logs/...
+        # pg-regression → .pg/regression/<session>/<env>-logs/...
         # (v4: session 保留 regression-<suite> 前缀, 不再 strip)
         self._invoke_ok(
             "--session", "regression-backend",
@@ -479,14 +479,14 @@ class TestSpecRendering(unittest.TestCase):
         )
         expected = os.path.join(
             PROJECT_ROOT,
-            ".pg/regression/regression-backend/dev-local/logs",
+            ".pg/regression/regression-backend/dev-local-logs",
             "role.backend.start@backend-1.log",
         )
         self.assertEqual(self.captured_spec["log_path"], expected)
         self.assertEqual(self.captured_spec["caller"], "pg-regression")
 
     def test_log_path_pg_fix_issue_skill(self):
-        # pg-fix-issue → .pg/fix-issue/<session>/<env>/logs/...
+        # pg-fix-issue → .pg/fix-issue/<session>/<env>-logs/...
         self._invoke_ok(
             "--session", "fix-2026-06-26-vm-failure",
             "--env", "dev-local",
@@ -496,14 +496,14 @@ class TestSpecRendering(unittest.TestCase):
         )
         expected = os.path.join(
             PROJECT_ROOT,
-            ".pg/fix-issue/fix-2026-06-26-vm-failure/dev-local/logs",
+            ".pg/fix-issue/fix-2026-06-26-vm-failure/dev-local-logs",
             "role.backend.start@backend-1.log",
         )
         self.assertEqual(self.captured_spec["log_path"], expected)
         self.assertEqual(self.captured_spec["caller"], "pg-fix-issue")
 
     def test_log_path_env_level_pg_regression(self):
-        # env-level + pg-regression → .pg/regression/<session>/<env>/logs/env.<action>.log
+        # env-level + pg-regression → .pg/regression/<session>/<env>-logs/env.<action>.log
         self._invoke_ok(
             "--session", "regression-frontend",
             "--env", "dev-local",
@@ -512,7 +512,7 @@ class TestSpecRendering(unittest.TestCase):
         )
         expected = os.path.join(
             PROJECT_ROOT,
-            ".pg/regression/regression-frontend/dev-local/logs",
+            ".pg/regression/regression-frontend/dev-local-logs",
             "env.prepare_env.log",
         )
         self.assertEqual(self.captured_spec["log_path"], expected)
@@ -582,7 +582,7 @@ class TestSpecRendering(unittest.TestCase):
 
     def test_prepare_env_spec_shape(self):
         # Environment-level hook: no role/instance, hook_type=prepare_env,
-        # log_path is env.prepare_env.log under 2-build/<env>/logs.
+        # log_path is env.prepare_env.log under <env>-logs.
         self._invoke_ok(
             "--session", "add-host-memory-overview",
             "--env", "dev-local",
@@ -595,7 +595,7 @@ class TestSpecRendering(unittest.TestCase):
         self.assertEqual(spec["hook_type"], "prepare_env")
         expected_log = os.path.join(
             PROJECT_ROOT,
-            ".pg/ad-hoc/add-host-memory-overview/dev-local/logs",
+            ".pg/ad-hoc/add-host-memory-overview/dev-local-logs",
             "env.prepare_env.log",
         )
         self.assertEqual(spec["log_path"], expected_log)

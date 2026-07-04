@@ -977,7 +977,7 @@ loop:
 |---------|------|----------|
 | 编译错误（新引入） | 编排器修复 | ✅ |
 | 测试失败（actual ≠ expected） | 编排器判断改代码还是改测试 | ✅ |
-| verify 失败（运行版本不对） | 检查上一次 `runner invoke-hook --action start` 是否成功（log_path 在 `.pg/fix-issue/<fix-change>/<env>/logs/role.*.start@*.log`） | ✅ |
+| verify 失败（运行版本不对） | 检查上一次 `runner invoke-hook --action start` 是否成功（log_path 在 `.pg/fix-issue/<fix-change>/<env>-logs/role.*.start@*.log`） | ✅ |
 | 端到端 API 失败 | 看 response body | ✅ |
 | 日志 PANIC | 看 panic stack | ✅ |
 | **success_criteria 未满足** | **重新诊断**（按 criteria 实际值推断根因） | ✅ |

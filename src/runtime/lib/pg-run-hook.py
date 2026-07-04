@@ -23,7 +23,7 @@ Usage:
     "instance_host": "localhost",
     "hook_type": "start",
     "timeout_seconds": 300,
-    "log_path": "/abs/.pg/changes/<change>/2-build/<env>/logs/role.backend.start@backend-1.log"
+    "log_path": "/abs/.pg/changes/<change>/2-build/<env>-logs/role.backend.start@backend-1.log"
   }
   EOF
 

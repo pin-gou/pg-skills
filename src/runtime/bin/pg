@@ -268,7 +268,7 @@ def cmd_doctor(args) -> int:
     # 6. .pg/hooks/lib/common.sh 存在? (pg_resolve_paths per-skill 路径路由)
     # 若 .pg/hooks/ 下有 hook 但缺 lib/common.sh, hook 走 $PG_LOG_FILE 单一日志,
     # pg-regression / pg-fix-issue 日志会回落到 scripts/logs 而非预期的
-    # .pg/regression/<suite>/<env>/logs / .pg/fix-issue/<change>/<env>/logs
+    # .pg/regression/<suite>/<env>-logs / .pg/fix-issue/<change>/<env>-logs
     if hooks_dir.exists():
         hook_files = list(hooks_dir.glob('*.sh'))
         lib_common = hooks_dir / 'lib' / 'common.sh'

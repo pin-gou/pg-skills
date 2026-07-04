@@ -117,12 +117,13 @@ def _pg_log_dir_for_skill(skill, change, env):
     """Return absolute log dir for a given skill. Mirrors pg-invoke-hook.py:pg_log_dir_for_skill
     and .pg/hooks/lib/common.sh:pg_resolve_paths. Keep all three in sync.
     """
+    dir_name = f"{env}-logs"
     if skill == "pg-regression" and change and change.startswith("regression-"):
         suite = change[len("regression-") :]
-        return os.path.join(PROJECT_ROOT, ".pg", "regression", suite, env, "logs")
+        return os.path.join(PROJECT_ROOT, ".pg", "regression", suite, dir_name)
     if skill == "pg-fix-issue":
-        return os.path.join(PROJECT_ROOT, ".pg", "fix-issue", change, env, "logs")
-    return os.path.join(PROJECT_ROOT, ".pg", "changes", change, "2-build", env, "logs")
+        return os.path.join(PROJECT_ROOT, ".pg", "fix-issue", change, dir_name)
+    return os.path.join(PROJECT_ROOT, ".pg", "changes", change, "2-build", dir_name)
 
 
 CHANGES_DIR = os.path.join(PROJECT_ROOT, ".pg", "changes")
@@ -1693,8 +1694,8 @@ def _render_role_action(
 
     # log_path: prefer runner-side path; hook scripts read it from $LOG_DIR
     # (parent dir of $BACKEND_LOG / $FRONTEND_LOG / etc.). Use
-    # 2-build/<env>/logs for log aggregation, matching the env hooks.
-    # pg-build keeps legacy .pg/changes/<change>/2-build/<env>/logs path.
+    # 2-build/<env>-logs for log aggregation, matching the env hooks.
+    # pg-build keeps .pg/changes/<change>/2-build/<env>-logs path.
     log_dir_abs = _pg_log_dir_for_skill("pg-build", change, env_name)
     log_name = f"role.{role}.{act_cfg.get('name', 'action')}@{instance_name}.log"
     log_path = os.path.join(log_dir_abs, log_name)
@@ -3629,8 +3630,7 @@ def _execute_phase(config, change, state, item_id):
                 / "changes"
                 / change
                 / "2-build"
-                / env_name
-                / "logs"
+                / f"{env_name}-logs"
             ),
             "caller": "pg-build",
             "skill": "pg-build",

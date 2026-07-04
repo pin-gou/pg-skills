@@ -65,9 +65,9 @@ metadata:
 
 - **优先**：直接信任 `PG_HOOK_LOG_DIR`（由 `pg-invoke-hook.py` 在 spec 阶段预拼的绝对路径）
 - **Fallback**：按 `PG_RUN_CALLER` + `PG_RUN_SESSION` + `PG_ENV` 自拼（v5 caller × session 双维度路由；老式手工调用 / 未走 `pg-invoke-hook.py` 仍可走此路径）
-  - `pg-build` → `.pg/changes/<C>/2-build/<env>/logs|pids`
-  - `pg-regression` → `.pg/regression/<suite>/<env>/logs|pids`（从 `regression-<suite>` 截 suite）
-  - `pg-fix-issue` → `.pg/fix-issue/<change>/<env>/logs|pids`
+  - `pg-build` → `.pg/changes/<C>/2-build/<env>-logs`
+  - `pg-regression` → `.pg/regression/<suite>/<env>-logs`（从 `regression-<suite>` 截 suite）
+  - `pg-fix-issue` → `.pg/fix-issue/<change>/<env>-logs`
   - 兜底 → `scripts/logs|pids`
 
 无此文件时，模板 fallback 到 caller 控制的 `$PG_LOG_FILE`（所有 skill 共用一条日志，pg-regression / pg-fix-issue 不再走隔离目录）。
@@ -256,7 +256,7 @@ Scanner: pg-init-project Phase 5 v1
 | # | 文件 | 行号 | 当前内容（节选） | 类别 | 建议改法 |
 |---|------|------|------------------|------|----------|
 | 1 | webvirt-agent/AGENTS.md | 60-95 | `make build` / `make proto` 等硬编码 | b | 替换为"模块构建命令: 见 .pg/context/agent-protocol.md §1" |
-| 2 | AGENTS.md (root) | 166-168 | `scripts/logs/backend.log` | c | 替换为"日志路径: 按 §3 路由 (e.g. .pg/agent/<session>/dev-local/logs/)" |
+| 2 | AGENTS.md (root) | 166-168 | `scripts/logs/backend.log` | c | 替换为"日志路径: 按 §3 路由 (e.g. .pg/agent/<session>/dev-local-logs/)" |
 ```
 
 **关键约束**：
@@ -398,7 +398,7 @@ Next steps:
 4. **跳过 `pg doctor`** —— 写完文件直接返回成功。**反例**：用户跑 `pg-propose` 时报 schema 错，回头找问题浪费半小时。
 5. **把 placeholder 留着** —— 在 `project.yaml` 顶部保留 `placeholder` module 不删。**反例**：schema 允许 `minProperties: 1` 但实际项目有 4 个 module，placeholder 残留污染 tracks/stages。
 6. **混淆 module hook 与 environment hook 的边界** —— 把 `modules.<m>.build` 写成 `bash .pg/hooks/kuboard-server-build.sh`，期望它走 hook 协议。**错**：`modules.<m>.build` 是 `executable_command` 字段，runner 直接渲染为 `timeout N bash -c '<cmd>'` 执行，**不**调用 `.pg/hooks/<m>-<action>.sh`。`pg-run-hook.py` 只服务于 `environments.<env>.{prepare_env,clean_env}` 与 `environments.<env>.roles.<r>.{start,stop,...}`。项目里如果残留 `<module>-{build,test,lint}.sh`，是历史模板的产物，删除即可。
-7. **忘记复制 `lib/common.sh`** —— 只复制 5 个 role/env 模板但漏掉 `lib/common.sh`。**反例**：新项目跑 `pg-regression` 时日志写到 `scripts/logs` 而非 `.pg/regression/<suite>/<env>/logs`，排错时找不到日志。`pg doctor` 会有 `hooks_lib_common_present` warning 提示。
+7. **忘记复制 `lib/common.sh`** —— 只复制 5 个 role/env 模板但漏掉 `lib/common.sh`。**反例**：新项目跑 `pg-regression` 时日志写到 `scripts/logs` 而非 `.pg/regression/<suite>/<env>-logs`，排错时找不到日志。`pg doctor` 会有 `hooks_lib_common_present` warning 提示。
 8. **Phase 5 直接修改 AGENTS.md** —— 不允许！必须只产 drift 清单，让用户 review 后手动应用。**反例**：pg-init-project 静默改用户的 AGENTS.md，导致用户信任破裂。
 9. **Phase 5 跳过 PG_SKIP_AGENTS_MD_MIGRATION 兜底** —— 用户拒绝时仍强行生成 patch 清单。**反例**：CI 跑 pg-init-project 时 .pg/context/ 下出现污染 artifacts，diff 噪音。
 

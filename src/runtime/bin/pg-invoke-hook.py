@@ -17,10 +17,10 @@ v5 协议 (current):
 - --skill / --caller 硬缺省 'ad-hoc', 任何漏传 caller 的调用都落到 .pg/ad-hoc/.
 - 新增 --log-dir (调试覆盖), --timeout-override (ad-hoc 调试, 输出 WARN).
 - caller 维度路由:
-    pg-build       -> .pg/changes/<session>/2-build/<env>/logs
-    pg-regression  -> .pg/regression/<session>/<env>/logs
-    pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs
-    ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs
+    pg-build       -> .pg/changes/<session>/2-build/<env>-logs
+    pg-regression  -> .pg/regression/<session>/<env>-logs
+    pg-fix-issue   -> .pg/fix-issue/<session>/<env>-logs
+    ad-hoc         -> .pg/ad-hoc/<session>/<env>-logs
 
 顶级 subcommands:
 - invoke-hook — 触发 role action (start/stop/restart/logs/tail/health_check) 或 env-level hook
@@ -69,10 +69,10 @@ Spec 渲染 (v5):
                     (完整 SSOT 见 src/runtime/spec/hook-env-vars.yaml)
   timeout_seconds  = act_cfg["timeout_seconds"] (可被 --timeout-override 覆盖)
   log_path        = per-caller 路由 (see pg_log_dir_for_skill):
-                    pg-build       -> .pg/changes/<session>/2-build/<env>/logs
-                    pg-regression  -> .pg/regression/<session>/<env>/logs
-                    pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs
-                    ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs
+                    pg-build       -> .pg/changes/<session>/2-build/<env>-logs
+                    pg-regression  -> .pg/regression/<session>/<env>-logs
+                    pg-fix-issue   -> .pg/fix-issue/<session>/<env>-logs
+                    ad-hoc         -> .pg/ad-hoc/<session>/<env>-logs
   wait_for_completion (bool, 默认 start=False / 其他=True):
                     start action 默认 fire-and-forget, hook 用 pg_start_bg
                     setsid detach 服务后立即返回, 避免 pg-run-hook.py 的 timeout
@@ -186,23 +186,24 @@ def pg_log_dir_for_skill(caller: str, session: str, env: str, project_root: Path
     """Return the per-caller log directory for hook logs (v4 协议).
 
     Routing rules (must stay in sync with .pg/hooks/lib/common.sh:pg_resolve_paths):
-      pg-build       -> .pg/changes/<session>/2-build/<env>/logs
-      pg-regression  -> .pg/regression/<session>/<env>/logs   (session = <suite>-<date>-<seq>)
-      pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs    (session 已含 fix- 前缀)
-      pg-agent       -> .pg/agent/<session>/<env>/logs        (LLM agent 通用入口, session = <iso-date>-<keyword>)
-      ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs       (独立顶级目录, 不与 SKILL 命名空间混)
+      pg-build       -> .pg/changes/<session>/2-build/<env>-logs
+      pg-regression  -> .pg/regression/<session>/<env>-logs   (session = <suite>-<date>-<seq>)
+      pg-fix-issue   -> .pg/fix-issue/<session>/<env>-logs    (session 已含 fix- 前缀)
+      pg-agent       -> .pg/agent/<session>/<env>-logs        (LLM agent 通用入口, session = <iso-date>-<keyword>)
+      ad-hoc         -> .pg/ad-hoc/<session>/<env>-logs       (独立顶级目录, 不与 SKILL 命名空间混)
     """
     base = project_root / ".pg"
+    dir_name = f"{env}-logs"
     if caller == CALLER_PG_BUILD:
-        return base / "changes" / session / "2-build" / env / "logs"
+        return base / "changes" / session / "2-build" / dir_name
     if caller == CALLER_PG_REGRESSION:
-        return base / "regression" / session / env / "logs"
+        return base / "regression" / session / dir_name
     if caller == CALLER_PG_FIX_ISSUE:
-        return base / "fix-issue" / session / env / "logs"
+        return base / "fix-issue" / session / dir_name
     if caller == CALLER_PG_AGENT:
-        return base / "agent" / session / env / "logs"
+        return base / "agent" / session / dir_name
     # ad-hoc
-    return base / "ad-hoc" / session / env / "logs"
+    return base / "ad-hoc" / session / dir_name
 
 
 def build_env_level_hook_spec(
@@ -416,7 +417,7 @@ def invoke_hook_main(argv=None) -> int:
                         help=(
                             "调用方身份 (caller 维度路由). "
                             "硬缺省 'ad-hoc' — 任何不显式传 --skill 的调用都视为 ad-hoc, "
-                            "日志落到 .pg/ad-hoc/<session>/<env>/logs/."
+                            "日志落到 .pg/ad-hoc/<session>/<env>-logs/."
                             "SKILL (pg-build / pg-regression / pg-fix-issue) 必须显式标注."
                         ))
     parser.add_argument("--log-dir", default=None,
