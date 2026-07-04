@@ -227,6 +227,73 @@ class TestPgBuildResult(unittest.TestCase):
         self.assertEqual(ok, 1, f"stderr: {err}")
         self.assertIn("tasks-updated", err)
 
+    # ============================================================
+    # v2.4 新增：--output-path 强制落盘
+    # ============================================================
+
+    def test_output_path_writes_json(self):
+        """[v2.4] --output-path 应写入合法 JSON 文件。"""
+        with tempfile.NamedTemporaryFile(
+            mode="w", suffix=".result.json", delete=False
+        ) as f:
+            tmp = f.name
+        try:
+            ok, out, err = _run([
+                "--mode", "agent",
+                "--status", "completed",
+                "--summary", "test v2.4 output",
+                "--track", "dev.backend", "--phase", "test",
+                "--outputs", "/tmp/Test.java",
+                "--tasks-updated", "1.1",
+                "--output-path", tmp,
+            ])
+            self.assertEqual(ok, 0, f"stderr: {err}")
+            self.assertTrue(os.path.isfile(tmp), f"文件未落盘: {tmp}")
+            with open(tmp, encoding="utf-8") as f:
+                content = json.load(f)
+            self.assertEqual(content["status"], "completed")
+            self.assertEqual(content["summary"], "test v2.4 output")
+            self.assertEqual(content["outputs"], ["/tmp/Test.java"])
+            self.assertEqual(content["tasks_updated"], ["1.1"])
+            # ORCHESTRATOR_READY 标记应在 stderr（不污染 stdout JSON）
+            self.assertIn("ORCHESTRATOR_READY", err)
+            # stdout 应是合法 JSON
+            json.loads(out)
+        finally:
+            os.unlink(tmp)
+
+    def test_output_path_require_output_fails_on_invalid_dir(self):
+        """[v2.4] --require-output + 不可写路径 → exit 2。"""
+        # /nonexistent/dir/file.json 不可写（中间目录不存在）
+        bad_path = "/nonexistent_xxxxx/dir/file.json"
+        ok, out, err = _run([
+            "--mode", "agent",
+            "--status", "completed",
+            "--summary", "test",
+            "--track", "dev.backend", "--phase", "test",
+            "--outputs", "/tmp/Test.java",
+            "--tasks-updated", "1.1",
+            "--output-path", bad_path,
+            "--require-output",
+        ])
+        self.assertEqual(ok, 2, f"stderr: {err}")
+        self.assertIn("写入失败", err)
+
+    def test_output_path_optional_no_file_written(self):
+        """[v2.4] 不传 --output-path 时行为同 v2.3（仅 stdout）。"""
+        ok, out, err = _run([
+            "--mode", "agent",
+            "--status", "completed",
+            "--summary", "no output path",
+            "--track", "dev.backend", "--phase", "test",
+            "--outputs", "/tmp/Test.java",
+            "--tasks-updated", "1.1",
+        ])
+        self.assertEqual(ok, 0, f"stderr: {err}")
+        # 输出到 stdout
+        result = json.loads(out)
+        self.assertEqual(result["summary"], "no output path")
+
 
 if __name__ == "__main__":
     unittest.main()

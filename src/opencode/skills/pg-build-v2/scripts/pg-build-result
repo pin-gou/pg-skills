@@ -9,6 +9,16 @@
 
 两种模式都通过 sub_agent_contract.validate_record_args 校验字段，校验失败 exit 1。
 
+v2.4 新增（sub-agent 返回契约强制落盘）：
+
+  --output-path <path> : 可选。指定后，脚本会将生成的 JSON 同时写入该绝对路径文件，
+                         并在写入后 `cat` 文件内容到 stdout 供 sub-agent 验证。
+                         文件路径通常由 dispatch_file 同前缀派生：
+                         e.g. <seq>-<track>-<phase>.result.json
+
+  --require-output     : 可选。配合 --output-path 使用；若文件未写入成功则 exit 1。
+                         推荐编排器在 dispatch 阶段强制设置此标志。
+
 用法（agent 模式）：
     pg-build-result --mode agent \\
         --status pass \\
@@ -17,14 +27,16 @@
         --evidence /abs/049-evidence.md \\
         --report /abs/051-gate.md \\
         --outputs /abs/out1.java,/abs/out2.java \\
-        --issues "G-1..."
+        --output-path /abs/051-dev.frontend-gate.result.json \\
+        --require-output
 
 用法（runner 模式）：
     pg-build-result --mode runner --status pass --summary "..." ...
 
 退出码：
-    0 — 校验通过，输出 JSON 或 CLI 参数字符串到 stdout
-    1 — 校验失败，错误信息到 stderr
+    0  — 校验通过，输出 JSON 或 CLI 参数字符串到 stdout
+    1  — 校验失败，错误信息到 stderr
+    2  — --require-output 时文件未写入（v2.4 新增）
 """
 from __future__ import annotations
 
@@ -45,7 +57,7 @@ from pipeline.sub_agent_contract import validate_record_args  # noqa: E402
 def _parse_args(argv: list[str]) -> argparse.Namespace:
     p = argparse.ArgumentParser(
         prog="pg-build-result",
-        description="Sub-agent 返回契约校验与生成工具 (v2.1)",
+        description="Sub-agent 返回契约校验与生成工具 (v2.4)",
     )
     p.add_argument(
         "--mode", choices=["agent", "runner"], required=True,
@@ -71,6 +83,17 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--tasks-updated", action="append", default=[],
         help="task_id 列表（可多次传：--tasks-updated 1.1 --tasks-updated 2.1）"
     )
+    # ── v2.4 新增：强制落盘参数 ──
+    p.add_argument(
+        "--output-path", default="",
+        help="v2.4: 将生成的 JSON 同时写入此绝对路径文件。"
+             "典型用法：与 dispatch_file 同前缀的 .result.json。",
+    )
+    p.add_argument(
+        "--require-output", action="store_true",
+        help="v2.4: 若 --output-path 指定但文件未写入成功则 exit 2。"
+             "编排器在 dispatch 阶段强制设置此标志。",
+    )
     return p.parse_args(argv)
 
 
@@ -89,9 +112,9 @@ def _validate(args: argparse.Namespace) -> tuple[bool, str]:
     )
 
 
-def _emit_agent_mode(args: argparse.Namespace) -> int:
-    """输出完整 JSON 结构供 sub-agent 复制到返回值。"""
-    result: dict[str, Any] = {
+def _build_result_dict(args: argparse.Namespace) -> dict[str, Any]:
+    """构造 sub-agent 返回的 JSON dict。"""
+    return {
         "summary": args.summary,
         "outputs": [s.strip() for s in args.outputs.split(",") if s.strip()],
         "tasks_updated": list(args.tasks_updated),
@@ -99,6 +122,50 @@ def _emit_agent_mode(args: argparse.Namespace) -> int:
         "evidence_paths": list(args.evidence),
         "report_path": args.report,
     }
+
+
+def _write_output_file(args: argparse.Namespace, result: dict[str, Any]) -> tuple[bool, str]:
+    """v2.4 新增：将 JSON 写入 --output-path 指定路径。
+
+    Returns:
+        (ok, error_msg): ok=True 表示写入成功
+    """
+    if not args.output_path:
+        return True, ""
+
+    try:
+        os.makedirs(os.path.dirname(os.path.abspath(args.output_path)), exist_ok=True)
+        with open(args.output_path, "w", encoding="utf-8") as f:
+            json.dump(result, f, ensure_ascii=False, indent=2)
+    except OSError as e:
+        return False, f"无法写入 {args.output_path}: {e}"
+
+    # 验证文件确实落盘（防止缓存/磁盘问题）
+    if not os.path.isfile(args.output_path):
+        return False, f"写入后文件仍不存在: {args.output_path}"
+
+    return True, ""
+
+
+def _emit_agent_mode(args: argparse.Namespace) -> int:
+    """输出完整 JSON 结构供 sub-agent 复制到返回值。"""
+    result = _build_result_dict(args)
+
+    # v2.4: 强制落盘
+    if args.output_path or args.require_output:
+        ok, err = _write_output_file(args, result)
+        if not ok:
+            print(f"[pg-build-result] 写入失败:\n  {err}", file=sys.stderr)
+            return 2  # v2.4: 专用退出码
+        # 写盘后回声到 stderr：让 sub-agent 看到自己写入的内容（防止幻觉）
+        with open(args.output_path, encoding="utf-8") as f:
+            echo_content = f.read()
+        print(f"[pg-build-result] 已落盘到 {args.output_path}", file=sys.stderr)
+        print(echo_content, file=sys.stderr)
+        # ORCHESTRATOR_READY 标记写到 stderr（不污染 stdout JSON）
+        print("**ORCHESTRATOR_READY**", file=sys.stderr)
+
+    # stdout 仅输出 JSON（保持 v2.3 兼容）
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
 
