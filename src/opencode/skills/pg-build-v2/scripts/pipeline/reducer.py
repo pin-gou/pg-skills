@@ -17,7 +17,6 @@ from pipeline.state import (
     PipelineState,
     TrackState,
     SUB_PHASES,
-    SUB_PHASES_WITH_FIX,
     FIX_SUB,
     FIX_GATE_SUB,
     SIMPLE_SUB,
@@ -131,7 +130,7 @@ def _dispatch_action(
 
 def _track_phase_index(state: PipelineState, track: str, phase: str) -> int:
     """返回 phase 在 SUB_PHASES 中的下标。"""
-    phases = SUB_PHASES_WITH_FIX
+    phases = SUB_PHASES
     try:
         return phases.index(phase)
     except ValueError:
@@ -754,9 +753,9 @@ def _sub_pipeline_advance(
 def _next_phase(current: str) -> str | None:
     """返回 SUB_PHASES 中的下一 phase。"""
     try:
-        idx = SUB_PHASES_WITH_FIX.index(current)
-        if idx + 1 < len(SUB_PHASES_WITH_FIX):
-            return SUB_PHASES_WITH_FIX[idx + 1]
+        idx = SUB_PHASES.index(current)
+        if idx + 1 < len(SUB_PHASES):
+            return SUB_PHASES[idx + 1]
         return None
     except ValueError:
         return None

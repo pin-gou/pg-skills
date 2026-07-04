@@ -9,12 +9,12 @@
 
 from __future__ import annotations
 
+import dataclasses
 from dataclasses import dataclass, field
 from typing import Any
 
 
 SUB_PHASES: tuple[str, ...] = ("test", "dev", "verify", "gate")
-SUB_PHASES_WITH_FIX: tuple[str, ...] = ("test", "dev", "verify", "gate")
 FIX_SUB = "fix"
 FIX_GATE_SUB = "fix-gate"
 SIMPLE_SUB = "simple"
@@ -79,22 +79,7 @@ class PhaseState:
         )
 
     def replace(self, **kwargs: Any) -> "PhaseState":
-        """返回新 PhaseState（仅替换指定字段）。"""
-        return PhaseState(
-            status=kwargs.get("status", self.status),
-            attempt=kwargs.get("attempt", self.attempt),
-            started_at=kwargs.get("started_at", self.started_at),
-            completed_at=kwargs.get("completed_at", self.completed_at),
-            agent=kwargs.get("agent", self.agent),
-            report_path=kwargs.get("report_path", self.report_path),
-            summary=kwargs.get("summary", self.summary),
-            tasks_marked=kwargs.get("tasks_marked", self.tasks_marked),
-            cycles=kwargs.get("cycles", self.cycles),
-            fix_cycles=kwargs.get("fix_cycles", self.fix_cycles),
-            gate_cycles=kwargs.get("gate_cycles", self.gate_cycles),
-            fix_gates=kwargs.get("fix_gates", self.fix_gates),
-            current_cycle=kwargs.get("current_cycle", self.current_cycle),
-        )
+        return dataclasses.replace(self, **kwargs)
 
 
 
@@ -202,33 +187,7 @@ class TrackState:
         )
 
     def replace(self, **kwargs: Any) -> "TrackState":
-        return TrackState(
-            track_id=kwargs.get("track_id", self.track_id),
-            bare=kwargs.get("bare", self.bare),
-            label=kwargs.get("label", self.label),
-            status=kwargs.get("status", self.status),
-            started_at=kwargs.get("started_at", self.started_at),
-            completed_at=kwargs.get("completed_at", self.completed_at),
-            modules=kwargs.get("modules", self.modules),
-            max_fail_retries=kwargs.get("max_fail_retries", self.max_fail_retries),
-            max_fix_retries=kwargs.get("max_fix_retries", self.max_fix_retries),
-            max_gate_fix_retries=kwargs.get("max_gate_fix_retries", self.max_gate_fix_retries),
-            phases=kwargs.get("phases", self.phases),
-            sub_pipelines=kwargs.get("sub_pipelines", self.sub_pipelines),
-            accepted_gaps=kwargs.get("accepted_gaps", self.accepted_gaps),
-            module_roots=kwargs.get("module_roots", self.module_roots),
-            module_details=kwargs.get("module_details", self.module_details),
-            test_commands=kwargs.get("test_commands", self.test_commands),
-            review_level=kwargs.get("review_level", self.review_level),
-            env_name=kwargs.get("env_name", self.env_name),
-            env_instances_yaml=kwargs.get("env_instances_yaml", self.env_instances_yaml),
-            hooks_yaml=kwargs.get("hooks_yaml", self.hooks_yaml),
-            prepare_log_path=kwargs.get("prepare_log_path", self.prepare_log_path),
-            prepare_status=kwargs.get("prepare_status", self.prepare_status),
-            tasks_by_phase=kwargs.get("tasks_by_phase", self.tasks_by_phase),
-            commands=kwargs.get("commands", self.commands),
-            fix_routing=kwargs.get("fix_routing", self.fix_routing),
-        )
+        return dataclasses.replace(self, **kwargs)
 
     def get_phase(self, phase: str) -> PhaseState:
         return self.phases.get(phase, PhaseState())
@@ -328,28 +287,7 @@ class PipelineState:
         )
 
     def replace(self, **kwargs: Any) -> "PipelineState":
-        return PipelineState(
-            schema_version=kwargs.get("schema_version", self.schema_version),
-            change=kwargs.get("change", self.change),
-            pipeline_order=kwargs.get("pipeline_order", self.pipeline_order),
-            track_types=kwargs.get("track_types", self.track_types),
-            tracks=kwargs.get("tracks", self.tracks),
-            current_sub_pipeline=kwargs.get("current_sub_pipeline", self.current_sub_pipeline),
-            init_committed=kwargs.get("init_committed", self.init_committed),
-            init_commit_sha=kwargs.get("init_commit_sha", self.init_commit_sha),
-            feature_branch=kwargs.get("feature_branch", self.feature_branch),
-            status=kwargs.get("status", self.status),
-            failed_reason=kwargs.get("failed_reason", self.failed_reason),
-            current_track=kwargs.get("current_track", self.current_track),
-            current_phase=kwargs.get("current_phase", self.current_phase),
-            last_dispatch_file=kwargs.get("last_dispatch_file", self.last_dispatch_file),
-            retry_count=kwargs.get("retry_count", self.retry_count),
-            stage_order=kwargs.get("stage_order", self.stage_order),
-            stage_env_map=kwargs.get("stage_env_map", self.stage_env_map),
-            stage_env_timeout=kwargs.get("stage_env_timeout", self.stage_env_timeout),
-            current_stage=kwargs.get("current_stage", self.current_stage),
-            stage_prepared=kwargs.get("stage_prepared", self.stage_prepared),
-        )
+        return dataclasses.replace(self, **kwargs)
 
     def is_track_completed(self, track_id: str) -> bool:
         t = self.tracks.get(track_id)

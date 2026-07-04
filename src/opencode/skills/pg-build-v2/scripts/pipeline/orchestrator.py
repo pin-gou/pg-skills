@@ -341,7 +341,6 @@ class Orchestrator:
                         "type": cfg.get("type", "standard"),
                         "review_level": cfg.get("review_level", ""),
                         "description": cfg.get("description", ""),
-                        "fix_routing": cfg.get("fix_routing", "source"),
                     }
             except Exception:
                 pass
@@ -384,51 +383,6 @@ class Orchestrator:
             stage_order.append("dev")
 
         return stage_order, stage_env_map
-
-    def _detect_pipeline_order(self) -> tuple[str, ...]:
-        """从 execution-manifest.yaml 读取 pipeline order。
-
-        fallback 到 project.yaml stages。
-        """
-        # 尝试 manifest
-        manifest_path = os.path.join(self.change_root, "execution-manifest.yaml")
-        if os.path.isfile(manifest_path):
-            try:
-                import yaml as _yaml
-                with open(manifest_path, encoding="utf-8") as f:
-                    manifest = _yaml.safe_load(f) or {}
-                order = []
-                for stage in manifest.get("stages", []):
-                    stage_name = stage.get("name", "")
-                    for track in stage.get("tracks", []):
-                        tid = track["id"] if isinstance(track, dict) else track
-                        qualified = f"{stage_name}.{tid}" if stage_name else tid
-                        order.append(qualified)
-                if "final_gate" in manifest:
-                    order.append(FINAL_GATE_TRACK)
-                if order:
-                    return tuple(order)
-            except Exception:
-                pass
-
-        # fallback: project.yaml
-        config_path = os.path.join(bootstrap.PROJECT_ROOT, ".pg", "project.yaml")
-        if os.path.isfile(config_path):
-            try:
-                import yaml as _yaml
-                with open(config_path, encoding="utf-8") as f:
-                    config = _yaml.safe_load(f) or {}
-                order = []
-                for stage in config.get("stages", []):
-                    stage_name = stage.get("name", "")
-                    for t in stage.get("tracks", []):
-                        qualified = f"{stage_name}.{t}" if stage_name else t
-                        order.append(qualified)
-                return tuple(order)
-            except Exception:
-                pass
-
-        return ()
 
     def record(
         self,

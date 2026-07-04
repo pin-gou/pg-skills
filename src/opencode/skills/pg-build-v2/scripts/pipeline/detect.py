@@ -9,7 +9,6 @@ from __future__ import annotations
 from pipeline.state import (
     PipelineState,
     SUB_PHASES,
-    SUB_PHASES_WITH_FIX,
     FIX_SUB,
     FIX_GATE_SUB,
     SIMPLE_SUB,
@@ -133,8 +132,8 @@ def next_pending(state: PipelineState) -> PipelineAction:
             idx = _phase_index(current_phase)
             if idx >= 0:
                 # 从下一 phase 开始找
-                for i in range(idx, len(SUB_PHASES_WITH_FIX)):
-                    phase = SUB_PHASES_WITH_FIX[i]
+                for i in range(idx, len(SUB_PHASES)):
+                    phase = SUB_PHASES[i]
                     ph = track.phases.get(phase)
                     if ph is not None and ph.status == "completed":
                         continue
@@ -161,7 +160,7 @@ def next_pending(state: PipelineState) -> PipelineAction:
         return PipelineAction(
             kind="dispatch",
             track=track_id,
-            phase=SUB_PHASES_WITH_FIX[0],
+            phase=SUB_PHASES[0],
             cycle=1,
         )
 
@@ -176,6 +175,6 @@ def next_pending(state: PipelineState) -> PipelineAction:
 
 def _phase_index(phase: str) -> int:
     try:
-        return SUB_PHASES_WITH_FIX.index(phase)
+        return SUB_PHASES.index(phase)
     except ValueError:
         return -1

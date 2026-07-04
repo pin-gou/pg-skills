@@ -40,7 +40,6 @@ from pipeline.state import (
     TrackState,
     PhaseState,
     SUB_PHASES,
-    SUB_PHASES_WITH_FIX,
     FIX_SUB,
     FIX_GATE_SUB,
     SIMPLE_SUB,

@@ -270,7 +270,7 @@ def build_ctx(
         "module_details": lazy_module_details,
         "review_level": lazy_review_level,
         "max_fix_retries": t.max_fix_retries,
-        "fix_routing": "source",
+        "fix_routing": t.fix_routing or "direct_to_gate",
         # stage
         "stage_name": track.rsplit(".", 1)[0] if "." in track else "dev",
         "test_key": "unit",
