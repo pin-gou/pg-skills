@@ -361,6 +361,15 @@ def build_action(
     ctx["report_filename"] = f"{rs}-{track}-{phase}.md"
     ctx["fix_report_filename"] = f"{rs}-{track}-fix-{cycle}.md"  # v2.2: 去掉冗余 phase 字段
 
+    # v2.4: 派生 result JSON 路径（与 dispatch_file 同前缀，扩展名 .result.json）
+    # dispatch_file 命名规则: <seq>-<track>-<phase>-dispatch[-cycle].md
+    # result 命名规则:     <seq>-<track>-<phase>-result[-cycle].json
+    result_prefix = f"{ds}-{track}-{phase}-result"
+    if cycle > 1:
+        result_prefix += f"-{cycle}"
+    expected_result_path = os.path.join(change_root, "2-build", f"{result_prefix}.json")
+    ctx["result_json_path"] = expected_result_path  # 注入 prompt，供 sub-agent 使用
+
     # 写 dispatch_file
     filepath = render_dispatch_file(
         change_root=change_root,
@@ -370,15 +379,6 @@ def build_action(
         cycle=cycle,
         dispatch_seq=ds,
     )
-
-    # v2.4: 派生 result JSON 路径（与 dispatch_file 同前缀，扩展名 .result.json）
-    # dispatch_file 命名规则: <seq>-<track>-<phase>-dispatch[-cycle].md
-    # result 命名规则:     <seq>-<track>-<phase>-result[-cycle].json
-    result_prefix = f"{ds}-{track}-{phase}-result"
-    if cycle > 1:
-        result_prefix += f"-{cycle}"
-    expected_result_path = os.path.join(change_root, "2-build", f"{result_prefix}.json")
-    ctx["result_json_path"] = expected_result_path  # 注入 prompt，供 sub-agent 使用
 
     result: dict[str, Any] = {
         "action": "dispatch",
@@ -425,6 +425,12 @@ def build_final_gate_action(
                 report_paths.append(os.path.join(build_dir, fname))
     ctx["report_paths"] = "\n".join(report_paths)
 
+    # v2.4: 派生 final-gate result JSON 路径
+    expected_result_path = os.path.join(
+        change_root, "2-build", f"{ds}-final-gate-gate-result.json"
+    )
+    ctx["result_json_path"] = expected_result_path
+
     filepath = render_dispatch_file(
         change_root=change_root,
         track="final-gate",
@@ -432,12 +438,6 @@ def build_final_gate_action(
         ctx=ctx,
         dispatch_seq=ds,
     )
-
-    # v2.4: 派生 final-gate result JSON 路径
-    expected_result_path = os.path.join(
-        change_root, "2-build", f"{ds}-final-gate-gate-result.json"
-    )
-    ctx["result_json_path"] = expected_result_path
 
     return {
         "action": "dispatch_final_gate",

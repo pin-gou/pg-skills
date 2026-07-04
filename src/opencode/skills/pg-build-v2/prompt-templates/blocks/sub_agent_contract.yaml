@@ -79,7 +79,7 @@ block: |
   ```
 
   **占位符**：
-  - `{result_json_path}` — 由编排器注入的 result JSON 落盘绝对路径（如 `2-build/002-dev.backend-dev.result.json`）
+  - `{result_json_path}` — 由编排器注入的 result JSON 落盘绝对路径
   - 脚本会用 `{result_json_path}` 写入 JSON，**并在写入失败时 exit 2**
   - 编排器会**检查该文件是否存在**——缺失 = 任务失败
 
