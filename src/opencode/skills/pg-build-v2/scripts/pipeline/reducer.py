@@ -31,9 +31,6 @@ from pipeline.events import (
     STATUS_ESCALATE,
     STATUS_PASS,
     STATUS_FAIL,
-    DEFAULT_FIX_ROUTING,  # v2.2
-    FIX_ROUTING_RE_VERIFY,  # v2.2
-    EVT_FIX_SKIPPED_VERIFY,  # v2.2
 )
 from pipeline.sub_pipeline import (
     SubPipeline,
@@ -48,7 +45,10 @@ from pipeline.sub_pipeline import (
 # 常量
 # ============================================================
 
-MAX_FIX_CYCLES = 4  # fix 循环最大次数（verify escalate 几次后强制 gate）
+# v2.3: fix_routing 已废弃。所有 fix 完成后统一走 re_verify（→ fix → verify → fix → ...），
+# 直到 track.max_fix_retries 用尽（耗尽点：fix_cycle_started 次数 == max_fix_retries）
+# 或 verify 最终返回 completed 才进 gate。
+# 注意：MAX_FIX_CYCLES 不再使用，改为读取 t.max_fix_retries。
 # 各 track 级重试限制从 TrackState 读取：
 #   max_fail_retries / max_fix_retries / max_gate_fix_retries
 # 默认值（TrackState 创建时使用）：
@@ -97,16 +97,26 @@ PHASE_AGENTS: dict[str, str] = {
 # 工具函数
 # ============================================================
 
-def _error_action(reason: str) -> tuple[PipelineState, PipelineAction]:
-    """返回 error action（无效的状态转换）。"""
-    return PipelineState(), PipelineAction(
+def _error_action(state: PipelineState, reason: str) -> tuple[PipelineState, PipelineAction]:
+    """返回 error action — 保留当前 state。
+
+    关键约束：error path 不应清空 state，否则 orchestrator.record 后续副作用
+    （save_snapshot, _auto_commit）会破坏持久层。
+    返回 (state, error_action)，让 caller 决定如何处理 action。
+    """
+    return state, PipelineAction(
         kind="error", detail={"reason": reason}
     )
 
 
-def _fail_action(track: str, phase: str, reason: str) -> tuple[PipelineState, PipelineAction]:
-    """返回 workflow_failed action。"""
-    return PipelineState(), PipelineAction(
+def _fail_action(state: PipelineState, track: str, phase: str, reason: str) -> tuple[PipelineState, PipelineAction]:
+    """返回 workflow_failed action — 保留当前 state。
+
+    Note: workflow_failed 是 terminal action（标记 status=failed）。
+    caller (orchestrator._action_to_dict) 仍会 save_snapshot，但只是把
+    failed 标记写入，不是破坏 tracks 内容。state 必须保留 tracks 内容以便排错。
+    """
+    return state, PipelineAction(
         kind="workflow_failed",
         track=track,
         phase=phase,
@@ -239,7 +249,7 @@ def reduce_state(
     if track == FINAL_GATE_TRACK or phase == FINAL_GATE_PHASE:
         return _handle_final_gate(state, record)
 
-    return _error_action(f"unknown phase: {phase!r}")
+    return _error_action(state, f"unknown phase: {phase!r}")
 
 
 # ============================================================
@@ -285,7 +295,7 @@ def _handle_linear_phase(
             max_retries = t.max_fail_retries
             if attempt > max_retries:
                 return _fail_action(
-                    track, phase,
+                    new_state, track, phase,
                     f"{track}:{phase} failed after {max_retries} attempts",
                 )
             t = _update_phase(t, phase, status="pending", attempt=attempt,
@@ -297,7 +307,7 @@ def _handle_linear_phase(
             )
             return new_state, _dispatch_action(track, phase, attempt=attempt)
 
-    return _error_action(f"track not found: {track}")
+    return _error_action(new_state, f"track not found: {track}")
 
 
 # ============================================================
@@ -309,7 +319,7 @@ def _handle_verify(
 ) -> tuple[PipelineState, PipelineAction]:
     track = record.track
     if track not in state.tracks:
-        return _error_action(f"track not found: {track}")
+        return _error_action(state, f"track not found: {track}")
     t = state.tracks[track]
 
     if record.status == STATUS_COMPLETED:
@@ -330,14 +340,17 @@ def _handle_verify(
         # v2.2: escalate 必须有 tasks_updated
         if not record.tasks_updated:
             return _error_action(
+                state,
                 f"escalate requires tasks_updated with failed V-* IDs: {track}:{record.phase}"
             )
         verify = t.phases.get("verify", PhaseState())
         fix_cycles = len(verify.fix_cycles)
-        if fix_cycles >= MAX_FIX_CYCLES:
-            # 耗尽 → 强制 gate
+        # v2.3: limit 读 track.max_fix_retries（语义：verify→fix 循环总次数）
+        max_fix_loops = t.max_fix_retries
+        if fix_cycles >= max_fix_loops:
+            # 耗尽 → 强制 gate（即使仍有未修复的 V-*）
             t = _update_phase(t, "verify", status="completed",
-                              summary="fix cycles exhausted, force gate")
+                              summary=f"fix cycles exhausted ({fix_cycles}/{max_fix_loops}), force gate")
             new_state = state.replace(
                 tracks={**state.tracks, track: t},
                 current_track=track,
@@ -369,13 +382,13 @@ def _handle_verify(
         attempt = verify_attempt(state, track) + 1
         max_retries = t.max_fail_retries if track in state.tracks else 3
         if attempt > max_retries:
-            return _fail_action(track, "verify",
+            return _fail_action(state, track, "verify",
                                 f"{track}:verify failed after {max_retries} attempts")
         t = _update_phase(t, "verify", status="pending", attempt=attempt)
         new_state = state.replace(tracks={**state.tracks, track: t})
         return new_state, _dispatch_action(track, "verify", attempt=attempt)
 
-    return _error_action(f"invalid verify status: {record.status}")
+    return _error_action(state, f"invalid verify status: {record.status}")
 
 
 # ============================================================
@@ -387,7 +400,7 @@ def _handle_fix(
 ) -> tuple[PipelineState, PipelineAction]:
     track = record.track
     if track not in state.tracks:
-        return _error_action(f"track not found: {track}")
+        return _error_action(state, f"track not found: {track}")
 
     # [v2.1 修复] 提前获取 t — 修复 UnboundLocalError：
     # 之前只在 STATUS_COMPLETED 分支里给 t 赋值，STATUS_FAILED 分支直接使用 t 导致崩溃
@@ -406,53 +419,40 @@ def _handle_fix(
         dict_phases["verify"] = verify
         t = t.replace(phases=dict_phases)
 
-        # v2.2: 检查 fix_routing
+        # v2.3: fix 完成后统一 re_verify（→ 子 pipeline 推进到 verify）
+        # 不再有"fix_routing"分支：fix 完成后总是进入 verify，让 verify 再次校验 V-*
+        # 直到 verify.completed 或 max_fix_retries 耗尽。
         sp = state.current_sub_pipeline
-        fix_routing = t.fix_routing or DEFAULT_FIX_ROUTING
-
-        if fix_routing == DEFAULT_FIX_ROUTING:
-            # direct_to_gate: fix 完成后跳过子 pipeline 的 verify，直接进 gate
-            new_state = state.replace(
-                tracks={**state.tracks, track: t},
-                current_sub_pipeline=None,
-                current_track=track,
-                current_phase="gate",
-            )
-            # 说明: gate 的 cycle 设为 1（不累加 fix 的 cycle）
-            return new_state, _dispatch_action(track, "gate", cycle=1)
-        else:
-            # re_verify: 推进子 pipeline 到 verify phase
-            new_state = state.replace(
-                tracks={**state.tracks, track: t},
-            )
-            return _sub_pipeline_advance(new_state, sp=sp)
+        new_state = state.replace(
+            tracks={**state.tracks, track: t},
+        )
+        return _sub_pipeline_advance(new_state, sp=sp)
 
     elif record.status == STATUS_FAILED:
-        # fix 失败 → 重试
-        attempt = (t.phases.get(FIX_SUB, PhaseState()).attempt or 0) + 1
-        max_retries = t.max_fix_retries if track in state.tracks else 5
-        if attempt > max_retries:
-            # [v2.1 修复 + accept_gap 协议] fix 循环耗尽 → 接受 gap，track 标记 completed
-            gap = _make_gap_entry(
-                track=track, phase="fix",
-                cycles=attempt, max_cycles=max_retries,
-                issues=record.summary or record.issues or "",
-            )
-            t = _update_phase(t, FIX_SUB, status="completed",
-                              summary=f"fix exhausted after {max_retries} cycles, gap accepted")
-            t = t.replace(status="completed", accepted_gaps=(*t.accepted_gaps, gap))
-            new_state = state.replace(
-                tracks={**state.tracks, track: t},
-                current_sub_pipeline=None,
-                current_track="",
-                current_phase="",
-            )
-            return new_state, PipelineAction(kind="advance", track=track)
-        t = _update_phase(t, FIX_SUB, status="pending", attempt=attempt)
-        new_state = state.replace(tracks={**state.tracks, track: t})
-        return new_state, _dispatch_action(track, FIX_SUB, attempt=attempt)
+        # v2.3: fix 失败 → 进入 verify（不再重试 fix）
+        # 语义：fix agent 自身失败时不再 retry，让 verify 重新检查；如果 verify 通过，
+        # 视为 fix cycle 完成但仍走 verify；如果 verify 再次 escalate，触发下一轮 fix。
+        # 这样 max_fix_retries 真正成为 "verify→fix 循环总次数"。
+        verify = t.phases.get("verify", PhaseState())
+        fix_cycles = list(verify.fix_cycles)
+        if fix_cycles:
+            last = dict(fix_cycles[-1])
+            last["status"] = "failed"
+            fix_cycles[-1] = last
+        verify = verify.replace(fix_cycles=tuple(fix_cycles))
+        dict_phases = dict(t.phases)
+        dict_phases["verify"] = verify
+        t = t.replace(phases=dict_phases)
+        sp = state.current_sub_pipeline
+        new_state = state.replace(
+            tracks={**state.tracks, track: t},
+        )
+        return _sub_pipeline_advance(new_state, sp=sp)
 
-    return _error_action(f"invalid fix status: {record.status}")
+    # v2.3: fix 子 pipeline 不再拥有 attempt/max_retries 概念。
+    # STATUS_FAILED 走同一个分支（见上），不再"重试 fix 自身"。
+    # 兜底：处理未来可能出现的非 COMPLETED/FAILED status：
+    return _error_action(state, f"invalid fix status: {record.status}")
 
 
 # ============================================================
@@ -464,10 +464,10 @@ def _handle_fix_gate(
 ) -> tuple[PipelineState, PipelineAction]:
     track = record.track
     if track not in state.tracks:
-        return _error_action(f"track not found: {track}")
+        return _error_action(state, f"track not found: {track}")
 
     # [v2.1 修复] 提前获取 t — 修复 STATUS_FAILED 分支 UnboundLocalError
-    t = state.tracks[track]
+    t = state.tracks[track] 
 
     if record.status == STATUS_COMPLETED:
         gate = t.phases.get("gate", PhaseState())
@@ -488,13 +488,13 @@ def _handle_fix_gate(
         attempt = (t.phases.get(FIX_GATE_SUB, PhaseState()).attempt or 0) + 1
         max_retries = t.max_fix_retries if track in state.tracks else 5
         if attempt > max_retries:
-            return _fail_action(track, "fix-gate",
+            return _fail_action(state, track, "fix-gate",
                                 f"{track}:fix-gate failed after {max_retries} attempts")
         t = _update_phase(t, FIX_GATE_SUB, status="pending", attempt=attempt)
         new_state = state.replace(tracks={**state.tracks, track: t})
         return new_state, _dispatch_action(track, FIX_GATE_SUB, attempt=attempt)
 
-    return _error_action(f"invalid fix-gate status: {record.status}")
+    return _error_action(state, f"invalid fix-gate status: {record.status}")
 
 
 # ============================================================
@@ -506,7 +506,7 @@ def _handle_gate(
 ) -> tuple[PipelineState, PipelineAction]:
     track = record.track
     if track not in state.tracks:
-        return _error_action(f"track not found: {track}")
+        return _error_action(state, f"track not found: {track}")
     t = state.tracks[track]
 
     if record.status == STATUS_PASS:
@@ -573,7 +573,7 @@ def _handle_gate(
         )
         return new_state, _dispatch_action(track, sp.current_phase, cycle=sp.cycle)
 
-    return _error_action(f"invalid gate status: {record.status}")
+    return _error_action(state, f"invalid gate status: {record.status}")
 
 
 # ============================================================
@@ -596,9 +596,12 @@ def _handle_final_gate(
             status="failed",
             failed_reason=record.summary or "final-gate assessment failed",
         )
-        return _fail_action(FINAL_GATE_TRACK, FINAL_GATE_PHASE, new_state.failed_reason)
+        return _fail_action(
+            new_state, FINAL_GATE_TRACK, FINAL_GATE_PHASE,
+            new_state.failed_reason or "final-gate assessment failed",
+        )
 
-    return _error_action(f"invalid final-gate status: {record.status}")
+    return _error_action(state, f"invalid final-gate status: {record.status}")
 
 
 # ============================================================
@@ -620,26 +623,81 @@ def _handle_sub_pipeline_record(
     elif record.phase == "gate":
         # gate-fix 子 pipeline 中的 gate
         return _handle_sub_gate(state, record, sp)
-    return _error_action(f"unexpected sub-pipeline phase: {record.phase}")
+    return _error_action(state, f"unexpected sub-pipeline phase: {record.phase}")
 
 
 def _handle_sub_verify(
     state: PipelineState, record: PipelineRecord, sp: SubPipeline,
 ) -> tuple[PipelineState, PipelineAction]:
-    """gate-fix 子 pipeline 中的 verify（必须 PROCEED 才能继续）。"""
+    """fix-cycle 或 gate-fix 子 pipeline 中的 verify。
+
+    v2.3 行为变更：
+    - STATUS_COMPLETED: 子 pipeline 完成，直接 dispatch gate（verify 通过 → 不再循环）
+    - STATUS_ESCALATE: 子 pipeline 中的 verify 失败 → 回到 fix
+    - STATUS_FAILED: 子 pipeline 失败
+    """
     track = record.track
     t = state.tracks.get(track)
 
     if record.status == STATUS_COMPLETED:
+        # 子 pipeline 中的 verify.completed → sub-pipeline 完成
+        # fix-cycle: sub-pipeline 是 (fix, verify) → 完成 = 进 gate
+        # gate-fix cycle: sub-pipeline 是 (fix-gate, verify, gate) → 完成 = 进入下一 phase（gate）
         if t is not None:
             t = _update_phase(t, "verify", status="completed",
                               summary=record.summary, report_path=record.report_path)
             state = state.replace(tracks={**state.tracks, track: t})
+        # 让 _sub_pipeline_advance 决定下一步（fix-cycle → gate, gate-fix cycle → next phase）
         return _sub_pipeline_advance(state, sp=sp)
 
     elif record.status == STATUS_ESCALATE:
         # 子 pipeline 中的 verify 失败 → 回到 fix
+        # v2.3: 这是"第二轮/第N轮"verify→fix 循环的入口，
+        # 必须在 dispatch fix 之前先记录 fix_cycle，并检查是否超 max_fix_retries。
         if sp.current_index > 0:
+            # 读 max_fix_retries（从 track 状态）
+            t = state.tracks.get(track)
+            max_fix = t.max_fix_retries if t else 5
+            # 检查 limit：fix_cycles 数量应等于 fix dispatches 数
+            current_cycles = (
+                len(t.phases.get("verify", PhaseState()).fix_cycles)
+                if t else 0
+            )
+
+            if current_cycles >= max_fix:
+                # 已在 sub-pipeline 中再次 escalate，超出 max_fix_retries
+                # → 强制进 gate，结束循环
+                if t:
+                    t = _update_phase(
+                        t, "verify",
+                        status="completed",
+                        summary=f"fix cycles exhausted in sub-pipeline ({current_cycles}/{max_fix}), force gate",
+                        report_path=record.report_path,
+                    )
+                new_state = state.replace(
+                    tracks={**state.tracks, track: t} if t else state.tracks,
+                    current_sub_pipeline=None,
+                    current_track=track,
+                    current_phase="gate",
+                )
+                gate_phase = (t.phases.get("gate", PhaseState()) if t else PhaseState())
+                gate_attempt = gate_phase.attempt + 1
+                return new_state, _dispatch_action(track, "gate", attempt=gate_attempt)
+
+            # 未超 limit：追加 fix_cycle 记录，回到 fix
+            if t:
+                verify = t.phases.get("verify", PhaseState())
+                verify = verify.replace(
+                    fix_cycles=(*verify.fix_cycles, {
+                        "cycle": current_cycles + 1,
+                        "status": "pending",
+                    }),
+                )
+                phases = dict(t.phases)
+                phases["verify"] = verify
+                t = t.replace(phases=phases)
+                state = state.replace(tracks={**state.tracks, track: t})
+
             sp = SubPipeline(
                 pipeline_id=sp.pipeline_id,
                 parent_track=sp.parent_track,
@@ -654,10 +712,10 @@ def _handle_sub_verify(
             return state, _dispatch_action(track, "fix", cycle=sp.cycle)
 
     elif record.status == STATUS_FAILED:
-        return _fail_action(track, "verify",
+        return _fail_action(state, track, "verify",
                             f"{track}:verify failed in sub-pipeline {sp.pipeline_id}")
 
-    return _error_action(f"unexpected sub-verify status: {record.status}")
+    return _error_action(state, f"unexpected sub-verify status: {record.status}")
 
 
 def _handle_sub_gate(
@@ -685,7 +743,7 @@ def _handle_sub_gate(
         # 子 pipeline 中的 gate 仍然 fail → 再试 gate-fix
         return _handle_gate(state, record)
 
-    return _error_action(f"unexpected sub-gate status: {record.status}")
+    return _error_action(state, f"unexpected sub-gate status: {record.status}")
 
 
 def _sub_pipeline_advance(
@@ -696,32 +754,28 @@ def _sub_pipeline_advance(
         return state, PipelineAction(kind="error", detail={"reason": "no active sub-pipeline"})
 
     if sp.is_last_phase:
-        # 子 pipeline 完成 → 回到主 pipeline
+        # 子 pipeline 当前已是最后一 phase（phase 本身完成后才会进入此分支）
+        # 回到主 pipeline：dispatch 主 pipeline 的下一个 phase
         track = sp.parent_track
         parent_phase = sp.parent_phase
 
         if parent_phase == "verify":
-            # v2.2: fix_routing 控制 fix 完成后的流向
+            # v2.3: 子 pipeline 完成后（verify.completed 触发）→ dispatch gate
+            # 不再 dispatch "另一个" verify：verify 已通过，循环结束。
             t = state.tracks.get(track)
-            verify = t.phases.get("verify", PhaseState()) if t else PhaseState()
-            fix_routing = t.fix_routing if t else ""
-            fix_routing = fix_routing or DEFAULT_FIX_ROUTING
-
-            if fix_routing == DEFAULT_FIX_ROUTING:
-                new_state = state.replace(
-                    current_sub_pipeline=None,
-                    current_track=track,
-                    current_phase="gate",
-                )
-                return new_state, _dispatch_action(track, "gate", cycle=1)
-            else:
-                next_cycle = len(verify.fix_cycles) + 1 if verify.fix_cycles else 1
-                new_state = state.replace(
-                    current_sub_pipeline=None,
-                    current_track=track,
-                    current_phase="verify",
-                )
-                return new_state, _dispatch_action(track, "verify", cycle=next_cycle)
+            if t:
+                t = _update_phase(t, "verify", status="completed",
+                                  summary=state.tracks[track].phases["verify"].summary,
+                                  report_path=state.tracks[track].phases["verify"].report_path)
+                state = state.replace(tracks={**state.tracks, track: t})
+            new_state = state.replace(
+                current_sub_pipeline=None,
+                current_track=track,
+                current_phase="gate",
+            )
+            gate_phase = state.tracks[track].phases.get("gate", PhaseState())
+            gate_attempt = gate_phase.attempt + 1
+            return new_state, _dispatch_action(track, "gate", attempt=gate_attempt)
 
         elif parent_phase == "gate":
             # gate-fix 子 pipeline 完成 → 回到 gate（dispatch 下一个 gate cycle）

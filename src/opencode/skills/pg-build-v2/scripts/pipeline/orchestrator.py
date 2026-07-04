@@ -25,7 +25,6 @@ from pipeline.events import (
     EVT_DISPATCH_ABANDONED,
     EVT_GIT_COMMIT,
     EVT_GAP_ACCEPTED,  # v2.1: fix/gate-fix 循环耗尽后接受的 gap
-    EVT_FIX_SKIPPED_VERIFY,  # v2.2
     STATUS_COMPLETED,  # v2.1: 单一来源替换字面量
     STATUS_PASS,
 )
@@ -212,7 +211,7 @@ class Orchestrator:
                 label=cfg.get("description", bare),
                 tasks_by_phase=tasks_by_phase,
                 commands=tuple(cfg.get("commands", [])),
-                fix_routing=cfg.get("fix_routing", ""),  # v2.2
+                # v2.3: fix_routing 配置已废弃，统一走 re_verify → verify 循环
             )
             if cfg.get("type") == "simple":
                 track_types[tid] = "simple"
@@ -447,6 +446,24 @@ class Orchestrator:
         # reducer
         new_state, action = reduce_state(self.state, record)
 
+        # ── v2.3: error path 无副作用保护 ──
+        # reducer 可能返回 kind="error"（如 escalate 缺 tasks_updated）。
+        # 这种情况下不应写 event_log、不应 save_snapshot、不应 _auto_commit。
+        # 否则会破坏持久层（snapshot 被清空、commit 多写）。
+        # reducer 已经保留 state 内容，编排器只需要把 error 透传给 caller。
+        if action.kind == "error":
+            return {
+                "action": "error",
+                "fatal": False,  # 非 fatal：编排器可以选择重试 record
+                "reason": action.detail.get("reason", "unknown"),
+                "phase": phase,
+                "track": track,
+                "hint": (
+                    "reducer 拒绝此 record；state 未变，event 未写，commit 未做。"
+                    "请修正 record 参数（如 escalate 必传 --tasks-updated）后重试。"
+                ),
+            }
+
         # 写 event log
         event_data = {
             "track": track,
@@ -483,11 +500,7 @@ class Orchestrator:
             cycle = len(verify.fix_cycles)
             self.event_log.append(EVT_FIX_CYCLE_STARTED, {"track": track, "cycle": cycle, "source_report": report_path})
 
-        # v2.2: fix_skipped_verify — fix 完成后直接进 gate，跳过 verify cycle=2
-        if phase == "fix" and status == "completed":
-            t = new_state.tracks.get(track)
-            if t and (t.fix_routing == ""):  # direct_to_gate
-                self.event_log.append(EVT_FIX_SKIPPED_VERIFY, {"track": track})
+        # v2.3: 移除 fix_skipped_verify 事件（fix 完成后总是 re_verify）
 
         # 更新 state
         self.state = new_state.replace(

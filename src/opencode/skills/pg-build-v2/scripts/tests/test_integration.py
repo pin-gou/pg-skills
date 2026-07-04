@@ -45,8 +45,8 @@ def _setup_initial_state(tmp_root: str, change: str = "test-change") -> Orchestr
         pipeline_order=("dev.backend", "dev.frontend"),
         status="running",
         tracks={
-            "dev.backend": TrackState.create("dev.backend", modules=("backend",), fix_routing="re_verify"),
-            "dev.frontend": TrackState.create("dev.frontend", modules=("frontend",), fix_routing="re_verify"),
+            "dev.backend": TrackState.create("dev.backend", modules=("backend",)),
+            "dev.frontend": TrackState.create("dev.frontend", modules=("frontend",)),
         },
     )
     save_snapshot(tmp_root, state)
@@ -214,7 +214,7 @@ class TestIntegrationFixCycle(unittest.TestCase):
         # 当前 dispatch 是 fix
         self.assertEqual(self.orch.state.current_phase, "fix")
 
-        # fix completed → back to verify (fix_routing=re_verify)
+        # fix completed → back to verify (v2.3 unified re_verify)
         fix_report = _make_report("# PASS\nfix OK")
         r = self.orch.record(
             "completed", summary="fixed all",

@@ -41,6 +41,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 #notes th { background: #f5f0e1; }
 #notes .improvement-badge { display: inline-block; background: #27ae60; color: #fff; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
 #notes .regression-badge { display: inline-block; background: #e74c3c; color: #fff; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
+#notes .new-badge { display: inline-block; background: #8e44ad; color: #fff; padding: 1px 8px; border-radius: 10px; font-size: 11px; font-weight: 600; }
 
 #tab-bar { display: flex; gap: 0; background: #ecf0f1; border-bottom: 2px solid #bdc3c7; flex-shrink: 0; }
 #tab-bar .tab { padding: 8px 20px; cursor: pointer; font-size: 13px; color: #7f8c8d; border-bottom: 2px solid transparent; margin-bottom: -2px; transition: all .15s; user-select: none; }
@@ -87,37 +88,53 @@ flowchart TB
     classDef done fill:#d5f5e3,stroke:#1e8449,stroke-width:3px
     classDef fail fill:#fadbd8,stroke:#c0392b,stroke-width:3px
     classDef future fill:#f4ecf7,stroke:#8e44ad,stroke-width:1px
+    classDef env fill:#ebf5fb,stroke:#2980b9,stroke-width:1px,stroke-dasharray: 5 5
 
     subgraph INPUT["输入层（与 pg-propose 衔接不变）"]
         PY["project.yaml"]:::input
         EM["execution-manifest.yaml"]:::input
     end
 
-    subgraph CLI["编排入口 ~60 LOC"]
+    subgraph CLI["编排入口 ~80 LOC"]
         CLI_MAIN["pg-pipeline-runner.py main()"]:::core
         CLI_MAIN --> CMD{"command?"}
+        CMD -->|"bootstrap"| BCLI["bootstrap.cli_bootstrap()"]:::core
         CMD -->|"next"| N["orchestrator.next()"]:::core
         CMD -->|"record"| R["orchestrator.record()"]:::core
+        CMD -->|"progress"| PG["orchestrator.progress()"]:::core
+        CMD -->|"env-action"| EA["cli_env_action()<br/>返回 plan（不执行）"]:::env
+        CMD -->|"env-action-result"| EAR["cli_env_action_result()<br/>写 completed event"]:::env
     end
 
-    subgraph BOOT["Bootstrap 启动"]
+    subgraph BOOT["Bootstrap 启动（v2.1.1）"]
         BT["bootstrap.py"]:::core
         BT --> M1["1. migrate_legacy_state"]
-        BT --> M2["2. ensure_context_chain"]
-        BT --> M3["3. feature branch: feat/pg/{change}"]
-        BT --> M4["4. init commit (once)"]
-        BT --> M5["5. prepare_env inline"]
+        BT --> M2["2. ensure_feature_branch"]
+        BT --> M3["3. init commit (once)"]
+        BT --> M4["4. 解析 env hook plan<br/>返回 plan 不执行"]
     end
 
-    subgraph REDUCER["纯函数 Reducer 层"]
+    subgraph ENV_SWITCH["环境切换（编排器 bash 执行）"]
+        DIR["detect.py 检测 stage 边界"]:::env
+        DIR -->|"返回 env_switch action"| EV_ACT["编排器收到 env_switch:<br/>调 env-action → 得 plan"]:::env
+        EV_ACT -->|"bash plan.command<br/>(timeout=plan.timeout_seconds)"| EV_BASH["编排器 shell 执行"]:::env
+        EV_BASH -->|"成功"| EV_OK["调 env-action-result ok<br/>stage_prepared 更新"]:::env
+        EV_BASH -->|"失败"| EV_FAIL["调 env-action-result failed<br/>终止循环提示修复"]:::fail
+    end
+
+    subgraph REDUCER["纯函数 Reducer 层（v2.2）"]
         RED["reducer.py"]:::core
         RED --> MATCH{"reduce_state()<br/>match (phase, status)"}
-        MATCH -->|"(test,completed)"| A1["→ dev"]
-        MATCH -->|"(verify,escalate)"| A2["→ 子 pipeline: fix→verify"]
-        MATCH -->|"(gate,fail)"| A3["→ 子 pipeline: fix-gate→verify→gate"]
-        MATCH -->|"(gate,pass)"| A4["→ track completed"]
-        MATCH -->|"(final-gate,pass)"| A5["→ pipeline done"]
-        MATCH -->|"(x,failed)"| A6["→ retry or workflow_failed"]
+        MATCH -->|"(test|dev,completed)"| A1["→ 下个 phase"]
+        MATCH -->|"(verify,completed)"| A2["→ gate"]
+        MATCH -->|"(verify,escalate)"| A3["→ fix 子 pipeline<br/>（escalate 强制 tasks_updated）"]
+        MATCH -->|"(gate,fail)"| A4["→ gate-fix 子 pipeline<br/>fix-gate→verify→gate"]
+        MATCH -->|"(gate,pass)"| A5["→ track completed"]
+        MATCH -->|"(fix,completed)<br/>direct_to_gate"| A6["→ gate（跳过 verify）"]
+        MATCH -->|"(fix,completed)<br/>re_verify"| A7["→ verify cycle=2"]
+        MATCH -->|"(fix-gate,completed)"| A8["→ verify in sub-pipeline"]
+        MATCH -->|"(final-gate,pass/fail)"| A9["→ done / workflow_failed"]
+        MATCH -->|"(x,failed)"| A10["→ retry or exhausted → gap_accepted"]
     end
 
     subgraph EVENT_LOG["Persistence 层（唯一 I/O 点）"]
@@ -134,45 +151,64 @@ flowchart TB
         TPL["prompt-templates/*.yaml<br/>11 个模板文件"]:::sub
     end
 
-    subgraph SUB_AGENTS["Sub-Agent 层（复用旧 agent 定义）"]
+    subgraph SUB_AGENTS["Sub-Agent 层"]
         T_SUB["pg-build/test"]:::sub
         D_SUB["pg-build/dev"]:::sub
         V_SUB["pg-build/verify"]:::sub
         G_SUB["pg-build/gate"]:::sub
         F_SUB["pg-build/fix"]:::sub
         FG_SUB["pg-build/fix-gate"]:::sub
+        S_SUB["pg-build/simple"]:::sub
     end
 
     subgraph SUB_PIPELINE["子 Pipeline 递归"]
-        SP_MECH["SubPipeline 机制<br/>fix / gate-fix 循环<br/>递归复用 reducer"]:::sub
-        SP_MECH --> SP1["SubPipeline(fix, verify)<br/>或 SubPipeline(fix-gate, verify, gate)"]
-        SP1 --> SP2["子 pipeline 完成 → 回到主 pipeline"]
+        SP_MECH["SubPipeline 机制<br/>v2.2: direct_to_gate"]:::sub
+        SP_MECH --> SP1["fix-cycle<br/>(fix→verify) 或 (fix→gate)"]
+        SP_MECH --> SP2["gate-fix-cycle<br/>(fix-gate→verify→gate)"]
+        SP1 --> SP3["子 pipeline 完成 → 回到主 pipeline"]
+        SP2 --> SP3
+    end
+
+    subgraph CONTRACT["Sub-agent 返回契约（v2.2 强化）"]
+        CT["sub_agent_contract.py"]:::gate
+        CT --> C1["status 按 phase 校验"]:::gate
+        CT --> C2["verify/gate: evidence 必填"]:::gate
+        CT --> C3["dev/test/fix: outputs 必填"]:::gate
+        CT --> C4["fix: report 必填"]:::gate
+        CT --> C5["escalate: tasks_updated 必填"]:::gate
+        CT --> C6["gate: gate_score 在 summary"]:::gate
     end
 
     subgraph FUTURE["未来：流程查看器"]
         VIEWER["Viewer UI"]:::future
         VIEWER -->|"实时 tail"| EL
         VIEWER -->|"Gantt 图"| GANTT["track × phase 时间线"]:::future
-        VIEWER -->|"中间产物"| ART["dispatch_file / report / log / 路径"]:::future
+        VIEWER -->|"中间产物"| ART["dispatch_file / report / log"]:::future
         VIEWER -->|"SSE/WebSocket"| SSE["Event Stream"]:::future
     end
 
     PY --> CLI_MAIN
     EM --> CLI_MAIN
-    CLI_MAIN --> BT
+
+    BCLI -->|"返回 env_hook_plan"| CLI_MAIN
+    CLI_MAIN -->|"首次 next"| BT
 
     N -->|"event: dispatch_started"| EL
-    R -->|"event: PipelineRecord"| RED
+    R -->|"校验 sub-agent 契约"| CT
+    R -->|"event: record_received"| RED
+    R -->|"检测 accepted_gaps 增量"| EL
     RED -->|"(new_state, action)"| DET
     RED -->|"snapshot"| SNAP
 
-    DET -->|PipelineAction| DP
+    DET -->|"env_switch"| DIR
+    DET -->|"其他 PipelineAction"| DP
     DP --> TE
     TE --> TPL
-    DP -->|"dispatch action"| CLI_MAIN
+    DP -->|"dispatch JSON"| CLI_MAIN
+    DP -->|"dispatch_file 命名<br/>{seq}-{track}-{phase}.md<br/>{seq}-{track}-fix-{cycle}.md"| DP
 
     CLI_MAIN -->|"Task tool"| SUB_AGENTS
-    SUB_AGENTS -->|"结果"| R
+    SUB_AGENTS -->|"结果 JSON"| R
 
     SUB_PIPELINE -.->|递归| REDUCER
   </pre>
@@ -230,8 +266,8 @@ flowchart TB
       <tr>
         <td>状态守卫</td>
         <td>ALLOWED_STATUS dict + 显式守卫函数</td>
-        <td>reducer match 穷举所有组合</td>
-        <td><span class="improvement-badge">编译保证</span></td>
+        <td>reducer match + sub_agent_contract.py 校验</td>
+        <td><span class="improvement-badge">双重校验</span></td>
       </tr>
       <tr>
         <td>查看器</td>
@@ -256,6 +292,54 @@ flowchart TB
         <td>6 步（含循环 import runner 自身）</td>
         <td>5 步（无循环依赖）</td>
         <td><span class="improvement-badge">干净</span></td>
+      </tr>
+      <tr>
+        <td>env hook 执行</td>
+        <td>runner 同步执行（timeout 受 runner 限制）</td>
+        <td>编排器 bash 执行（LLM bash timeout 决定）</td>
+        <td><span class="improvement-badge">解耦</span></td>
+      </tr>
+      <tr>
+        <td>fix routing</td>
+        <td>固定 fix→verify cycle=2</td>
+        <td><code>direct_to_gate</code>（默认）或 <code>re_verify</code></td>
+        <td><span class="improvement-badge">灵活</span></td>
+      </tr>
+      <tr>
+        <td>record CLI</td>
+        <td>位置参数（易出错）</td>
+        <td>argparse 仅 flag 模式</td>
+        <td><span class="improvement-badge">可靠</span></td>
+      </tr>
+      <tr>
+        <td>dispatch 命名</td>
+        <td><code>{seq}-{track}-{phase}-fix-{cycle}.md</code></td>
+        <td><code>{seq}-{track}-fix-{cycle}.md</code>（去冗余）</td>
+        <td><span class="improvement-badge">简洁</span></td>
+      </tr>
+      <tr>
+        <td>产物声明</td>
+        <td>可选（sub-agent 可空手完成）</td>
+        <td>dev/test/fix 强制 <code>--outputs</code></td>
+        <td><span class="new-badge">可审计</span></td>
+      </tr>
+      <tr>
+        <td>证据追踪</td>
+        <td>verify/gate 选填</td>
+        <td>verify/gate/fix-gate 强制 <code>--evidence</code></td>
+        <td><span class="new-badge">可追溯</span></td>
+      </tr>
+      <tr>
+        <td>escalate 约束</td>
+        <td>仅 status 字面量</td>
+        <td>强制 <code>--tasks-updated</code> + <code>--evidence</code></td>
+        <td><span class="new-badge">精准定位</span></td>
+      </tr>
+      <tr>
+        <td>多 stage 环境</td>
+        <td>单 stage 假设</td>
+        <td>detect.py 自动检测 stage 边界 + 多 env 切换</td>
+        <td><span class="improvement-badge">安全</span></td>
       </tr>
     </table>
   </details>
@@ -287,61 +371,101 @@ async function render() {
     'flowchart LR',
     '    classDef old fill:#fdedec,stroke:#e74c3c,stroke-width:2px',
     '    classDef new fill:#d5f5e3,stroke:#27ae60,stroke-width:2px',
+    '    classDef v2 fill:#d5f5e3,stroke:#1e8449,stroke-width:3px',
     '',
     '    subgraph OLD["旧 pg-build ~7800 LOC"]',
     '        direction TB',
     '        V1["pg-pipeline-runner.py 4637 LOC"]:::old',
     '        V2["pg_runner_v2.py 891 LOC"]:::old',
     '        COMMON["pg_pipeline_common.py 1234 LOC"]:::old',
-        '        STATE["pg_pipeline_state_v2.py 1054 LOC"]:::old',
+    '        STATE["pg_pipeline_state_v2.py 1054 LOC"]:::old',
     '        V1 -.->|"dual path"| V2',
     '        V2 -.->|"shared helpers"| COMMON',
     '        COMMON -.->|"circular import"| V1',
     '    end',
     '',
-    '    NEW("pg-build-v2 ~3000 LOC"):::new',
+    '    subgraph NEW["pg-build-v2 ~3000 LOC"]',
+    '        direction TB',
+    '        EL2["event_log.py / events.py"]:::new',
+    '        STATE2["state.py (frozen dataclass)"]:::new',
+    '        REDUCER2["reducer.py (pure function)"]:::new',
+    '        SNAP2["snapshot.py"]:::new',
+    '        DET2["detect.py (env_switch)"]:::new',
+    '        BOOT2["bootstrap.py (no inline exec)"]:::new',
+    '        CT2["sub_agent_contract.py"]:::new',
+    '    end',
     '',
-    '    OLD ===>|"重构"| NEW',
+    '    OLD ===>|"Event Sourcing 重构"| NEW',
     '',
-    '    NEW --> EVENTS["pipeline/events.py"]',
-    '    NEW --> STATE2["pipeline/state.py"]',
-    '    NEW --> REDUCER["pipeline/reducer.py"]',
-    '    NEW --> EL["pipeline/event_log.py"]',
-    '    NEW --> SNAP["pipeline/snapshot.py"]',
+    '    NEW --> EVENTS2["pipeline/events.py"]',
+    '    NEW --> STATE2',
+    '    NEW --> REDUCER2',
+    '    NEW --> EL2',
+    '    NEW --> SNAP2',
+    '    NEW --> DET2',
   ].join('\n');
 
   const { svg: svgCmp } = await mermaid.render('mermaidComparison', comparisonSrc);
   const tabCmp = document.getElementById('tab-comparison-content');
-  tabCmp.innerHTML = '';
-  tabCmp.appendChild(svgCmp);
+  tabCmp.innerHTML = svgCmp;
 
   // 渲染 Event Schema 图
   const eventSrc = [
     'flowchart LR',
     '    classDef ev fill:#e8f4f8,stroke:#2980b9,stroke-width:1px',
     '    classDef term fill:#fdedec,stroke:#e74c3c,stroke-width:1px',
+    '    classDef env fill:#ebf5fb,stroke:#27ae60,stroke-width:1px',
+    '    classDef audit fill:#fef9e7,stroke:#f39c12,stroke-width:1px',
     '',
-    '    P["pipeline_started<br/>change, pipeline_order"]:::ev',
-    '    B["bootstrap_step_completed<br/>step, detail"]:::ev',
-    '    PE["prepare_env_completed<br/>env, exit_code, log_path"]:::ev',
-    '    D["dispatch_started<br/>track, phase, agent"]:::ev',
-    '    R["record_received<br/>track, phase, status"]:::ev',
-    '    FC["fix_cycle_started<br/>track, cycle"]:::ev',
-    '    GC["gate_cycle_started<br/>track, cycles_remaining"]:::ev',
-    '    TC["track_completed<br/>track"]:::ev',
-    '    PC["pipeline_completed<br/>final_status"]:::ev',
-    '    WF["workflow_failed<br/>reason"]:::term',
+    '    subgraph CORE["核心流程事件"]',
+    '        P["pipeline_started"]:::ev',
+    '        B["bootstrap_step_completed"]:::ev',
+    '        D["dispatch_started"]:::ev',
+    '        R["record_received"]:::ev',
+    '        TC["track_completed"]:::ev',
+    '        PC["pipeline_completed"]:::ev',
+    '        WF["workflow_failed"]:::term',
+    '    end',
     '',
-    '    P --> D --> R --> FC --> D',
-    '    R --> GC --> D',
-    '    R --> TC--> PC',
+    '    subgraph ENV["环境生命周期事件（v2.1.1 新增）"]',
+    '        PES["prepare_env_started"]:::env',
+    '        PEC["prepare_env_completed"]:::env',
+    '        CES["clean_env_started"]:::env',
+    '        CEC["clean_env_completed"]:::env',
+    '    end',
+    '',
+    '    subgraph CYCLE["子 pipeline 循环事件"]',
+    '        FC["fix_cycle_started"]:::ev',
+    '        GC["gate_cycle_started"]:::ev',
+    '        FSV["fix_skipped_verify<br/>v2.2 direct_to_gate"]:::ev',
+    '        SPC["sub_pipeline_completed"]:::ev',
+    '        GA["gap_accepted<br/>v2.1 循环耗尽"]:::audit',
+    '    end',
+    '',
+    '    subgraph AUX["辅助事件"]',
+    '        DA["dispatch_abandoned<br/>3次 retry 废弃"]:::term',
+    '        GC2["git_commit"]:::audit',
+    '    end',
+    '',
+    '    P --> D --> R',
+    '    R ---> FC --> D',
+    '    R ---> FSV --> D',
+    '    R ---> GC --> SPC',
+    '    SPC --> D',
+    '    R --> TC --> PC',
+    '    R --> GA',
+    '    R --> DA',
     '    R --> WF',
+    '',
+    '    PES --> PEC',
+    '    CES --> CEC',
+    '    PEC --> D',
+    '    CEC --> D',
   ].join('\n');
 
   const { svg: svgEv } = await mermaid.render('mermaidEvents', eventSrc);
   const tabEv = document.getElementById('tab-event-schema-content');
-  tabEv.innerHTML = '';
-  tabEv.appendChild(svgEv);
+  tabEv.innerHTML = svgEv;
 
   loading.classList.add('hidden');
 
@@ -350,8 +474,8 @@ async function render() {
   if (svg) {
     svg.style.width = '100%';
     svg.style.height = '100%';
-    svg.style.minWidth = '1200px';
-    svg.style.minHeight = '800px';
+    svg.style.minWidth = '1300px';
+    svg.style.minHeight = '900px';
 
     panZoomInstance = svgPanZoom(svg, {
       zoomEnabled: true,
@@ -387,13 +511,11 @@ async function render() {
     updateZoomInfo();
     panZoomInstance.setOnZoom(updateZoomInfo);
 
-    // 点击节点显示详情
     svg.querySelectorAll('.node').forEach(node => {
       node.style.cursor = 'pointer';
     });
   }
 
-  // 初始化 svg-pan-zoom on 对比图和 event 图
   document.querySelectorAll('#tab-comparison-content svg, #tab-event-schema-content svg').forEach(svg2 => {
     svg2.style.width = '100%';
     svg2.style.maxHeight = '70vh';
@@ -467,7 +589,6 @@ function switchTab(tabId) {
   document.querySelector(`.tab[data-tab="${tabId}"]`).classList.add('active');
   document.getElementById(`tab-${tabId}-content`).classList.add('active');
 
-  // 适配 svg 大小
   setTimeout(() => {
     document.querySelectorAll('#container svg').forEach(s => {
       try {

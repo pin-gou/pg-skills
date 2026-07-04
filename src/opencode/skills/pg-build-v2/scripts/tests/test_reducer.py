@@ -22,7 +22,6 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from pipeline.events import PipelineRecord, PipelineAction, FINAL_GATE_TRACK
 from pipeline.reducer import (
     reduce_state,
-    MAX_FIX_CYCLES,
     _handle_linear_phase,
     _handle_final_gate,
     _handle_fix,
@@ -48,8 +47,8 @@ from pipeline.sub_pipeline import SubPipeline, create_fix_cycle, create_gate_fix
 
 
 def _make_track(track_id: str, status: str = "pending") -> TrackState:
-    # v2.2: 显式设置 fix_routing="re_verify" 以保留旧 fix→verify 行为
-    return TrackState.create(track_id, status=status, fix_routing="re_verify")
+    # v2.3: fix_routing 已废弃，默认行为就是 fix→verify
+    return TrackState.create(track_id, status=status)
 
 
 def _make_phase_state(status: str = "pending", attempt: int = 0) -> PhaseState:
@@ -193,10 +192,11 @@ class TestVerifyPhase(unittest.TestCase):
         self.assertIsNotNone(new_state.current_sub_pipeline)
 
     def test_verify_escalate_exhausted_forces_gate(self):
-        """fix 循环 > MAX_FIX_CYCLES → 强制 gate。"""
-        fix_cycles = tuple({"cycle": i+1, "status": "completed"} for i in range(MAX_FIX_CYCLES))
+        """fix 循环 >= max_fix_retries → 强制 gate（v2.3：max_fix_retries 由 track 配置决定）。"""
+        max_fix = 3  # 显式设置 max_fix_retries=3
+        fix_cycles = tuple({"cycle": i+1, "status": "completed"} for i in range(max_fix))
         verify = PhaseState(status="running", attempt=3, fix_cycles=fix_cycles)
-        t = _make_track("dev.backend")
+        t = TrackState.create("dev.backend", max_fix_retries=max_fix)
         t = t.replace(phases={"verify": verify,
                                "test": _make_phase_state("completed"),
                                "dev": _make_phase_state("completed")})
@@ -206,11 +206,12 @@ class TestVerifyPhase(unittest.TestCase):
         )
         record = PipelineRecord(
             track="dev.backend", phase="verify", status="escalate",
-            tasks_updated=("V-1",),  # v2.2
+            tasks_updated=("V-1",),
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
-        self.assertEqual(action.phase, "gate")
+        self.assertEqual(action.phase, "gate",
+                         "fix_cycles=3 == max_fix_retries=3 时 escalate 应强制 gate")
 
 
 class TestFixPhase(unittest.TestCase):
@@ -460,8 +461,11 @@ class TestDetect(unittest.TestCase):
     # ============================================================
 
     def test_fix_status_failed_does_not_crash(self):
-        """[v2.1 回归] _handle_fix 在 STATUS_FAILED 分支不应崩溃 (UnboundLocalError)。"""
+        """[v2.3 回归] _handle_fix 在 STATUS_FAILED 分支不应崩溃，
+        且应 re_verify（不再 retry fix 自身）。
+        """
         from pipeline.events import STATUS_FAILED
+        from pipeline.sub_pipeline import create_fix_cycle
         fix_phase = PhaseState(status="running", attempt=1)
         verify_phase = PhaseState(status="running", fix_cycles=(
             {"cycle": 1, "status": "running"},
@@ -471,11 +475,13 @@ class TestDetect(unittest.TestCase):
         ph["fix"] = fix_phase
         ph["verify"] = verify_phase
         track = track.replace(phases=ph)
+        sp = create_fix_cycle("dev.backend", 1)
         state = PipelineState(
             change="x",
             pipeline_order=("dev.backend",),
             current_track="dev.backend",
             current_phase="fix",
+            current_sub_pipeline=sp,
             status="running",
             tracks={"dev.backend": track},
         )
@@ -488,9 +494,9 @@ class TestDetect(unittest.TestCase):
                             "fix STATUS_FAILED 应被 reducer 接受，不应返回 error")
         self.assertEqual(action.kind, "dispatch")
         self.assertEqual(action.track, "dev.backend")
-        self.assertEqual(action.phase, "fix")
-        self.assertEqual(action.attempt, 2,
-                         "fix STATUS_FAILED 应递增 attempt 到 2")
+        # v2.3: fix failed 也走 re_verify → 推进到 verify
+        self.assertEqual(action.phase, "verify",
+                         "v2.3: fix failed 也要 re_verify，不是 retry fix 自身")
 
     def test_fix_gate_status_failed_does_not_crash(self):
         """[v2.1 回归] _handle_fix_gate 在 STATUS_FAILED 分支不应崩溃。"""
@@ -557,19 +563,27 @@ class TestDetect(unittest.TestCase):
         self.assertIn("scope creep", gap["issues"])
         self.assertIn("accepted_at", gap)
 
-    def test_fix_status_failed_exhausted_accepts_gap(self):
-        """fix 循环耗尽后接受 gap 到 track.accepted_gaps（v2.1 accept_gap 协议）。"""
+    def test_fix_status_failed_returns_to_verify(self):
+        """v2.3: fix failed 不再 retry fix 自身，而是 re_verify。
+        不再有 `accept_gap` 协议（fix 内部 retry 已删除）。"""
         from pipeline.events import STATUS_FAILED
+        from pipeline.sub_pipeline import create_fix_cycle
         fix_phase = PhaseState(status="running", attempt=3)
+        verify_phase = PhaseState(status="running", fix_cycles=(
+            {"cycle": 1, "status": "completed"},
+        ))
         track = TrackState.create("dev.backend", max_fix_retries=3)
         ph = dict(track.phases)
         ph["fix"] = fix_phase
+        ph["verify"] = verify_phase
         track = track.replace(phases=ph)
+        sp = create_fix_cycle("dev.backend", 1)
         state = PipelineState(
             change="x",
             pipeline_order=("dev.backend",),
             current_track="dev.backend",
             current_phase="fix",
+            current_sub_pipeline=sp,
             status="running",
             tracks={"dev.backend": track},
         )
@@ -579,16 +593,12 @@ class TestDetect(unittest.TestCase):
             issues="G-1,G-2",
         )
         new_state, action = reduce_state(state, record)
-        self.assertEqual(action.kind, "advance",
-                         f"expected advance (accept_gap), got {action.kind}")
-        new_track = new_state.tracks["dev.backend"]
-        self.assertEqual(new_track.status, "completed")
-        self.assertEqual(len(new_track.accepted_gaps), 1)
-        gap = new_track.accepted_gaps[0]
-        self.assertEqual(gap["phase"], "fix")
-        self.assertEqual(gap["cycles_attempted"], 4)
-        self.assertEqual(gap["max_cycles"], 3)
-        self.assertIn("fix exhausted", gap["issues"])
+        # v2.3: fix 内部不再 retry / 不再 accept_gap，转向 re_verify
+        self.assertNotEqual(action.kind, "advance",
+                            "v2.3: fix 不再有 accept_gap 协议")
+        self.assertEqual(action.kind, "dispatch")
+        self.assertEqual(action.phase, "verify",
+                         "v2.3: fix failed → re_verify，max_fix_retries 由 verify→fix 循环控制")
 
 
 if __name__ == "__main__":

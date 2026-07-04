@@ -113,12 +113,13 @@ class TrackState:
     prepare_status: str = ""             # "ok" | "error" | "skipped"
     tasks_by_phase: dict[str, str] = field(default_factory=dict)
     commands: tuple[str, ...] = ()       # simple track 的命令列表
-    fix_routing: str = ""                # v2.2: "" → 默认 direct_to_gate; "re_verify" → 保留旧行为
 
     @classmethod
     def create(cls, track_id: str, **kwargs) -> "TrackState":
         """工厂方法：bare 自动从 track_id 派生。"""
         bare = kwargs.pop("bare", None) or track_id.rsplit(".", 1)[-1]
+        # v2.3: fix_routing 字段已废弃，忽略外部传入以保证向后兼容
+        kwargs.pop("fix_routing", None)
         return cls(track_id=track_id, bare=bare, **kwargs)
 
     def to_dict(self) -> dict[str, Any]:
@@ -147,7 +148,7 @@ class TrackState:
             "prepare_status": self.prepare_status,
             "tasks_by_phase": dict(self.tasks_by_phase),
             "commands": list(self.commands),
-            "fix_routing": self.fix_routing,
+            # v2.3: fix_routing 已废弃，新 snapshot 不再含该字段
         }
 
     @classmethod
@@ -183,7 +184,7 @@ class TrackState:
             prepare_status=d.get("prepare_status", ""),
             tasks_by_phase=d.get("tasks_by_phase", {}),
             commands=tuple(d.get("commands", [])),
-            fix_routing=d.get("fix_routing", ""),
+            # v2.3: fix_routing 已废弃，旧 snapshot 中的字段被静默忽略
         )
 
     def replace(self, **kwargs: Any) -> "TrackState":
