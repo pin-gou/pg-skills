@@ -169,11 +169,15 @@ def build_ctx(
     t = state.tracks.get(track, TrackState.create(track))
     ph = t.phases.get(phase, PhaseState())
 
+    # 确保 project root 已缓存，供后续 build_rules 解析（#258）
+    # 以及惰性富化环节共用。移出 needs_lazy 块以避免 post-bootstrap
+    # 快照场景下 build_ctx 跳过惰性分支时 config cache 为空。
+    if project_root:
+        _set_project_root(project_root)
+
     # === 惰性富化：TrackState 来自旧快照时现场解析 ===
     needs_lazy = not (t.module_roots or t.module_details or t.test_commands)
     if needs_lazy:
-        if project_root:
-            _set_project_root(project_root)
         pc = _load_project_config_cached()
         module_names = list(t.modules)
         stage_name = track.rsplit(".", 1)[0] if "." in track else "dev"
