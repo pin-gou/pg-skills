@@ -173,8 +173,8 @@ V-* 编号规则摘要：
 更新 TodoWrite 第 5.5 项。
 
 **目的**：从 proposal.md 推断本变更 affected_paths，评估每个 `config.stages[*].on_conditions`
-是否命中，决定 `enabled_stages` 列表。这一步在 2c（affected_tracks）之后、2d（environment.yaml）
-之前执行，其结果会同时影响 tasks.md 章节顺序与 environment.yaml 内容。
+是否命中，决定 `enabled_stages` 列表。这一步在 2c（affected_tracks）之后、2d（环境 SSOT 校对）
+之前执行，其结果会同时影响 tasks.md 章节顺序与 execution-manifest.yaml 内容。
 
 **步骤**：
 
@@ -342,6 +342,25 @@ review-notes.md 包含：
 - `context`（来自 AGENTS.md，经 context-summary.yaml 缓存）和 `rules`（来自 config.yaml）是给你的约束，不可复制到产物中
 - 每个产物文件写入后验证文件存在
 - 如果变更名称已存在，询问用户是继续还是新建
+
+---
+
+## 产物清单（硬约束）
+
+每个 change 在 `.pg/changes/<change>/` 下必须生成**且仅生成**以下 4 个产物文件：
+
+| 产物 | 写入位置 | 何时生成 |
+|------|---------|---------|
+| `proposal.md` | `.pg/changes/<change>/proposal.md` | 阶段 2a |
+| `design.md` | `.pg/changes/<change>/design.md` | 阶段 2b |
+| `execution-manifest.yaml` | `.pg/changes/<change>/execution-manifest.yaml` | 阶段 2d（含 `stages[i].environment` 字段） |
+| `tasks.md` | `.pg/changes/<change>/tasks.md` | 阶段 2d |
+
+**严禁生成**以下文件（v1 遗留物，pg-build-v2 不再读取）：
+
+- ❌ `environment.yaml` —— per-change 的环境选择已写入 `execution-manifest.yaml` 的 `stages[i].environment` 字段，由 `pg-build-v2` 直接读取
+
+任何 stage 缺少产物文件 → workflow_failed 终止。多生成产物文件 → 后续 pg-build-v2 会忽略，但污染产物目录。
 
 ---
 

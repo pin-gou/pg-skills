@@ -109,7 +109,7 @@
 ### real-integration Verification Criteria
 | ID | 验证项 | 前置/数据准备 | 方法 | 预期结果 |
 |-----|--------|---------------|------|---------|
-| V-real-integration-1 | 跨模块联调：端到端流程通过 | change 的 environment.yaml 中 real-integration 选定的环境就绪 | 浏览器跑完整流程 | 无报错、数据正确 |
+| V-real-integration-1 | 跨模块联调：端到端流程通过 | change 的 execution-manifest.yaml 中 real-integration.environment 选定的环境就绪 | 浏览器跑完整流程 | 无报错、数据正确 |
 ```
 
 ---

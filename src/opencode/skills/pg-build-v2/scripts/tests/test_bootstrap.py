@@ -196,7 +196,8 @@ stages:
         plan_int = bootstrap._build_env_hook_plan("test-change", "prepare_env", explicit_stage_name="integration")
         self.assertEqual(plan_int["env_name"], "env-b")
 
-    def test_plan_environment_yaml_skip(self):
+    def test_plan_no_env_in_manifest_returns_skipped(self):
+        """v2: execution-manifest.yaml 与 project.yaml 都不含 env → skipped。"""
         project_yaml = os.path.join(self.tmp, ".pg", "project.yaml")
         os.makedirs(os.path.dirname(project_yaml), exist_ok=True)
         with open(project_yaml, "w", encoding="utf-8") as f:
@@ -208,8 +209,9 @@ environments:
 """)
         change_root = os.path.join(self.tmp, ".pg", "changes", "test-change")
         os.makedirs(change_root, exist_ok=True)
-        with open(os.path.join(change_root, "environment.yaml"), "w") as f:
-            f.write("dev: skip\n")
+        manifest_path = os.path.join(change_root, "execution-manifest.yaml")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            f.write("stages: []\n")
         plan = bootstrap._build_env_hook_plan("test-change", "prepare_env", explicit_stage_name="dev")
         self.assertTrue(plan.get("skipped"))
 
@@ -363,10 +365,10 @@ environments:
         self.assertIn("ENV=test-env", proc.stdout)
 
     def test_cli_env_action_skipped(self):
-        """environment.yaml 标 skip → cli_env_action 返回 skipped=true。"""
-        env_yaml = os.path.join(self.change_root, "environment.yaml")
-        with open(env_yaml, "w", encoding="utf-8") as f:
-            f.write("dev: skip\n")
+        """v2: execution-manifest.yaml 缺 stage → cli_env_action 返回 skipped=true。"""
+        manifest_path = os.path.join(self.change_root, "execution-manifest.yaml")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            f.write("stages: []\n")
         result = bootstrap.cli_env_action("test-change", "prepare_env", "dev", "test-env")
         self.assertTrue(result["ok"])
         self.assertTrue(result["skipped"])

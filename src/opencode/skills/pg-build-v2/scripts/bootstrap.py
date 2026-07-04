@@ -190,8 +190,8 @@ def maybe_bootstrap_init_commit(change: str, init_committed: bool) -> dict[str, 
 # ============================================================
 #
 # v2.1.1 重构：把"解析 env hook 命令"和"执行 env hook 命令"拆开。
-#   - _build_env_hook_plan() — 纯函数，从 project.yaml / execution-manifest /
-#     environment.yaml 解析出 (command, env_name, stage_name, timeout_seconds,
+#   - _build_env_hook_plan() — 纯函数，从 project.yaml / execution-manifest.yaml
+#     解析出 (command, env_name, stage_name, timeout_seconds,
 #     log_path, env) 等；不执行。
 #   - _execute_plan() — 复用 _build_env_hook_plan() 获取 plan，然后同步执行。
 #   - execute_env_hook_inline() — 旧 API 的兼容包装。
@@ -276,19 +276,6 @@ def _build_env_hook_plan(
 
     if not env_name:
         return {"ok": True, "skipped": True}
-
-    env_yaml_path = os.path.join(CHANGES_DIR, change, "environment.yaml")
-    if os.path.isfile(env_yaml_path):
-        try:
-            with open(env_yaml_path, encoding="utf-8") as f:
-                env_map = _yaml.safe_load(f) or {}
-            mapped = env_map.get(stage_name, env_name)
-            if mapped == "skip":
-                return {"ok": True, "skipped": True}
-            if mapped:
-                env_name = mapped
-        except Exception:
-            pass
 
     env_cfg = (config.get("environments") or {}).get(env_name, {})
     action = env_cfg.get(phase_name)

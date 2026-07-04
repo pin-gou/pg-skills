@@ -4,7 +4,7 @@
 tasks.md 的章节顺序由 **stages × tracks** 二维展开驱动。
 
 > **编排模型**：见 [./orchestration-model.md](./orchestration-model.md)
-> **environment 选择**：见 `.pg/changes/<change>/environment.yaml`（SSOT），不再由 tasks.md 承载
+> **environment 选择**：见 `.pg/changes/<change>/execution-manifest.yaml` 的 `stages[i].environment` 字段（SSOT），不再由 tasks.md 承载
 
 ---
 
@@ -135,7 +135,7 @@ standard track 各 sub 的 body 内容参照下方「各子章节模板」段填
 
 - [ ] 3.1 执行 lint（runner 通过 modules.env-scripts.lint 注入命令）
 - [ ] 3.2 执行测试（runner 通过 modules.env-scripts.test.unit 注入命令）
-- [ ] 3.3 启动服务：runner 按 environment.yaml 中 prepare-env-scripts: <env> 启动（若 required=true）
+- [ ] 3.3 启动服务：runner 按 execution-manifest.yaml 中 prepare-env-scripts.environment 启动（若 required=true）
 - [ ] 3.4 验证 V-env-scripts-N：来自 design.md 的 Verification Criteria
 
 ## 4. prepare-env-scripts.env-scripts:gate - prepare-env-scripts 门控审查
@@ -148,7 +148,7 @@ standard track 各 sub 的 body 内容参照下方「各子章节模板」段填
 
 ### 核心规则
 
-- **environment 选择已由 environment.yaml 决定**
+- **environment 选择已由 execution-manifest.yaml 决定**
 - 章节编号 N 从 1 开始顺序递增
 - 每个 track 生成 4 个子章节：`test`、`dev`、`verify`、`gate`
 - 每个章节使用 `## <N>. {stage.name}.{track_id}:{sub} - <label>` 格式
@@ -160,10 +160,10 @@ standard track 各 sub 的 body 内容参照下方「各子章节模板」段填
 
 ---
 
-## 环境选择产物：environment.yaml
+## 环境选择产物：execution-manifest.yaml
 
 per-change environment 选择由
-`.pg/changes/<change>/environment.yaml` 承载（详见 [./orchestration-model.md](./orchestration-model.md)「per-change environment 选择」段）。
+`.pg/changes/<change>/execution-manifest.yaml` 的 `stages[i].environment` 字段承载（详见 [./orchestration-model.md](./orchestration-model.md)「per-change environment 选择」段）。
 
 ---
 

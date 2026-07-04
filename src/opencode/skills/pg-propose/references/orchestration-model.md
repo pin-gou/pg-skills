@@ -64,22 +64,22 @@ runner 执行 test 命令时按以下规则查找：
 | stage | tracks | test_key | environment.required | per-change 选择落地 |
 |---|---|---|---|---|
 | `dev-isolated` | backend, agent, frontend | unit | false | 无（runner 不启停服务） |
-| `dev-mock-integration` | backend, agent, frontend | integration | true | `environment.yaml: dev-mock-integration: <env-name>` |
-| `real-integration` | real-integration | e2e | true | `environment.yaml: real-integration: <env-name>` |
+| `dev-mock-integration` | backend, agent, frontend | integration | true | `execution-manifest.yaml: stages[i].environment` |
+| `real-integration` | real-integration | e2e | true | `execution-manifest.yaml: stages[i].environment` |
 
 ---
 
-## per-change environment 选择（SSOT：environment.yaml）
+## per-change environment 选择（SSOT：execution-manifest.yaml）
 
-**架构原则**：同一架构下不同 change 的特点不一样，可以选择不同的 environment 进行开发；config.yaml 只承载**架构级**定义（modules / environments / tracks / stages），**per-change 选择必须由 pg-propose 在 `.pg/changes/<change>/environment.yaml` 中确定**。
+**架构变更（v2）**：per-change 的 environment 选择直接落在 `execution-manifest.yaml` 的 `stages[i].environment` 字段（string 或 `{name: string}`）。不再生成 `.pg/changes/<change>/environment.yaml`。
 
 ### 三个文件的职责
 
 | 文件 | 职责 |
 |------|------|
 | `.pg/project.yaml` | 1. 架构级：modules / environments / tracks / stages 拓扑<br>2. 每个 `environment.required: true` 的 stage 加 `environment.selection_rules: list[string]` 字段，**以自然语言规则**说明该 stage 的选择依据（每条 string 一条原子规则） |
-| `.pg/changes/<change>/environment.yaml` | **per-change 的具体选择结果**（SSOT）<br>结构：`per-stage map`，key 是 stage name，value 是该 stage 选定的 environment 名称（或 `skip`）<br>runner 在每个 `environment.required=true` 的 stage 读取对应 stage 字段 |
-| `tasks.md` | 不再含 `## Deployments` 段（SSOT 落到 environment.yaml）<br>`## Deployments` 在 archive 历史中保留为可读副本 |
+| `.pg/changes/<change>/execution-manifest.yaml` | **per-change 的具体选择结果**（SSOT）<br>结构：`stages[i].environment: <env-name>`（string）或 `stages[i].environment.name: <env-name>`（dict 形式）<br>runner 在每个 `environment.required=true` 的 stage 读取对应 stage 字段 |
+| `tasks.md` | 不再含 `## Deployments` 段（SSOT 落到 execution-manifest.yaml）<br>`## Deployments` 在 archive 历史中保留为可读副本 |
 
 ### real-integration / dev-mock-integration 的 environment 选择流程
 
@@ -87,13 +87,13 @@ runner 执行 test 命令时按以下规则查找：
 2. 过滤出所有 `environment.required: true` 的 stage
 3. 对每个这样的 stage，读取其 `environment.selection_rules`（自然语言规则数组）
 4. 根据本 change 的 `affected_tracks`，按规则逐条匹配，给出该 stage 选定的 environment 名称
-5. 写出 `.pg/changes/<change>/environment.yaml`（per-stage map）
+5. 写入 `.pg/changes/<change>/execution-manifest.yaml` 的 `stages[i].environment` 字段
 
-### runner 行为约束（硬性）
+### runner 行为约束
 
-- `environment.yaml` 缺失 → workflow_failed 终止
-- `environment.yaml` 中某 stage 未声明 → workflow_failed 终止
-- `environment.yaml` 中 env 值不在 `config.yaml.environments` 中 → workflow_failed 终止
+- `execution-manifest.yaml` 缺失 → workflow_failed 终止
+- `stages[i].environment` 未声明 → 该 stage 视为 skipped（无 env 准备）
+- `environment` 值不在 `config.yaml.environments` 中 → workflow_failed 终止
 - `config.yaml.stages.<stage>.environment.selection_rules` **不应**被硬编码在 SKILL.md / references 中——这是项目级知识，由 config.yaml 承载
 
 ---
@@ -127,7 +127,7 @@ affected_tracks 为空时（如纯文档变更），整个 verify 章节标 `无
 
 三者协作：
 - **affected_tracks** 决定 `stages[*].tracks` 哪些生成 `- 无` vs 实际任务
-- **on_conditions** 决定 `stages[*]` 哪些 stage 整体启用 (生成 tasks.md 章节 + 写入 environment.yaml)
+- **on_conditions** 决定 `stages[*]` 哪些 stage 整体启用 (生成 tasks.md 章节 + 写入 execution-manifest.yaml 的 stages[i].environment)
 
 ### 与 selection_rules 的区别
 
