@@ -338,7 +338,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <rect x="60" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
   <text x="72" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-propose</text>
   <rect x="158" y="85" width="116" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
-  <text x="170" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-build-v2</text>
+  <text x="170" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-build</text>
   <rect x="276" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
   <text x="288" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-fix-issue</text>
   <rect x="384" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
@@ -391,7 +391,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 <pre>
 .pg/
 ├── project.yaml                  # 统一配置 SSOT（六段结构）
-├── changes/                      # pg-build-v2 caller 路由：变更提案与过程产物
+├── changes/                      # pg-build caller 路由：变更提案与过程产物
 │   ├── add-login-page/           # 某次变更
 │   │   ├── proposal.md           # 做什么、为什么做
 │   │   ├── design.md             # 怎么做、验证标准
@@ -478,7 +478,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 
   <!-- pg-build container -->
   <rect x="36" y="60" width="200" height="152" rx="8" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
-  <text x="136" y="82" font-size="12" font-weight="700" fill="#6d28d9" text-anchor="middle">pg-build-v2 专用</text>
+  <text x="136" y="82" font-size="12" font-weight="700" fill="#6d28d9" text-anchor="middle">pg-build 专用</text>
 
   <rect x="56" y="95" width="160" height="42" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
   <text x="136" y="115" font-size="13" font-weight="600" fill="#6d28d9" text-anchor="middle">tracks</text>
@@ -673,7 +673,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
   --role backend \
   --instance backend-1 \
   --action start \
-  --caller pg-build-v2
+  --caller pg-build
 
 <span style="color:#94a3b8"># 用户手工查看日志</span>
 ./pg-run --env dev-local --role backend --instance backend-1 --action logs --tail-lines 20
@@ -844,7 +844,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <circle cx="380" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
   <text x="380" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">4</text>
   <text x="380" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Build</text>
-  <text x="380" y="118" font-size="10" fill="#64748b" text-anchor="middle">/3-pg-build-v2</text>
+  <text x="380" y="118" font-size="10" fill="#64748b" text-anchor="middle">/3-pg-build</text>
 
   <line x1="402" y1="70" x2="458" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
 
@@ -901,7 +901,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <tr><td>1. 定界</td><td><code>/1-pg-define</code></td><td>模糊需求</td><td>边界清单 + scope summary</td></tr>
   <tr><td>2. 提案</td><td><code>/2-pg-propose</code></td><td>边界 + project.yaml</td><td>proposal + design + tasks + environment.yaml</td></tr>
   <tr><td>3. 评审</td><td><code>/2.1-pg-propose-refine</code></td><td>review-notes 评审意见</td><td>修改后的 proposal/design/tasks</td></tr>
-  <tr><td>4. 构建</td><td><code>/3-pg-build-v2</code></td><td>设计文档 + project.yaml</td><td>代码 + 测试 + 报告 + 自动归档</td></tr>
+  <tr><td>4. 构建</td><td><code>/3-pg-build</code></td><td>设计文档 + project.yaml</td><td>代码 + 测试 + 报告 + 自动归档</td></tr>
   <tr><td>5. 合并</td><td><code>pg-verify-and-merge</code></td><td>feature branch</td><td>合入 master</td></tr>
 </table>
 </div>
@@ -924,7 +924,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <tr>
     <td><span class="tag tag-yellow">适中</span></td>
     <td>单模块、≤8 tasks、无 DB schema 变更、有明确边界</td>
-    <td>走标准流 <code>/2-pg-propose</code> + <code>/3-pg-build-v2</code></td>
+    <td>走标准流 <code>/2-pg-propose</code> + <code>/3-pg-build</code></td>
   </tr>
   <tr>
     <td><span class="tag tag-green">过小</span></td>
@@ -942,7 +942,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <div class="compare-row">
   <div class="compare-box compare-box-new">
     <h4 style="color:var(--success)">正经功能 → 标准流</h4>
-    <p><code>/1-pg-define</code> → <code>/2-pg-propose</code> → review → <code>/3-pg-build-v2</code></p>
+    <p><code>/1-pg-define</code> → <code>/2-pg-propose</code> → review → <code>/3-pg-build</code></p>
   </div>
   <div class="compare-box compare-box-new" style="background:#fef3c7;border-color:#fcd34d">
     <h4 style="color:#92400e">Bug → 修复流</h4>
@@ -1116,7 +1116,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <!-- ============================================================ -->
 <!-- 4.4 构建 -->
 <div id="sec4-build" class="section">
-<h1>4.4 构建 —— `/3-pg-build-v2`（基于事件溯源引擎）</h1>
+<h1>4.4 构建 —— `/3-pg-build`（基于事件溯源引擎）</h1>
 
 <p style="color:var(--muted); font-style:italic">"图纸审完了，Runner 开始施工。<strong>人只做一件事</strong>：执行命令等结果。"</p>
 
@@ -1131,7 +1131,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <rect x="10" y="20" width="220" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
   <text x="120" y="40" font-size="12" font-weight="600" fill="#1d4ed8" text-anchor="middle">LLM 调用 runner</text>
   <text x="120" y="56" font-size="10" fill="#1d4ed8" text-anchor="middle">python3 .../pg-pipeline-runner.py next &lt;change&gt;</text>
-  <text x="120" y="68" font-size="9" fill="#64748b" text-anchor="middle">（位于 pg-build-v2/scripts/）</text>
+  <text x="120" y="68" font-size="9" fill="#64748b" text-anchor="middle">（位于 pg-build/scripts/）</text>
 
   <line x1="230" y1="45" x2="260" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
 
@@ -1159,7 +1159,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <h3>Runner 自动管的事（你不用操心）</h3>
 <ul>
   <li>切到 <code>feat/pg/&lt;change&gt;</code> feature branch</li>
-  <li>启动时 init commit（<code>chore(&lt;change&gt;): bootstrap pg-build-v2</code>）</li>
+  <li>启动时 init commit（<code>chore(&lt;change&gt;): bootstrap pg-build</code>）</li>
   <li>每个 sub 阶段 record commit（<code>chore(&lt;change&gt;): auto-record &lt;item&gt;:&lt;sub&gt; &lt;status&gt;</code>）</li>
   <li>报告顺序编号 <code>{track.id}-{N}-{kind}.md</code></li>
   <li>final-gate pass 后自动归档到 <code>changes/archive/</code></li>
@@ -1302,7 +1302,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 ├── environment.yaml                  ← pg-propose 产物（per-stage environment SSOT）
 ├── 1-propose-review/
 │   └── review-notes.md               ← 评审历史（归档保留，build 不读）
-└── 2-build/                          ← pg-build-v2 过程产物
+└── 2-build/                          ← pg-build 过程产物
     ├── context-chain.md
     ├── pipeline.events               ← append-only JSONL（唯一持久化入口）
     ├── known-issues.md
@@ -1388,7 +1388,7 @@ tracks:
 
 <h2>4.4.6 gate-score —— 5 维加权评分</h2>
 
-<p>每个 track 在进入 <code>gate</code> 阶段时，由 <code>pg-build-v2/gate</code> sub-agent 按 5 个维度打分，<strong>总分 ≥ 80 才视为 gate 通过</strong>。相比传统的 bool 通过/失败，gate-score 能区分"差一点点"和"差很多"：</p>
+<p>每个 track 在进入 <code>gate</code> 阶段时，由 <code>pg-build/gate</code> sub-agent 按 5 个维度打分，<strong>总分 ≥ 80 才视为 gate 通过</strong>。相比传统的 bool 通过/失败，gate-score 能区分"差一点点"和"差很多"：</p>
 
 <div class="svg-container">
 <svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg">
@@ -1450,7 +1450,7 @@ tracks:
 <ol>
   <li>gate agent 输出结构化 JSON：<code>{"scores": {...}, "total": 86, "threshold": 80, "passed": true, "weak_dims": []}</code></li>
   <li><code>total ≥ 80</code> → gate pass，pipeline 推进</li>
-  <li><code>total &lt; 80</code> → 进入 fix-gate 循环，runner 把 <code>weak_dims</code> 传给 <code>pg-build-v2/fix-gate</code> sub-agent 定向修复</li>
+  <li><code>total &lt; 80</code> → 进入 fix-gate 循环，runner 把 <code>weak_dims</code> 传给 <code>pg-build/fix-gate</code> sub-agent 定向修复</li>
   <li><code>max_gate_fix_retries</code> 次仍未达 80 → final-gate 触发人工评审</li>
 </ol>
 
@@ -1466,7 +1466,7 @@ tracks:
 
 <table>
   <tr><th></th><th>标准流</th><th>快捷流</th><th>修复流</th><th>回归流</th></tr>
-  <tr><td>入口</td><td><code>/2-pg-propose</code> + <code>/3-pg-build-v2</code></td><td><code>/2b-pg-quick-build</code></td><td><code>/5-pg-fix-issue</code></td><td><code>/4-pg-regression</code></td></tr>
+  <tr><td>入口</td><td><code>/2-pg-propose</code> + <code>/3-pg-build</code></td><td><code>/2b-pg-quick-build</code></td><td><code>/5-pg-fix-issue</code></td><td><code>/4-pg-regression</code></td></tr>
   <tr><td>设计文档</td><td>4 份</td><td>零产物落盘</td><td>仅诊断报告</td><td>仅问题清单</td></tr>
   <tr><td>change 目录</td><td>是</td><td>否</td><td>否</td><td>否</td></tr>
   <tr><td>人工参与</td><td>提案 review</td><td>无</td><td>确认复现方案</td><td>无</td></tr>
@@ -1699,7 +1699,7 @@ ls .opencode/skills/pg-propose/references/
 <div class="card" onclick="toggleQA(this)">
   <div class="collapse-toggle open"><strong>Build 跑到一半失败了怎么办？</strong></div>
   <div class="collapse-body open">
-    <p>查看 <code>.pg/changes/&lt;name&gt;/2-build/*.md</code> 中的报告。gate 或 verify 报告会写明失败原因。修复后重跑 <code>/3-pg-build-v2</code>。</p>
+    <p>查看 <code>.pg/changes/&lt;name&gt;/2-build/*.md</code> 中的报告。gate 或 verify 报告会写明失败原因。修复后重跑 <code>/3-pg-build</code>。</p>
   </div>
 </div>
 
@@ -1794,7 +1794,7 @@ pg doctor
   <tr><td><code>/2-pg-propose</code></td><td>提案——生成设计文档</td></tr>
   <tr><td><code>/2.1-pg-propose-refine</code></td><td>按评审意见修设计</td></tr>
   <tr><td><code>/2b-pg-quick-build</code></td><td>小改动直接编码</td></tr>
-  <tr><td><code>/3-pg-build-v2</code></td><td>构建——pipeline 实现（事件溯源引擎）</td></tr>
+  <tr><td><code>/3-pg-build</code></td><td>构建——pipeline 实现（事件溯源引擎）</td></tr>
   <tr><td><code>/4-pg-regression</code></td><td>回归——跑全量测试</td></tr>
   <tr><td><code>/5-pg-fix-issue</code></td><td>修复——系统化修 bug</td></tr>
   <tr><td><code>/6-pg-archive</code></td><td>归档已完成变更</td></tr>
