@@ -140,9 +140,8 @@ pg-skills/
 | 步骤 | 命令 / skill | 产出 |
 |------|-------------|------|
 | 定义需求 | `/1-pg-define` 或 `pg-propose` skill | `.pg/changes/<name>/proposal.md` |
-| 生成设计 | `/2-pg-propose` | design.md + tasks.md + review-notes.md |
-| 构建实现 (v1) | `/3-pg-build` | 代码 + 测试 + 验证报告（旧版，已 deprecated） |
-| 构建实现 (v2) | `/3-pg-build` | 事件溯源引擎驱动（推荐） |
+| 生成设计 | `/2-pg-propose` | design.md + tasks.md + execution-manifest.yaml |
+| 构建实现 | `/3-pg-build` | 事件溯源引擎驱动，runner 自动编排 sub-agent |
 | 验证合并 | `pg-verify-and-merge` skill | 合并到 master |
 
 ### 快捷流：跳过 proposal 直接构建
@@ -189,7 +188,8 @@ pg-skills/
 | **0.3.x** | 完整项目初始化流程（`pg init` + `pg doctor`） |
 | **0.4.x** | v4 Hook 协议 — caller × session 双维度路由 + pg-run 菜单 |
 | **0.5.x** | 字段统一为 snake_case + 配置重构 |
-| **0.6.x** | pg-build 事件溯源引擎 + pg-agent workflow + health check —— **当前** |
+| **0.6.x** | pg-build 事件溯源引擎 + pg-agent workflow + health check |
+| **0.7.x** | pg-build v2 取代 v1 + 路径简化 + execution-manifest.yaml SSOT + pg-regression A/B/C 修复边界 —— **当前** |
 | **1.0.x** | 生产就绪，在 2+ 外部项目 dogfood |
 
 ### 升级命令
