@@ -584,6 +584,10 @@ def _inline_env_into_command(plan: dict[str, Any]) -> None:
     if env_parts:
         plan["command"] = f"env {' '.join(env_parts)} {plan['command']}"
 
+    log_path = plan.get("log_path", "")
+    if log_path:
+        plan["command"] += f" > {shlex.quote(log_path)} 2>&1"
+
 
 def cli_bootstrap(change: str) -> dict[str, Any]:
     """CLI 入口：执行 bootstrap 副作用（不含 env hook）+ 检测 pipeline 配置。
