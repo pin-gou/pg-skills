@@ -20,6 +20,28 @@ import subprocess
 import sys
 from pathlib import Path
 
+# ----- 默认 .gitignore 内容 (pg init 写入) -----
+
+GITIGNORE_CONTENT = """\
+# Runtime session directories (all auto-generated, never committed)
+runs/
+ad-hoc/
+fix-issue/
+agent/
+regression/
+
+# Dynamic generated files
+*.profile
+cronjobs/prompt.txt
+
+# pg-init-project dynamic output (review-only, regenerated each run)
+agents-md-patches.md
+
+# Build artifacts within change sessions
+changes/**/2-build/*.png
+changes/**/2-build/*.txt
+changes/**/*.log
+"""
 
 # ----- 路径解析 -----
 
@@ -75,16 +97,21 @@ def cmd_init(args) -> int:
     for sub in ['hooks', 'context', 'scripts', 'changes', 'runs']:
         (pg_dir / sub).mkdir(exist_ok=True)
 
-    # 2. 生成 placeholder project.yaml (仅在不存在时, 避免覆盖 SKILL 已生成的)
+    # 2. 初始化 .pg/.gitignore (仅在不存在时, 避免覆盖用户自定义)
+    pg_gitignore = pg_dir / '.gitignore'
+    if not pg_gitignore.exists():
+        pg_gitignore.write_text(GITIGNORE_CONTENT)
+
+    # 3. 生成 placeholder project.yaml (仅在不存在时, 避免覆盖 SKILL 已生成的)
     project_yaml = pg_dir / 'project.yaml'
     if not project_yaml.exists():
         project_yaml.write_text(generate_project_yaml(project_root))
 
-    # 3. 创建 .opencode/ → .pg/skills/src/opencode/ 下的逐项 symlink
+    # 4. 创建 .opencode/ → .pg/skills/src/opencode/ 下的逐项 symlink
     if not args.no_symlinks:
         create_opencode_symlinks(project_root, pg_skills_root)
 
-    # 3. 创建 pg-run symlink
+    # 5. 创建 pg-run symlink
     create_pg_run_symlink(project_root)
 
     print(f'✓ pg-skills init in {project_root}')
