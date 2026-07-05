@@ -243,6 +243,17 @@ Task 工具调用:
 [每个受影响 track 的字段列表]
 
 ### 8. 影响半径（修复波及的文件）
+**强制扫描范围**（必须逐项检查，不可跳过）：
+
+| 扫描目录 | 说明 | 检查方法 |
+|---------|------|---------|
+| 1. 根因函数/方法所在的文件 | bug 发生的直接位置 | explore 已定位 |
+| 2. 同 Controller/Handler 的同名/同模式方法 | 相同的 bug pattern 可能被复制到邻近方法 | grep `auth.getName()`、`getPrincipal()` 等当前 bug 的特征模式 |
+| 3. 同模块/同包的相似逻辑 | 相同的调用模式（如当前 bug 中的工具方法在其他类中的复制） | 按当前 bug 的特征字符串（方法名 / 关键 token）逐一 grep |
+| 4. 跨模块的同逻辑 | 其他模块的同类工具方法（按 `project.yaml` 的 `modules[*]` / `tracks[*].modules` 列表逐个搜索） | 在每个 module 目录下 grep 特征字符串 |
+
+**输出格式**：
+
 | 文件 | 为什么受影响 | 是否需要同步修改 |
 |------|------------|----------------|
 ```
@@ -261,6 +272,7 @@ explore 返回的摘要**直接**作为 Phase 2 的输入。编排器**不再重
 - ✅ `success_criteria` 已定义（至少 1 条，SMART 准则）
 - ✅ `failure_criteria` 已定义（至少 1 条，避免漏判）
 - ✅ `affected_files` 已识别完毕（含测试、配置等周边文件）
+- ✅ 影响半径扫描（第 8 节）已完成，无遗漏的同模式方法
 - ✅ Phase 2 自检清单已逐项确认
 
 ---
@@ -325,6 +337,21 @@ success_criteria:
       url: /api/compute.../tenants/.../instances
       expect_match: "<vm_name>"
 ```
+
+**强制必含项**：所有 success_criteria 必须包含以下 **SC-FORCE-1**：
+
+```yaml
+  - id: SC-FORCE-1
+    description: "修复代码已部署到运行中的服务（binary 版本包含本次修复）"
+    verify_method: "log_filter"  # 或 "api_call"
+    verify_args:
+      service: <role>                              # 来自 project.yaml environments.<env>.roles[*].name
+      patterns: ["<fixed-symbol-or-class-name>"]   # 本次修复引入的独有可识别符号（详见 §5.1.4.3）
+      expect_found: true
+    timeout: 30s
+```
+
+这条标准的含义是：修复不仅仅是"单元测试通过"，还必须确认运行中的服务是**编译了本次变更的 binary**。编排器必须通过 `invoke-hook --action start` 重新部署后，再通过日志匹配或 API 响应确认运行版本包含修复代码。
 
 **支持的成功标准类型**：
 
@@ -439,6 +466,13 @@ question 工具调用:
     ]
   }]
 ```
+
+> **前端问题额外确认**：如果问题描述涉及前端页面行为（如页面加载、按钮点击、数据显示），则必须额外确认用户已在前端浏览器中完成以下操作再进入 Phase 4：
+> 1. 硬刷新页面（Command/Ctrl + Shift + R）确保加载最新前端代码
+> 2. 重新执行触发 bug 的操作步骤
+> 3. 在 `reproduction_steps` 中包含"打开浏览器 DevTools → Network 面板 → 观察对应 API 请求的响应"的步骤
+>
+> 编排器应在 Phase 3 question 中附加提示："此问题涉及前端页面，请确认已在前端浏览器中完成一次硬刷新验证后，再继续执行"
 
 ### 3.2 环境选择（仅当 `fix_issue.ask_environment_choice == true`）
 
@@ -679,9 +713,8 @@ operations:
   # 4. 日志搜索
   - name: search_logs
     type: log_filter
-    service: backend
-    patterns: ["<成功关键字>", "PANIC", "FATAL"]
-
+    service: <role>
+    patterns: ["<成功关键字>", "PANIC", "FATAL"] |
   # 5. Git diff 状态校验
   - name: verify_clean_diff
     type: git_diff_check
@@ -725,26 +758,109 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 
 **`next_call_timeout_seconds` 处理**：runner 在 `invoke-hook` 调用时返回的 `__CONFIG__` 段包含 `action_metadata[role][action].timeout_seconds`，LLM 把它当作下一次 bash tool 的 timeout 上限；不传会让 bash tool 120s 默认超时提前杀死长时间运行的 start/stop 脚本（典型如 backend start = 300s）。
 
-**pg-fix-issue Phase 5 触发时机**：
+**pg-fix-issue Phase 5 触发时机**（下表中的 `backend` / `backend-1` / `agent` 等为**常见角色示例**，实际按 `project.yaml` 的 `environments.<env>.roles[*]` 替换）：
 
 | 触发时机 | 编排器动作 |
 |---------|----------|
 | Phase 4 修复前用户选"是 prepare" | 调 `invoke-hook --session <C> --env <ENV> --action prepare_env --skill pg-fix-issue` |
-| 修复后需要 backend 重启验证 | 调 `invoke-hook --session <C> --env <ENV> --role backend --instance backend-1 --action start --skill pg-fix-issue` |
-| 修复后需要 backend 停止收尾 | 调 `invoke-hook --session <C> --env <ENV> --role backend --instance backend-1 --action stop --skill pg-fix-issue` |
-| 看 backend 日志 | 调 `invoke-hook --session <C> --env <ENV> --role backend --instance backend-1 --action logs --tail-lines 100 --skill pg-fix-issue` |
+| 修复后需要某 role 重启验证 | 调 `invoke-hook --session <C> --env <ENV> --role <role> --instance <instance-name> --action start --skill pg-fix-issue` |
+| 修复后需要某 role 停止收尾 | 调 `invoke-hook --session <C> --env <ENV> --role <role> --instance <instance-name> --action stop --skill pg-fix-issue` |
+| 看某 role 的日志 | 调 `invoke-hook --session <C> --env <ENV> --role <role> --instance <instance-name> --action logs --tail-lines 100 --skill pg-fix-issue` |
 | 验证成功后用户选"是 clean" | 调 `invoke-hook --session <C> --env <ENV> --action clean_env --skill pg-fix-issue` |
 
-**精细化 vs 整栈的选择规则**（v3.0 通过 invoke-hook 表达）：
+**精细化 vs 整栈的选择规则**（v3.0 通过 invoke-hook 表达；`<role>` / `<instance-name>` 按 SSOT 替换）：
 
 | 场景 | 推荐 invoke-hook 调用 |
 |------|---------------------|
-| bug 在 backend，验证只涉及 backend | `start backend/backend-1`（fine-grained） |
-| bug 在 agent，需要 backend 与 agent 协同 | `start backend/backend-1` + `start agent/agent-1`（按依赖顺序） |
+| bug 在某个 role，验证只涉及该 role | `start <role>/<instance-name>`（fine-grained） |
+| bug 涉及多个 role 协同 | `start <role1>/<instance1>` + `start <role2>/<instance2>`（按依赖顺序） |
 | bug 涉及数据库 schema，需要 prepare_env 重置 db | `prepare_env`（Phase 3 用户选"是"后触发） |
 | Phase 1 复现前环境状态不可信 | `prepare_env`（按 3.3 用户选择） |
 
 **收益**：滚动修复时**只重启相关 role**，不打断其它 role → 大幅缩短 iteration cycle。
+
+### 5.1.4.2 修复上线验证必做序列（v3.1 新增）
+
+**核心原则**：单元测试通过 ≠ 修复成功。编排器必须确保修复代码已**编译并部署到运行中的服务**，才能宣布修复成功。
+
+**必做序列**（Phase 5 中必须按以下顺序执行，不可跳过任意一步）：
+
+```
+Step 1: invoke-hook --action start  → 编译并部署修复代码到目标服务
+Step 2: api_call 或 log_filter  → 验证服务正在运行且响应正确
+Step 3: 验证确认操作的 operation（如 git_diff_check） → 确认 DIAG 日志已清理
+```
+
+**如果任何一步失败，立即进入 Phase 6，不继续后续步骤。**
+
+**invoke_then_verify 完整操作样例**（`<...>` 占位符必须按 §5.1.4.3 替换为当前项目实际值）：
+
+```yaml
+operations:
+  # Step 1: 编译部署（由编排器通过 invoke-hook 触发，不在 operations 列表内）
+  # 编排器在 Phase 5 开始时调：
+  #   python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
+  #     --session <C> --env <ENV> --role <role> --instance <instance-name> \
+  #     --action start --skill pg-fix-issue
+
+  # Step 2a: 确认服务已启动并运行修复代码（log_filter 验证 binary 版本）
+  - name: verify_running_version
+    type: log_filter
+    service: <role>
+    patterns: ["<fixed-symbol-or-class-name>"]   # 本次修复引入的独有可识别符号
+    expect_found: true
+
+  # Step 2b: 端到端 API 验证（调用真实 running 服务）
+  - name: e2e_api_verify
+    type: api_call
+    method: <HTTP-method>
+    url: http://<service-host>:<port><api-path>
+    headers:
+      Authorization: "<auth-header-template>"
+    expect_field: <response-field>
+    expect_value: <expected-value>
+
+  # Step 3: 清理检查
+  - name: verify_clean_diff
+    type: git_diff_check
+    forbid_markers: ["DIAG:"]
+
+  # Step 4: 单元测试（可选，在部署验证通过后执行）
+  - name: run_unit_tests
+    type: test
+    module: <module-id>
+    test_key: unit
+    output_mode: summary_plus_failures
+```
+
+**⚠️ 强约束**：编排器**不得**以"单测已通过"为由跳过 invoke-hook 和 api_call 验证。`invoke-hook --action start` 必须在所有 api_call operations 之前执行，确保被测服务运行的是当前修复代码。
+
+### 5.1.4.3 占位符替换规约（v3.1 新增）
+
+**核心原则**：本 SKILL 是跨语言、跨项目的通用模板。上面示例中所有 `<...>` 占位符必须根据**当前项目**的 `.pg/project.yaml` 实际定义替换，**严禁**硬编码示例中的具体值（如特定端口、特定类名、特定 module ID）。
+
+| 占位符 | 含义 | SSOT 查找路径（按优先级） |
+|--------|------|------------------------|
+| `<role>` | 服务的角色名（例：backend / frontend / agent / api / web / worker） | `project.yaml` → `environments.<env>.roles[*].name` |
+| `<instance-name>` | 该 role 下的实例名 | `environments.<env>.roles[<role>].instances[*].name` |
+| `<service-host>` | 服务运行主机 | `environments.<env>.roles[<role>].instances[*].host` |
+| `<port>` | 服务端口 | `environments.<env>.roles[<role>].instances[*].port` |
+| `<module-id>` | 模块标识（用于 `modules.<m>.test.<key>` 解析） | `project.yaml` → 顶层 `modules[*]` 的 key |
+| `<api-path>` | 实际 API HTTP path | 由当前项目的 API 规范决定（路径格式因项目而异，本 SKILL 不假设特定前缀） |
+| `<HTTP-method>` | HTTP 方法（GET / POST / PUT / DELETE） | 由 API 端点定义决定 |
+| `<auth-header-template>` | 认证头模板 | 按项目认证机制调整（Bearer token / Cookie / API Key / mTLS 等） |
+| `<response-field>` | 期望匹配的响应字段名（按当前项目的 `ApiResponse<T>` 包装结构） | 由当前项目的统一响应体规范决定（不要假设 `code` / `data` / `message` 等具体字段名） |
+| `<expected-value>` | 该字段的期望值 | 由当前 bug 修复目标决定 |
+| `<fixed-symbol-or-class-name>` | 本次修复引入的**独有可识别符号**——服务启动日志或标准输出中可以匹配到 | 取值策略见下方"如何选定 `<fixed-symbol>`" |
+
+**如何选定 `<fixed-symbol-or-class-name>`**：
+
+- 优先级 1：新引入的方法名（含全限定类名或 method descriptor）—— 例：`com.example.MyController.getCurrentUserId`
+- 优先级 2：新引入的字段名或常量键名
+- 优先级 3：本次修复加入的独有日志前缀（DIAG 风格或业务日志），如 `[FIX-2026-07-05-me-user-not-found]`
+- 优先级 4：本次修复 commit message 中的某个唯一短串
+
+> **❌ 反模式**：在 SKILL 示例中硬编码任何项目特定的 URL（如 `localhost:9080/api/...`）、类名、模块名。这些是**教学线索**而非直接复用的字面量。
 
 ### 5.1.5 test_key 选择
 
@@ -1037,6 +1153,18 @@ question 工具调用:
   ]
 ```
 
+**所有场景下，末尾增加第 5 选项**（用户实测 fail 回退入口）：
+
+```
+  options: [
+    ...(上 N 选项)...,
+    {
+      label: "用户实测仍失败",
+      description: "主 agent 已报告修复成功但用户实测 bug 仍在。回到 Phase 1 重新诊断，侧重检查代码是否已部署到运行中的服务。iteration_count += 1。"
+    }
+  ]
+```
+
 **ESCALATE 输出 report 包含的产物**（来自 `fix_issue.escalation_artifacts`）：
 
 ```yaml
@@ -1068,6 +1196,27 @@ escalation_report:
 | 切人工修复 | 保留 | 不变 | 输出 report，停止 |
 | 缩范围重试 | 不重置 | 不变 | 编辑 success_criteria（保留核心），继续 |
 | 手动验证后回报 | 不重置 | 不变 | 等待用户回报 |
+| 用户实测仍失败 | +1 | 不变 | 回到 Phase 1 重新诊断 |
+
+---
+
+### 6.6 用户实测 fail 分支（re-entry protocol）
+
+**触发条件**：主 agent 已完成 Phase 5b 并报告"修复成功"，但用户回复"bug 仍存在"或"修复无效"。
+
+**自动处理**（编排器在收到用户反馈后立即执行，**不**经过 ESCALATE_MENU）：
+1. `iteration_count += 1`
+2. 如果 `iteration_count > fix_issue.max_iteration_count`，转入 ESCALATE_MENU（见 6.5）
+3. 否则，**保留**所有诊断产物（调用链路分析、phase2_output、executor JSON 历史），直接回到 Phase 1
+4. 重新诊断时，编排器必须优先检查以下"假阳性"场景：
+   - 修复代码已编译但未部署到运行中的服务（最常见原因）
+   - 部署的 binary 不是最新版本（invoke-hook 未执行或失败）
+   - 测试环境与用户使用的环境不一致
+   - 前端缓存导致旧代码仍在运行（硬刷新无效）
+
+**假阳性防范**：在最终结论末尾附加以下提示：
+
+> ⚠️ 如果以上结论与您的实际体验不符，请回复"bug 仍存在"，我将自动回到诊断阶段重新分析。
 
 ---
 
@@ -1134,4 +1283,6 @@ escalation_report:
 
 ### 备注
 [如有必要：Test X 失败与本次修复根因无关，已记入 KnownIssues]
+
+> ⚠️ 如果以上结论与您的实际体验不符，请回复"bug 仍存在"，我将自动回到诊断阶段重新分析。
 ```
