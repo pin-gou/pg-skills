@@ -190,6 +190,9 @@ reducer 返回 `kind="error"` 时：
 | `schema_violation: ... 要求 summary 中含 'gate_score: <0-100>'` | gate/final-gate 阶段 summary 缺评分 | 确保 summary 含 `gate_score: <0-100>, p0_failures: [...]` |
 | `result_json_missing_after_retry` (v2.4) | sub-agent 未调用 `pg-build-result --output-path` | 检查 dispatch prompt 中 `{result_json_path}` 占位符是否被替换；sub-agent 必须执行 `pg-build-result --mode agent --output-path <path> --require-output` |
 | `pg-build-result` exit 2 (v2.4) | `--require-output` 模式下写入失败 | 检查 `--output-path` 目录是否存在、是否可写；路径必须是绝对路径 |
+| `result_json_missing: ...` (v2.5) | `--result-json` 指向不存在路径 | 用 dispatch action 返回的 `expected_result_path`；或改回 v2.4 显式 CLI 形式 |
+| `result_json_invalid: ...` (v2.5) | `--result-json` 文件 JSON 解析失败或顶层非 dict | 让 sub-agent 重跑 `pg-build-result` 落盘 |
+| `status_missing: ...` (v2.5) | `--result-json` 与 `--status` 同时缺 status 字段 | 二选一必填（CLI `--status` 或文件 `status`） |
 
 ## 完整代码参考
 
@@ -206,3 +209,57 @@ reducer 返回 `kind="error"` 时：
   - `scripts/pipeline/orchestrator.py:_derive_result_path` (dispatch_file → result.json 派生)
   - `scripts/pipeline/dispatch.py` (返回 `expected_result_path` 字段)
   - `prompt-templates/blocks/sub_agent_contract.yaml` (强制落盘指令块)
+
+## v2.5 record 命令支持 --result-json
+
+### 背景
+
+v2.4 强制 sub-agent 把 result.json 落盘后，编排器在调 `runner record` 时仍要把 7 字段（status/summary/report/outputs/issues/evidence/tasks_updated）**逐个**通过 CLI flag 重传——LLM 在长 prompt 下极易漏传 `--tasks-updated` 等关键字段，触发 schema_violation。
+
+v2.5 起，record 命令新增 `--result-json <path>` 可选参数，**编排器只需传 result.json 路径，7 字段自动从文件加载**：
+
+```bash
+# v2.5 推荐用法（编排器侧最少传参）
+$RUNNER record <change> --result-json <result.json 绝对路径>
+
+# 也可与显式 CLI 参数混用：CLI 非空值优先于文件内容
+$RUNNER record <change> --result-json <abs/006-dev.backend-dev-result.json> \
+                       --status pass        # 显式覆盖文件中的 status
+
+# 完全兼容 v2.4 调用形式（不传 --result-json 时行为完全一致）
+$RUNNER record <change> --status completed --summary "..." --report ... --tasks-updated 2.1,2.3 ...
+```
+
+### 字段映射（result.json → record CLI）
+
+result.json 文件由 `pg-build-result --mode agent --output-path <path>` 生成，文件顶层 dict 的 7 个 key 与 record CLI 一一对应：
+
+| result.json key | record CLI 参数 | 合并策略 |
+|---|---|---|
+| `status` | `--status` | CLI 非空 > 文件 |
+| `summary` | `--summary` | CLI 非空 > 文件 |
+| `report_path` | `--report` | CLI 非空 > 文件 |
+| `outputs` | `--outputs` | CLI 非空 > 文件 |
+| `issues` | `--issues` | CLI 非空 > 文件 |
+| `evidence_paths` | `--evidence` | CLI list + 文件 list 拼接去空 |
+| `tasks_updated` | `--tasks-updated` | CLI list + 文件 list 拼接去空（CLI 已先做逗号归一） |
+
+### 新增 fatal 错误
+
+| 触发条件 | reason | 修复 |
+|---|---|---|
+| `--result-json` 路径不存在 | `result_json_missing: ...` | 用 dispatch action 中的 `expected_result_path`；或改回显式 CLI 形式 |
+| `--result-json` 内容非合法 JSON | `result_json_invalid: ...` | 重新让 sub-agent 跑 `pg-build-result` 落盘 |
+| `--result-json` 顶层不是 dict | `result_json_invalid: ...` | 检查文件来源（pg-build-result 输出顶层就是 object） |
+| `--result-json` 缺 status 且 CLI 也未传 `--status` | `status_missing: ...` | 二选一必填 |
+
+### 与 v2.4 兼容
+
+- 不传 `--result-json` 时，record 命令行为与 v2.4 完全一致（回归保护）
+- sub-agent 侧的 `pg-build-result --output-path --require-output` 落盘要求不变
+- orchestrator.py 内部的 `result_json_missing_after_retry` fatal（基于 `expected_result_path`）依然独立生效，不受 CLI `--result-json` 影响
+
+### 完整代码参考
+
+- **CLI 入口**: `scripts/pg-pipeline-runner.py` (record 分支：`--result-json` + 7 字段合并)
+- **测试**: `scripts/tests/test_record_result_json.py` (6 个 case)

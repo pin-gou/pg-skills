@@ -144,26 +144,134 @@ def main() -> None:
     elif command == "record":
         rec_parser = argparse.ArgumentParser(prog="pg-pipeline-runner.py record", add_help=False)
         rec_parser.add_argument("change", nargs="?", default=change)
-        rec_parser.add_argument("--status", required=True, choices=tuple(sorted(VALID_STATUSES)),
-                                help="record status: completed|failed|escalate|pass|fail")
+        rec_parser.add_argument("--status", default="",
+                                choices=tuple(sorted(VALID_STATUSES)) + ("",),
+                                help="record status: completed|failed|escalate|pass|fail"
+                                     "（v2.5: 可从 --result-json 加载，CLI 留空即可）")
         rec_parser.add_argument("--report", default="",
-                                help="报告文件绝对路径")
+                                help="报告文件绝对路径（v2.5: 可从 --result-json 加载）")
         rec_parser.add_argument("--summary", default="",
-                                help="<=200 字的一句话摘要")
+                                help="<=200 字的一句话摘要（v2.5: 可从 --result-json 加载）")
         rec_parser.add_argument("--outputs", default="",
-                                help="产物文件列表，逗号分隔")
+                                help="产物文件列表，逗号分隔（v2.5: 可从 --result-json 加载）")
         rec_parser.add_argument("--issues", default="",
-                                help="问题列表，逗号分隔")
+                                help="问题列表，逗号分隔（v2.5: 可从 --result-json 加载）")
         rec_parser.add_argument("--evidence", action="append", default=[],
-                                help="证据文件绝对路径（可多次传）")
+                                help="证据文件绝对路径（可多次传；v2.5: 可从 --result-json 加载并合并）")
         rec_parser.add_argument("--tasks-updated", action="append", default=[],
                                 dest="tasks_updated",
-                                help="已更新的 task_id。支持两种格式：1) 逗号分隔: --tasks-updated \"1.1,1.2,1.3\"  2) 多次传参: --tasks-updated 1.1 --tasks-updated 1.2。两种格式可混用")
+                                help="已更新的 task_id。支持两种格式：1) 逗号分隔: --tasks-updated \"1.1,1.2,1.3\"  2) 多次传参: --tasks-updated 1.1 --tasks-updated 1.2。两种格式可混用（v2.5: 可从 --result-json 加载并合并）")
+        # v2.5: 从 result.json 一次性加载 7 字段（CLI 显式参数优先级高于文件内容）
+        rec_parser.add_argument("--result-json", default="",
+                                dest="result_json",
+                                help="v2.5: 从此 result.json 文件加载 7 字段填充 record 参数"
+                                     "（status/summary/report_path/outputs/issues/evidence_paths/tasks_updated）。"
+                                     "CLI 显式非空参数优先于文件内容。可与现有参数混用。")
         rec_args = rec_parser.parse_args(sys.argv[3:])
-        status = rec_args.status
+
+        # ── v2.5: 加载 --result-json（如指定）──
+        file_values: dict[str, Any] = {}
+        if rec_args.result_json:
+            if not os.path.isfile(rec_args.result_json):
+                print(json.dumps({
+                    "action": "error", "fatal": True,
+                    "reason": (
+                        f"result_json_missing: '{rec_args.result_json}' 不存在或不是文件。"
+                        f"v2.5: --result-json 必须指向 sub-agent 已落盘的 result.json。"
+                        f"  编排器应使用 dispatch action 中的 expected_result_path。"
+                    ),
+                    "hint": (
+                        "确认 sub-agent 是否调用了 "
+                        "pg-build-result --output-path <path> --require-output。"
+                        "如未落盘，可让编排器改回 v2.4 显式 CLI 形式"
+                        "（--status --summary --report --evidence --tasks-updated ...）。"
+                    ),
+                }, ensure_ascii=False))
+                return
+            try:
+                with open(rec_args.result_json, "r", encoding="utf-8") as _f:
+                    _data = json.load(_f)
+            except (OSError, json.JSONDecodeError) as _e:
+                print(json.dumps({
+                    "action": "error", "fatal": True,
+                    "reason": (
+                        f"result_json_invalid: '{rec_args.result_json}' JSON 解析失败: {_e}。"
+                        f"v2.5: --result-json 必须是合法 JSON 对象。"
+                    ),
+                    "hint": "检查文件是否被覆写或损坏；让 sub-agent 重新调用 pg-build-result 落盘。",
+                }, ensure_ascii=False))
+                return
+            if not isinstance(_data, dict):
+                print(json.dumps({
+                    "action": "error", "fatal": True,
+                    "reason": (
+                        f"result_json_invalid: '{rec_args.result_json}' 顶层必须是 JSON object，"
+                        f"实际得到 {type(_data).__name__}。"
+                    ),
+                    "hint": "pg-build-result 输出的 JSON 顶层就是 object；检查文件来源。",
+                }, ensure_ascii=False))
+                return
+            file_values = _data
+
+        # ── v2.5: 7 字段合并（CLI 非空 > 文件 > 默认空）──
+        def _merge_str(key: str, cli_val: str) -> str:
+            """字符串字段：CLI 非空（strip 后） > 文件值 > 默认空。
+
+            outputs/issues 在文件中可能以 list 形式存储（pg-build-result 输出），
+            此时 join 成逗号分隔字符串，与 orchestrator.record() 的 outputs/issues 参数签名一致。
+            """
+            if cli_val and cli_val.strip():
+                return cli_val
+            v = file_values.get(key)
+            if isinstance(v, list):
+                return ",".join(str(x).strip() for x in v if x is not None and str(x).strip())
+            if isinstance(v, str) and v.strip():
+                return v
+            if v is not None and not isinstance(v, str):
+                return str(v)
+            return ""
+
+        def _merge_list(key: str, cli_list: list[str]) -> list[str]:
+            """list 字段：CLI + 文件拼接（CLI 在前），去空字符串。"""
+            merged: list[str] = []
+            for x in cli_list:
+                if x and str(x).strip():
+                    merged.append(str(x).strip())
+            file_v = file_values.get(key)
+            if isinstance(file_v, list):
+                for x in file_v:
+                    if x is not None and str(x).strip():
+                        merged.append(str(x).strip())
+            return merged
+
+        status = _merge_str("status", rec_args.status)
+        report_path = _merge_str("report_path", rec_args.report)
+        summary = _merge_str("summary", rec_args.summary)
+        outputs = _merge_str("outputs", rec_args.outputs)
+        issues = _merge_str("issues", rec_args.issues)
+        evidence_paths = _merge_list("evidence_paths", rec_args.evidence)
+        # tasks_updated 的 CLI 端还要做逗号分隔归一化，先归一再合并
+        normalized_tasks_cli: list[str] = []
+        for item in rec_args.tasks_updated:
+            for part in item.split(","):
+                part = part.strip()
+                if part:
+                    normalized_tasks_cli.append(part)
+        tasks_updated = _merge_list("tasks_updated", normalized_tasks_cli)
+
+        # ── status 兜底必填（CLI/文件都没有 → fatal）──
+        if not status:
+            print(json.dumps({
+                "action": "error", "fatal": True,
+                "reason": (
+                    "status_missing: --status 与 result.json.status 均为空。"
+                    "v2.5: 编排器必须显式 --status 或在 --result-json 文件中提供 status 字段。"
+                ),
+                "hint": "传 --status completed|failed|escalate|pass|fail 之一。",
+            }, ensure_ascii=False))
+            return
 
         # —report 不存在时立刻退出（不调 orchestrator）
-        report_path = rec_args.report
         if report_path and not os.path.isfile(report_path):
             print(json.dumps({
                 "action": "error", "fatal": True,
@@ -171,19 +279,11 @@ def main() -> None:
             }))
             return
 
-        # 归一化 --tasks-updated：支持逗号分隔和重复 flag 两种格式，可混用
-        normalized_tasks: list[str] = []
-        for item in rec_args.tasks_updated:
-            for part in item.split(","):
-                part = part.strip()
-                if part:
-                    normalized_tasks.append(part)
-
         result = orch.record(
-            status, report_path, rec_args.summary,
-            rec_args.outputs, rec_args.issues,
-            evidence_paths=rec_args.evidence,
-            tasks_updated=normalized_tasks,
+            status, report_path, summary,
+            outputs, issues,
+            evidence_paths=evidence_paths,
+            tasks_updated=tasks_updated,
         )
 
     elif command == "progress":
@@ -199,6 +299,7 @@ def _usage(msg: str = "") -> None:
     print("  python3 pg-pipeline-runner.py bootstrap <change>                                          # 执行 bootstrap 副作用", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py next <change>                                              # 获取下一步 action", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py record <change> --status <status> [--report <path>] [--summary <文本>] [--outputs <...>] [--issues <...>] [--evidence <...>] [--tasks-updated <t1,t2,...|--tasks-updated t1 --tasks-updated t2>]", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py record <change> --result-json <result.json 路径>     # v2.5: 从 sub-agent 落盘的 result.json 加载 7 字段", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py progress <change>                                           # 查看进度", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py env-action <change> --phase prepare_env|clean_env --stage <stage> --env <env> [--timeout <秒>]", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py env-action-result <change> --phase prepare_env|clean_env --stage <stage> --env <env> --success true|false [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]", file=sys.stderr)

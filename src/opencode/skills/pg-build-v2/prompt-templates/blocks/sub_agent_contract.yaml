@@ -134,3 +134,25 @@ block: |
 
   传法：可多次 `--tasks-updated X`，或逗号分隔。空值 `[""]` `[" "]` 也算未填。
   绕过脚本手写 JSON 不会被这里拦截（因为脚本不参与），但 orchestrator 的 `mark_all_tasks_in_phase` fallback 会污染 tasks.md，且不会给出清晰的错误提示。**请务必调用脚本**。
+
+  ### 编排器侧的 v2.5 简化
+
+  **v2.5 起，编排器在调 `record` 命令时可以直接传 result.json 路径**——7 字段自动从文件加载，无需逐个拼接 CLI flag：
+
+  ```bash
+  # 推荐用法（编排器侧最少传参）
+  python3 .opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py record <change> \
+      --result-json {result_json_path}
+  ```
+
+  **好处**：
+  - 不必再手工拼 `--status --summary --report --evidence --tasks-updated --outputs --issues` 7 个 flag
+  - 避免在长 prompt 下漏传 `--tasks-updated` 等关键字段触发 `schema_violation`
+  - 与 v2.4 的 sub-agent 落盘要求**完全兼容**——你无需做任何额外动作，编排器会自动从你落盘的 result.json 加载字段
+
+  **行为细节**（编排器会做）：
+  - CLI 显式参数（如 `--status pass`）**优先于** result.json 中的同名字段
+  - `evidence_paths` / `tasks_updated` 是 list，CLI 传值与文件传值**会拼接合并**
+  - 若 `--result-json` 指向不存在/非法的文件 → fatal，编排器收到清晰错误信息
+
+  **完全兼容旧调用**：编排器如果仍传 7 个显式 flag（不传 `--result-json`），行为与 v2.4 完全一致。
