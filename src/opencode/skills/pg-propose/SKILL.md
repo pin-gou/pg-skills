@@ -225,7 +225,7 @@ enabled_stages:
 **操作方法**：LLM 遵行两阶段法——先按 `stage.tracks` 数组顺序机械生成所有章节标题骨架（simple=1 个 heading，standard=4 个 heading，N 连续递增），heading 骨架确认无误后再逐个填充 body 内容。禁止在填充阶段调整 heading 顺序、跳过非 affected track 或调换 simple/standard 先后顺序。
 
 核心规则摘要：
-- **environment 选择**：LLM 根据 project.yaml 中 stage 的 `environment.selection_rules` 选择环境后在顶部 block quote 留一行 `> - **environment 选择**：{stage} → {env}`（仅人类参考，CLI 工具 pg-gen-manifest.py 会解析此行的 stage 到 env 映射）
+- **environment 选择**：LLM 根据 project.yaml 中 stage 的 `environment.selection_rules` 选择环境后在顶部 block quote 留一行 `> - **environment 选择**：{stage} → {env}`（仅人类参考，CLI 工具 `.opencode/skills/pg-propose/scripts/pg-gen-manifest.py` 会解析此行的 stage 到 env 映射）
 - 章节编号 N 从 1 开始顺序递增
 - **standard track** 生成 4 个子章节：`test` / `dev` / `verify` / `gate`
 - **simple track**（`tracks.<id>.type == "simple"`）生成 1 个章节（派遣 pg-build/simple agent 执行 commands）
@@ -261,11 +261,11 @@ enabled_stages:
 **步骤**：
 1. 调用生成 CLI：
    ```bash
-   python3 .opencode/skills/pg-build/scripts/pg-gen-manifest.py CHANGE_NAME
+   python3 .opencode/skills/pg-propose/scripts/pg-gen-manifest.py CHANGE_NAME
    ```
 2. 调用校验 CLI（校验 manifest ↔ tasks.md 一致性）：
    ```bash
-   python3 .opencode/skills/pg-build/scripts/pg-validate-proposal.py manifest CHANGE_NAME
+   python3 .opencode/skills/pg-propose/scripts/pg-validate-proposal.py manifest CHANGE_NAME
    ```
 3. 失败处理（最多 2 轮）：
    - 若校验不通过，根据错误类型修正 tasks.md：

@@ -38,7 +38,7 @@ stages ── 一组阶段（dev-isolated → dev-mock-integration → real-inte
 - 这与 validator 的 `_is_simple_track()` 行为一致：simple track 章节被列入 `skipped_items` 但仍要求存在
 - **实现方式**：pg-propose 使用两阶段骨架填充法生成 tasks.md——阶段一按 `stage.tracks` 数组顺序机械生成所有 heading（禁止按 affected_tracks 分组），阶段二按 heading 顺序逐个填充 body。heading 骨架固定后，LLM 无法重排章节顺序。
 
-**simple track 与 runner 的契约**（来自 `pg-build/scripts/pg_pipeline_common.py:146-167` 和 `pg-pipeline-runner.py:_build_simple_dispatch`）：
+**simple track 与 runner 的契约**（来自 `pg-propose/scripts/pg_pipeline_common.py:146-167`）：
 - runner 看到 simple type → `get_track_type()` 归类为 `"phase"`，作为 dispatch 类型处理
 - runner 在 `cmd_next` 时调用 `_noopify_simple_track_sections()`，把 simple track 对应章节自动改写为 canonical form（heading 后追加 `(simple track: 派遣 pg-build/simple agent 执行 commands)` + body 单 `- 无` 行）
 - 改写 idempotent：已是 canonical form 的章节保持原样
