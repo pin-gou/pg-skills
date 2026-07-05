@@ -1,4 +1,4 @@
-"""Event types for pg-build-v2 pipeline events.
+"""Event types for pg-build pipeline events.
 
 所有 event 在写入 pipeline.events 文件时序列化为 JSON。
 此处定义的 dataclass 是类型化引用，序列化逻辑在 event_log.py。

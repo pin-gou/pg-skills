@@ -5,7 +5,7 @@ import sys
 import tempfile
 import unittest
 
-# 让测试可以 import pg-build-v2 scripts
+# 让测试可以 import pg-build scripts
 sys.path.insert(
     0,
     os.path.join(

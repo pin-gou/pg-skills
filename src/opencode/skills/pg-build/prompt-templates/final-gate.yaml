@@ -25,7 +25,7 @@ prompt: |
   2. **所有 track 的 gate assessment 报告**（{report_paths}）
      - **每个 gate assessment 必须存在**且包含 `gate-score` 字段（v2.1 强制）
   3. **pipeline.events**（`{events_path}`）— 了解 sub-agent 执行历史与已知问题；
-     可通过 `python3 .opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py progress {_change}` 查看
+     可通过 `python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py progress {_change}` 查看
   4. **known-issues.md**（如存在）— 累积的 gate-fix 兜底问题
 
   ### 加权评分维度

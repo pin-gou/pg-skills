@@ -499,7 +499,7 @@ class Orchestrator:
                     "<seq>-<track>-<phase>.result.json 是否落盘。\n"
                     "重试后仍缺失 = sub-agent 未执行 pg-build-result 脚本。\n"
                     "修复方法：sub-agent 必须调用:\n"
-                    f"  python3 .opencode/skills/pg-build-v2/scripts/pg-build-result "
+                    f"  python3 .opencode/skills/pg-build/scripts/pg-build-result "
                     f"--mode agent --output-path {expected_result_path} --require-output "
                     f"--status <status> --summary \"<summary>\" ..."
                 ),

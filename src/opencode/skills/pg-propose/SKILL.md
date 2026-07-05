@@ -356,11 +356,11 @@ review-notes.md 包含：
 | `execution-manifest.yaml` | `.pg/changes/<change>/execution-manifest.yaml` | 阶段 2d（含 `stages[i].environment` 字段） |
 | `tasks.md` | `.pg/changes/<change>/tasks.md` | 阶段 2d |
 
-**严禁生成**以下文件（v1 遗留物，pg-build-v2 不再读取）：
+**严禁生成**以下文件（v1 遗留物，pg-build 不再读取）：
 
-- ❌ `environment.yaml` —— per-change 的环境选择已写入 `execution-manifest.yaml` 的 `stages[i].environment` 字段，由 `pg-build-v2` 直接读取
+- ❌ `environment.yaml` —— per-change 的环境选择已写入 `execution-manifest.yaml` 的 `stages[i].environment` 字段，由 `pg-build` 直接读取
 
-任何 stage 缺少产物文件 → workflow_failed 终止。多生成产物文件 → 后续 pg-build-v2 会忽略，但污染产物目录。
+任何 stage 缺少产物文件 → workflow_failed 终止。多生成产物文件 → 后续 pg-build 会忽略，但污染产物目录。
 
 ---
 

@@ -1,4 +1,4 @@
-"""append-only event log for pg-build-v2.
+"""append-only event log for pg-build.
 
 写入：pipeline.events 文件（JSONL 格式，每行一个 event）
 读取：完整 replay / tail N 条 / 单条查询

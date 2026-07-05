@@ -61,7 +61,7 @@ block: |
   **Agent 模式（v2.4 — 必须含 --output-path 强制落盘）：**
 
   ```bash
-  python3 .opencode/skills/pg-build-v2/scripts/pg-build-result \
+  python3 .opencode/skills/pg-build/scripts/pg-build-result \
       --mode agent \
       --status <status> \
       --summary "<=200 字摘要>" \
@@ -141,7 +141,7 @@ block: |
 
   ```bash
   # 推荐用法（编排器侧最少传参）
-  python3 .opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py record <change> \
+  python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py record <change> \
       --result-json {result_json_path}
   ```
 

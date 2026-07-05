@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""pg-pipeline-runner.py — pg-build-v2 CLI 入口。
+"""pg-pipeline-runner.py — pg-build CLI 入口。
 
 用法：
   python3 pg-pipeline-runner.py bootstrap <change>

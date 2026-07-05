@@ -306,7 +306,7 @@ def _build_env_hook_plan(
     _env = os.environ.copy()
     _env.setdefault("PG_PROJECT_ROOT", PROJECT_ROOT)
     _env.setdefault("PG_SKILLS_PATH", os.path.join(PROJECT_ROOT, ".pg", "skills"))
-    _env.setdefault("PG_RUN_CALLER", "pg-build-v2")
+    _env.setdefault("PG_RUN_CALLER", "pg-build")
     _env["PG_ENV"] = env_name
     _env["PG_STAGE"] = stage_name or ""
     _env["PG_HOOK_TYPE"] = phase_name

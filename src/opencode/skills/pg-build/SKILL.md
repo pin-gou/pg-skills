@@ -1,6 +1,6 @@
 ---
-name: pg-build-v2
-description: 基于 Event Sourcing + Reducer 模式的 pipeline 编排引擎。替代 pg-build（旧 v1/v2 双轨架构）。
+name: pg-build
+description: 基于 Event Sourcing + Reducer 模式的 pipeline 编排引擎。取代旧版过程式状态机架构。
 license: MIT
 compatibility: 需要 .pg/project.yaml / execution-manifest.yaml 驱动编排。
 metadata:
@@ -8,7 +8,7 @@ metadata:
   version: "1.0"
 ---
 
-# pg-build-v2
+# pg-build
 
 端到端实现变更的 pipeline 编排引擎。**事件溯源** + **纯函数 Reducer** 取代旧架构的过程式状态机。
 
@@ -35,7 +35,7 @@ sub-agent (via Task tool)      ← test / dev / verify / gate / fix / fix-gate
 ## CLI 用法
 
 ```bash
-RUNNER="python3 .opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py"
+RUNNER="python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py"
 
 $RUNNER bootstrap <change>
 $RUNNER next <change>
@@ -110,7 +110,7 @@ v2.4 起，sub-agent 不仅要返回 JSON，**还必须把 JSON 落盘到 dispat
 **sub-agent 必须执行的命令**（从 dispatch prompt 中 `{result_json_path}` 占位符取值）：
 
 ```bash
-python3 .opencode/skills/pg-build-v2/scripts/pg-build-result \
+python3 .opencode/skills/pg-build/scripts/pg-build-result \
     --mode agent \
     --status <status> \
     --summary "<=200 字>" \

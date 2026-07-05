@@ -31,7 +31,7 @@ def _get_templates_dir() -> str:
     # 从本文件位置向上找到 scripts/ → 同级 prompt-templates/
     here = os.path.dirname(os.path.abspath(__file__))
     scripts = os.path.dirname(here)  # scripts/
-    skills = os.path.dirname(scripts)  # pg-build-v2/
+    skills = os.path.dirname(scripts)  # pg-build/
     return os.path.join(skills, "prompt-templates")
 
 

@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>pg-build-v2 架构图</title>
+<title>pg-build 架构图</title>
 <script src="https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/svg-pan-zoom@3.6.1/dist/svg-pan-zoom.min.js"></script>
 <style>
@@ -54,7 +54,7 @@ body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; b
 <body>
 
 <div id="toolbar">
-  <h1>pg-build-v2 架构图</h1>
+  <h1>pg-build 架构图</h1>
   <button class="btn" onclick="zoomIn()">+ 放大</button>
   <span class="zoom-info" id="zoomLevel">100%</span>
   <button class="btn" onclick="zoomOut()">− 缩小</button>
@@ -230,7 +230,7 @@ flowchart TB
       <tr>
         <th>维度</th>
         <th>旧 pg-build</th>
-        <th>pg-build-v2</th>
+        <th>pg-build</th>
         <th>改进</th>
       </tr>
       <tr>
@@ -384,7 +384,7 @@ async function render() {
     '        COMMON -.->|"circular import"| V1',
     '    end',
     '',
-    '    subgraph NEW["pg-build-v2 ~3000 LOC"]',
+    '    subgraph NEW["pg-build ~3000 LOC"]',
     '        direction TB',
     '        EL2["event_log.py / events.py"]:::new',
     '        STATE2["state.py (frozen dataclass)"]:::new',

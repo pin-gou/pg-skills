@@ -1,4 +1,4 @@
-# pg-build-v2 实施计划
+# pg-build 实施计划
 
 > **目标**：把当前 `pg-pipeline-runner.py` (4637 LOC, 96 函数, 305 分支, 51 散落 save_state) 重写为事件驱动的 pipeline 引擎（~1000 LOC），同时为未来流程查看器/审计工具提供数据契约。
 
@@ -22,7 +22,7 @@
 ## 1. 目录结构（最终落地形态）
 
 ```
-.pg/skills/src/opencode/skills/pg-build-v2/
+.pg/skills/src/opencode/skills/pg-build/
 ├── SKILL.md                       # 替换旧 SKILL.md（精简到 ~250 行）
 ├── plan.md                        # 本文件
 ├── scripts/
@@ -65,7 +65,7 @@
 **测试目录**：
 
 ```
-pg-build-v2/scripts/tests/
+pg-build/scripts/tests/
 ├── __init__.py
 ├── test_event_log.py              # append-only 写入 + replay + tail 正确性
 ├── test_snapshot.py               # 快照重建一致性
@@ -386,7 +386,7 @@ def reduce_state(state: PipelineState, record: PipelineRecord) -> tuple[Pipeline
   - `pg_pipeline_state_v2.py`
   - `pg_runner_v2.py`
 - `pg-build/scripts/_deprecated/` 添加 README 说明保留原因（archived change 回放需要）
-- 删除旧 `pg-build-v2/scripts/` 中所有 `_use_state_v2()` 路由逻辑
+- 删除旧 `pg-build/scripts/` 中所有 `_use_state_v2()` 路由逻辑
 
 **完成定义**：
 - [ ] `pg-build/scripts/` 不再被任何 active session 引用（grep 验证）

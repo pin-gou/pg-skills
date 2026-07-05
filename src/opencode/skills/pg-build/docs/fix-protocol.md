@@ -1,6 +1,6 @@
-# pg-build-v2 fix/gate-fix 循环协议（v2.1）
+# pg-build fix/gate-fix 循环协议（v2.1）
 
-本文档定义 pg-build-v2 中 sub-agent 循环的状态机协议。reducer 实现必须严格遵循此图。
+本文档定义 pg-build 中 sub-agent 循环的状态机协议。reducer 实现必须严格遵循此图。
 
 ## 协议约束
 

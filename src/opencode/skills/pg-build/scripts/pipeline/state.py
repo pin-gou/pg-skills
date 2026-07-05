@@ -1,4 +1,4 @@
-"""PipelineState: pg-build-v2 内存中的 pipeline 状态。
+"""PipelineState: pg-build 内存中的 pipeline 状态。
 
 设计原则：
 - frozen dataclass: 不可变。状态变更通过 reducer 生成新对象。
