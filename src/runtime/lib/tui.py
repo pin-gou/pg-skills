@@ -1,5 +1,7 @@
 """tui.py — 零依赖终端控制层"""
 
+from __future__ import annotations
+
 import fcntl
 import os
 import select
