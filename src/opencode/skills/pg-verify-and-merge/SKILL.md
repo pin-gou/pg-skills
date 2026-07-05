@@ -73,17 +73,25 @@ manager agent **无需显式传入** `AffectedTracks`（除非有特殊原因要
 - Feature branch 已推送到远端
 - 当前在 feature branch 上，无未提交的修改（pg-build 已完成并提交）
 - `git remote` 可访问 origin/`Git.default_branch`
-- `.pg/changes/<change>/tasks.md` 存在（pg-build 阶段已生成）
+- `.pg/changes/<change>/` 或 `.pg/changes/archive/<date>-<change>/` 任一存在
+  (pg-build 完成时自动 archive 到后者, change 目录已搬到 archive 下)
 
 ## 阶段结构
 
 **前置步骤**（orchestrator 执行）：
 
+CHANGE 路径推断规则 (pg-build 完成时已 archive):
+  1. 编排器优先传 archive 路径: `archive/2026-07-05-harden-authz-and-input-validation`
+  2. fallback: 传原 change 名 `harden-authz-and-input-validation`,
+     pg-parse-config.py 内部 fallback 到 git_diff 推断 affected_tracks
+
 ```bash
 # 一次性注入所有配置到 temp/vm-context.json
+# --json-only: 抑制 banner, stdout 只输出 JSON (v2.0.1), 无需 python 管道截断
 mkdir -p temp
-python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-verify-and-merge \
-    --change-dir ".pg/changes/<CHANGE>" \
+python3 .pg/skills/src/opencode/scripts/pg-parse-config.py \
+    pg-verify-and-merge --json-only \
+    --change-dir ".pg/changes/${CHANGE}" \
     > temp/vm-context.json
 # ↑ stdout: tracks / regressionSuites / verify_merge / flyway / git / __meta
 # 注: __meta 含 affected_tracks 数组 (simple track 已过滤)
@@ -143,12 +151,31 @@ bash .opencode/skills/pg-verify-and-merge/scripts/renumber-flyway-migration.sh \
 
 # Step 2: 对 AffectedTracks 每个 track 跑 lint
 # lint_cmd 已是 dict {cmd, timeout_seconds}（pg-parse-config.py 直接产出）
+# lint 日志落到 <change>/3-merge/lint-logs/, 与 2-build/ 解耦 (verify-and-merge 专属空间)
+# archive 路径推断: 优先 __meta.change_dir, 找不到则 glob archive/<date>-<change>
+CHANGE_NAME=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['__meta']['change_dir'].split('/')[-1])")
+CHANGE_DIR_REL=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['__meta']['change_dir'])")
+CHANGE_DIR="${PROJECT_ROOT:-.}/$CHANGE_DIR_REL"
+# 兜底: 如果 __meta.change_dir 路径不存在 (archive 后), 找 archive 下同名 change
+if [ ! -d "$CHANGE_DIR" ]; then
+    CHANGE_DIR=$(ls -d "./.pg/changes/archive/"*"-${CHANGE_NAME}" 2>/dev/null | head -1)
+fi
+LINT_LOG_DIR="$CHANGE_DIR/3-merge/lint-logs"
+mkdir -p "$LINT_LOG_DIR"
+
 for track in $AFFECTED; do
     LINT_CMD=$(python3 -c "import json; t=json.load(open('temp/vm-context.json'))['tracks'].get('$track',{}).get('lint_cmd'); print(t['cmd'] if t else '')")
     if [ -n "$LINT_CMD" ]; then
         TIMEOUT=$(python3 -c "import json; t=json.load(open('temp/vm-context.json'))['tracks'].get('$track',{}).get('lint_cmd'); print(t.get('timeout_seconds', 1800))")
-        echo "=== Lint $track (timeout=${TIMEOUT}s) ==="
-        timeout "$TIMEOUT" bash -c "$LINT_CMD" 2>&1 | tail -50
+        LINT_LOG="$LINT_LOG_DIR/lint-${track}-$(date +%Y%m%dT%H%M%S).log"
+        echo "=== Lint $track (timeout=${TIMEOUT}s, log=$LINT_LOG) ==="
+        timeout "$TIMEOUT" bash -c "$LINT_CMD" > "$LINT_LOG" 2>&1
+        LINT_EXIT=$?
+        echo "--- lint exit code: $LINT_EXIT ---"
+        # 仅失败时 tail -50, 成功时静默
+        if [ $LINT_EXIT -ne 0 ]; then
+            tail -50 "$LINT_LOG"
+        fi
     else
         echo "track '$track' 无 lint 命令，跳过"
     fi

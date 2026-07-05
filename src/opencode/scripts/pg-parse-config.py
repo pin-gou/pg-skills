@@ -269,15 +269,21 @@ def inject_meta(data):
     return data
 
 
-def emit_cwd_policy_notice():
+def emit_cwd_policy_notice(json_only: bool = False):
     """每次解析配置都输出 cwd 规约提示（stderr，模型必看）。
 
     v2.0 核心规约：所有命令从项目根路径执行，executor 不会自动切换 cwd。
+
+    v2.0.1 新增 json_only 参数：传 True 时抑制 banner 输出，让 stdout 纯净，
+    便于下游（LLM/SKILL）直接 json.load() 而无需手动截取首个 { 之后的 JSON。
+    对应 --json-only 命令行 flag。
     """
+    if json_only:
+        return
     notice = """\
-================================================================
+============================================================
 [pg-parse-config] 命令执行位置规约 (v2.0)
-================================================================
+============================================================
 所有命令从项目根路径执行（executor 不会自动切换 cwd）:
   - 需切换目录的命令在命令字符串中显式写 'cd <dir> && <cmd>'
   - rebuild_and_restart / verify 脚本应自包含 cwd 处理
@@ -287,7 +293,7 @@ def emit_cwd_policy_notice():
   rebuild_and_restart: bash scripts/agent-update.sh    # 脚本内部自己 cd
   test: cd <module-name> && go test ./...             # 命令内显式 cd
   verify: bash scripts/agent-verify-running.sh         # 脚本内部处理
-================================================================
+============================================================
 """
     print(notice, file=sys.stderr)
 
@@ -873,9 +879,15 @@ def main():
     data = load()
     args = sys.argv[1:]
 
+    # v2.0.1 新增: --json-only 抑制 banner, 让 stdout 纯净 (LLM 直接 json.load)
+    json_only = False
+    if "--json-only" in args:
+        json_only = True
+        args = [a for a in args if a != "--json-only"]
+
     if not args:
         print(json.dumps(inject_meta(data), indent=2, ensure_ascii=False))
-        emit_cwd_policy_notice()
+        emit_cwd_policy_notice(json_only=json_only)
         _run_validation(data)
         return
 
@@ -902,7 +914,7 @@ def main():
             sub_args = args[1:]
             result = cmd_pg_verify_and_merge(sub_args, data, project_root)
             print(json.dumps(result, indent=2, ensure_ascii=False))
-            emit_cwd_policy_notice()
+            emit_cwd_policy_notice(json_only=json_only)
             _run_validation(data)
             return
 
@@ -921,7 +933,7 @@ def main():
                 filtered = _filter_regression_by_suite(data, filtered, suite_name)
 
         print(json.dumps(inject_meta(filtered), indent=2, ensure_ascii=False))
-        emit_cwd_policy_notice()
+        emit_cwd_policy_notice(json_only=json_only)
         _run_validation(data)
         return
 
