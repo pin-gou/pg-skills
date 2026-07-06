@@ -630,6 +630,34 @@ question 工具调用:
 
 ## Phase 5: 验证
 
+### Phase 5 入口：部署门控（Deployment Gate）
+
+**核心原则**：单元测试通过 ≠ 修复成功。编排器必须确保修复代码已**编译并部署到运行中的服务**，才能宣布修复成功。
+
+**必做序列**（进入 Phase 5 后、构造任何 operations 之前完成，不可跳过任意一步）：
+
+```
+Step 1: invoke-hook --action start  → 编译并部署修复代码到目标服务
+Step 2: api_call 或 log_filter  → 验证服务正在运行且响应正确（health check）
+Step 3: 构造 operations 列表（至少包含 1 个 api_call 或 log_filter）
+```
+
+**如果 Step 1 或 Step 2 失败，立即进入 Phase 6，不继续后续步骤。**
+
+**⚠️ 强约束**：编排器**不得**以"单测已通过"为由跳过 invoke-hook 和 api_call 验证。`invoke-hook --action start` 必须在所有 api_call operations 之前执行，确保被测服务运行的是当前修复代码。
+
+### Phase 5 入口自检清单
+
+进入 Phase 5 后，编排器必须逐项确认以下清单全部完成，方可继续：
+
+- [ ] 已调用 `invoke-hook --action start` 编译并部署修复代码到目标服务
+- [ ] 已通过 `api_call` 或 `log_filter` 确认服务正在运行（health check）
+- [ ] 本次修改涉及的 module 已在 operations 列表中（至少 1 个 module）
+- [ ] operations 列表包含至少 1 个 `api_call` 或 `log_filter` operation（仅 build/lint 不构成有效验证）
+- [ ] Phase 2 定义的 SC-FORCE-1（确认运行版本包含本次修复的独有符号）已纳入验证
+
+---
+
 **硬性规则**：不得以任何理由绕过 executor。
 
 编排器必须构造 `operations` 列表，派遣 `pg-executor` 执行。禁止任何形式的直接操作（`curl`、`journalctl`、`ssh`、`systemctl`、`cp`、`go build` 等）。
@@ -779,19 +807,9 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 
 **收益**：滚动修复时**只重启相关 role**，不打断其它 role → 大幅缩短 iteration cycle。
 
-### 5.1.4.2 修复上线验证必做序列（v3.1 新增）
+### 5.1.4.2 invoke_then_verify 验证操作样例
 
-**核心原则**：单元测试通过 ≠ 修复成功。编排器必须确保修复代码已**编译并部署到运行中的服务**，才能宣布修复成功。
-
-**必做序列**（Phase 5 中必须按以下顺序执行，不可跳过任意一步）：
-
-```
-Step 1: invoke-hook --action start  → 编译并部署修复代码到目标服务
-Step 2: api_call 或 log_filter  → 验证服务正在运行且响应正确
-Step 3: 验证确认操作的 operation（如 git_diff_check） → 确认 DIAG 日志已清理
-```
-
-**如果任何一步失败，立即进入 Phase 6，不继续后续步骤。**
+> ⚠️ **必做序列（invoke-hook → api_call → git_diff_check）已移至 Phase 5 入口「部署门控」节。本节仅保留操作样例供参考。**
 
 **invoke_then_verify 完整操作样例**（`<...>` 占位符必须按 §5.1.4.3 替换为当前项目实际值）：
 
@@ -832,8 +850,6 @@ operations:
     test_key: unit
     output_mode: summary_plus_failures
 ```
-
-**⚠️ 强约束**：编排器**不得**以"单测已通过"为由跳过 invoke-hook 和 api_call 验证。`invoke-hook --action start` 必须在所有 api_call operations 之前执行，确保被测服务运行的是当前修复代码。
 
 ### 5.1.4.3 占位符替换规约（v3.1 新增）
 
