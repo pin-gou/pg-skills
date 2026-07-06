@@ -2,11 +2,24 @@
 name: pg-fix-issue
 description: 复现问题、收集错误信息、进行系统化诊断、对根因进行修复。触发词："修复问题"、"fix issue"
 license: MIT
-compatibility: 项目根目录需要 `.pg/project.yaml` (v3.0 4-段结构 modules/environments/tracks/stages + fix_issue). service 启停走 `pg-invoke-hook.py` (runtime 层独立 CLI, 与 pg-build 共享入口, hooks 协议; 旧路径 `pg-pipeline-runner.py invoke-hook` 仍作为 thin wrapper 可用).
+compatibility: 项目根目录需要 `.pg/project.yaml` (v3.0+ 4-段结构 modules/environments/tracks/stages + fix_issue). service 启停走 `pg-invoke-hook.py` (runtime 层独立 CLI, 与 pg-build 共享入口, hooks 协议; 旧路径 `pg-pipeline-runner.py invoke-hook` 仍作为 thin wrapper 可用). v3.1 新增 Phase 1.5 复现门为 opt-in（fix_issue.reproducibility_gate: true 启用），v3.0 项目零改动继续可用。
 metadata:
   author: pg-spec
-  version: "3.0"
+  version: "3.1"
 ---
+
+> **v3.1 新增能力（非破坏性）**：
+> - 新增 **Phase 1.5 复现判定门**（Reproducibility Gate）：在 Phase 1 链路分析之后、
+>   Phase 2 修复规划之前，先用最小复现操作验证 bug 是否可被真实环境触发。
+>   4 种退出路径：REPRODUCED → 正常进入 Phase 2；NOT_REPRODUCED / ENV_BLOCKED /
+>   INCONCLUSIVE → 输出诊断报告 + 优雅退出，**不进入修复阶段**，git diff 保持空。
+> - 新增最终结论变体 B 模板（无法复现场景专用）。
+> - 新增附录 A：典型 profile 示例（frontend-only / docs-only / library / not-reproducible）。
+>
+> **Migration Note（v3.1 向后兼容）**：
+> - 默认行为不变：缺省 `fix_issue.reproducibility_gate = false`，跳过 Phase 1.5，走 v3.0 完全相同的路径。
+> - 启用 Phase 1.5：项目方在 `.pg/project.yaml` 的 `fix_issue` 段显式设 `reproducibility_gate: true`。
+> - 现有 v3.0 项目**零改动**即可继续使用本 SKILL。
 
 > **v3.0 Breaking Change**：本 SKILL 的 service 启停入口从"编排器在 SKILL 端预渲染
 > `resolved_actions` 字符串 → 塞进 executor 的 `type: shell`"模式，改为"编排器 LLM
@@ -43,6 +56,10 @@ metadata:
 | `tracks.<id>.modules` | file path → track 反查 | Phase 0.1 | 该 track 不可识别 |
 | `fix_issue.max_iteration_count` | **主 agent 整体迭代上限** | Phase 6 | 默认 5 |
 | `fix_issue.partial_success_threshold` | 成功率低于此值算修复失败 | Phase 5b | 默认 0.7 |
+| `fix_issue.reproducibility_gate` | **v3.1 新增**：是否启用 Phase 1.5 复现判定门 | Phase 1.5 | 默认 false（v3.0 行为） |
+| `fix_issue.allow_force_fix_on_irreproducible` | v3.1 新增：NOT_REPRODUCED 时是否允许 force-fix 跳过 Phase 1.5 | Phase 1.5 | 默认 false |
+| `fix_issue.max_repro_attempts` | v3.1 新增：复现尝试最多派几轮 executor | Phase 1.5 | 默认 1 |
+| `fix_issue.repro_timeout_seconds` | v3.1 新增：单次复现超时（秒） | Phase 1.5 | 默认 300 |
 | `fix_issue.ask_environment_choice` | Phase 3 是否询问环境选择 | Phase 3 | 默认 true |
 | `fix_issue.ask_prepare_env` / `.ask_clean_env` | Phase 3 是否询问 prepare/clean 时机 | Phase 3 | 默认 true |
 | `fix_issue.allow_manual_verification` | executor 全失败时是否允许切人工 | Phase 6 ESCALATE | 默认 true |
@@ -85,6 +102,10 @@ metadata:
     ↓
 [Phase 1: 调用链路分析]（编排器主导 + explore 辅助）
     ↓
+[Phase 1.5: 复现判定门（Reproducibility Gate）]    ← v3.1 新增，可选
+    ├─ REPRODUCED → 进入 Phase 2
+    ├─ NOT_REPRODUCED / ENV_BLOCKED / INCONCLUSIVE → 诊断报告 + 优雅退出（变体 B 模板）
+    ↓ (skip if reproducibility_gate: false)
 [Phase 2: 规划复现步骤]
     ↓
 [Phase 3: 用户确认]
@@ -141,6 +162,10 @@ fix_issue_context:
 | `tracks.<t>.modules` | `pg-parse-config.py pg-fix-issue` 输出 `tracks.<t>.modules` |
 | `fix_issue.max_iteration_count` | 5（**主 agent 整体迭代上限，Phase 6 用**） |
 | `fix_issue.ask_environment_choice` | true（Phase 3 是否问环境） |
+| `fix_issue.reproducibility_gate` | **v3.1 新增** false（是否启用 Phase 1.5 复现门；opt-in） |
+| `fix_issue.allow_force_fix_on_irreproducible` | **v3.1 新增** false（NOT_REPRODUCED 时是否允许用户输入 force-fix 跳过） |
+| `fix_issue.max_repro_attempts` | **v3.1 新增** 1（复现尝试最多派几轮 executor） |
+| `fix_issue.repro_timeout_seconds` | **v3.1 新增** 300（单次复现超时秒数） |
 
 > **模块命令必须经 helper 解析**：直接读 `modules.<m>.test.<key>` 字段在 schema 升级后可能是 object 形式（带 `cmd` + `timeout_seconds`），手动 `cmd: "{modules.X.Y}"` 会把 dict 当字符串运行。helper 统一处理 string/object 两种形式 + timeout 注入。
 
@@ -180,12 +205,18 @@ fix_issue_defaults:
   ask_prepare_env: true
   ask_clean_env: true
   allow_manual_verification: true
+  # v3.1 新增字段（opt-in）
+  reproducibility_gate: false           # 默认 false 保留 v3.0 行为
+  allow_force_fix_on_irreproducible: false
+  max_repro_attempts: 1
+  repro_timeout_seconds: 300
   escalation_artifacts:
     - diag_logs
     - call_chain_analysis
     - phase2_output
     - executor_json_history
     - git_diff_state
+    - phase1_5_diagnostic_report   # v3.1 新增：Phase 1.5 退出的诊断报告
 ```
 
 ---
@@ -274,6 +305,192 @@ explore 返回的摘要**直接**作为 Phase 2 的输入。编排器**不再重
 - ✅ `affected_files` 已识别完毕（含测试、配置等周边文件）
 - ✅ 影响半径扫描（第 8 节）已完成，无遗漏的同模式方法
 - ✅ Phase 2 自检清单已逐项确认
+
+---
+
+## Phase 1.5: 复现判定门（Reproducibility Gate） — v3.1 新增（opt-in）
+
+**触发条件**：仅当 `.pg/project.yaml` 的 `fix_issue.reproducibility_gate: true` 时执行。
+
+**目的**：在 Phase 1 完成链路分析之后、Phase 2 投入大量精力规划 success_criteria 之前，
+先用**最小复现操作**验证 bug 是否能被真实环境触发。**核心价值**：避免"无法复现的 bug
+被强行修复"——盲目改代码会引入回归或掩盖真因。
+
+### 1.5.1 流程
+
+1. **编排器构造最小复现操作**（≤ 3 步）：
+   - 基于 Phase 1 候选故障点推断出最小操作链
+   - 不需要 success_criteria（这是 Phase 2 才定义的）
+   - 不调用 `invoke-hook start` 部署（沿用当前 dev 环境即可）
+
+   ```yaml
+   # 示例：前端输入卡顿 bug
+   phase1_5_reproduction:
+     steps:
+       - step: 1
+         action: "登录获取 token"
+         verify_method: api_call
+         url: /api/auth.../api-keys/login
+         expect_status: 200
+       - step: 2
+         action: "打开 host-terminal 页"
+         verify_method: browser
+         url: "http://localhost:3008/maintenance/host/detail/<hostId>?tab=terminal"
+         expect_terminal_open: true
+       - step: 3
+         action: "用 chrome devtools 钩子抓 ws.send"
+         verify_method: browser_evaluate
+         script: |
+           hook WebSocket.prototype.send;
+           dispatch keydown 'a' to xterm textarea;
+           expect: send called within 100ms with preview=[97]
+   ```
+
+2. **派遣 executor 跑这 3 步 + 收集证据**：
+   - 用现有的 `api_call` / `shell` / `browser_evaluate` / `log_filter` operation 表达
+   - 不强求 verify_method 全用 api_call——前端 bug 可用 `browser` 类
+
+3. **编排器根据 executor JSON 判定**：
+
+   | 实际结果 | 判定 | 后续动作 |
+   |---------|------|---------|
+   | bug 被触发（evidence 出现异常） | **REPRODUCED** | 进入 Phase 2 正常流程 |
+   | bug 未触发，行为符合预期 | **NOT_REPRODUCED** | 见 §1.5.2 |
+   | 环境本身有问题（agent 离线、DB 不可达） | **ENV_BLOCKED** | 见 §1.5.3 |
+   | 证据不足，无法判定 | **INCONCLUSIVE** | 见 §1.5.4 |
+
+### 1.5.2 NOT_REPRODUCED 退出路径（最常见）
+
+**不进入 Phase 2，不派遣 coder。** 产出诊断报告：
+
+```yaml
+phase1_5_diagnostic_report:
+  bug_id: "fix-2026-07-06-host-terminal-input-delay"
+  reproduction_attempted: true
+  reproduction_result: not_reproduced
+  evidence:
+    - "Step 1: ticket API 成功, t=234ms, response.status=200"
+    - "Step 2: terminal page loaded, xterm textarea found, focus ok"
+    - "Step 3: 钩子 WebSocket.send, dispatch keydown 'a'"
+    - "Step 4: ws.send called at t=0ms with preview=[97]"
+    - "Step 5: 后端日志显示 'Raw chunk written: direction=IN, size=1'"
+  analysis: |
+    前端到后端链路完全正常：
+    - 每个字符 0~5ms 内 send 到 WebSocket
+    - 后端 PTY 收到字节并审计落库
+    - xterm 屏幕正常回显
+    可能原因（非代码问题）：
+    1. 用户环境网络代理卡顿（Vite dev proxy / 企业代理）
+    2. 用户终端设备性能问题（CPU 占用、内存压力）
+    3. 用户实际遇到的 bug 与描述不符
+    4. 用户操作步骤与本流程复现的操作有差异
+  recommendations:
+    - "请提供 Chrome DevTools Network 面板中 WebSocket 帧的时间戳"
+    - "请提供 backend.log 中 HostTerminal 相关日志"
+    - "请提供 agent 端 PTY 输出日志"
+    - "请确认浏览器是否启用了 Hardware Acceleration"
+  exit_reason: needs-more-info
+```
+
+**orchestrator action**：
+- 输出最终结论变体 B 模板（见 §最终结论格式）
+- **不修改任何代码**，git diff 保持空
+- **停止流程**，等待用户补充信息
+
+### 1.5.3 ENV_BLOCKED 退出路径
+
+环境本身问题（agent 未启动、DB schema 未迁移、网络不可达）导致无法复现：
+
+```yaml
+exit_reason: infra-blocked
+blockers:
+  - "agent-1 not connected: getHostStatus returns DISCONNECTED"
+  - "DB migration V123__host_terminal_audit.sql not applied"
+recommendations:
+  - "请先执行 prepare_env: invoke-hook --action prepare_env"
+  - "或手动启动 agent: invoke-hook --action start --role agent"
+```
+
+**orchestrator action**：
+- 询问用户是否执行 prepare_env
+- 用户同意后调 `invoke-hook --action prepare_env`，重跑 Phase 1.5
+
+### 1.5.4 INCONCLUSIVE 退出路径
+
+证据不足以判定：
+
+```yaml
+exit_reason: inconclusive
+gap:
+  - "无法验证字符是否到达 PTY（无 agent 日志）"
+  - "WebSocket 帧捕获被 vite proxy 干扰"
+recommendations:
+  - "请补充 <具体缺什么> 后重试"
+  - "或确认接受风险后输入 'force-fix' 跳过 Phase 1.5"
+```
+
+**orchestrator action**：
+- 输出诊断报告
+- 若 `fix_issue.allow_force_fix_on_irreproducible: true` 且用户明确输入 `force-fix`，允许跳过 Phase 1.5 进入 Phase 2
+- 否则停止
+
+### 1.5.5 配置字段（向后兼容）
+
+```yaml
+fix_issue:
+  # v3.1 新增（全部 opt-in，缺省 false 保持 v3.0 行为）
+
+  # 是否启用 Phase 1.5 复现判定门
+  reproducibility_gate: false   # 默认 false = v3.0 行为
+
+  # NOT_REPRODUCED 时是否允许用户输入 'force-fix' 跳过验证强制进入 Phase 2
+  allow_force_fix_on_irreproducible: false   # 默认 false
+
+  # 复现尝试最多派几轮 executor（复杂 bug 可调高）
+  max_repro_attempts: 1   # 默认 1
+
+  # 单次复现操作超时（秒）
+  repro_timeout_seconds: 300   # 默认 300
+```
+
+### 1.5.6 向后兼容性保证
+
+| 现有 v3.0 项目配置 | v3.1 流程行为 |
+|------------------|-------------|
+| 完全没改 `.pg/project.yaml` | 缺省 `reproducibility_gate: false`，**跳过 Phase 1.5**，走 v3.0 完全相同的路径 |
+| 显式 `reproducibility_gate: false` | 同上（明确标注） |
+| 显式 `reproducibility_gate: true` | 启用 Phase 1.5，bug 不可复现时输出诊断报告 + 不进入修复 |
+
+**零破坏**：所有 v3.0 项目不需要任何改动即可继续使用本 SKILL。
+
+### 1.5.7 实际案例：webvirt host-terminal 输入卡顿
+
+> **背景**：用户报告 `/maintenance/host/detail/.../?tab=terminal` 终端"连续输入字符需要等待数秒，
+> Ctrl+C 不响应"。期望修复前端代码。
+>
+> **Phase 1.5 实测结果**（通过 chrome devtools + WebSocket.send 钩子）：
+>
+> | 步骤 | 期望 | 实测 |
+> |-----|------|------|
+> | 1. ticket API | 200 OK | 200 OK (t=234ms) |
+> | 2. WS 连接 | OPEN | OPEN (t=12ms) |
+> | 3. 输入 'a' send | ws.send called | t=0ms send called, preview=[97] |
+> | 4. 6 字符连发 | 全部 ws.send | 全部 0~32ms 内 send 触发 |
+> | 5. Ctrl+C | ws.send preview=[3] | preview=[3] ✅ |
+> | 6. 后端日志 | Raw chunk size=1 | "Raw chunk written: size=1" ✅ |
+> | 7. xterm 屏幕回显 | "ls -la" 正常执行 | "total 4010212" 目录列表正常显示 ✅ |
+>
+> **判定**：**NOT_REPRODUCED**。
+> **退出路径**：变体 B 模板。
+> **结果**：git diff 为空，未修改任何代码。
+> **建议**：用户提供 WebSocket 帧时间戳 + 后端日志以进一步分析。
+
+### 1.5.8 反模式（明确禁止）
+
+- ❌ **跳过 Phase 1.5 直接进 Phase 4**：在 bug 描述模糊时几乎必然引入回归
+- ❌ **Phase 1.5 测一次失败就认定 NOT_REPRODUCED**：必须派遣 executor 完成完整 3 步才能判定
+- ❌ **Phase 1.5 测成功但不复盘就进 Phase 2**：要确认复现的是用户报告的现象，不是误触发的另一现象
+- ❌ **executor 返回后不交叉验证关键 operation**：参考 §5b.0 伪造检测规则
 
 ---
 
@@ -1238,6 +1455,10 @@ escalation_report:
 
 ## 最终结论格式
 
+编排器**必须**严格按以下模板输出。v3.1 新增**变体 B** 用于 Phase 1.5 退出的场景。
+
+### 变体 A：标准修复结论（v3.0 原有）
+
 编排器**必须**严格按以下模板输出：
 
 ```markdown
@@ -1302,3 +1523,181 @@ escalation_report:
 
 > ⚠️ 如果以上结论与您的实际体验不符，请回复"bug 仍存在"，我将自动回到诊断阶段重新分析。
 ```
+
+### 变体 B：无法复现结论（v3.1 新增）
+
+**适用场景**：Phase 1.5 复现判定门返回 `NOT_REPRODUCED` / `ENV_BLOCKED` / `INCONCLUSIVE`。
+**核心原则**：**不修改任何代码**（git diff 为空），输出诊断报告，等待用户补充信息。
+
+```markdown
+## 修复未执行：bug 无法被复现
+
+### 退出原因
+[needs-more-info / infra-blocked / inconclusive]
+
+### Bug ID
+[fix-YYYY-MM-DD-<slug>]
+
+### 问题描述
+[用户最初描述的现象]
+
+### Phase 1 调用链路分析摘要
+- 候选故障点 1: <文件:行号 + 函数签名>
+- 候选故障点 2: <文件:行号 + 函数签名>
+- 受影响 track: [...]
+- 受影响 module: [...]
+
+### Phase 1.5 复现尝试
+
+| 步骤 | 操作 | 期望 | 实测 | 判定 |
+|-----|------|------|------|------|
+| 1 | <operation 描述> | <expect> | <actual> | ✅/❌ |
+| 2 | ... | ... | ... | ... |
+| 3 | ... | ... | ... | ... |
+
+**复现结果**: [REPRODUCED → 进入 Phase 2 / NOT_REPRODUCED / ENV_BLOCKED / INCONCLUSIVE]
+
+### 收集的证据
+- [粘贴 executor 返回的关键 evidence，包含具体时间戳/响应/日志片段]
+- [粘贴 chromium devtools / curl / log_filter 等的输出]
+
+### 根因分析
+- [bug 报告描述的现象与实际代码行为不符]
+- [可能原因 1：环境问题（网络/资源/配置）]
+- [可能原因 2：用户操作步骤差异]
+- [可能原因 3：bug 描述本身不准确]
+
+### 建议后续动作
+- [用户应补充什么信息，例如：]
+  - Chrome DevTools Network 面板 WebSocket 帧时间戳
+  - backend.log 关键日志
+  - agent 端 PTY 输出
+  - 浏览器版本 + 操作系统
+- [或调整 bug 描述后重试]
+- [或跳过 Phase 1.5 强制修复：需 `force-fix` 关键字 + allow_force_fix_on_irreproducible: true]
+
+### 未修改任何代码
+**git diff 状态**: 空（无任何文件变更）
+**原因**: 在真实环境中无法触发 bug，硬改代码会引入回归或掩盖真因。
+
+> ℹ️ 本次流程因 Phase 1.5 退出而停止。如需重跑，请补充上述信息后重新触发。
+> 如确认 bug 真实存在但无法在测试环境复现，可输入 `force-fix` 强制进入 Phase 2（需 `allow_force_fix_on_irreproducible: true`）。
+```
+
+### 变体 C：部分成功（v3.0 保留）
+
+当 `success_criteria` 通过率 ≥ `fix_issue.partial_success_threshold`（默认 0.7）但 < 100% 时使用：
+
+```markdown
+## 问题修复结论（部分成功）
+
+### 修复状态
+**部分成功** — 通过率 [N/M (XX%)] 达 ≥ 阈值 [XX%]，未达 100%
+
+### 通过的成功标准
+[表格列出 PASS 的 SC]
+
+### 未通过的成功标准
+[表格列出 FAIL 的 SC，含 expected/actual 对比]
+
+### 诊断
+[哪些 SC 失败的可能原因]
+
+### 建议
+[是否需要重新诊断 / 接受现状 / 调整阈值]
+```
+
+---
+
+## 附录 A：典型 profile 示例（v3.1 新增）
+
+### A.1 profile.not-reproducible
+
+适用：bug 描述模糊、用户环境特殊、自动化测试覆盖不到。
+
+```yaml
+fix_issue:
+  reproducibility_gate: true
+  allow_force_fix_on_irreproducible: false  # 严禁绕过
+  max_repro_attempts: 2
+  repro_timeout_seconds: 180
+```
+
+**编排器动作**：
+- Phase 1.5 退出后直接停止，不进 Phase 2
+- 报告产出后等待用户补充信息
+- 用户重新描述 bug 后从 Phase 1 重跑
+
+### A.2 profile.frontend-only
+
+适用：纯前端项目（无 backend / agent）。
+
+```yaml
+fix_issue:
+  reproducibility_gate: true
+  deployment_mode: static-check    # 未来扩展字段，v3.1 当前文档约定
+  runner: local-shell              # 未来扩展字段，v3.1 当前文档约定
+```
+
+**编排器动作**：
+- 跳过 `invoke-hook start`
+- verify_method 优先用 `browser`（pg-browser-testing-with-devtools）
+- 跳过 SC-FORCE-1（无运行服务可验证）
+- Phase 5 验证靠 lint + browser 截图 + chrome devtools
+
+### A.3 profile.docs-only
+
+适用：纯文档 / 注释修改，无代码逻辑变化。
+
+```yaml
+fix_issue:
+  reproducibility_gate: false     # 文档 bug 无需复现
+  runner: local-shell
+```
+
+**编排器动作**：
+- 跳过所有 `invoke-hook` / SC-FORCE-1
+- 仅验证 markdown 格式 + commit message 规范
+- Phase 4 只修改 .md 文件，不触碰代码
+
+### A.4 profile.library
+
+适用：SDK / utility 库项目（被其他项目引用）。
+
+```yaml
+fix_issue:
+  reproducibility_gate: true
+  allow_force_fix_on_irreproducible: true   # 库 bug 允许 force-fix
+  max_repro_attempts: 3
+```
+
+**编排器动作**：
+- Phase 5 验证增加"跨项目依赖扫描"（grep import 该库的项目）
+- SC-FORCE-1 改为"库 binary 版本包含本次修复"（maven artifact / npm package version）
+- 允许在下游项目无法访问时 force-fix
+
+### A.5 配置文件完整示例
+
+```yaml
+# .pg/project.yaml
+fix_issue:
+  max_iteration_count: 5
+  partial_success_threshold: 0.7
+  ask_environment_choice: true
+  ask_prepare_env: true
+  ask_clean_env: true
+  allow_manual_verification: true
+
+  # v3.1 新增字段（opt-in）
+  reproducibility_gate: false              # 默认 false = v3.0 行为
+  allow_force_fix_on_irreproducible: false # NOT_REPRODUCED 时是否允许 force-fix
+  max_repro_attempts: 1                    # 复现尝试最多派几轮 executor
+  repro_timeout_seconds: 300               # 单次复现超时秒数
+```
+
+### A.6 启用 v3.1 复现门的推荐路径
+
+1. **新项目**：直接 `reproducibility_gate: true`（强烈推荐）
+2. **现有 v3.0 项目**：先保留 `false`，对 1-2 个真实 bug 试点后再切换
+3. **误报频繁的项目**（bug 描述经常不准确）：优先开启
+4. **关键 bug 不可漏修的项目**：保持 false，由人工把关
