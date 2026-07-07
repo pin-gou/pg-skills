@@ -18,7 +18,6 @@ header: |
   - track.review_level: {review_level}
   - track.modules: {modules}
   - track.max_fix_retries: {max_fix_retries}
-  - track.fix_routing: {fix_routing}
 
   ### Module 配置
   {module_details}

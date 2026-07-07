@@ -551,7 +551,7 @@ def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
                 track_configs[tid].setdefault("type", cfg.get("type", "standard"))
                 track_configs[tid].setdefault("review_level", cfg.get("review_level", ""))
                 track_configs[tid].setdefault("description", cfg.get("description", ""))
-                track_configs[tid].setdefault("fix_routing", cfg.get("fix_routing", "source"))
+                track_configs[tid].setdefault("timeout_seconds", cfg.get("timeout_seconds", 1800))
         except Exception:
             pass
 

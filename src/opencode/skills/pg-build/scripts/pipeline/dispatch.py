@@ -242,8 +242,7 @@ def build_ctx(
         cmds_lines = []
         for i, cmd in enumerate(commands, 1):
             cmds_lines.append(f"  {i}. cmd: \"{cmd}\"")
-            cmds_lines.append(f"     timeout_seconds: 300")
-            cmds_lines.append(f"     on_failure: fail")
+            cmds_lines.append(f"     timeout_seconds: {t.timeout_seconds}")
         commands_normalized = "\n".join(cmds_lines)
     else:
         commands_normalized = ""
@@ -274,7 +273,6 @@ def build_ctx(
         "module_details": lazy_module_details,
         "review_level": lazy_review_level,
         "max_fix_retries": t.max_fix_retries,
-        # v2.3: fix_routing 已废弃，dispatch context 不再注入
         # stage
         "stage_name": track.rsplit(".", 1)[0] if "." in track else "dev",
         "test_key": "unit",
@@ -306,8 +304,7 @@ def build_ctx(
         "cycles_remaining": max(0, t.max_gate_fix_retries - cycle + 1),
         "max_gate_fix_retries": t.max_gate_fix_retries,
         # simple
-        "track_timeout": 1800,
-        "track_on_failure": "workflow_failed",
+        "track_timeout": t.timeout_seconds,
         "commands_normalized": commands_normalized,
         # final-gate
         "proposal_path": "",

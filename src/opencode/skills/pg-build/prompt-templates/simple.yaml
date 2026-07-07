@@ -6,7 +6,6 @@ prompt: |
   本 track 为 type=simple，执行预定 commands 即可。
 
   - track.timeout: {track_timeout}
-  - track.on_failure: {track_on_failure}
 
   ### 命令清单
 
@@ -15,9 +14,7 @@ prompt: |
   ### 执行规则
 
   - 按顺序执行每条命令
-  - 如果命令失败且 on_failure=continue，继续下一条
-  - 如果命令失败且 on_failure=fail，停止并返回 FAILED
-  - 如果命令失败且有 retry_max，自动重试
+  - 任何命令执行失败即停止并返回 FAILED
 
   ### 写盘要求
 

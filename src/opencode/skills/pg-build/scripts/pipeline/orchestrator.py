@@ -284,7 +284,7 @@ class Orchestrator:
                 label=cfg.get("description", bare),
                 tasks_by_phase=tasks_by_phase,
                 commands=tuple(cfg.get("commands", [])),
-                # v2.3: fix_routing 配置已废弃，统一走 re_verify → verify 循环
+                timeout_seconds=cfg.get("timeout_seconds", 1800),
             )
             if cfg.get("type") == "simple":
                 track_types[tid] = "simple"

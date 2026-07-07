@@ -29,7 +29,6 @@ class TestRenderer(unittest.TestCase):
             "review_level": "standard",
             "modules": "['backend']",
             "max_fix_retries": 5,
-            "fix_routing": "source",
             "module_details": "- module: backend",
             "stage_name": "dev",
             "test_key": "unit",
@@ -50,7 +49,7 @@ class TestRenderer(unittest.TestCase):
 
     def test_render_verify_phase(self):
         ctx = {"id": "dev.backend", "_change": "x", "report_filename": "verify-report.md",
-               "review_level": "", "modules": "", "max_fix_retries": 3, "fix_routing": "",
+               "review_level": "", "modules": "", "max_fix_retries": 3,
                "module_details": "", "stage_name": "", "test_key": "", "gate": "",
                "env_required": "", "env_name": "", "prepare_status": "", "prepare_log_path": "",
                "test_commands": "", "module_roots": "", "tasks_preformatted": "",
@@ -62,7 +61,7 @@ class TestRenderer(unittest.TestCase):
         ctx = {"id": "backend", "_change": "x", "verify_report_path": "/tmp/verify.md",
                "fix_cycle": "1", "test_commands": "mvn test",
                "fix_report_filename": "fix-report.md", "review_level": "", "modules": "",
-               "max_fix_retries": 3, "fix_routing": "", "module_details": "", "stage_name": "",
+               "max_fix_retries": 3, "module_details": "", "stage_name": "",
                "test_key": "", "gate": "", "env_required": "", "env_name": "",
                "prepare_status": "", "prepare_log_path": "", "module_roots": "",
                "tasks_preformatted": "", "tasks_validation": ""}
@@ -73,7 +72,7 @@ class TestRenderer(unittest.TestCase):
 
     def test_render_gate_phase(self):
         ctx = {"id": "backend", "_change": "x", "report_filename": "gate-report.md",
-               "review_level": "", "modules": "", "max_fix_retries": 3, "fix_routing": "",
+               "review_level": "", "modules": "", "max_fix_retries": 3,
                "module_details": "", "stage_name": "", "test_key": "", "gate": "",
                "env_required": "", "env_name": "", "prepare_status": "", "prepare_log_path": "",
                "test_commands": "", "module_roots": "", "tasks_preformatted": "",
@@ -85,7 +84,7 @@ class TestRenderer(unittest.TestCase):
         """所有 8 个 phase 都可以渲染。"""
         phases = ["test", "dev", "verify", "gate", "fix", "fix-gate", "simple", "final-gate"]
         ctx = {"id": "x", "_change": "x", "review_level": "", "modules": "",
-               "max_fix_retries": 3, "fix_routing": "", "module_details": "",
+               "max_fix_retries": 3, "module_details": "",
                "stage_name": "", "test_key": "", "gate": "", "env_required": "",
                "env_name": "", "prepare_status": "", "prepare_log_path": "",
                "test_commands": "", "module_roots": "", "tasks_preformatted": "",
@@ -93,7 +92,7 @@ class TestRenderer(unittest.TestCase):
                "verify_report_path": "", "fix_cycle": 1, "fix_report_filename": "",
                "gate_report_path": "", "gate_cycles": 1, "cycles_remaining": 1,
                "max_gate_fix_retries": 2,
-               "track_timeout": "", "track_on_failure": "", "commands_normalized": "",
+               "track_timeout": 1800, "commands_normalized": "",
                "proposal_path": "", "tasks_path": "", "design_doc_paths": "",
                "report_paths": "", "report_filename": "", "label": ""}
         for phase in phases:
@@ -110,7 +109,7 @@ class TestRenderer(unittest.TestCase):
         """render_dispatch_file 写入文件并返回路径。"""
         tmp = tempfile.mkdtemp()
         ctx = {"id": "dev.backend", "_change": "test-change", "review_level": "",
-               "modules": "", "max_fix_retries": 3, "fix_routing": "", "module_details": "",
+               "modules": "", "max_fix_retries": 3, "module_details": "",
                "stage_name": "", "test_key": "", "gate": "", "env_required": "",
                "env_name": "", "prepare_status": "", "prepare_log_path": "",
                "test_commands": "", "module_roots": "", "tasks_preformatted": "",
