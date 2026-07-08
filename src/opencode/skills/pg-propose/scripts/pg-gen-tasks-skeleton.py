@@ -2,14 +2,17 @@
 """pg-gen-tasks-skeleton.py — Mechanical skeleton generator for tasks.md.
 
 Pure-function CLI: zero LLM dependency, zero heuristics beyond path-glob
-and keyword matching. Generates a fully-expanded tasks.md skeleton where:
+and keyword matching. Generates a tasks.md skeleton where:
 
-  - Every stage × track × sub combination produces a heading (no skipping).
-  - Default body is "- 无" (or simple-track placeholder).
+  - Only stages listed in `--selected-stages` produce headings (if provided).
+  - Within a stage, only tracks that are in `--affected-tracks` produce headings.
+  - Simple tracks in affected_tracks produce 1 heading; standard tracks produce 4
+    (test / dev / verify / gate).
+  - final-gate section is always appended regardless of selected_stages.
   - Each heading carries an HTML comment block documenting the
     on_conditions evaluation for the stage / track it belongs to.
   - Top of file contains the environment selection block quote.
-  - File ends with a mandatory `final-gate` section.
+  - No Evidence block is generated for verify sections.
 
 Also emits a sibling `on-conditions-eval.md` file under
 `.pg/changes/<change>/1-propose-review/` so the LLM can later (in stage 3
@@ -22,6 +25,7 @@ Usage:
         --proposal-md <path/to/proposal.md> \\
         --affected-tracks <track1,track2,...> \\
         --environment "<stage1>→<env1>,<stage2>→<env2>,..." \\
+        [--selected-stages "<stage1>,<stage2>,..."] \\
         [--output-tasks <path>] \\
         [--output-eval <path>]
 
@@ -83,8 +87,13 @@ def parse_args():
     parser.add_argument("--output-tasks", default=None,
                         help="output tasks.md path (default: .pg/changes/<change>/tasks.md)")
     parser.add_argument("--output-eval", default=None,
-                        help="output on-conditions-eval.md path "
-                             "(default: .pg/changes/<change>/1-propose-review/on-conditions-eval.md)")
+                         help="output on-conditions-eval.md path "
+                              "(default: .pg/changes/<change>/1-propose-review/on-conditions-eval.md)")
+    parser.add_argument("--selected-stages", default="",
+                         help="comma-separated list of stage names to include "
+                              "(e.g. 'dev'). Only stages in this list and their "
+                              "affected tracks generate sections. "
+                              "Empty = include all stages (backward compatible).")
     return parser.parse_args()
 
 
@@ -265,27 +274,38 @@ def evaluate_on_conditions(rule: str, affected_paths: list[str],
 # Skeleton generation
 # ============================================================
 
-def build_sections(config: dict, affected_tracks: set) -> list[dict]:
-    """Build the full section list (no skipping based on on_conditions).
+def build_sections(config: dict, affected_tracks: set,
+                   selected_stages: set[str]) -> list[dict]:
+    """Build the section list filtered by selected_stages and affected_tracks.
+
+    - Only stages whose name is in selected_stages (or all if empty) are included.
+    - Within a stage, only tracks that are in affected_tracks produce headings.
+    - final-gate is always appended.
 
     Returns list of dicts with keys:
         n, stage, track, sub, is_simple, is_affected, label, env
     """
     sections = []
-    stages = config.get("stages") or []
-    tracks_cfg = config.get("tracks") or {}
+    all_stages = config.get("stages") or []
+
+    # 1) Filter stages by selected_stages
+    if selected_stages:
+        stages = [s for s in all_stages if s.get("name") in selected_stages]
+    else:
+        stages = list(all_stages)
 
     N = 1
     for stage in stages:
         stage_name = stage["name"]
         test_key = stage.get("test_key", "unit")
-        env_required = (stage.get("environment") or {}).get("required", False)
 
         for track_id in stage.get("tracks") or []:
-            track_cfg = tracks_cfg.get(track_id) or {}
+            # 2) Skip tracks not in affected_tracks
+            if track_id not in affected_tracks:
+                continue
+
             track_type = get_track_type(config, track_id)
             is_simple = (track_type == "phase")
-            is_affected = track_id in affected_tracks
 
             if is_simple:
                 label = f"{stage_name} {track_id}"
@@ -295,7 +315,7 @@ def build_sections(config: dict, affected_tracks: set) -> list[dict]:
                     "track": track_id,
                     "sub": None,
                     "is_simple": True,
-                    "is_affected": False,
+                    "is_affected": True,
                     "label": label,
                     "env": None,
                 })
@@ -308,13 +328,13 @@ def build_sections(config: dict, affected_tracks: set) -> list[dict]:
                         "track": track_id,
                         "sub": sub_name,
                         "is_simple": False,
-                        "is_affected": is_affected,
+                        "is_affected": True,
                         "label": label_fn(stage_name, test_key),
-                        "env": stage_name if env_required else None,
+                        "env": None,
                     })
                     N += 1
 
-    # final-gate (mandatory)
+    # final-gate (mandatory, always appended)
     sections.append({
         "n": N,
         "stage": "final",
@@ -466,9 +486,6 @@ def build_tasks_md(sections: list[dict], env_map: dict[str, str],
         out_lines.append("")
 
         out_lines.append(format_section_body(sec))
-        evidence = format_section_evidence_block(sec)
-        if evidence:
-            out_lines.append(evidence)
         out_lines.append("")
 
     return "\n".join(out_lines).rstrip() + "\n"
@@ -559,6 +576,7 @@ def main():
         sys.exit(1)
 
     affected_tracks = {t.strip() for t in args.affected_tracks.split(",") if t.strip()}
+    selected_stages = {s.strip() for s in args.selected_stages.split(",") if s.strip()}
 
     try:
         config = load_config()
@@ -569,7 +587,7 @@ def main():
     proposal_text = read_proposal_text(args.proposal_md)
     affected_paths = extract_globs_from_proposal(proposal_text)
 
-    sections = build_sections(config, affected_tracks)
+    sections = build_sections(config, affected_tracks, selected_stages)
 
     output_tasks = args.output_tasks or os.path.join(
         CHANGES_DIR, args.change, "tasks.md"

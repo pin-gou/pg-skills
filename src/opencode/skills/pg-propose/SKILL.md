@@ -186,18 +186,20 @@ LLM 准备以下 4 个参数：
 | `--proposal-md` | 阶段 2a 产物 | `.pg/changes/<change>/proposal.md` |
 | `--affected-tracks` | 阶段 2c 判定结果 | `backend,frontend` |
 | `--environment` | 阶段 2c LLM 按 selection_rules 选择 | `dev→dev-local` |
+| `--selected-stages` | LLM 根据 enabled_stages 推导 | `dev` |
 
 ```bash
 python3 .opencode/skills/pg-propose/scripts/pg-gen-tasks-skeleton.py \
   --change <change-name> \
   --proposal-md .pg/changes/<change>/proposal.md \
   --affected-tracks "<track1>,<track2>,..." \
-  --environment "<stage1>→<env1>,<stage2>→<env2>,..."
+  --environment "<stage1>→<env1>,<stage2>→<env2>,..." \
+  --selected-stages "<stage1>,<stage2>,..."
 ```
 
 脚本输出两个文件：
 
-- **`.pg/changes/<change>/tasks.md`** —— 完整骨架（含所有 heading + 默认 body + HTML 注释 + final-gate）
+- **`.pg/changes/<change>/tasks.md`** —— 骨架（仅 selected_stages 内的 stage + affected_tracks 内的 track）
 - **`.pg/changes/<change>/1-propose-review/on-conditions-eval.md`** —— `on_conditions` 评估记录模板（供阶段三 review 复核）
 
 脚本 stdout 输出 JSON，含 `sections` 数组（每个章节的 `n`/`stage`/`track`/`sub`/`is_affected`/`is_simple` 标记），
@@ -205,7 +207,7 @@ LLM 据此按顺序填充 body。
 
 #### 2d.2 脚本生成的骨架结构
 
-对每个 stage × track × sub，脚本**全量展开**生成章节（不再按 on_conditions 跳过 heading）：
+脚本按 `--selected-stages` 过滤 stage，对每个选中 stage 的 `--affected-tracks` 内的 track 生成章节：
 
 | Track 类型 | 章节形态 |
 |------------|---------|
