@@ -1,0 +1,120 @@
+version: 1
+
+# v2.6: Code review profiles
+# 每个 profile 定义一组检查项 + 权重 + threshold。
+# 检查项的执行细则在 `.pg/code-review/<profile_name>/<check_name>.md`。
+#
+# 优先级（高 → 低）：
+#   1. track.code_review_profiles: [...]  用户显式指定（按顺序 = 优先级）
+#   2. track.code_review_profile: ""     legacy 单 profile 字段
+#   3. module_details[].language 自动派发（java→java-spring, go→go, ts→vue3, ...）
+#   4. profile 'default' 兜底
+#
+# 合并策略：Union
+#   - checks: 并集，weight 取 max，enabled 取 OR
+#   - pass_threshold: 取 min（更严格）
+#   - escalate_threshold: 取 min（更严格）
+
+profiles:
+
+  # ============================================================
+  # 默认 profile（兜底，所有 track 都会 merge 这个）
+  # ============================================================
+  default:
+    language: any
+    checks:
+      design_alignment:
+        enabled: true
+        weight: 30
+        doc: design_alignment
+      scope_creep:
+        enabled: true
+        weight: 25
+        doc: scope_creep
+      pattern_consistency:
+        enabled: true
+        weight: 20
+        doc: pattern_consistency
+      file_location:
+        enabled: true
+        weight: 15
+        doc: file_location
+      test_contract:
+        enabled: true
+        weight: 10
+        doc: test_contract
+    pass_threshold: 80
+    escalate_threshold: 60
+
+  # ============================================================
+  # Java Spring profile（自动派发：language=java/kotlin/scala）
+  # ============================================================
+  java-spring:
+    inherit: default
+    language: java
+    checks:
+      pattern_consistency:
+        enabled: true
+        weight: 20
+        doc: pattern_consistency
+      null_safety:
+        enabled: true
+        weight: 20
+        doc: null_safety
+    pass_threshold: 85
+
+  # ============================================================
+  # Vue 3 profile（自动派发：language=typescript/javascript/vue）
+  # ============================================================
+  vue3:
+    inherit: default
+    language: typescript
+    checks:
+      pattern_consistency:
+        enabled: true
+        weight: 20
+        doc: pattern_consistency
+      component_props:
+        enabled: true
+        weight: 15
+        doc: component_props
+    pass_threshold: 85
+
+  # ============================================================
+  # Go profile（自动派发：language=go）
+  # ============================================================
+  go:
+    inherit: default
+    language: go
+    checks:
+      pattern_consistency:
+        enabled: true
+        weight: 20
+        doc: pattern_consistency
+      error_wrapping:
+        enabled: true
+        weight: 20
+        doc: error_wrapping
+    pass_threshold: 85
+
+  # ============================================================
+  # Security profile（需要用户显式指定，不按 language 自动派发）
+  # 用于鉴权/加密/敏感数据相关变更。
+  # ============================================================
+  security:
+    language: any
+    checks:
+      secret_leak:
+        enabled: true
+        weight: 25
+        doc: secret_leak
+      auth_bypass:
+        enabled: true
+        weight: 20
+        doc: auth_bypass
+      error_silence:
+        enabled: true
+        weight: 10
+        doc: error_silence
+    pass_threshold: 90
+    escalate_threshold: 70
