@@ -20,8 +20,8 @@ from pipeline.state import (
     FIX_SUB,
     FIX_GATE_SUB,
     SIMPLE_SUB,
-    CODE_VIEW_SUB,
-    FIX_CODE_VIEW_SUB,
+    REVIEW_SUB,
+    FIX_REVIEW_SUB,
 )
 from pipeline.events import (
     FINAL_GATE_TRACK,
@@ -38,10 +38,10 @@ from pipeline.sub_pipeline import (
     SubPipeline,
     create_fix_cycle,
     create_gate_fix_cycle,
-    create_code_view_cycle,
+    create_review_cycle,
     FIX_CYCLE_PHASES,
     GATE_FIX_CYCLE_PHASES,
-    CODE_VIEW_CYCLE_PHASES,
+    REVIEW_CYCLE_PHASES,
 )
 
 
@@ -89,11 +89,11 @@ def _make_gap_entry(
 PHASE_AGENTS: dict[str, str] = {
     "test":          "pg-build/test",
     "dev":           "pg-build/dev",
-    "code-view":     "pg-build/code-view",
+    "review":     "pg-build/review",
     "verify":        "pg-build/verify",
     "gate":          "pg-build/gate",
     "fix":           "pg-build/fix",
-    "fix-code-view": "pg-build/fix-code-view",
+    "fix-review": "pg-build/fix-review",
     "fix-gate":      "pg-build/fix-gate",
     "simple":        "pg-build/simple",
 }
@@ -230,9 +230,9 @@ def reduce_state(
     if phase in ("test", "dev", "simple"):
         return _handle_linear_phase(state, record)
 
-    # ─── code-view ───
-    if phase == "code-view":
-        return _handle_code_view(state, record)
+    # ─── review ───
+    if phase == "review":
+        return _handle_review(state, record)
 
     # ─── verify ───
     if phase == "verify":
@@ -242,9 +242,9 @@ def reduce_state(
     if phase == "fix":
         return _handle_fix(state, record)
 
-    # ─── fix-code-view (子 pipeline 中的 fix-code-view phase) ───
-    if phase == "fix-code-view":
-        return _handle_fix_code_view(state, record)
+    # ─── fix-review (子 pipeline 中的 fix-review phase) ───
+    if phase == "fix-review":
+        return _handle_fix_review(state, record)
 
     # ─── fix-gate (子 pipeline 中的 fix-gate phase) ───
     if phase == "fix-gate":
@@ -293,19 +293,19 @@ def _handle_linear_phase(
                 return new_state, PipelineAction(kind="advance", track=track)
 
             # test / dev → 下一个 phase
-            # v3.x: 若下一 phase 是 code-view 且 track.code_view_enabled=False
-            #       跳过 code-view，直接推进到 verify
+            # v3.x: 若下一 phase 是 review 且 track.code_review_enabled=False
+            #       跳过 review，直接推进到 verify
             next_phase = _next_phase(phase)
-            while next_phase == "code-view" and not t.code_view_enabled:
+            while next_phase == "review" and not t.code_review_enabled:
                 t = _update_phase(
-                    t, "code-view",
+                    t, "review",
                     status="completed",
-                    summary="code-view disabled by manifest (no phase_prompts.code-view)",
+                    summary="review disabled by manifest (no phase_prompts.review)",
                 )
                 new_state = new_state.replace(
                     tracks={**new_state.tracks, track: t}
                 )
-                next_phase = _next_phase("code-view")
+                next_phase = _next_phase("review")
                 if next_phase is None:
                     return new_state, PipelineAction(kind="advance", track=track)
             if next_phase is None:
@@ -420,16 +420,16 @@ def _handle_verify(
 
 
 # ============================================================
-# 子 reducer：code-view
+# 子 reducer：review
 # ============================================================
 
-def _handle_code_view(
+def _handle_review(
     state: PipelineState, record: PipelineRecord,
 ) -> tuple[PipelineState, PipelineAction]:
-    """v2.6 新增：code-view phase 处理器。
+    """v2.6 新增：review phase 处理器。
 
     - STATUS_COMPLETED → dispatch verify
-    - STATUS_ESCALATE  → 创建 code-view-cycle 子 pipeline（独立计数 code_view_fix_cycles）
+    - STATUS_ESCALATE  → 创建 review-cycle 子 pipeline（独立计数 review_fix_cycles）
     - STATUS_FAILED    → attempt++ 重试，耗尽进 workflow_failed
     """
     track = record.track
@@ -438,8 +438,8 @@ def _handle_code_view(
     t = state.tracks[track]
 
     if record.status == STATUS_COMPLETED:
-        # code-view 通过 → 推进到 verify
-        t = _update_phase(t, "code-view", status="completed",
+        # review 通过 → 推进到 verify
+        t = _update_phase(t, "review", status="completed",
                           summary=record.summary, report_path=record.report_path)
         new_state = state.replace(
             tracks={**state.tracks, track: t},
@@ -449,21 +449,21 @@ def _handle_code_view(
         return new_state, _dispatch_action(track, "verify")
 
     elif record.status == STATUS_ESCALATE:
-        # v2.6: escalate 必填 tasks_updated（CV-* IDs）
+        # v2.6: escalate 必填 tasks_updated（R-* IDs）
         if not record.tasks_updated:
             return _error_action(
                 state,
-                f"escalate requires tasks_updated with failed CV-* IDs: {track}:{record.phase}"
+                f"escalate requires tasks_updated with failed R-* IDs: {track}:{record.phase}"
             )
-        code_view = t.phases.get("code-view", PhaseState())
-        cv_fix_cycles = len(code_view.code_view_fix_cycles)
-        max_cv_fix_loops = t.max_code_view_fix_retries
+        code_view = t.phases.get("review", PhaseState())
+        cv_fix_cycles = len(code_view.review_fix_cycles)
+        max_cv_fix_loops = t.max_review_fix_retries
         if cv_fix_cycles >= max_cv_fix_loops:
-            # 耗尽 → 强制 verify（即使仍有未修复的 CV-*）
+            # 耗尽 → 强制 verify（即使仍有未修复的 R-*）
             t = _update_phase(
-                t, "code-view", status="completed",
+                t, "review", status="completed",
                 summary=(
-                    f"code-view fix cycles exhausted "
+                    f"review fix cycles exhausted "
                     f"({cv_fix_cycles}/{max_cv_fix_loops}), force verify"
                 ),
                 report_path=record.report_path,
@@ -475,16 +475,16 @@ def _handle_code_view(
             )
             return new_state, _dispatch_action(track, "verify")
 
-        # 创建 code-view 子 pipeline
-        sp = create_code_view_cycle(track, cv_fix_cycles + 1)
+        # 创建 review 子 pipeline
+        sp = create_review_cycle(track, cv_fix_cycles + 1)
         code_view = code_view.replace(
-            code_view_fix_cycles=(*code_view.code_view_fix_cycles, {
+            review_fix_cycles=(*code_view.review_fix_cycles, {
                 "cycle": cv_fix_cycles + 1,
                 "status": "pending",
             }),
         )
         phases = dict(t.phases)
-        phases["code-view"] = code_view
+        phases["review"] = code_view
         t = t.replace(phases=phases)
         new_state = state.replace(
             tracks={**state.tracks, track: t},
@@ -497,31 +497,31 @@ def _handle_code_view(
         )
 
     elif record.status == STATUS_FAILED:
-        attempt = (t.phases.get("code-view", PhaseState()).attempt or 0) + 1
+        attempt = (t.phases.get("review", PhaseState()).attempt or 0) + 1
         max_retries = t.max_fail_retries if track in state.tracks else 3
         if attempt > max_retries:
             return _fail_action(
-                state, track, "code-view",
-                f"{track}:code-view failed after {max_retries} attempts",
+                state, track, "review",
+                f"{track}:review failed after {max_retries} attempts",
             )
-        t = _update_phase(t, "code-view", status="pending", attempt=attempt)
+        t = _update_phase(t, "review", status="pending", attempt=attempt)
         new_state = state.replace(tracks={**state.tracks, track: t})
-        return new_state, _dispatch_action(track, "code-view", attempt=attempt)
+        return new_state, _dispatch_action(track, "review", attempt=attempt)
 
-    return _error_action(state, f"invalid code-view status: {record.status}")
+    return _error_action(state, f"invalid review status: {record.status}")
 
 
 # ============================================================
-# 子 reducer：fix-code-view
+# 子 reducer：fix-review
 # ============================================================
 
-def _handle_fix_code_view(
+def _handle_fix_review(
     state: PipelineState, record: PipelineRecord,
 ) -> tuple[PipelineState, PipelineAction]:
-    """v2.6 新增：fix-code-view phase 处理器（code-view 子 pipeline 中的 fix 阶段）。
+    """v2.6 新增：fix-review phase 处理器（review 子 pipeline 中的 fix 阶段）。
 
-    与 _handle_fix 行为对齐：fix 完成后进入 code-view 重审；
-    fix 自身失败时不重试，直接进入 code-view（让重审判定是否还需 fix）。
+    与 _handle_fix 行为对齐：fix 完成后进入 review 重审；
+    fix 自身失败时不重试，直接进入 review（让重审判定是否还需 fix）。
     """
     track = record.track
     if track not in state.tracks:
@@ -529,15 +529,15 @@ def _handle_fix_code_view(
     t = state.tracks[track]
 
     if record.status == STATUS_COMPLETED:
-        code_view = t.phases.get("code-view", PhaseState())
-        cv_fix_cycles = list(code_view.code_view_fix_cycles)
+        code_view = t.phases.get("review", PhaseState())
+        cv_fix_cycles = list(code_view.review_fix_cycles)
         if cv_fix_cycles:
             last = dict(cv_fix_cycles[-1])
             last["status"] = "completed"
             cv_fix_cycles[-1] = last
-        code_view = code_view.replace(code_view_fix_cycles=tuple(cv_fix_cycles))
+        code_view = code_view.replace(review_fix_cycles=tuple(cv_fix_cycles))
         dict_phases = dict(t.phases)
-        dict_phases["code-view"] = code_view
+        dict_phases["review"] = code_view
         t = t.replace(phases=dict_phases)
 
         sp = state.current_sub_pipeline
@@ -545,22 +545,22 @@ def _handle_fix_code_view(
         return _sub_pipeline_advance(new_state, sp=sp)
 
     elif record.status == STATUS_FAILED:
-        # 失败时不重试 fix-code-view 自身，进入 code-view 让其判定
-        code_view = t.phases.get("code-view", PhaseState())
-        cv_fix_cycles = list(code_view.code_view_fix_cycles)
+        # 失败时不重试 fix-review 自身，进入 review 让其判定
+        code_view = t.phases.get("review", PhaseState())
+        cv_fix_cycles = list(code_view.review_fix_cycles)
         if cv_fix_cycles:
             last = dict(cv_fix_cycles[-1])
             last["status"] = "failed"
             cv_fix_cycles[-1] = last
-        code_view = code_view.replace(code_view_fix_cycles=tuple(cv_fix_cycles))
+        code_view = code_view.replace(review_fix_cycles=tuple(cv_fix_cycles))
         dict_phases = dict(t.phases)
-        dict_phases["code-view"] = code_view
+        dict_phases["review"] = code_view
         t = t.replace(phases=dict_phases)
         sp = state.current_sub_pipeline
         new_state = state.replace(tracks={**state.tracks, track: t})
         return _sub_pipeline_advance(new_state, sp=sp)
 
-    return _error_action(state, f"invalid fix-code-view status: {record.status}")
+    return _error_action(state, f"invalid fix-review status: {record.status}")
 
 
 # ============================================================
@@ -787,11 +787,11 @@ def _handle_sub_pipeline_record(
     # 把子 pipeline 的 phase 路由到对应的父 pipeline handler
     if record.phase == "fix":
         return _handle_fix(state, record)
-    elif record.phase == "fix-code-view":
-        return _handle_fix_code_view(state, record)
-    elif record.phase == "code-view":
-        # code-view-cycle 子 pipeline 中的 code-view 重审
-        return _handle_sub_code_view(state, record, sp)
+    elif record.phase == "fix-review":
+        return _handle_fix_review(state, record)
+    elif record.phase == "review":
+        # review-cycle 子 pipeline 中的 review 重审
+        return _handle_sub_review(state, record, sp)
     elif record.phase == "fix-gate":
         return _handle_fix_gate(state, record)
     elif record.phase == "verify":
@@ -923,43 +923,43 @@ def _handle_sub_gate(
     return _error_action(state, f"unexpected sub-gate status: {record.status}")
 
 
-def _handle_sub_code_view(
+def _handle_sub_review(
     state: PipelineState, record: PipelineRecord, sp: SubPipeline,
 ) -> tuple[PipelineState, PipelineAction]:
-    """v2.6 新增：code-view-cycle 子 pipeline 中的 code-view 重审阶段。
+    """v2.6 新增：review-cycle 子 pipeline 中的 review 重审阶段。
 
     - STATUS_COMPLETED: 子 pipeline 完成 → 主 pipeline 推进到 verify
-    - STATUS_ESCALATE:  → 回到 fix-code-view（再开一轮 fix 循环）
+    - STATUS_ESCALATE:  → 回到 fix-review（再开一轮 fix 循环）
     - STATUS_FAILED:    → workflow_failed
     """
     track = record.track
     t = state.tracks.get(track)
 
     if record.status == STATUS_COMPLETED:
-        # 子 pipeline 中的 code-view.completed → sub-pipeline 完成
+        # 子 pipeline 中的 review.completed → sub-pipeline 完成
         if t is not None:
-            t = _update_phase(t, "code-view", status="completed",
+            t = _update_phase(t, "review", status="completed",
                               summary=record.summary, report_path=record.report_path)
             state = state.replace(tracks={**state.tracks, track: t})
         return _sub_pipeline_advance(state, sp=sp)
 
     elif record.status == STATUS_ESCALATE:
-        # 子 pipeline 中的 code-view escalate → 回到 fix-code-view
+        # 子 pipeline 中的 review escalate → 回到 fix-review
         if sp.current_index > 0:
             t = state.tracks.get(track)
-            max_cv_fix = t.max_code_view_fix_retries if t else 3
+            max_cv_fix = t.max_review_fix_retries if t else 3
             current_cycles = (
-                len(t.phases.get("code-view", PhaseState()).code_view_fix_cycles)
+                len(t.phases.get("review", PhaseState()).review_fix_cycles)
                 if t else 0
             )
             if current_cycles >= max_cv_fix:
-                # 已超 max_code_view_fix_retries → 强制进 verify，结束循环
+                # 已超 max_review_fix_retries → 强制进 verify，结束循环
                 if t:
                     t = _update_phase(
-                        t, "code-view",
+                        t, "review",
                         status="completed",
                         summary=(
-                            f"code-view fix cycles exhausted in sub-pipeline "
+                            f"review fix cycles exhausted in sub-pipeline "
                             f"({current_cycles}/{max_cv_fix}), force verify"
                         ),
                         report_path=record.report_path,
@@ -972,17 +972,17 @@ def _handle_sub_code_view(
                 )
                 return new_state, _dispatch_action(track, "verify")
 
-            # 未超 limit：追加 code_view_fix_cycle 记录，回到 fix-code-view
+            # 未超 limit：追加 review_fix_cycle 记录，回到 fix-review
             if t:
-                code_view = t.phases.get("code-view", PhaseState())
+                code_view = t.phases.get("review", PhaseState())
                 code_view = code_view.replace(
-                    code_view_fix_cycles=(*code_view.code_view_fix_cycles, {
+                    review_fix_cycles=(*code_view.review_fix_cycles, {
                         "cycle": current_cycles + 1,
                         "status": "pending",
                     }),
                 )
                 phases = dict(t.phases)
-                phases["code-view"] = code_view
+                phases["review"] = code_view
                 t = t.replace(phases=phases)
                 state = state.replace(tracks={**state.tracks, track: t})
 
@@ -997,13 +997,13 @@ def _handle_sub_code_view(
                 status="running",
             )
             state = state.replace(current_sub_pipeline=sp)
-            return state, _dispatch_action(track, "fix-code-view", cycle=sp.cycle)
+            return state, _dispatch_action(track, "fix-review", cycle=sp.cycle)
 
     elif record.status == STATUS_FAILED:
-        return _fail_action(state, track, "code-view",
-                            f"{track}:code-view failed in sub-pipeline {sp.pipeline_id}")
+        return _fail_action(state, track, "review",
+                            f"{track}:review failed in sub-pipeline {sp.pipeline_id}")
 
-    return _error_action(state, f"unexpected sub-code-view status: {record.status}")
+    return _error_action(state, f"unexpected sub-review status: {record.status}")
 
 
 def _sub_pipeline_advance(
@@ -1046,13 +1046,13 @@ def _sub_pipeline_advance(
             )
             return new_state, _dispatch_action(track, "gate")
 
-        elif parent_phase == "code-view":
-            # v2.6: code-view-cycle 子 pipeline 完成 → dispatch verify
+        elif parent_phase == "review":
+            # v2.6: review-cycle 子 pipeline 完成 → dispatch verify
             t = state.tracks.get(track)
             if t:
-                t = _update_phase(t, "code-view", status="completed",
-                                  summary=state.tracks[track].phases["code-view"].summary,
-                                  report_path=state.tracks[track].phases["code-view"].report_path)
+                t = _update_phase(t, "review", status="completed",
+                                  summary=state.tracks[track].phases["review"].summary,
+                                  report_path=state.tracks[track].phases["review"].report_path)
                 state = state.replace(tracks={**state.tracks, track: t})
             new_state = state.replace(
                 current_sub_pipeline=None,

@@ -38,10 +38,10 @@ def _make_report_at(directory: str, filename: str, content: str = "# PASS\ngate 
     return path
 
 
-def _run_code_view(orch, summary: str = "cv_score: 90, p0_failures: []") -> dict:
-    """v2.6: 跑 code-view 阶段（在 dev 与 verify 之间）。
+def _run_review(orch, summary: str = "review_score: 90, p0_failures: []") -> dict:
+    """v2.6: 跑 review 阶段（在 dev 与 verify 之间）。
 
-    集成测试 helper：完成当前 code-view dispatch，dispatch verify。
+    集成测试 helper：完成当前 review dispatch，dispatch verify。
     """
     cv_report = _make_report(f"# PASS\n{summary}")
     return orch.record(
@@ -58,10 +58,10 @@ def _setup_initial_state(tmp_root: str, change: str = "test-change") -> Orchestr
         status="running",
         tracks={
             "dev.backend": TrackState.create(
-                "dev.backend", modules=("backend",), code_view_enabled=True,
+                "dev.backend", modules=("backend",), code_review_enabled=True,
             ),
             "dev.frontend": TrackState.create(
-                "dev.frontend", modules=("frontend",), code_view_enabled=True,
+                "dev.frontend", modules=("frontend",), code_review_enabled=True,
             ),
         },
     )
@@ -84,7 +84,7 @@ class TestIntegrationTdvg(unittest.TestCase):
         self.orch = _setup_initial_state(self.tmp, "test-change")
 
     def test_full_tdvg(self):
-        """test→dev→code-view→verify→gate→pass→track completed。"""
+        """test→dev→review→verify→gate→pass→track completed。"""
         track = "dev.backend"
 
         # Step 1: test completed → dev
@@ -93,14 +93,14 @@ class TestIntegrationTdvg(unittest.TestCase):
         self.assertEqual(r1["action"], "dispatch")
         self.assertEqual(r1["sub"], "dev")
 
-        # Step 2: dev completed → code-view（v2.6 新增）
+        # Step 2: dev completed → review（v2.6 新增）
         r2 = self.orch.record("completed", summary="impl done", outputs="/tmp/Impl.java",
                               tasks_updated=["2.1"])
         self.assertEqual(r2["action"], "dispatch")
-        self.assertEqual(r2["sub"], "code-view")
+        self.assertEqual(r2["sub"], "review")
 
-        # Step 2.5: code-view completed → verify（v2.6 新增）
-        r2_5 = _run_code_view(self.orch)
+        # Step 2.5: review completed → verify（v2.6 新增）
+        r2_5 = _run_review(self.orch)
         self.assertEqual(r2_5["action"], "dispatch")
         self.assertEqual(r2_5["sub"], "verify")
 
@@ -143,7 +143,7 @@ class TestIntegrationTdvg(unittest.TestCase):
                          tasks_updated=["1.1"])  # test
         self.orch.record("completed", summary="dev phase 完成", outputs="/tmp/Dev.java",
                          tasks_updated=["2.1"])  # dev
-        _run_code_view(self.orch)  # code-view (v2.6)
+        _run_review(self.orch)  # review (v2.6)
         verify_report = _make_report("# PASS\nverify 1")
         self.orch.record(
             "completed", summary="verify 完成",
@@ -168,7 +168,7 @@ class TestIntegrationTdvg(unittest.TestCase):
                          tasks_updated=["10.1"])  # test
         self.orch.record("completed", summary="dev phase 完成", outputs="/tmp/FrontDev.java",
                          tasks_updated=["11.1"])  # dev
-        _run_code_view(self.orch)  # code-view (v2.6)
+        _run_review(self.orch)  # review (v2.6)
         verify_report2 = _make_report("# PASS\nverify 2")
         self.orch.record(
             "completed", summary="verify 完成",
@@ -220,7 +220,7 @@ class TestIntegrationFixCycle(unittest.TestCase):
                          tasks_updated=["1.1"])  # test
         self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java",
                          tasks_updated=["2.1"])  # dev
-        _run_code_view(self.orch)  # code-view (v2.6)
+        _run_review(self.orch)  # review (v2.6)
 
         # verify escalate（verify 阶段需要 report + evidence）
         verify_report = _make_report("# FAIL\n3 tests FAIL")
@@ -240,7 +240,7 @@ class TestIntegrationFixCycle(unittest.TestCase):
                          tasks_updated=["1.1"])  # test
         self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java",
                          tasks_updated=["2.1"])  # dev
-        _run_code_view(self.orch)  # code-view (v2.6)
+        _run_review(self.orch)  # review (v2.6)
 
         # verify escalate（verify 阶段需要 report + evidence）
         verify_report = _make_report("# FAIL\n3 tests FAIL")
@@ -279,7 +279,7 @@ class TestIntegrationGateFail(unittest.TestCase):
                          tasks_updated=["1.1"])  # test
         self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java",
                          tasks_updated=["2.1"])  # dev
-        _run_code_view(self.orch)  # code-view (v2.6)
+        _run_review(self.orch)  # review (v2.6)
         verify_report = _make_report("# PASS\nverify ok")
         self.orch.record(
             "completed", summary="verify 完成",
@@ -390,10 +390,10 @@ class TestIntegrationSimpleTrack(unittest.TestCase):
             status="running",
             tracks={
                 "dev.backend": TrackState.create(
-                    "dev.backend", modules=("backend",), code_view_enabled=True,
+                    "dev.backend", modules=("backend",), code_review_enabled=True,
                 ),
                 "proto-gen": TrackState.create(
-                    "proto-gen", modules=(), max_fail_retries=1, code_view_enabled=False,
+                    "proto-gen", modules=(), max_fail_retries=1, code_review_enabled=False,
                 ),
             },
         )

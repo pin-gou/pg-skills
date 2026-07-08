@@ -212,7 +212,7 @@ class TestBuildSections(unittest.TestCase):
         sub_names = [s["sub"] for s in sections[:-1]]
         self.assertEqual(
             sub_names,
-            ["test", "dev", "code-view", "verify", "gate"],
+            ["test", "dev", "review", "verify", "gate"],
         )
 
     def test_simple_track_yields_1_section(self):
@@ -247,7 +247,7 @@ class TestBuildSections(unittest.TestCase):
         )
         sections = skel.build_sections(cfg, {"backend", "frontend"}, set())
         # openapi-gen 不在 affected_tracks → 被跳过
-        # backend: 5 sections (含 code-view)
+        # backend: 5 sections (含 review)
         # frontend: 5 sections
         # final-gate: 1
         # total: 11
@@ -406,7 +406,7 @@ class TestBuildTasksMd(unittest.TestCase):
         text = skel.build_tasks_md(
             sections, {"dev": "dev-local"}, cfg, [], ""
         )
-        # backend (5, 含 code-view) + frontend (5, 含 code-view) + final-gate (1) = 11 headings
+        # backend (5, 含 review) + frontend (5, 含 review) + final-gate (1) = 11 headings
         self.assertEqual(text.count("## "), 11)
 
     def test_unaffected_body_is_noop(self):
@@ -425,7 +425,7 @@ class TestBuildTasksMd(unittest.TestCase):
         # backend (affected) → 5 sub
         self.assertIn("## 1. dev.backend:test", text)
         self.assertIn("## 2. dev.backend:dev", text)
-        self.assertIn("## 3. dev.backend:code-view", text)
+        self.assertIn("## 3. dev.backend:review", text)
         self.assertIn("## 4. dev.backend:verify", text)
         self.assertIn("## 5. dev.backend:gate", text)
 
@@ -594,7 +594,7 @@ class TestCliE2E(unittest.TestCase):
         ])
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         json_out = json.loads(result.stdout)
-        # v3.x: backend (5 sub, 含 code-view) + final-gate = 6
+        # v3.x: backend (5 sub, 含 review) + final-gate = 6
         self.assertEqual(json_out["section_count"], 6)
         tasks_path = json_out["tasks_md_written"]
         self.assertTrue(os.path.isfile(tasks_path))
@@ -602,7 +602,7 @@ class TestCliE2E(unittest.TestCase):
             text = f.read()
         self.assertIn("> - **environment 选择**：dev → dev-local", text)
         self.assertIn("## 1. dev.backend:test", text)
-        self.assertIn("## 3. dev.backend:code-view", text)
+        self.assertIn("## 3. dev.backend:review", text)
         self.assertIn("## 6. final-gate", text)
 
     def test_simple_track(self):
@@ -715,7 +715,7 @@ class TestCliE2E(unittest.TestCase):
         self.assertNotIn("dev.frontend", text)
         # backend 5 sub 全在
         self.assertIn("## 1. dev.backend:test", text)
-        self.assertIn("## 3. dev.backend:code-view", text)
+        self.assertIn("## 3. dev.backend:review", text)
         self.assertIn("## 5. dev.backend:gate", text)
 
     def test_invalid_environment_arg_exits_nonzero(self):

@@ -6,7 +6,7 @@
 - Union 合并（weight=max, threshold=min）
 - inherit 链展开（仅用于 checks，不稀释 threshold）
 - Markdown 规则读取
-- compute_cv_score & decide_cv_disposition
+- compute_review_score & decide_review_disposition
 """
 
 from __future__ import annotations
@@ -28,8 +28,8 @@ from pipeline.profile_loader import (
     load_effective_profile,
     resolve_profile_for_track,
     load_markdown_rule,
-    compute_cv_score,
-    decide_cv_disposition,
+    compute_review_score,
+    decide_review_disposition,
     profile_index_path,
     profile_dir,
 )
@@ -326,8 +326,8 @@ class TestMarkdownRule(unittest.TestCase):
         self.assertEqual(content, "# alt")
 
 
-class TestComputeScore(unittest.TestCase):
-    """cv_score 计算。"""
+class TestComputeReviewScore(unittest.TestCase):
+    """review_score 计算。"""
 
     def test_all_pass(self):
         p = Profile(
@@ -337,7 +337,7 @@ class TestComputeScore(unittest.TestCase):
                 ("b", CheckConfig(True, 20)),
             ),
         )
-        self.assertEqual(compute_cv_score(p, {"a": True, "b": True}), 100)
+        self.assertEqual(compute_review_score(p, {"a": True, "b": True}), 100)
 
     def test_all_fail(self):
         p = Profile(
@@ -347,7 +347,7 @@ class TestComputeScore(unittest.TestCase):
                 ("b", CheckConfig(True, 20)),
             ),
         )
-        self.assertEqual(compute_cv_score(p, {"a": False, "b": False}), 0)
+        self.assertEqual(compute_review_score(p, {"a": False, "b": False}), 0)
 
     def test_partial_pass(self):
         p = Profile(
@@ -358,7 +358,7 @@ class TestComputeScore(unittest.TestCase):
             ),
         )
         # weight pass 30 of 50
-        score = compute_cv_score(p, {"a": True, "b": False})
+        score = compute_review_score(p, {"a": True, "b": False})
         self.assertEqual(score, 60)
 
     def test_disabled_excluded(self):
@@ -370,7 +370,7 @@ class TestComputeScore(unittest.TestCase):
             ),
         )
         # 只 a 计分，a 通过 → 100
-        self.assertEqual(compute_cv_score(p, {"a": True, "b": False}), 100)
+        self.assertEqual(compute_review_score(p, {"a": True, "b": False}), 100)
 
     def test_missing_results_treated_as_fail(self):
         p = Profile(
@@ -381,28 +381,28 @@ class TestComputeScore(unittest.TestCase):
             ),
         )
         # b 缺结果 → False
-        self.assertEqual(compute_cv_score(p, {"a": True}), 60)
+        self.assertEqual(compute_review_score(p, {"a": True}), 60)
 
     def test_empty_profile(self):
         p = Profile(name="empty")
-        self.assertEqual(compute_cv_score(p, {}), 100)
+        self.assertEqual(compute_review_score(p, {}), 100)
 
 
-class TestDecideDisposition(unittest.TestCase):
+class TestDecideReviewDisposition(unittest.TestCase):
     def test_completed_above_pass_threshold(self):
         p = Profile(name="x", pass_threshold=80, escalate_threshold=60)
-        self.assertEqual(decide_cv_disposition(p, 80), "completed")
-        self.assertEqual(decide_cv_disposition(p, 100), "completed")
+        self.assertEqual(decide_review_disposition(p, 80), "completed")
+        self.assertEqual(decide_review_disposition(p, 100), "completed")
 
     def test_escalate_between_thresholds(self):
         p = Profile(name="x", pass_threshold=80, escalate_threshold=60)
-        self.assertEqual(decide_cv_disposition(p, 79), "escalate")
-        self.assertEqual(decide_cv_disposition(p, 60), "escalate")
+        self.assertEqual(decide_review_disposition(p, 79), "escalate")
+        self.assertEqual(decide_review_disposition(p, 60), "escalate")
 
     def test_failed_below_escalate_threshold(self):
         p = Profile(name="x", pass_threshold=80, escalate_threshold=60)
-        self.assertEqual(decide_cv_disposition(p, 59), "failed")
-        self.assertEqual(decide_cv_disposition(p, 0), "failed")
+        self.assertEqual(decide_review_disposition(p, 59), "failed")
+        self.assertEqual(decide_review_disposition(p, 0), "failed")
 
 
 if __name__ == "__main__":

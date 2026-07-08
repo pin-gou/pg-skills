@@ -64,7 +64,7 @@ from pg_pipeline_common import (
 STANDARD_SUBS = [
     ("test",  lambda stage_name, test_key: f"{stage_name} 测试先行（{test_key}）"),
     ("dev",   lambda stage_name, test_key: "实现开发"),
-    ("code-view", lambda stage_name, test_key: "静态代码审查"),
+    ("review", lambda stage_name, test_key: "静态代码审查"),
     ("verify", lambda stage_name, test_key: f"{stage_name} 集成验证"),
     ("gate",  lambda stage_name, test_key: f"{stage_name} 门控审查"),
 ]
@@ -285,7 +285,7 @@ def build_sections(config: dict, affected_tracks: set,
 
     v3.x 升级（code-review 阶段适配）：
       - standard track 的 sub 数量按 tracks.<id>.code_review_enabled 决定
-        - enabled=true → 5 sub（test / dev / code-view / verify / gate）
+        - enabled=true → 5 sub（test / dev / review / verify / gate）
         - enabled=false → 4 sub（test / dev / verify / gate）
       - 章节号 N 跨 change 不一致（已接受的硬冲突）
 
@@ -331,11 +331,11 @@ def build_sections(config: dict, affected_tracks: set,
             else:
                 # v3.x: 动态 4/5 sub 决定
                 track_cfg = tracks_cfg.get(track_id) or {}
-                code_view_enabled = bool(track_cfg.get("code_review_enabled", True))
+                code_review_enabled = bool(track_cfg.get("code_review_enabled", True))
                 subs = (
                     STANDARD_SUBS  # 5 sub
-                    if code_view_enabled
-                    else [s for s in STANDARD_SUBS if s[0] != "code-view"]  # 4 sub
+                    if code_review_enabled
+                    else [s for s in STANDARD_SUBS if s[0] != "review"]  # 4 sub
                 )
                 for sub_name, label_fn in subs:
                     sections.append({
@@ -456,13 +456,13 @@ def format_section_body(section: dict) -> str:
         return f"- [ ] {section['n']}.1 编写 {section['stage']} 测试：待 LLM 填充"
     if section["sub"] == "dev":
         return f"- [ ] {section['n']}.1 实现功能：待 LLM 填充"
-    if section["sub"] == "code-view":
-        # v3.x: code-view 阶段 placeholder（runner 不展开命令，agent 自己读 profile 配置）
+    if section["sub"] == "review":
+        # v3.x: review 阶段 placeholder（runner 不展开命令，agent 自己读 profile 配置）
         return (
-            f"- [ ] {section['n']}.1 code-view agent 读 design.md + tasks.md + .pg/code-review.yaml 细则\n"
-            f"- [ ] {section['n']}.2 code-view agent 对 git diff feat/pg/{{change}} 做静态审查\n"
-            f"- [ ] {section['n']}.3 code-view agent 输出 cv_score + p0_failures 到 2-build/{{seq}}-{section['track']}-code-view.md\n"
-            f"- [ ] {section['n']}.4 score < pass_threshold → escalate 至 fix-code-view；score < escalate_threshold → workflow_failed"
+            f"- [ ] {section['n']}.1 review agent 读 design.md + tasks.md + .pg/code-review.yaml 细则\n"
+            f"- [ ] {section['n']}.2 review agent 对 git diff feat/pg/{{change}} 做静态审查\n"
+            f"- [ ] {section['n']}.3 review agent 输出 review_score + p0_failures 到 2-build/{{seq}}-{section['track']}-review.md\n"
+            f"- [ ] {section['n']}.4 score < pass_threshold → escalate 至 fix-review；score < escalate_threshold → workflow_failed"
         )
     if section["sub"] == "verify":
         return f"- [ ] {section['n']}.1 执行 lint（runner 通过 modules 注入命令）\n" \

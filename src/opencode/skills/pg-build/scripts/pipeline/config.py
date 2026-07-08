@@ -91,7 +91,7 @@ def resolve_test_commands(
 def resolve_module_languages(config: dict[str, Any], module_names: list[str]) -> tuple[str, ...]:
     """v2.6: 收集所有模块的 language 字段，去重保序。
 
-    用于 code-view agent 按 language 自动派发 profile。
+    用于 review agent 按 language 自动派发 profile。
     """
     modules = config.get("modules", {})
     seen: set[str] = set()

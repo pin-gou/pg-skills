@@ -163,7 +163,7 @@ def load_profile(project_root: str, name: str) -> Profile:
 def load_markdown_rule(project_root: str, profile_name: str, check_name: str) -> str:
     """加载 .pg/code-review/<profile_name>/<check_name>.md 规则文档。
 
-    找不到时返回空字符串（code-view agent 用 prompt 中 inline fallback 兜底）。
+    找不到时返回空字符串（review agent 用 prompt 中 inline fallback 兜底）。
     """
     base = profile_dir(project_root) / profile_name
     # 候选路径：<check_name>.md 或 profile_loader 写入的 doc 字段
@@ -337,14 +337,14 @@ def resolve_profile_for_track(
 
 
 # ============================================================
-# Score 计算（code-view agent 用）
+# Score 计算（review agent 用）
 # ============================================================
 
-def compute_cv_score(
+def compute_review_score(
     profile: Profile,
     check_results: dict[str, bool],  # {check_name: pass?}
 ) -> int:
-    """根据 enabled 检查项 + 权重 + 通过情况计算 cv_score。
+    """根据 enabled 检查项 + 权重 + 通过情况计算 review_score。
 
     公式：score = sum(weight for enabled & pass) / sum(weight for enabled) * 100
     返回 0-100 的整数。
@@ -367,18 +367,18 @@ def compute_cv_score(
     return int(round(passed_weight * 100.0 / total_weight))
 
 
-def decide_cv_disposition(
-    profile: Profile, cv_score: int,
+def decide_review_disposition(
+    profile: Profile, review_score: int,
 ) -> str:
     """根据 score 与 threshold 决定 disposition。
 
     返回值：
       - "completed": score ≥ pass_threshold → 进入 verify
-      - "escalate": pass_threshold > score ≥ escalate_threshold → fix-code-view
+      - "escalate": pass_threshold > score ≥ escalate_threshold → fix-review
       - "failed": score < escalate_threshold → workflow_failed
     """
-    if cv_score >= profile.pass_threshold:
+    if review_score >= profile.pass_threshold:
         return "completed"
-    if cv_score >= profile.escalate_threshold:
+    if review_score >= profile.escalate_threshold:
         return "escalate"
     return "failed"

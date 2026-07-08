@@ -32,9 +32,9 @@ from pipeline.reducer import (
     _handle_sub_verify,
     _handle_sub_gate,
     _handle_verify,
-    _handle_code_view,
-    _handle_fix_code_view,
-    _handle_sub_code_view,
+    _handle_review,
+    _handle_fix_review,
+    _handle_sub_review,
     _sub_pipeline_advance,
     PHASE_AGENTS,
 )
@@ -51,18 +51,18 @@ from pipeline.sub_pipeline import (
     SubPipeline,
     create_fix_cycle,
     create_gate_fix_cycle,
-    create_code_view_cycle,
-    CODE_VIEW_CYCLE,
-    CODE_VIEW_CYCLE_PHASES,
+    create_review_cycle,
+    REVIEW_CYCLE,
+    REVIEW_CYCLE_PHASES,
 )
 
 
 def _make_track(
-    track_id: str, status: str = "pending", code_view_enabled: bool = True,
+    track_id: str, status: str = "pending", code_review_enabled: bool = True,
 ) -> TrackState:
     # v2.3: fix_routing 已废弃，默认行为就是 fix→verify
-    # v3.x: 测试默认开启 code-view（与 v2.6 测试意图一致，验证 dev → code-view 路径）
-    return TrackState.create(track_id, status=status, code_view_enabled=code_view_enabled)
+    # v3.x: 测试默认开启 review（与 v2.6 测试意图一致，验证 dev → review 路径）
+    return TrackState.create(track_id, status=status, code_review_enabled=code_review_enabled)
 
 
 def _make_phase_state(status: str = "pending", attempt: int = 0) -> PhaseState:
@@ -110,8 +110,8 @@ class TestLinearPhase(unittest.TestCase):
         self.assertEqual(action.kind, "dispatch")
         self.assertEqual(action.phase, "dev")
 
-    def test_dev_completed_advances_to_code_view(self):
-        """v2.6: dev 完成 → dispatch code-view（不是 verify）。"""
+    def test_dev_completed_advances_to_review(self):
+        """v2.6: dev 完成 → dispatch review（不是 verify）。"""
         t = _make_track("dev.backend")
         t = t.replace(phases={"test": _make_phase_state("completed")})
         state = PipelineState(
@@ -121,10 +121,10 @@ class TestLinearPhase(unittest.TestCase):
         record = PipelineRecord(track="dev.backend", phase="dev", status="completed")
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
-        self.assertEqual(action.phase, "code-view")
+        self.assertEqual(action.phase, "review")
 
-    def test_code_view_completed_advances_to_verify(self):
-        """v2.6: code-view 完成 → dispatch verify。"""
+    def test_review_completed_advances_to_verify(self):
+        """v2.6: review 完成 → dispatch verify。"""
         t = _make_track("dev.backend")
         t = t.replace(phases={
             "test": _make_phase_state("completed"),
@@ -135,8 +135,8 @@ class TestLinearPhase(unittest.TestCase):
             tracks={"dev.backend": t},
         )
         record = PipelineRecord(
-            track="dev.backend", phase="code-view", status="completed",
-            summary="cv_score: 85, p0_failures: []",
+            track="dev.backend", phase="review", status="completed",
+            summary="review_score: 85, p0_failures: []",
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
@@ -636,16 +636,16 @@ class TestDetect(unittest.TestCase):
 
 
 # ============================================================
-# v2.6: code-view phase + fix-code-view cycle + sub-code-view
+# v2.6: review phase + fix-review cycle + sub-review
 # ============================================================
 
-class TestCodeViewPhase(unittest.TestCase):
-    """code-view phase: completed / escalate / failed。"""
+class TestReviewPhase(unittest.TestCase):
+    """review phase: completed / escalate / failed。"""
 
     def setUp(self):
         self.track = _make_track("dev.backend")
 
-    def test_code_view_completed_advances_to_verify(self):
+    def test_review_completed_advances_to_verify(self):
         t = self.track.replace(phases={
             "test": _make_phase_state("completed"),
             "dev": _make_phase_state("completed"),
@@ -655,14 +655,14 @@ class TestCodeViewPhase(unittest.TestCase):
             tracks={"dev.backend": t},
         )
         record = PipelineRecord(
-            track="dev.backend", phase="code-view", status="completed",
-            summary="cv_score: 90, p0_failures: []",
+            track="dev.backend", phase="review", status="completed",
+            summary="review_score: 90, p0_failures: []",
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
         self.assertEqual(action.phase, "verify")
 
-    def test_code_view_escalate_creates_sub_pipeline(self):
+    def test_review_escalate_creates_sub_pipeline(self):
         t = self.track.replace(phases={
             "test": _make_phase_state("completed"),
             "dev": _make_phase_state("completed"),
@@ -670,119 +670,119 @@ class TestCodeViewPhase(unittest.TestCase):
         state = PipelineState(
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": t},
-            current_track="dev.backend", current_phase="code-view",
+            current_track="dev.backend", current_phase="review",
         )
         record = PipelineRecord(
-            track="dev.backend", phase="code-view", status="escalate",
-            summary="CV-1 fail",
-            tasks_updated=("CV-1",),
+            track="dev.backend", phase="review", status="escalate",
+            summary="R-1 fail",
+            tasks_updated=("R-1",),
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
-        self.assertEqual(action.phase, "fix-code-view")
+        self.assertEqual(action.phase, "fix-review")
         sp = new_state.current_sub_pipeline
         self.assertIsNotNone(sp)
-        self.assertEqual(sp.kind, CODE_VIEW_CYCLE)
-        self.assertEqual(sp.parent_phase, "code-view")
+        self.assertEqual(sp.kind, REVIEW_CYCLE)
+        self.assertEqual(sp.parent_phase, "review")
 
-    def test_code_view_escalate_without_tasks_updated_returns_error(self):
-        """v2.6: escalate 必填 tasks_updated (CV-* IDs)。"""
+    def test_review_escalate_without_tasks_updated_returns_error(self):
+        """v2.6: escalate 必填 tasks_updated ("R-* IDs)。"""
         t = self.track
         state = PipelineState(
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": t},
-            current_track="dev.backend", current_phase="code-view",
+            current_track="dev.backend", current_phase="review",
         )
         record = PipelineRecord(
-            track="dev.backend", phase="code-view", status="escalate",
-            summary="CV-1 fail",
+            track="dev.backend", phase="review", status="escalate",
+            summary="R-1 fail",
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "error")
         self.assertIn("tasks_updated", action.detail.get("reason", ""))
 
-    def test_code_view_escalate_exhausted_force_verify(self):
-        """v2.6: code_view_fix_cycles 达 max_code_view_fix_retries → force verify。"""
+    def test_review_escalate_exhausted_force_verify(self):
+        """v2.6: review_fix_cycles 达 max_review_fix_retries → force verify。"""
         t = self.track.replace(
             phases={
-                "code-view": PhaseState(
+                "review": PhaseState(
                     status="pending",
-                    code_view_fix_cycles=(
+                    review_fix_cycles=(
                         {"cycle": 1, "status": "completed"},
                         {"cycle": 2, "status": "completed"},
                         {"cycle": 3, "status": "completed"},
                     ),
                 ),
             },
-            max_code_view_fix_retries=3,
+            max_review_fix_retries=3,
         )
         state = PipelineState(
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": t},
-            current_track="dev.backend", current_phase="code-view",
+            current_track="dev.backend", current_phase="review",
         )
         record = PipelineRecord(
-            track="dev.backend", phase="code-view", status="escalate",
-            summary="CV-1 still fail",
-            tasks_updated=("CV-1",),
+            track="dev.backend", phase="review", status="escalate",
+            summary="R-1 still fail",
+            tasks_updated=("R-1",),
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
         self.assertEqual(action.phase, "verify")
         # summary 应记录 exhausted
-        cv_phase = new_state.tracks["dev.backend"].phases["code-view"]
+        cv_phase = new_state.tracks["dev.backend"].phases["review"]
         self.assertIn("exhausted", cv_phase.summary)
 
-    def test_code_view_failed_retries(self):
-        """v2.6: code-view 阶段 failed → attempt++ 重试，耗尽 workflow_failed。"""
+    def test_review_failed_retries(self):
+        """v2.6: review 阶段 failed → attempt++ 重试，耗尽 workflow_failed。"""
         t = self.track.replace(
             max_fail_retries=2,
-            phases={"code-view": _make_phase_state("pending", attempt=2)},
+            phases={"review": _make_phase_state("pending", attempt=2)},
         )
         state = PipelineState(
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": t},
-            current_track="dev.backend", current_phase="code-view",
+            current_track="dev.backend", current_phase="review",
         )
         # 第 3 次失败（attempt 已 2，再失败 → 3 > 2 → workflow_failed）
         record = PipelineRecord(
-            track="dev.backend", phase="code-view", status="failed",
-            summary="code-view error",
+            track="dev.backend", phase="review", status="failed",
+            summary="review error",
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "workflow_failed")
 
-    def test_code_view_failed_retries_within_limit(self):
+    def test_review_failed_retries_within_limit(self):
         """v2.6: 失败但在 max_fail_retries 内 → dispatch 重试。"""
         t = self.track.replace(
             max_fail_retries=3,
-            phases={"code-view": _make_phase_state("pending", attempt=1)},
+            phases={"review": _make_phase_state("pending", attempt=1)},
         )
         state = PipelineState(
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": t},
-            current_track="dev.backend", current_phase="code-view",
+            current_track="dev.backend", current_phase="review",
         )
         record = PipelineRecord(
-            track="dev.backend", phase="code-view", status="failed",
+            track="dev.backend", phase="review", status="failed",
             summary="transient",
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
-        self.assertEqual(action.phase, "code-view")
+        self.assertEqual(action.phase, "review")
         self.assertEqual(action.attempt, 2)
 
 
-class TestFixCodeViewPhase(unittest.TestCase):
-    """fix-code-view 子 pipeline 中的 fix 阶段。"""
+class TestFixReviewPhase(unittest.TestCase):
+    """fix-review 子 pipeline 中的 fix 阶段。"""
 
     def _make_sub_state(self) -> tuple[PipelineState, SubPipeline]:
-        sp = create_code_view_cycle("dev.backend", 1)
+        sp = create_review_cycle("dev.backend", 1)
         track = _make_track("dev.backend").replace(
             phases={
-                "code-view": PhaseState(
+                "review": PhaseState(
                     status="pending",
-                    code_view_fix_cycles=({"cycle": 1, "status": "pending"},),
+                    review_fix_cycles=({"cycle": 1, "status": "pending"},),
                 ),
             },
         )
@@ -790,55 +790,55 @@ class TestFixCodeViewPhase(unittest.TestCase):
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": track},
             current_track="dev.backend",
-            current_phase="fix-code-view",
+            current_phase="fix-review",
             current_sub_pipeline=sp,
         )
         return state, sp
 
-    def test_fix_code_view_completed_advances_to_code_view(self):
-        """fix-code-view completed → 子 pipeline 推进到 code-view。"""
+    def test_fix_review_completed_advances_to_review(self):
+        """fix-review completed → 子 pipeline 推进到 review。"""
         state, _ = self._make_sub_state()
         record = PipelineRecord(
-            track="dev.backend", phase="fix-code-view", status="completed",
-            summary="fixed CV-1",
+            track="dev.backend", phase="fix-review", status="completed",
+            summary="fixed R-1",
             report_path="/tmp/fix-cv.md",
-            tasks_updated=("CV-1",),
+            tasks_updated=("R-1",),
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
-        self.assertEqual(action.phase, "code-view")
+        self.assertEqual(action.phase, "review")
         # fix_cycle 应标记为 completed
-        cv = new_state.tracks["dev.backend"].phases["code-view"]
-        self.assertEqual(cv.code_view_fix_cycles[-1]["status"], "completed")
+        cv = new_state.tracks["dev.backend"].phases["review"]
+        self.assertEqual(cv.review_fix_cycles[-1]["status"], "completed")
 
-    def test_fix_code_view_failed_advances_to_code_view(self):
-        """v2.6: fix-code-view 失败不重试自身，进入 code-view 让其判定。"""
+    def test_fix_review_failed_advances_to_review(self):
+        """v2.6: fix-review 失败不重试自身，进入 review 让其判定。"""
         state, _ = self._make_sub_state()
         record = PipelineRecord(
-            track="dev.backend", phase="fix-code-view", status="failed",
+            track="dev.backend", phase="fix-review", status="failed",
             summary="could not fix",
             report_path="/tmp/fix-cv.md",
-            tasks_updated=("CV-1",),
+            tasks_updated=("R-1",),
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
-        self.assertEqual(action.phase, "code-view")
-        cv = new_state.tracks["dev.backend"].phases["code-view"]
-        self.assertEqual(cv.code_view_fix_cycles[-1]["status"], "failed")
+        self.assertEqual(action.phase, "review")
+        cv = new_state.tracks["dev.backend"].phases["review"]
+        self.assertEqual(cv.review_fix_cycles[-1]["status"], "failed")
 
 
-class TestSubCodeViewPhase(unittest.TestCase):
-    """code-view-cycle 子 pipeline 中的 code-view 重审阶段。"""
+class TestSubReviewPhase(unittest.TestCase):
+    """review-cycle 子 pipeline 中的 review 重审阶段。"""
 
     def _make_sub_state(self) -> tuple[PipelineState, SubPipeline]:
-        sp = create_code_view_cycle("dev.backend", 1)
-        # advance to index 1 (code-view)
+        sp = create_review_cycle("dev.backend", 1)
+        # advance to index 1 (review)
         sp = sp.advance()
         track = _make_track("dev.backend").replace(
             phases={
-                "code-view": PhaseState(
+                "review": PhaseState(
                     status="pending",
-                    code_view_fix_cycles=({"cycle": 1, "status": "completed"},),
+                    review_fix_cycles=({"cycle": 1, "status": "completed"},),
                 ),
             },
         )
@@ -846,17 +846,17 @@ class TestSubCodeViewPhase(unittest.TestCase):
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": track},
             current_track="dev.backend",
-            current_phase="code-view",
+            current_phase="review",
             current_sub_pipeline=sp,
         )
         return state, sp
 
-    def test_sub_code_view_completed_returns_to_main_pipeline(self):
-        """子 pipeline 中 code-view completed → 主 pipeline dispatch verify。"""
+    def test_sub_review_completed_returns_to_main_pipeline(self):
+        """子 pipeline 中 review completed → 主 pipeline dispatch verify。"""
         state, _ = self._make_sub_state()
         record = PipelineRecord(
-            track="dev.backend", phase="code-view", status="completed",
-            summary="cv_score: 95",
+            track="dev.backend", phase="review", status="completed",
+            summary="review_score: 95",
             report_path="/tmp/cv.md",
         )
         new_state, action = reduce_state(state, record)
@@ -864,108 +864,108 @@ class TestSubCodeViewPhase(unittest.TestCase):
         self.assertEqual(action.phase, "verify")
         self.assertIsNone(new_state.current_sub_pipeline)
 
-    def test_sub_code_view_escalate_creates_new_fix_cycle(self):
-        """子 pipeline 中 code-view escalate → 回到 fix-code-view，新一轮。"""
+    def test_sub_review_escalate_creates_new_fix_cycle(self):
+        """子 pipeline 中 review escalate → 回到 fix-review，新一轮。"""
         # simulate sub pipeline 已有 1 个 fix_cycle，再 escalate 时再开第 2 轮
         track = _make_track("dev.backend").replace(
             phases={
-                "code-view": PhaseState(
+                "review": PhaseState(
                     status="pending",
-                    code_view_fix_cycles=(
+                    review_fix_cycles=(
                         {"cycle": 1, "status": "completed"},
                     ),
                 ),
             },
-            max_code_view_fix_retries=3,
+            max_review_fix_retries=3,
         )
-        sp = create_code_view_cycle("dev.backend", 1).advance()  # index=1
+        sp = create_review_cycle("dev.backend", 1).advance()  # index=1
         # current_index > 0 to trigger escalate→fix path
         sp = dataclasses.replace(sp, current_index=1)
         state = PipelineState(
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": track},
             current_track="dev.backend",
-            current_phase="code-view",
+            current_phase="review",
             current_sub_pipeline=sp,
         )
         record = PipelineRecord(
-            track="dev.backend", phase="code-view", status="escalate",
-            summary="CV-1 still fail",
-            tasks_updated=("CV-1",),
+            track="dev.backend", phase="review", status="escalate",
+            summary="R-1 still fail",
+            tasks_updated=("R-1",),
             report_path="/tmp/cv.md",
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
-        self.assertEqual(action.phase, "fix-code-view")
+        self.assertEqual(action.phase, "fix-review")
         # 新一轮已记录
-        cv = new_state.tracks["dev.backend"].phases["code-view"]
-        self.assertEqual(len(cv.code_view_fix_cycles), 2)
+        cv = new_state.tracks["dev.backend"].phases["review"]
+        self.assertEqual(len(cv.review_fix_cycles), 2)
 
-    def test_sub_code_view_escalate_exhausted_force_verify(self):
+    def test_sub_review_escalate_exhausted_force_verify(self):
         """子 pipeline 中再次 escalate 超 max → force verify。"""
         track = _make_track("dev.backend").replace(
             phases={
-                "code-view": PhaseState(
+                "review": PhaseState(
                     status="pending",
-                    code_view_fix_cycles=(
+                    review_fix_cycles=(
                         {"cycle": 1, "status": "completed"},
                         {"cycle": 2, "status": "completed"},
                         {"cycle": 3, "status": "completed"},
                     ),
                 ),
             },
-            max_code_view_fix_retries=3,
+            max_review_fix_retries=3,
         )
-        sp = create_code_view_cycle("dev.backend", 3)
+        sp = create_review_cycle("dev.backend", 3)
         sp = dataclasses.replace(sp, current_index=1)
         state = PipelineState(
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": track},
             current_track="dev.backend",
-            current_phase="code-view",
+            current_phase="review",
             current_sub_pipeline=sp,
         )
         record = PipelineRecord(
-            track="dev.backend", phase="code-view", status="escalate",
-            summary="CV-1 still fail",
-            tasks_updated=("CV-1",),
+            track="dev.backend", phase="review", status="escalate",
+            summary="R-1 still fail",
+            tasks_updated=("R-1",),
             report_path="/tmp/cv.md",
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "dispatch")
         self.assertEqual(action.phase, "verify")
         self.assertIsNone(new_state.current_sub_pipeline)
-        cv = new_state.tracks["dev.backend"].phases["code-view"]
+        cv = new_state.tracks["dev.backend"].phases["review"]
         self.assertIn("exhausted", cv.summary)
 
 
 class TestSubPipelineRouting(unittest.TestCase):
-    """_handle_sub_pipeline_record 路由到 _handle_sub_code_view / _handle_fix_code_view。"""
+    """_handle_sub_pipeline_record 路由到 _handle_sub_review / _handle_fix_review。"""
 
-    def test_routes_fix_code_view_to_handler(self):
-        sp = create_code_view_cycle("dev.backend", 1)
+    def test_routes_fix_review_to_handler(self):
+        sp = create_review_cycle("dev.backend", 1)
         track = _make_track("dev.backend").replace(phases={
-            "code-view": PhaseState(
+            "review": PhaseState(
                 status="pending",
-                code_view_fix_cycles=({"cycle": 1, "status": "pending"},),
+                review_fix_cycles=({"cycle": 1, "status": "pending"},),
             ),
         })
         state = PipelineState(
             change="x", pipeline_order=("dev.backend",),
             tracks={"dev.backend": track},
             current_track="dev.backend",
-            current_phase="fix-code-view",
+            current_phase="fix-review",
             current_sub_pipeline=sp,
         )
         record = PipelineRecord(
-            track="dev.backend", phase="fix-code-view", status="completed",
+            track="dev.backend", phase="fix-review", status="completed",
             summary="fixed", report_path="/tmp/fix.md",
-            tasks_updated=("CV-1",),
+            tasks_updated=("R-1",),
         )
         new_state, action = reduce_state(state, record)
-        # 推进到 sub pipeline 下一 phase（code-view）
+        # 推进到 sub pipeline 下一 phase（review）
         self.assertEqual(action.kind, "dispatch")
-        self.assertEqual(action.phase, "code-view")
+        self.assertEqual(action.phase, "review")
 
 
 if __name__ == "__main__":

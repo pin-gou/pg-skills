@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
-"""v3.3: pg-propose code-view 章节生成 + 4/5 sub 动态行为单测。
+"""v3.3: pg-propose review 章节生成 + 4/5 sub 动态行为单测。
 
 覆盖：
-- code_review_enabled=true → 5 sub（test/dev/code-view/verify/gate）
+- code_review_enabled=true → 5 sub（test/dev/review/verify/gate）
 - code_review_enabled=false → 4 sub（test/dev/verify/gate）
 - 章节号 N 顺序递增（含 final-gate）
-- code-view 章节 body 预填 placeholder
-- pg-gen-manifest.py 输出 phase_prompts 含/不含 code-view
+- review 章节 body 预填 placeholder
+- pg-gen-manifest.py 输出 phase_prompts 含/不含 review
 - manifest.schema.json 4-5 sub 都通过校验
 - pg-validate-proposal.py 不报错
 """
@@ -100,8 +100,8 @@ class TestCodeViewSectionDynamic(unittest.TestCase):
         json_out = json.loads(result.stdout)
         # backend 5 + frontend 5 + final-gate 1 = 11
         self.assertEqual(json_out["section_count"], 11)
-        # 检查 code-view 在 sections 中出现 2 次
-        cv_count = sum(1 for s in json_out["sections"] if s.get("sub") == "code-view")
+        # 检查 review 在 sections 中出现 2 次
+        cv_count = sum(1 for s in json_out["sections"] if s.get("sub") == "review")
         self.assertEqual(cv_count, 2)
         self.tearDown_extra()
 
@@ -118,21 +118,21 @@ class TestCodeViewSectionDynamic(unittest.TestCase):
         json_out = json.loads(result.stdout)
         # backend 4 + frontend 5 + final-gate 1 = 10
         self.assertEqual(json_out["section_count"], 10)
-        # code-view 只出现 1 次（frontend）
-        cv_sections = [s for s in json_out["sections"] if s.get("sub") == "code-view"]
+        # review 只出现 1 次（frontend）
+        cv_sections = [s for s in json_out["sections"] if s.get("sub") == "review"]
         self.assertEqual(len(cv_sections), 1)
         self.assertEqual(cv_sections[0]["track"], "frontend")
-        # backend 没有 code-view
+        # backend 没有 review
         backend_subs = [
             s["sub"] for s in json_out["sections"]
             if s["track"] == "backend" and s.get("sub")
         ]
-        self.assertNotIn("code-view", backend_subs)
+        self.assertNotIn("review", backend_subs)
         self.assertEqual(backend_subs, ["test", "dev", "verify", "gate"])
         self.tearDown_extra()
 
     def test_code_view_placeholder_body(self):
-        """code-view 章节 body 预填 placeholder（4 行任务）。"""
+        """review 章节 body 预填 placeholder（4 行任务）。"""
         self._setup_project(backend_enabled=True, frontend_enabled=False)
         result = _run_script("pg-gen-tasks-skeleton.py", [
             "--change", self.change,
@@ -146,13 +146,13 @@ class TestCodeViewSectionDynamic(unittest.TestCase):
         )
         with open(tasks_path) as f:
             text = f.read()
-        # 包含 code-view 章节
-        self.assertIn("## 3. dev.backend:code-view", text)
+        # 包含 review 章节
+        self.assertIn("## 3. dev.backend:review", text)
         # placeholder 4 行
-        self.assertIn("code-view agent 读 design.md", text)
+        self.assertIn("review agent 读 design.md", text)
         self.assertIn("git diff", text)
-        self.assertIn("cv_score", text)
-        self.assertIn("escalate 至 fix-code-view", text)
+        self.assertIn("review_score", text)
+        self.assertIn("escalate 至 fix-review", text)
         self.tearDown_extra()
 
     def test_section_numbering_sequential(self):
@@ -173,7 +173,7 @@ class TestCodeViewSectionDynamic(unittest.TestCase):
 
 
 class TestManifestCodeView(unittest.TestCase):
-    """v3.3: pg-gen-manifest.py 输出含/不含 code-view sub。"""
+    """v3.3: pg-gen-manifest.py 输出含/不含 review sub。"""
 
     def setUp(self):
         self.tmpdir = tempfile.mkdtemp(prefix="pg_test_cv_")
@@ -226,7 +226,7 @@ class TestManifestCodeView(unittest.TestCase):
         )
         with open(manifest_path) as f:
             manifest = yaml.safe_load(f)
-        # 检查 backend / frontend 都含 code-view sub
+        # 检查 backend / frontend 都含 review sub
         backend_track = next(
             t for stage in manifest["stages"]
             for t in stage["tracks"] if t["id"] == "backend"
@@ -235,8 +235,8 @@ class TestManifestCodeView(unittest.TestCase):
             t for stage in manifest["stages"]
             for t in stage["tracks"] if t["id"] == "frontend"
         )
-        self.assertIn("code-view", backend_track["phase_prompts"])
-        self.assertIn("code-view", frontend_track["phase_prompts"])
+        self.assertIn("review", backend_track["phase_prompts"])
+        self.assertIn("review", frontend_track["phase_prompts"])
         # phase_prompts 5 个 sub
         self.assertEqual(len(backend_track["phase_prompts"]), 5)
 
@@ -265,9 +265,9 @@ class TestManifestCodeView(unittest.TestCase):
             for t in stage["tracks"] if t["id"] == "frontend"
         )
         # backend 4 sub, frontend 5 sub
-        self.assertNotIn("code-view", backend_track["phase_prompts"])
+        self.assertNotIn("review", backend_track["phase_prompts"])
         self.assertEqual(len(backend_track["phase_prompts"]), 4)
-        self.assertIn("code-view", frontend_track["phase_prompts"])
+        self.assertIn("review", frontend_track["phase_prompts"])
         self.assertEqual(len(frontend_track["phase_prompts"]), 5)
 
 

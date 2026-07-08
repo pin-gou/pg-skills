@@ -322,11 +322,11 @@ review-notes.md 必含段：
 ## 文档变更记录
 
 - **v3.3（2026-07-08）**：适配 pg-build v2.6 code-review 阶段。
-  - `pg-gen-tasks-skeleton.py` 的 `STANDARD_SUBS` 增加 `code-view`；`build_sections` 按 `tracks.<id>.code_review_enabled` 决定 4/5 sub。
-  - `pg-gen-manifest.py` / `manifest.schema.json` / `pg-validate-proposal.py` 适配：phase_prompts 4 必填 + code-view optional，minProperties=4/maxProperties=5。
-  - `references/tasks-templates.md` 新增 `track:code-view` 章节模板与不变量说明。
+  - `pg-gen-tasks-skeleton.py` 的 `STANDARD_SUBS` 增加 `review`；`build_sections` 按 `tracks.<id>.code_review_enabled` 决定 4/5 sub。
+  - `pg-gen-manifest.py` / `manifest.schema.json` / `pg-validate-proposal.py` 适配：phase_prompts 4 必填 + review optional，minProperties=4/maxProperties=5。
+  - `references/tasks-templates.md` 新增 `track:review` 章节模板与不变量说明。
   - **破坏性变更**：章节号 N 跨 change 不一致（同一 track 在不同 change 编号可能不同）。下游消费方必须基于脚本输出 sections JSON 的 N 值填，不许硬编码。
-  - 协调：pg-build 内部 `TrackState.code_review_*` 字段已删除，改用 `code_view_enabled`（从 execution-manifest.yaml 派生的 bool 字段）。
+  - 协调：pg-build 内部 `TrackState.code_review_*` 字段：`code_review_enabled` / `code_review_profiles` / `code_review_profile` / `code_review_languages`。
 
 - **v3.2（前置版本）**：tasks.md 章节标题骨架 + 章节编号 N + simple/standard 分流 + on_conditions 评估注释全部由 `pg-gen-tasks-skeleton.py` 机械生成。
 

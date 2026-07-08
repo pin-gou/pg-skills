@@ -14,12 +14,12 @@ from dataclasses import dataclass, field
 from typing import Any
 
 
-SUB_PHASES: tuple[str, ...] = ("test", "dev", "code-view", "verify", "gate")
+SUB_PHASES: tuple[str, ...] = ("test", "dev", "review", "verify", "gate")
 FIX_SUB = "fix"
 FIX_GATE_SUB = "fix-gate"
 SIMPLE_SUB = "simple"
-CODE_VIEW_SUB = "code-view"
-FIX_CODE_VIEW_SUB = "fix-code-view"
+REVIEW_SUB = "review"
+FIX_REVIEW_SUB = "fix-review"
 
 
 @dataclass(frozen=True)
@@ -36,7 +36,7 @@ class PhaseState:
     tasks_marked: tuple[int, ...] = ()
     cycles: tuple[dict[str, Any], ...] = ()
     fix_cycles: tuple[dict[str, Any], ...] = ()
-    code_view_fix_cycles: tuple[dict[str, Any], ...] = ()
+    review_fix_cycles: tuple[dict[str, Any], ...] = ()
     gate_cycles: tuple[dict[str, Any], ...] = ()
     fix_gates: tuple[dict[str, Any], ...] = ()
     current_cycle: int = 1
@@ -57,8 +57,8 @@ class PhaseState:
             out["cycles"] = list(self.cycles)
         if self.fix_cycles:
             out["fix_cycles"] = list(self.fix_cycles)
-        if self.code_view_fix_cycles:
-            out["code_view_fix_cycles"] = list(self.code_view_fix_cycles)
+        if self.review_fix_cycles:
+            out["review_fix_cycles"] = list(self.review_fix_cycles)
         if self.gate_cycles:
             out["gate_cycles"] = list(self.gate_cycles)
         if self.fix_gates:
@@ -78,7 +78,7 @@ class PhaseState:
             tasks_marked=tuple(d.get("tasks_marked", ())),
             cycles=tuple(d.get("cycles", [])),
             fix_cycles=tuple(d.get("fix_cycles", [])),
-            code_view_fix_cycles=tuple(d.get("code_view_fix_cycles", [])),
+            review_fix_cycles=tuple(d.get("review_fix_cycles", [])),
             gate_cycles=tuple(d.get("gate_cycles", [])),
             fix_gates=tuple(d.get("fix_gates", [])),
             current_cycle=d.get("current_cycle", 1),
@@ -103,15 +103,15 @@ class TrackState:
     max_fail_retries: int = 3
     max_fix_retries: int = 5
     max_gate_fix_retries: int = 2
-    max_code_view_fix_retries: int = 3
+    max_review_fix_retries: int = 3
     phases: dict[str, PhaseState] = field(default_factory=dict)
     sub_pipelines: tuple[Any, ...] = ()  # SubPipeline
     accepted_gaps: tuple[dict[str, Any], ...] = ()
-    # code-view 配置（v2.6 → v3.x 重构）
-    # v3.x 移除：code_review_enabled / code_review_profiles / code_review_profile / code_review_languages
-    # 改由 execution-manifest.yaml 的 phase_prompts.code-view 是否存在作为唯一 SSOT，
-    # orchestrator bootstrap 时派生 code_view_enabled 字段。
-    code_view_enabled: bool = False  # 派生字段：从 manifest 的 phase_prompts.code-view 派生
+    # review 配置（v2.6: user-facing config fields）
+    code_review_enabled: bool = True
+    code_review_profiles: tuple[str, ...] = ()
+    code_review_profile: str = ""
+    code_review_languages: tuple[str, ...] = ()
 
     # 富化上下文（由 _first_next 从 project.yaml 预填充）
     module_roots: str = ""               # "[webvirt-backend, webvirt-agent-proto]"
@@ -145,7 +145,7 @@ class TrackState:
             "max_fail_retries": self.max_fail_retries,
             "max_fix_retries": self.max_fix_retries,
             "max_gate_fix_retries": self.max_gate_fix_retries,
-            "max_code_view_fix_retries": self.max_code_view_fix_retries,
+            "max_review_fix_retries": self.max_review_fix_retries,
             "phases": {k: v.to_dict() for k, v in self.phases.items()},
             "sub_pipelines": [sp.to_dict() for sp in self.sub_pipelines],
             "accepted_gaps": list(self.accepted_gaps),
@@ -161,7 +161,10 @@ class TrackState:
             "tasks_by_phase": dict(self.tasks_by_phase),
             "commands": list(self.commands),
             "timeout_seconds": self.timeout_seconds,
-            "code_view_enabled": self.code_view_enabled,
+            "code_review_enabled": self.code_review_enabled,
+            "code_review_profiles": list(self.code_review_profiles),
+            "code_review_profile": self.code_review_profile,
+            "code_review_languages": list(self.code_review_languages),
         }
 
     @classmethod
@@ -183,7 +186,7 @@ class TrackState:
             max_fail_retries=d.get("max_fail_retries", 3),
             max_fix_retries=d.get("max_fix_retries", 5),
             max_gate_fix_retries=d.get("max_gate_fix_retries", 2),
-            max_code_view_fix_retries=d.get("max_code_view_fix_retries", 3),
+            max_review_fix_retries=d.get("max_review_fix_retries", 3),
             phases=phases,
             sub_pipelines=sub_pipelines,
             accepted_gaps=tuple(d.get("accepted_gaps", ())),
@@ -199,13 +202,10 @@ class TrackState:
             tasks_by_phase=d.get("tasks_by_phase", {}),
             commands=tuple(d.get("commands", [])),
             timeout_seconds=d.get("timeout_seconds", 1800),
-            # v3.x 兼容：旧 snapshot 含 code_review_enabled → 派生出 code_view_enabled。
-            # 优先使用新字段 code_view_enabled；若缺则从旧字段回填（保留 v2.6 行为）。
-            code_view_enabled=(
-                bool(d.get("code_view_enabled"))
-                if d.get("code_view_enabled") is not None
-                else bool(d.get("code_review_enabled", True))
-            ),
+            code_review_enabled=d.get("code_review_enabled", True),
+            code_review_profiles=tuple(d.get("code_review_profiles", ())),
+            code_review_profile=d.get("code_review_profile", ""),
+            code_review_languages=tuple(d.get("code_review_languages", ())),
         )
 
     def replace(self, **kwargs: Any) -> "TrackState":
