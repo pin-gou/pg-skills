@@ -8,104 +8,113 @@ tasks.md 的章节顺序由 **stages × tracks** 二维展开驱动。
 
 ---
 
-## 生成算法（两阶段骨架填充法）
+## 生成算法（v3.2 升级：脚本外化）
 
-### 阶段零：决定 enabled_stages（受 on_conditions 控制）
+> **v3.2 核心变化**：tasks.md 的**章节标题骨架 + 章节编号 N + simple/standard 分流 +
+> environment block quote + final-gate + on_conditions 机械评估注释**——全部由
+> `pg-gen-tasks-skeleton.py` 机械生成。LLM 只负责按骨架填充 body 内容，不再维护
+> 章节编号、heading 顺序、simple/standard 分流逻辑。
 
-on_conditions 评估逻辑不变，与之前相同——详见 [./orchestration-model.md](./orchestration-model.md)「on_conditions & stage 动态启用」段。
+### 阶段零：调用骨架生成脚本
 
-最终输出 `enabled_stages` 列表（常驻 stage + 触发的 stage）。
-
-### 阶段一：生成章节标题骨架（机械顺序，无分支）
-
-按 `enabled_stages` 顺序，对每个 stage 严格按 `stage.tracks` 数组顺序执行，**禁止按 affected_tracks 分组、禁止跳过非 affected track、禁止调换 simple/standard 先后顺序**：
-
+```bash
+python3 .opencode/skills/pg-propose/scripts/pg-gen-tasks-skeleton.py \
+  --change <change-name> \
+  --proposal-md .pg/changes/<change>/proposal.md \
+  --affected-tracks "<track1>,<track2>,..." \
+  --environment "<stage1>→<env1>,<stage2>→<env2>,..."
 ```
+
+输入参数说明：
+
+| 参数 | 来源 | 必填 |
+|------|------|------|
+| `--change` | 阶段 1b 确认的变更名 | 是 |
+| `--proposal-md` | 阶段 2a 产物 | 是 |
+| `--affected-tracks` | 阶段 2c 判定结果 | 是 |
+| `--environment` | 阶段 2c LLM 按 selection_rules 选择 | 是 |
+
+输出：
+
+- `.pg/changes/<change>/tasks.md`：完整骨架
+- `.pg/changes/<change>/1-propose-review/on-conditions-eval.md`：on_conditions 评估模板
+- stdout JSON：sections 数组（章节清单 + 元数据）
+
+### 阶段一：脚本生成骨架（机械，全量展开）
+
+`pg-gen-tasks-skeleton.py` 按以下规则生成骨架：
+
+```python
+# Pseudo-code (actual logic in pg-gen-tasks-skeleton.py:build_sections)
+
 N = 1
-skeleton = []
-
-for stage in enabled_stages:
-    for track_id in stage.tracks:   # ← 严格按 config 数组顺序，禁止重排
+for stage in config.stages:                       # ← 按 config.stages 原序遍历
+    for track_id in stage.tracks:                 # ← 按 stage.tracks 数组顺序
         track_cfg = config.tracks[track_id]
-
-        # track 级 on_conditions: 所有条件未命中则跳过该 track (参考 orchestration-model.md)
-        track_on_conditions = track_cfg.get("on_conditions", [])
-        if track_on_conditions and not any(evaluate_condition(c, affected_paths, proposal_text) for c in track_on_conditions):
-            continue
-
         is_simple = track_cfg.get("type") == "simple"
 
         if is_simple:
-            # simple track: 1 个 heading，无论是否在 affected_tracks 中
-            heading = "## {N}. {stage.name}.{track_id} - {stage.name} {track_id}"
-            skeleton.append(heading)
+            append_section(N, stage, track_id, sub=None, is_simple=True)
             N += 1
         else:
-            # standard track: 4 个 heading（test/dev/verify/gate）
             for sub in ["test", "dev", "verify", "gate"]:
-                label = "{stage.name} 测试先行（{stage.test_key}）" if sub == "test" \
-                   else "{stage.name} 实现开发" if sub == "dev" \
-                   else "{stage.name} 集成验证" if sub == "verify" \
-                   else "{stage.name} 门控审查"
-                heading = "## {N}. {stage.name}.{track_id}:{sub} - {label}"
-                skeleton.append(heading)
+                append_section(N, stage, track_id, sub=sub, is_simple=False)
                 N += 1
 
 # 追加 final-gate
-skeleton.append("## {N}. final-gate - 最终门控审查")
+append_section(N, "final", "final-gate", sub=None, is_simple=False)
 ```
 
-**输出**：仅含 `##` 标题行的 tasks.md 骨架，body 为空。
+**关键不变量**：
 
-**track 级 `on_conditions`**：如果某 track 在 config 中定义了 `on_conditions`，上述骨架循环会在进入该 track 时先评估所有条件（LLM 推理，路径 + 语义维度，OR 语义）。所有条件均未命中 → 该 track 的 heading 完全跳过（不占章节号，不影响后续 track 的 N）。无 `on_conditions` 的 track 行为不变（always generate）。
+- 章节编号 N 从 1 开始**顺序递增，不跳过任何值**
+- 每个 stage × track × sub 都生成一个 heading（**不受 on_conditions 影响**）
+- on_conditions 评估结果以 **HTML 注释**形式嵌入每个章节 heading 下方
+- simple track 占 1 个章节号，standard track 占 4 个章节号
+- 末尾追加 final-gate 章节（占 1 个章节号）
 
-### 阶段二：按骨架顺序逐个填充 body
+### 阶段二：LLM 按骨架顺序填充 body
 
-阶段一的 heading（含编号 N、track_id、sub 前缀、标签）**禁止修改**，只填充 body：
+LLM 读取脚本 stdout 的 sections JSON，按数组顺序对每个章节填充 body：
 
-```
-final_lines = []
+| 章节类型 | 默认 body（脚本生成） | LLM 动作 |
+|---------|----------------------|---------|
+| `is_simple == true` | `- [ ] N.1 执行 tracks.<id>.commands（...）` | 保留不动 |
+| `is_simple == false` + `is_affected == false` | `- 无` | 保留不动 |
+| `is_simple == false` + `is_affected == true` + `sub in (test, dev)` | `- [ ] N.1 待 LLM 填充` | **替换为真实任务** |
+| `is_simple == false` + `is_affected == true` + `sub == verify` | lint/test/start/verify 4 条占位 | **替换为真实任务**，保留 Evidence Block |
+| `is_simple == false` + `is_affected == true` + `sub == gate` | `- 无` | 保留不动（编排器自动派遣 gate agent） |
+| `stage == "final"` | 3 条 final-gate 标准任务 | 保留不动 |
 
-for heading in skeleton:
-    parse track_id and sub from heading
+**硬约束**：
 
-    if heading is final-gate:
-        fill final-gate template body
-        continue
+- **禁止**修改任何 heading 文本、章节编号 N、stage/track/sub 前缀、标签
+- **禁止**调整章节顺序或跳过任何章节
+- **禁止**删除任何章节（包括 on_conditions 未命中的章节，heading 也保留）
+- **禁止**在 verify 章节的命令步骤后追加具体 shell 命令
+- **禁止**移除每个章节 heading 下的 `<!-- on_conditions_eval -->` HTML 注释（review 阶段需要）
 
-    is_simple = config.tracks[track_id].type == "simple"
-    if is_simple:
-        body = "- [ ] {N}.1 执行 tracks.{track_id}.commands（runner 派遣 pg-build/simple agent 按序执行）"
-    else:
-        is_affected = track_id in affected_tracks
-        if is_affected:
-            body = fill_real_tasks(track_id, stage, sub)  # 用具体实现任务替换
-        else:
-            body = "- 无"
-
-    final_lines.append(heading + "\n\n" + body)
-```
-
-**硬约束**：阶段一的 heading **禁止**被阶段二修改。填充 body 时禁止改变标题文本、编号、标签。
-
-### 阶段二各子章节模板
+### 各子章节模板
 
 standard track 各 sub 的 body 内容参照下方「各子章节模板」段填充。
 
-### 关键变化（v3.0 升级）
+### 与 v3.1 的差异总结
 
-- **新增阶段零** `enabled_stages`：根据 `on_conditions` 过滤 config.stages
-- **无 on_conditions 的 stage 视为常驻**，永远生成章节
-- **有 on_conditions 的 stage** 仅当 LLM 推理命中规则时才生成章节
-- tasks.md 章节顺序由 enabled_stages 顺序决定，**不再等同于 config.yaml.stages 数组顺序**
-- runner 按 tasks.md 实际章节执行，与 config.stages 数组解耦
+| 维度 | v3.1（已废弃） | v3.2（当前） |
+|------|---------------|-------------|
+| 骨架生成 | LLM 手写 heading | `pg-gen-tasks-skeleton.py` 脚本生成 |
+| 章节编号维护 | LLM 维护 N 计数器 | 脚本自动维护 |
+| simple/standard 分流 | LLM 判断 | 脚本分流 |
+| on_conditions 跳过 effect | 该 track heading 不生成 | heading 保留，body = `- 无` |
+| on_conditions 评估时机 | LLM 在阶段二推理 | 脚本机械评估 + LLM 阶段三复核 |
+| on_conditions 留痕位置 | review-notes.md 段落 | tasks.md HTML 注释 + on-conditions-eval.md + review-notes.md 合并 |
 
-### v3.1 升级（simple track 分流）
+### v3.0/v3.1 历史说明（保留作对比）
 
-- **新增 track 类型分流**：生成算法增加 `is_simple` 判断
-- simple track 在 tasks.md 中**只占 1 个章节号**（替代原来 4 个 - 无 占位）
-- canonical form 一步到位生成（heading 含 `(simple track: 派遣 pg-build/simple agent 执行 commands)` + body 单 `- 无` 行），与 runner 的 `_noopify_simple_track_sections` canonical form 完全对齐
-- validator 仍 `valid: true`（`_is_simple_track()` 检测 simple type 后列入 `skipped_items`，不强制要求 4 子章节）
+> 以下两段描述 v3.0/v3.1 的行为，已被 v3.2 取代，仅供了解演进过程。
+
+- **v3.0 升级（已废弃）**：新增 enabled_stages 概念，根据 on_conditions 过滤 config.stages。无 on_conditions 的 stage 视为常驻；有 on_conditions 的 stage 仅当 LLM 推理命中规则时才生成章节。
+- **v3.1 升级（已废弃）**：新增 track 类型分流——simple track 在 tasks.md 中只占 1 个章节号，canonical form 一步到位生成。
 
 ### 关键变化（v3.0 升级）
 

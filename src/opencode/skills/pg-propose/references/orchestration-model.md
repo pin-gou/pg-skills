@@ -117,129 +117,78 @@ affected_tracks 为空时（如纯文档变更），整个 verify 章节标 `无
 
 ---
 
-## on_conditions & stage 动态启用
+## on_conditions & 机械评估（v3.2 升级）
 
 ### 概念
 
 - `affected_tracks` —— 本次变更改动了哪些业务 track
 - `affected_paths` —— 本次变更触及了哪些文件路径 (glob 列表)
-- `on_conditions` —— config.stages 中某 stage 的"启用规则" (`list[string]` 自然语言)
+- `on_conditions` —— config.stages / config.tracks 中的"启用规则" (`list[string]` 自然语言)
 
 三者协作：
-- **affected_tracks** 决定 `stages[*].tracks` 哪些生成 `- 无` vs 实际任务
-- **on_conditions** 决定 `stages[*]` 哪些 stage 整体启用 (生成 tasks.md 章节 + 写入 execution-manifest.yaml 的 stages[i].environment)
 
-### 与 selection_rules 的区别
+- **affected_tracks** 决定 body 是 `- 无` 还是具体任务（heading 始终生成）
+- **on_conditions** 决定**机械评估结果**，由 `pg-gen-tasks-skeleton.py` 自动产出，**不再影响 tasks.md 章节生成**（v3.2 起所有 stage × track × sub 都生成 heading）
 
-| 字段 | 触发时机 | 语义 | 消费者 |
-|---|---|---|---|
-| `stages[*].environment.selection_rules` | stage 已启用 + `environment.required=true` 时 | 按顺序匹配选 env 名称 | runner |
-| `stages[*].on_conditions` | pg-propose 生成 tasks.md 之前 | 任一命中即启用 stage (OR 语义) | pg-propose |
+### v3.2 行为变化（与 v3.1 的差异）
 
-`on_conditions` 是 pg-propose 阶段的"是否生成章节"判定；
-`selection_rules` 是 runner 阶段的"哪个 env"判定。
+| 维度 | v3.1（已废弃） | v3.2（当前） |
+|------|---------------|-------------|
+| 章节生成 | on_conditions 未命中 → 不生成 heading | on_conditions 未命中 → 仍生成 heading，body = `- 无` |
+| 章节编号 N | 受 on_conditions 跳过影响（连续递增） | 全量展开，编号稳定不变 |
+| 评估执行者 | LLM 在阶段二手工推理 | `pg-gen-tasks-skeleton.py` 脚本机械评估 |
+| LLM 决策时机 | 阶段二生成 tasks.md 前 | 阶段三 review 时复核机械评估 |
+| 留痕位置 | review-notes.md 段落 | `on-conditions-eval.md` + review-notes.md 合并 |
 
-两者形态一致（都是 `list[string]` 自然语言），但消费者与触发时机完全不同。
+**核心好处**：
 
-### 解析算法（pg-propose 阶段二 2c.5）
+- 章节编号 N 在生成后**永远不变**，LLM 反悔启用某个 stage 只需改 body
+- 决策可追溯：机械评估的依据在 HTML 注释 + 评估表格中完整保留
+- LLM 注意力聚焦：阶段二不再维护 on_conditions 决策逻辑，只在阶段三做最终复核
 
-pg-propose 收到 config.stages 时，对每个 stage 做：
+### 机械评估算法（pg-gen-tasks-skeleton.py 实现）
 
 ```python
-def is_stage_enabled(stage, affected_paths, proposal_md_text):
-    on_conditions = stage.get("on_conditions")
-    if not on_conditions:
-        return True  # 无 on_conditions = 常驻 stage，永远启用
-
-    # 解析每条自然语言规则（LLM 推理）
-    for condition in on_conditions:
-        if evaluate_condition(condition, affected_paths, proposal_md_text):
-            return True
-    return False
-
-
-def evaluate_condition(condition, affected_paths, proposal_md_text):
-    """
-    自然语言规则的 LLM 推理:
-    1. 提取规则中的关键路径 glob（如 pg-spec-deprecated/scripts/**）
-    2. 检查 affected_paths 是否命中（机械匹配）
-    3. 检查 proposal.md 文本是否包含规则中描述的语义关键词
-       （如"环境层脚本"、"fixtures"、"setup 脚本注入"）
-    4. 任一维度命中即认为规则成立（OR 语义）
-    """
-    # LLM 推理路径：返回 bool
-    ...
+def evaluate_on_conditions(rule, affected_paths, proposal_text):
+    """Path-glob 维度 + 关键词维度, OR 语义."""
+    path_hit = check_glob_match(rule, affected_paths)
+    semantic_hit = check_keyword_match(rule, proposal_text)
+    return {
+        "rule": rule,
+        "path_hit": path_hit,
+        "semantic_hit": semantic_hit,
+        "matched": path_hit or semantic_hit,
+    }
 ```
 
-### 示例
+- **path 维度**：从规则中提取 glob（如 `.pg/hooks/**`、`pg-spec-deprecated/scripts/**`），
+  与 `affected_paths`（从 proposal.md "### 包含"段提取的 glob 列表）做 fnmatch 匹配
+- **semantic 维度**：从规则中提取关键词（去停用词后），检查是否在 proposal.md 全文中出现
+- 任一维度命中 → 规则成立
 
-```yaml
-stages:
-  - name: prepare-env-scripts
-    on_conditions:
-      - "本变更 affected_paths 命中 pg-spec-deprecated/scripts/** 任一路径"
-      - "本变更 proposal.md 包含对环境层脚本或 fixtures 的修改描述"
-```
+### on_conditions 评估记录模板
 
-- 若 `affected_paths = ["pg-spec-deprecated/scripts/fixtures/e2e-test-users.sql"]`，
-  pg-propose 判定第 1 条命中 → stage 启用
-- 若 `affected_paths = []` 且 proposal.md 不含"环境层脚本"等关键词 → 两条都不命中 → stage 跳过
+`pg-gen-tasks-skeleton.py` 自动生成 `.pg/changes/<change>/1-propose-review/on-conditions-eval.md`，
+含 stage 级 / track 级每条规则的机械评估表：
 
-### 与 runner 的契约
+| # | 规则 | 机械评估 (path) | 机械评估 (semantic) | 建议 | 最终决策 | 依据 |
+|---|------|----------------|--------------------|------|----------|------|
+| 1 | "本变更 affected_paths 命中 .pg/hooks/**" | ✅ | ❌ | 命中 | [ ] |  |
+| 2 | "本变更包含 fixtures 修改" | ❌ | ✅ | 命中 | [ ] |  |
+| **结论** | | | | | [ ] |  |
+
+LLM 在阶段三 review 时：
+
+1. 对每条规则勾选「最终决策」：同意 → `[x]`；覆盖 → `[~]` + 写依据
+2. 把整个表格内容**合并到** `review-notes.md` 的「on_conditions 评估记录」段
+3. 若某 stage/track 决策翻转为"启用"，需在 review-notes 标注"建议启用"，由用户在 review 阶段决定
+
+### 与 runner / validator 的契约
 
 - runner **不解析** `on_conditions` 字段
 - runner 按 tasks.md 实际章节数（不被 config.stages 数组长度限制）执行
-- 若 runner 收到的 tasks.md 含 config.stages 中没有的 stage 章节 → 按 tasks.md 章节照常执行（向后兼容）
-- 若 tasks.md 不含 config.stages 中的某 stage 章节 → runner 跳过该 stage（因为 tasks.md 是 SSOT）
-
-### 评审留痕
-
-`on_conditions` 评估存在不确定性（自然语言），pg-propose 应在 `review-notes.md` 留痕
-记录每条 on_conditions 的评估结果（命中/未命中 + 依据），便于 review 阶段追溯。
-
-例：
-
-```markdown
-## on_conditions 评估记录
-
-### prepare-env-scripts
-- 规则 1: "本变更 affected_paths 命中 `pg-spec-deprecated/scripts/**` 任一路径"
-  - 评估: 命中 ✅
-  - 依据: affected_paths 含 `pg-spec-deprecated/scripts/fixtures/e2e-test-users.sql`
-- 规则 2: "本变更 proposal.md 包含对环境层脚本或 fixtures 的修改描述"
-  - 评估: 未评估（规则 1 已命中）
-- 结论: stage 启用 ✅
-```
-
-### 与 validator 的契约
-
-pg-propose LLM 在 2c.5 评估 on_conditions 得到的 `enabled_stages` 决策，需要显式通知 `pg-validate-tasks.py`：
-
-- **tasks.md 章节** = `enabled_stages` × `stage.tracks`（pg-propose 生成产物）
-- **validator 调用** = `validate <change> --skip-stages <disabled-stage-1>,<disabled-stage-2>,...`
-- **review-notes.md** = 「on_conditions 评估记录」段留痕（决策的可追溯凭据）
-- **runner 行为** = 无章节视为 `completed (skip)`，与 pg-propose 设计一致（不需要 `--skip-stages`）
-
-**为什么需要显式传参**：
-
-- `on_conditions` 是自然语言规则，评估本质是 LLM 推理
-- validator 是纯 Python 脚本，无 LLM 推理能力
-- 通过 `--skip-stages` 把"未启用的 stage"显式传过去，让 validator 与 runner 行为对齐
-
-**`--skip-stages` 参数语义**：
-
-| 属性 | 行为 |
-|------|------|
-| 匹配方式 | 严格按 `stage.name` 整词匹配（非前缀） |
-| 多值语法 | 逗号分隔，可重复传：`--skip-stages a --skip-stages b,c` |
-| 范围 | 跳过该 stage 下所有 `<stage>.<track>` item |
-| 输出 | 被跳过的 item 计入 `summary.skipped_items`，出现在 human report 的 `## Skipped Items` 段 |
-
-**漏传后果**：
-
-- validator 报 `missing_track` error
-- LLM 必须（a）补占位章节让 validator 通过（不推荐），或（b）传 `--skip-stages` 让 validator 接受
-- 选 (b)：SKILL.md 2e.5 段已明确说明
+- tasks.md 含 config.stages 中没有的 stage 章节 → runner 照常执行（向后兼容）
+- tasks.md 不含 config.stages 中的某 stage 章节 → runner 跳过该 stage（tasks.md 是 SSOT）
 
 ### track 级 on_conditions
 
@@ -256,15 +205,11 @@ tracks:
 
 | 属性 | stage 级 | track 级 |
 |------|---------|---------|
-| 字段位置 | `stages[*].on_conditions` | `tracks.<id>.on_conditions` |
-| 评估时机 | 2c.5（tasks.md 生成前） | 2e 骨架阶段（逐 track） |
-| 跳过 effect | 整个 stage 所有 track 不生成 | 仅该 track 的 heading 不生成 |
-| 留痕要求 | review-notes.md 必须记录 | 不强制留痕 |
-| 评估语义 | 任一命中即启用（OR） | 同一维度的 OR 语义 |
-
-**LLM 评估方式**：同 stage 级 `evaluate_condition`——检查 `affected_paths` glob 匹配 + `proposal.md` 语义关键词，任一维度命中即认为条件成立。
-
-**阶段二填充时的表现**：track 因 `on_conditions` 跳过后，后续 track 的章节编号 N 相应减少（被跳过的 track 不占编号）。与 `affected_tracks` 中`- 无` 章节的区别：后者占章节号但内容为空，前者不占章节号。
+| 字段位置 | `stages[*].on_conditions` | `tracks[*].on_conditions` |
+| 评估时机 | 阶段二脚本生成 tasks.md 时 | 阶段二脚本生成 tasks.md 时 |
+| 留痕位置 | tasks.md 章节 HTML 注释 + on-conditions-eval.md | 同上 |
+| 评估语义 | 任一命中即建议启用（OR） | 同一维度的 OR 语义 |
+| heading 生成 | 始终生成 | 始终生成（v3.2 起） |
 
 ---
 
