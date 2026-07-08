@@ -1,7 +1,7 @@
 """v2.6: Code review profile loader.
 
 职责：
-1. 加载 .pg/code-review.yaml 的 profile 索引
+1. 加载 .pg/code-review/code-review.yaml 的 profile 索引
 2. 加载单个 profile（YAML 结构）
 3. 加载 .pg/code-review/<profile>/<check>.md 规则文档
 4. 解析 track 配置的优先级：用户显式 > language 自动派发 > default
@@ -88,8 +88,8 @@ def profile_dir(project_root: str) -> Path:
 
 
 def profile_index_path(project_root: str) -> Path:
-    """profile 索引文件：.pg/code-review.yaml"""
-    return Path(project_root) / ".pg" / "code-review.yaml"
+    """profile 索引文件：.pg/code-review/code-review.yaml"""
+    return Path(project_root) / ".pg" / "code-review" / "code-review.yaml"
 
 
 # ============================================================
@@ -137,14 +137,14 @@ def _parse_profile(name: str, raw: dict[str, Any]) -> Profile:
 
 
 def list_available_profiles(project_root: str) -> list[str]:
-    """列出 .pg/code-review.yaml 中所有 profile 名。"""
+    """列出 .pg/code-review/code-review.yaml 中所有 profile 名。"""
     data = _load_yaml(profile_index_path(project_root))
     profiles = data.get("profiles") or {}
     return sorted(profiles.keys())
 
 
 def load_profile(project_root: str, name: str) -> Profile:
-    """从 .pg/code-review.yaml 加载单个 profile。
+    """从 .pg/code-review/code-review.yaml 加载单个 profile。
 
     找不到时返回 default profile（空骨架），避免硬失败。
     """
