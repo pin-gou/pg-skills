@@ -606,7 +606,7 @@ def _pick_env(config: dict) -> tuple:
 
 TAB_NAMES = ["常用操作", "Environment", "Instance", "Module"]
 TAB_KEYS = ["f", "e", "i", "m"]
-_ACTION_ORDER = ["start", "stop", "logs", "tail"]
+_ACTION_ORDER = ["start", "stop", "health_check", "logs", "tail"]
 
 
 def _build_quick_items() -> list:
@@ -1095,7 +1095,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--instance", help="instance 名称")
     parser.add_argument(
         "--action",
-        help="action 名称（build/lint/test.*/start/stop/logs/tail/prepare_env/clean_env/start_all_instances/stop_all_instances/prepare_env_and_start）",
+        help="action 名称（build/lint/test.*/start/stop/health_check/logs/tail/prepare_env/clean_env/start_all_instances/stop_all_instances/prepare_env_and_start）",
     )
     parser.add_argument("--cmd", help="直接执行的 shell 命令（跳过菜单）")
     return parser.parse_args(argv)
