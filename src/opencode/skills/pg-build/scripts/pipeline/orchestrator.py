@@ -36,6 +36,7 @@ from pipeline.config import (
     resolve_module_details,
     resolve_module_roots,
     resolve_test_commands,
+    resolve_module_languages,
     resolve_env_instances,
     resolve_hooks,
 )
@@ -247,7 +248,7 @@ class Orchestrator:
                             stage_env_timeout[env_name] = timeout
                         break
 
-        SUB_PHASE_NAMES = ("test", "dev", "verify", "gate")
+        SUB_PHASE_NAMES = ("test", "dev", "code-view", "verify", "gate")
 
         tracks: dict[str, TrackState] = {}
         track_types: dict[str, str] = {}
@@ -273,6 +274,7 @@ class Orchestrator:
                 max_fail_retries=cfg.get("max_fail_retries", 3),
                 max_fix_retries=cfg.get("max_fix_retries", 5),
                 max_gate_fix_retries=cfg.get("max_gate_fix_retries", 2),
+                max_code_view_fix_retries=cfg.get("max_code_view_fix_retries", 3),
                 module_roots=resolve_module_roots(project_config, module_names),
                 module_details=resolve_module_details(project_config, module_names),
                 test_commands=resolve_test_commands(project_config, module_names),
@@ -285,9 +287,17 @@ class Orchestrator:
                 tasks_by_phase=tasks_by_phase,
                 commands=tuple(cfg.get("commands", [])),
                 timeout_seconds=cfg.get("timeout_seconds", 1800),
+                # v2.6: code-view 配置
+                code_review_enabled=cfg.get("code_review_enabled", True),
+                code_review_profiles=tuple(cfg.get("code_review_profiles", ())),
+                code_review_profile=cfg.get("code_review_profile", ""),
+                code_review_languages=resolve_module_languages(project_config, module_names),
             )
-            if cfg.get("type") == "simple":
+            is_simple = cfg.get("type") == "simple"
+            if is_simple:
                 track_types[tid] = "simple"
+                # v2.6: simple track 自动跳过 code-view（无需配置）
+                tracks[tid] = tracks[tid].replace(code_review_enabled=False)
 
         # 确定当前 stage
         first_stage = PipelineState.extract_stage(order[0]) if order else ""

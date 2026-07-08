@@ -1,0 +1,26 @@
+# fix-code-view.yaml — sub=fix-code-view 完整提示词
+# v2.6 新增：code-view 子 pipeline 中的 fix 阶段。
+
+prompt: |
+  ### 必读源报告（code-view ESCALATE 派发）
+
+  - **源 code-view 报告**: {code_view_report_path}
+
+  请用 Read 工具逐字读取该文件。报告包含 code-view agent 记录的
+  ESCALATE Issue 详情（CV-* 项）、每项检查的证据、score 等完整上下文。
+
+  ### 修复范围
+
+  - fix_cycle: {fix_cycle}
+  - 只修复 source code-view 报告中列出的 CV-* 项
+  - 不要引入超出修复范围的新功能
+  - 不要修改 design.md（设计层 bug 需 escalate）
+
+  ### 修复后必跑流程
+
+  1. 修改源码
+  2. 跑 {test_commands} 单元测试（必须通过）
+  3. 跑模块 lint（必须 0 警告）
+  4. 只跑 code-view 报告中标记为 FAIL 的检查项（不要跑全部）
+  5. 重新计算 cv_score（仅基于 FAIL 已修复的检查项）
+  6. 用 cat > 写盘到 2-build/{fix_report_filename}

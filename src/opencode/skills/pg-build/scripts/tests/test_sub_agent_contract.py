@@ -173,7 +173,11 @@ class TestSubAgentContract(unittest.TestCase):
 
     def test_phase_rules_consistency(self):
         """PHASE_RULES 必须覆盖所有 phase。"""
-        expected = {"test", "dev", "verify", "gate", "fix", "fix-gate", "simple"}
+        expected = {
+            "test", "dev", "verify", "gate",
+            "fix", "fix-gate", "simple",
+            "code-view", "fix-code-view",  # v2.6
+        }
         self.assertEqual(set(PHASE_RULES.keys()), expected)
 
     # ============================================================

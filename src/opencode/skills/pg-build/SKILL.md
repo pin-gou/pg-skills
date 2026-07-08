@@ -27,8 +27,24 @@ PipelineAction                 ← dispatch / advance / done / failed / env_swit
 orchestrator                   ← next() / record() / progress()
     │
     ▼
-sub-agent (via Task tool)      ← test / dev / verify / gate / fix / fix-gate
+sub-agent (via Task tool)      ← test / dev / code-view / verify / gate / fix / fix-code-view / fix-gate
 ```
+
+## v2.6 新增：Code View 阶段
+
+每个 track 在 `dev → verify` 之间增加 **code-view** 阶段（dev 完成后、verify 前），由独立的 code-view agent 对代码做静态审查。目的是在集成/E2E 验证之前发现"实现与设计不一致 / scope creep / 模式不一致 / 测试契约弱"等**静态代码问题**，降低 fix cycle 成本。
+
+完整流程：
+
+```
+test → dev → code-view → verify → gate
+              ↓ escalate (CV-* FAIL)
+            [fix-code-view → code-view → ...] (max N 次, 独立计数 code_view_fix_cycles)
+              ↓ fail
+            accepted_gaps → gate
+```
+
+详见 [§v2.6 Code View 阶段](#v26-code-view-阶段)。
 
 所有状态管理（`PipelineState` / `TrackState` / `PhaseState`）在 `scripts/pipeline/state.py` 中定义为 frozen dataclass。
 
@@ -202,13 +218,133 @@ reducer 返回 `kind="error"` 时：
 - **State**: `scripts/pipeline/state.py` (frozen dataclass)
 - **Event Schema**: `scripts/pipeline/events.py` (所有 event type 定义)
 - **Dispatch**: `scripts/pipeline/dispatch.py` (构建 action JSON + dispatch file)
+- **Sub Pipeline**: `scripts/pipeline/sub_pipeline.py` (递归子 pipeline，含 code-view-cycle)
+- **Profile Loader**: `scripts/pipeline/profile_loader.py` (v2.6: profile 加载 + Union 合并)
 - **Bootstrap**: `scripts/bootstrap.py` (pipeline 启动副作用)
-- **Templates**: `prompt-templates/*.yaml` (8 个 phase 模板)
+- **Templates**: `prompt-templates/*.yaml` (9 个 phase 模板，含 code-view / fix-code-view)
+- **v2.6 Code View**:
+  - `.pg/code-review.yaml` (profile 索引)
+  - `.pg/code-review/<profile>/*.md` (检查项执行细则)
+  - `.opencode/agents/pg-build/code-view.md` (sub-agent 定义)
+  - `.opencode/agents/pg-build/fix-code-view.md` (fix sub-agent 定义)
 - **v2.4 result.json 落盘**:
   - `scripts/pg-build-result` (`--output-path` / `--require-output` 参数)
   - `scripts/pipeline/orchestrator.py:_derive_result_path` (dispatch_file → result.json 派生)
   - `scripts/pipeline/dispatch.py` (返回 `expected_result_path` 字段)
   - `prompt-templates/blocks/sub_agent_contract.yaml` (强制落盘指令块)
+
+## v2.6 Code View 阶段
+
+### 位置
+
+```
+test → dev → code-view → verify → gate
+```
+
+code-view 是**新 phase**（不是 verify 内部的步骤），由独立的 `pg-build/code-view` agent 执行。
+
+### 与 verify 的区别
+
+| 维度 | code-view（静态） | verify（运行时） |
+|------|-------------------|------------------|
+| 视角 | 代码静态属性 | 运行时行为 |
+| 检查项 | design 对齐 / scope creep / 模式一致 / 文件位置 / 测试契约 | V-* 验证项 |
+| 不做的事 | 跑测试 / 启服务 | 改代码 |
+| 触发 fix | CV-*（设计/模式类） | V-*（功能/集成类） |
+
+### Profile 配置
+
+`code-view` 检查项由 **profile** 控制，位于 `.pg/code-review.yaml`：
+
+```yaml
+profiles:
+  default:           # 兜底
+    checks: { design_alignment: ..., scope_creep: ..., ... }
+    pass_threshold: 80
+    escalate_threshold: 60
+  java-spring:       # 语言 profile（自动派发）
+    inherit: default
+    checks: { pattern_consistency: ..., null_safety: ... }
+    pass_threshold: 85
+  security:          # 显式 profile（需用户指定）
+    checks: { secret_leak: ..., auth_bypass: ... }
+    pass_threshold: 90
+```
+
+每项检查的执行细则在 `.pg/code-review/<profile_name>/<check_name>.md`。
+
+### Profile 选择优先级（高 → 低）
+
+1. `track.code_review_profiles: [...]` — 用户显式指定（按顺序 = 优先级）
+2. `track.code_review_profile: "..."` — legacy 单 profile
+3. 按 `module_details[].language` 自动派发（java → java-spring, go → go, ...）
+4. `default` 兜底
+
+### Union 合并语义
+
+| 字段 | 合并策略 |
+|------|----------|
+| `checks` | 并集（包含 inherit 链） |
+| `weight` | `max(各 profile 同名项)` |
+| `enabled` | `OR`（任一为 true 即 true） |
+| `pass_threshold` / `escalate_threshold` | `min`（更严格）— **仅取显式 profile，不含 inherit 链** |
+
+### Track 配置
+
+```yaml
+# .pg/project.yaml
+tracks:
+  backend:
+    code_review_enabled: true          # 默认 true
+    code_review_profiles: []           # 不写 → 按 language 自动派发
+    max_code_view_fix_retries: 3       # 默认 3
+  auth-service:
+    code_review_enabled: true
+    code_review_profiles:              # 显式指定（按顺序 = 优先级）
+      - security
+      - java-spring
+  proto-gen:
+    # simple track 自动 code_review_enabled=false（无需配置）
+```
+
+### Score 协议
+
+`code-view` agent 返回时 `summary` 必须包含：
+
+```
+cv_score: <0-100>, p0_failures: [CV-1, CV-3]
+```
+
+| cv_score 范围 | disposition | 下一步 |
+|--------------|-------------|--------|
+| ≥ pass_threshold | `completed` | → verify |
+| escalate_threshold ≤ score < pass | `escalate` | → fix-code-view 循环 |
+| < escalate_threshold | `failed` | → workflow_failed |
+
+### fix-code-view 循环
+
+`escalate` 触发独立子 pipeline `code-view-cycle`（phases = `fix-code-view`, `code-view`），与 verify 的 fix 循环**不共享计数**：
+
+```
+verify.fix_cycles        ← verify escalate 计数
+code-view.code_view_fix_cycles  ← code-view escalate 计数（独立）
+```
+
+`max_code_view_fix_retries` 默认为 3，耗尽后强制进 verify。
+
+### 报告文件命名
+
+| 文件 | 内容 |
+|------|------|
+| `2-build/{seq}-{track}-code-view.md` | code-view agent 产出的审查报告 |
+| `2-build/{seq}-{track}-fix-code-view-{cycle}.md` | fix-code-view agent 产出的修复记录 |
+
+### 关闭方式
+
+- `track.code_review_enabled: false` — 关闭单个 track
+- `track_types[tid] == "simple"` — simple track 自动关闭（无需配置）
+
+---
 
 ## v2.5 record 命令支持 --result-json
 

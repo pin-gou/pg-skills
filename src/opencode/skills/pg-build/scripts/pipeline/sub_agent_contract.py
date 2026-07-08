@@ -17,6 +17,7 @@ from pipeline.events import (
     STATUS_ESCALATE,  # v2.2: escalate 校验
     PHASE_STATUS_ALLOWED,
     SUB_GATE,
+    SUB_CODE_VIEW,
     FINAL_GATE_TRACK,
 )
 
@@ -60,6 +61,19 @@ PHASE_RULES: dict[str, dict[str, Any]] = {
         "evidence_required": False,
         "report_required": False,
         "outputs_required": True,  # v2.2: dev 阶段 outputs 必填（产物列表）
+        "tasks_updated_required": True,
+    },
+    # v2.6: code-view phase（dev 后 verify 前的静态代码审查）
+    "code-view": {
+        "evidence_required": True,
+        "report_required": True,
+        "tasks_updated_required": "escalate_only",
+        "cv_score_required": True,  # summary 必须含 cv_score
+    },
+    "fix-code-view": {
+        "evidence_required": False,
+        "report_required": True,  # 与 fix 一致：修复记录必填
+        "outputs_required": True,
         "tasks_updated_required": True,
     },
     "simple": {
@@ -202,16 +216,17 @@ def validate_record_args(
             )
 
     # ── v2.2: escalate 时强制 evidence（允许 outputs/report_path fallback） ──
-    if status == STATUS_ESCALATE and phase == "verify":
+    if status == STATUS_ESCALATE and phase in ("verify", "code-view"):
         effective_evidence = list(evidence_paths) if evidence_paths else []
         if not effective_evidence and outputs:
             effective_evidence = [s.strip() for s in outputs.split(",") if s.strip()]
         if report_path and report_path not in effective_evidence:
             effective_evidence.append(report_path)
         if not effective_evidence:
+            phase_label = "code-view" if phase == "code-view" else "verify"
             return False, (
-                "schema_violation: escalate 要求 --evidence 非空（需包含 verify 报告路径），"
-                "请让 sub-agent 产出可追溯证据文件"
+                f"schema_violation: escalate 要求 --evidence 非空（需包含 {phase_label} 报告路径），"
+                f"请让 sub-agent 产出可追溯证据文件"
             )
 
     # ── v2.1: gate / final-gate 要求 summary 含 gate-score ──
@@ -227,6 +242,19 @@ def validate_record_args(
                 f"schema_violation: gate_score={score} 不在 [0, 100] 范围"
             )
 
+    # ── v2.6: code-view 要求 summary 含 cv_score ──
+    if rule_track == SUB_CODE_VIEW:
+        score = parse_gate_score(summary)  # 复用同一解析器：cv_score 或 final_score
+        if score is None:
+            return False, (
+                f"schema_violation: phase={phase} (track={track}) 要求 summary 中含 "
+                f"'cv_score: <0-100>', 例如 'cv_score: 85, p0_failures: [CV-1]'"
+            )
+        if not (0 <= score <= 100):
+            return False, (
+                f"schema_violation: cv_score={score} 不在 [0, 100] 范围"
+            )
+
     # ── outputs 中的路径：警告但不阻断（产物可能尚未落盘） ──
     if outputs:
         for p in (s.strip() for s in outputs.split(",")):
@@ -240,20 +268,21 @@ def validate_record_args(
 
 
 def parse_gate_score(summary: str) -> int | None:
-    """从 summary 解析 gate_score。
+    """从 summary 解析 gate_score / final_score / cv_score。
 
     支持格式：
       - 'gate_score: 85, p0_failures: []'
       - 'gate_score=85'
       - 'final_score: 92, min_track_score: 80, p0_failures: [G-1]'
+      - 'cv_score: 90, p0_failures: []'  # v2.6: code-view 用
 
     Returns:
         int: 0-100 之间的分数
         None: 未找到或解析失败
     """
     import re
-    # 同时匹配 gate_score 和 final_score（final-gate 用）
-    m = re.search(r'(?:gate_score|final_score)\s*[=:]\s*(\d+)', summary)
+    # 同时匹配 gate_score / final_score / cv_score
+    m = re.search(r'(?:gate_score|final_score|cv_score)\s*[=:]\s*(\d+)', summary)
     if m:
         try:
             return int(m.group(1))

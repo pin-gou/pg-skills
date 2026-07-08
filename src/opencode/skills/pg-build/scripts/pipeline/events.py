@@ -18,10 +18,12 @@ SUB_GATE = "gate"
 SUB_FIX = "fix"
 SUB_FIX_GATE = "fix-gate"
 SUB_SIMPLE = "simple"
+SUB_CODE_VIEW = "code-view"
+SUB_FIX_CODE_VIEW = "fix-code-view"
 
 ALL_SUBS: tuple[str, ...] = (
-    SUB_TEST, SUB_DEV, SUB_VERIFY, SUB_GATE,
-    SUB_FIX, SUB_FIX_GATE, SUB_SIMPLE,
+    SUB_TEST, SUB_DEV, SUB_CODE_VIEW, SUB_VERIFY, SUB_GATE,
+    SUB_FIX, SUB_FIX_CODE_VIEW, SUB_FIX_GATE, SUB_SIMPLE,
 )
 
 
@@ -43,13 +45,15 @@ STATUSES_ALL: frozenset[str] = frozenset(ALL_STATUSES)
 # Phase → 合法 status 映射（v2.1 新增）
 # 编排器在 record 时校验 sub-agent 返回的 status 是否与 phase 匹配
 PHASE_STATUS_ALLOWED: dict[str, frozenset[str]] = {
-    SUB_TEST:     frozenset({STATUS_COMPLETED, STATUS_FAILED}),
-    SUB_DEV:      frozenset({STATUS_COMPLETED, STATUS_FAILED}),
-    SUB_SIMPLE:   frozenset({STATUS_COMPLETED, STATUS_FAILED}),
-    SUB_VERIFY:   frozenset({STATUS_COMPLETED, STATUS_ESCALATE, STATUS_FAILED}),
-    SUB_FIX:      frozenset({STATUS_COMPLETED, STATUS_FAILED}),
-    SUB_FIX_GATE: frozenset({STATUS_COMPLETED, STATUS_FAILED}),
-    SUB_GATE:     frozenset({STATUS_PASS, STATUS_FAIL}),
+    SUB_TEST:          frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_DEV:           frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_SIMPLE:        frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_CODE_VIEW:     frozenset({STATUS_COMPLETED, STATUS_ESCALATE, STATUS_FAILED}),
+    SUB_VERIFY:        frozenset({STATUS_COMPLETED, STATUS_ESCALATE, STATUS_FAILED}),
+    SUB_FIX:           frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_FIX_CODE_VIEW: frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_FIX_GATE:      frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_GATE:          frozenset({STATUS_PASS, STATUS_FAIL}),
     # final-gate 用 phase="gate" 但 track="final-gate"，由 caller 区分
 }
 

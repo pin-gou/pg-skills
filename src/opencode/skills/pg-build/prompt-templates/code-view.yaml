@@ -1,0 +1,38 @@
+# code-view.yaml — sub=code-view 完整提示词
+# v2.6 新增：dev 后 verify 前的静态代码审查 phase。
+
+prompt: |
+  ### 阶段定位
+
+  本阶段是 **code-view**（静态代码审查），处于 `dev → code-view → verify` 流程的中间位置。
+  关注的是代码**静态属性**是否符合 design.md + 编码规约，与 verify 阶段的"运行时行为"互补。
+
+  ### 必读源文档
+
+  - **design.md**: `.pg/changes/{change_name}/design.md` — 期望实现的 API/DTO/数据结构/契约
+  - **tasks.md**: `.pg/changes/{change_name}/tasks.md` — 任务清单与验收标准
+  - **profile 配置**: `.pg/code-review.yaml` — 检查项 + 权重 + threshold
+  - **profile 规则**: `.pg/code-review/<profile>/<check>.md` — 每项检查的执行细则
+
+  ### 审查范围
+
+  - 仅检查 dev agent 在 `git diff feat/pg/{change}` 中的新增/修改文件
+  - 不重跑测试（那是 verify 阶段的工作）
+  - 不修改源码
+
+  ### 评分协议（必填）
+
+  summary 必须包含：
+  - `cv_score: <0-100>` — 加权平均分
+  - `p0_failures: [CV-1, CV-3]` — P0 失败项列表（CV-* ID）
+
+  ### 输出报告
+
+  - 报告路径: `{change}/2-build/{report_seq}-{item}-code-view.md`
+  - 报告内含每项检查的 PASS/FAIL 判定与证据
+
+  ### 触发 fix 循环
+
+  - score < escalate_threshold（默认 60） → 直接 workflow_failed
+  - pass_threshold（默认 80）≤ score < escalate_threshold → escalate 走 fix-code-view 循环
+  - score ≥ pass_threshold → completed → 进入 verify

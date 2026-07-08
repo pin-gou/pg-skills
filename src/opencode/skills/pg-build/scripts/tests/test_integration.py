@@ -38,6 +38,18 @@ def _make_report_at(directory: str, filename: str, content: str = "# PASS\ngate 
     return path
 
 
+def _run_code_view(orch, summary: str = "cv_score: 90, p0_failures: []") -> dict:
+    """v2.6: 跑 code-view 阶段（在 dev 与 verify 之间）。
+
+    集成测试 helper：完成当前 code-view dispatch，dispatch verify。
+    """
+    cv_report = _make_report(f"# PASS\n{summary}")
+    return orch.record(
+        "completed", summary=summary,
+        report_path=cv_report, outputs=cv_report,
+    )
+
+
 def _setup_initial_state(tmp_root: str, change: str = "test-change") -> Orchestrator:
     """设置初始 state 并跳过 bootstrap。"""
     state = PipelineState(
@@ -68,7 +80,7 @@ class TestIntegrationTdvg(unittest.TestCase):
         self.orch = _setup_initial_state(self.tmp, "test-change")
 
     def test_full_tdvg(self):
-        """test→dev→verify→gate→pass→track completed。"""
+        """test→dev→code-view→verify→gate→pass→track completed。"""
         track = "dev.backend"
 
         # Step 1: test completed → dev
@@ -77,11 +89,16 @@ class TestIntegrationTdvg(unittest.TestCase):
         self.assertEqual(r1["action"], "dispatch")
         self.assertEqual(r1["sub"], "dev")
 
-        # Step 2: dev completed → verify
+        # Step 2: dev completed → code-view（v2.6 新增）
         r2 = self.orch.record("completed", summary="impl done", outputs="/tmp/Impl.java",
                               tasks_updated=["2.1"])
         self.assertEqual(r2["action"], "dispatch")
-        self.assertEqual(r2["sub"], "verify")
+        self.assertEqual(r2["sub"], "code-view")
+
+        # Step 2.5: code-view completed → verify（v2.6 新增）
+        r2_5 = _run_code_view(self.orch)
+        self.assertEqual(r2_5["action"], "dispatch")
+        self.assertEqual(r2_5["sub"], "verify")
 
         # Step 3: verify completed → gate (verify 需要 report + evidence)
         verify_report = _make_report("# PASS\nall V-* PASS")
@@ -122,6 +139,7 @@ class TestIntegrationTdvg(unittest.TestCase):
                          tasks_updated=["1.1"])  # test
         self.orch.record("completed", summary="dev phase 完成", outputs="/tmp/Dev.java",
                          tasks_updated=["2.1"])  # dev
+        _run_code_view(self.orch)  # code-view (v2.6)
         verify_report = _make_report("# PASS\nverify 1")
         self.orch.record(
             "completed", summary="verify 完成",
@@ -146,6 +164,7 @@ class TestIntegrationTdvg(unittest.TestCase):
                          tasks_updated=["10.1"])  # test
         self.orch.record("completed", summary="dev phase 完成", outputs="/tmp/FrontDev.java",
                          tasks_updated=["11.1"])  # dev
+        _run_code_view(self.orch)  # code-view (v2.6)
         verify_report2 = _make_report("# PASS\nverify 2")
         self.orch.record(
             "completed", summary="verify 完成",
@@ -197,6 +216,7 @@ class TestIntegrationFixCycle(unittest.TestCase):
                          tasks_updated=["1.1"])  # test
         self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java",
                          tasks_updated=["2.1"])  # dev
+        _run_code_view(self.orch)  # code-view (v2.6)
 
         # verify escalate（verify 阶段需要 report + evidence）
         verify_report = _make_report("# FAIL\n3 tests FAIL")
@@ -216,6 +236,7 @@ class TestIntegrationFixCycle(unittest.TestCase):
                          tasks_updated=["1.1"])  # test
         self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java",
                          tasks_updated=["2.1"])  # dev
+        _run_code_view(self.orch)  # code-view (v2.6)
 
         # verify escalate（verify 阶段需要 report + evidence）
         verify_report = _make_report("# FAIL\n3 tests FAIL")
@@ -254,6 +275,7 @@ class TestIntegrationGateFail(unittest.TestCase):
                          tasks_updated=["1.1"])  # test
         self.orch.record("completed", summary="dev 完成", outputs="/tmp/Dev.java",
                          tasks_updated=["2.1"])  # dev
+        _run_code_view(self.orch)  # code-view (v2.6)
         verify_report = _make_report("# PASS\nverify ok")
         self.orch.record(
             "completed", summary="verify 完成",

@@ -13,10 +13,12 @@ from typing import Any
 # 子 pipeline 类型常量
 FIX_CYCLE = "fix-cycle"       # verify escalate → fix → verify
 GATE_FIX_CYCLE = "gate-fix-cycle"  # gate fail → fix-gate → verify → gate
+CODE_VIEW_CYCLE = "code-view-cycle"  # code-view escalate → fix-code-view → code-view
 
 # 各子 pipeline 类型的 phase 序列
 FIX_CYCLE_PHASES: tuple[str, ...] = ("fix", "verify")
 GATE_FIX_CYCLE_PHASES: tuple[str, ...] = ("fix-gate", "verify", "gate")
+CODE_VIEW_CYCLE_PHASES: tuple[str, ...] = ("fix-code-view", "code-view")
 
 
 @dataclass(frozen=True)
@@ -130,6 +132,23 @@ def create_gate_fix_cycle(track: str, cycle: int) -> SubPipeline:
         cycle=cycle,
         kind=GATE_FIX_CYCLE,
         phases=GATE_FIX_CYCLE_PHASES,
+        current_index=0,
+        status="running",
+    )
+
+
+def create_code_view_cycle(track: str, cycle: int) -> SubPipeline:
+    """创建 code-view 子 pipeline（code-view escalate 时调用）。
+
+    v2.6 新增：与 verify→fix 循环解耦，独立计数 code_view_fix_cycles。
+    """
+    return SubPipeline(
+        pipeline_id=SubPipeline.build_id(track, CODE_VIEW_CYCLE, cycle),
+        parent_track=track,
+        parent_phase="code-view",
+        cycle=cycle,
+        kind=CODE_VIEW_CYCLE,
+        phases=CODE_VIEW_CYCLE_PHASES,
         current_index=0,
         status="running",
     )

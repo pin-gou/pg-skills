@@ -88,6 +88,23 @@ def resolve_test_commands(
     return " && ".join(commands)
 
 
+def resolve_module_languages(config: dict[str, Any], module_names: list[str]) -> tuple[str, ...]:
+    """v2.6: 收集所有模块的 language 字段，去重保序。
+
+    用于 code-view agent 按 language 自动派发 profile。
+    """
+    modules = config.get("modules", {})
+    seen: set[str] = set()
+    out: list[str] = []
+    for name in module_names:
+        mod = modules.get(name, {})
+        lang = mod.get("language", "")
+        if lang and lang not in seen:
+            seen.add(lang)
+            out.append(lang)
+    return tuple(out)
+
+
 def resolve_env_instances(config: dict[str, Any], env_name: str) -> str:
     """从 environments[{env_name}].roles[*].instances 渲染 YAML 文本。
 
