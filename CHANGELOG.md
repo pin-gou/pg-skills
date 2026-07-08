@@ -5,6 +5,108 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.8.0] - 2026-07-08
+
+### 新增
+
+- **pg-build v2.6 code-review 阶段（破坏性）**：`test → dev → review → verify → gate` 五阶段模型中新增 `review` 子阶段（位于 dev 与 verify 之间），由独立 `pg-build/review` sub-agent 执行静态代码审查（R-* 检查项：design 对齐 / scope creep / 模式一致 / 文件位置 / 测试契约弱）。`pg-build/fix-review` sub-agent 处理 review 阶段的修复（独立计数 `review_fix_cycles`，默认 3 次），与 `verify→fix` 循环解耦。代码命名从 `code-view` 全量迁移为 `code-review`（agent 文件、prompt 模板、状态字段、事件枚举、测试文件）
+- **pg-build review phase Profile 引擎**：`scripts/pipeline/profile_loader.py` 支持 `.pg/code-review.yaml` 多 profile 索引（default / java-spring / go / vue3 / security），Language 自动派发（java/kotlin/scala → `java-spring`，go → `go`，ts/js/vue → `vue3`，其他 → `default`），Union 合并语义（`checks` 并集、`weight` max、`enabled` OR、`pass_threshold` min）。`review` 自动 skip 场景：`code_review_enabled=false`，track type `simple`，`execution-manifest.yaml` 无 `phases.review` 字段
+- **pg-build review 子 pipeline 机制**：review escalate 创建 `REVIEW_CYCLE` 子 pipeline（`fix-review → review`），独立于 `FIX_CYCLE`（`fix → verify`）和 `GATE_FIX_CYCLE`（`fix-gate → verify → gate`）。`max_review_fix_retries` 默认为 3，耗尽后强制进 verify
+- **pg-build v3.x SSOT 迁移**：`TrackState.code_review_*` 字段（`code_review_enabled` / `code_review_profiles` / `code_review_profile` / `code_review_languages`）从 pg-build 内部状态中删除，改由 `execution-manifest.yaml` 的 `phases.review` 是否存在作为唯一 SSOT。orchestrator bootstrap 时从 manifest 派生 `code_review_enabled` 字段
+- **pg-propose v3.3 code-review 适配**：`pg-gen-tasks-skeleton.py` 的 `STANDARD_SUBS` 增加 `review`，按 `tracks.<id>.code_review_enabled` 决定 tasks.md 含 4 或 5 sub。`pg-gen-manifest.py` / `manifest.schema.json` / `pg-validate-proposal.py` 适配：`phase_prompts` 4 必填 + review optional，`minProperties=4` / `maxProperties=5`。`references/tasks-templates.md` 新增 `track:review` 章节模板。章节号 N 跨 change 不再一致，下游消费方基于 sections JSON 的 N 值填
+- **pg-init-project v0.3 code-review 适配**：新增 Phase 2.5，根据 Phase 1 扫到的 module languages 自动派发 `.pg/code-review/` 目录（profile 索引 + 各 profile 检查项细则）。`modules.<m>.review_level` 字段新增（按 language 推断：`java/go/proto` → `security`，`ts/py` → `standard`，`shell` → `none`）。Security profile 保持 opt-in 不自动拷贝。Phase 2.5 幂等：已存在 `.pg/code-review/` 时不覆盖。模板缺失时 WARN + 仅生成 default profile
+- **code-review 示例模板**：`examples/code-review/` 目录新增 15 个文件，覆盖 5 个 profile：
+  - `default/`5 文件：`design_alignment.md`、`file_location.md`、`pattern_consistency.md`、`scope_creep.md`、`test_contract.md`
+  - `java-spring/`2 文件：`null_safety.md`、`pattern_consistency.md`
+  - `go/`2 文件：`error_wrapping.md`、`pattern_consistency.md`
+  - `vue3/`2 文件：`component_props.md`、`pattern_consistency.md`
+  - `security/`3 文件：`auth_bypass.md`、`error_silence.md`、`secret_leak.md`
+  - `code-review.yaml`：profile 索引（weight / enabled / pass_threshold / escalate_threshold / checks 及 Union 继承规则）
+- **pg-fix-issue v3.1 → v3.2 重构**：重写 SKILL.md（删除 ~1600 行过时代码），采用 6 阶段流程（Phase 0 Load Config → Phase 1 Call Chain → Phase 2 Plan → Phase 3 用户确认 → Phase 4 自动修复 → Phase 5 验证）。支持 `pg-fix-issue-v2` 目录删除。Phase 1.5 新增复现判定门
+- **pg-fix-issue 目录清理**：删除 `pg-fix-issue-v2` 目录（`src/opencode/skills/pg-fix-issue-v2/` 230 行 SKILL.md + 19 行命令文件），`/5-pg-fix-issue-v2` 命令同步删除。`pg-fix-issue-v2` 命名空间彻底退役
+- **pg-propose tasks.md 骨架脚本外化**：`pg-gen-tasks-skeleton.py` 替代 LLM 手工生成章节标题骨架。脚本输出 `tasks.md` + `on-conditions-eval.md` + sections JSON，LLM 只填充 body。`--selected-stages` 参数支持按 on_conditions 过滤 stage。`pg-gen-tasks-skeleton.py` 新增 620 行代码 + 722 行测试用例
+- **pg-propose 两阶段填充法**：LLM 先机械生成所有章节标题骨架（`--selected-stages` 过滤后的 stage + `--affected-tracks` 内的 track），heading 骨架确认无误后再逐个填充 body。禁止在填充阶段调整 heading 顺序或跳过章节
+- **pg-build 配置优化**：`tracks.<id>.max_fix_retries` 统一为 5（默认值），`max_gate_fix_retries` 移除。`tracks.<id>.code_review_enabled` 新增字段。`manifest.schema.json` tracks 对象新增 `code_review_enabled` 属性
+- **pg-run health_check 菜单**：`pg-run` 交互菜单增加 `Instance.health_check` 选项，配合 `actions.health_check` 声明使用
+- **pg-define 约束收紧**：禁止 `pg-define` 直接生成 `design.md` / `proposal.md` / `tasks.md`（这些产物由 `pg-propose` 独占产出）
+- **Python 3.7 兼容**：`pg-gen-tasks-skeleton.py` 等脚本兼容 Python 3.7（`rst` 回退 `removeprefix` / `removesuffix` 等）
+- **品构品牌命名**：Workshop 文档标题从 `pg-skills Workshop` 改为 `品构 Workshop`，slogan `让 AI 写出可托付的代码` 贯穿全文。sec1 重构为 5 段叙事（§1.1 可托付 / §1.2 品构命名释义 / §1.3 4 支柱 / §1.4 AI 角色表 / §1.5 速查对照表），新增 SVG 品牌视觉
+
+### 变更
+
+- **code_view → code_review 全量重命名（破坏性）**：agent 文件 `code-view.md` → `review.md`，`fix-code-view.md` → `fix-review.md`；prompt 模板 `code-view.yaml` → `review.yaml`，`fix-code-view.yaml` → `fix-review.yaml`；状态字段 `code_view_enabled` → `code_review_enabled`；事件枚举 `EVT_CODE_VIEW_*` → `EVT_REVIEW_*`，`EVT_FIX_CODE_VIEW_*` → `EVT_FIX_REVIEW_*`；测试文件 `test_state_code_view.py` → `test_state_review.py`，`test_code_view_section.py` → `test_review_section.py`。pg-build 内部 `TrackState.code_view_*` 字段：`code_view_enabled` / `code_view_profile` → `code_review_enabled` / `code_review_profiles` / `code_review_profile` / `code_review_languages`
+- **pg-propose SKILL.md 重构**：SKILL.md 从 810 行压缩到 303 行（-507 行），流程编排与模板字符串分离：SKILL.md 仅保留流程编排 + 阶段契约 + 黑/白名单；模板字符串、字段定义、规则清单全部下放到 `references/` 单一 SSOT。顶部新增「文档导航」routing table
+- **pg-build SKILL.md 更新**：新增 v2.6 review 阶段完整文档（profile 配置 / Score 协议 / fix-review 循环 / 关闭方式 / v3.x SSOT 迁移），新增 v2.5 `--result-json` 记录，新增 v2.4 result.json 强制落盘协议
+- **pg-propose references 解耦**：`references/orchestration-model.md` 重写（161 行增量），`references/tasks-templates.md` 重写（139 行增量），新增 `references/review-checklist.md`（6 类自审清单 + 3.5.7 on_conditions 复核），新增 `references/config-fields.md`
+
+### 修复
+
+- **pg-gen-tasks-skeleton.py `--selected-stages` 参数缺失**：v3.2 生成的 skeleton 错误地包含所有 stage（包括 on_conditions 未命中的），追加 `--selected-stages` 参数后仅生成选中 stage 的章节，不占章节号 N
+- **pg-gen-manifest.py phase_prompts 校验**：phase_prompts 的 minProperties 从 4 改为 4（必填）+ 1 optional（review），maxProperties 从 4 改为 5，适配 code-review 阶段
+
+### 备注
+
+- 19 个 commits，78 文件变更（+8220 / -2205 LOC）。核心新增：code-review 引擎（4 个 sub-agent + 15 个 profile 模板 + 3 个 SKILL 适配）、pg-propose tasks.md 骨架外化（620 行脚本 + 722 行测试）、pg-init-project Phase 2.5（97 行增量）。品牌命名同步更新：Workshop 文档标题改为「品构」
+- 破坏性变更：`code_view` → `code_review` 全量重命名（影响所有 state 字段、事件枚举、agent 文件、prompt 模板、测试文件），既有 snapshot 需要迁移。pg-propose tasks.md 章节号 N 跨 change 不再一致（同一 track 在不同 change 的 N 可能不同）
+- 依赖：`.pg/skills/examples/code-review/` 模板目录必须存在（subtree 拉取的 SSOT 模板），含 default / java-spring / go / vue3 / security 5 个 profile 的检查项细则。该目录缺失时 pg-init-project 仅生成 default profile 并 WARN
+- 新增 5 个测试文件：`test_state_review.py`（222 行）、`test_review_section.py`（335 行）、`test_profile_loader.py`（409 行）、`test_state_code_view.py` 替换为 `test_state_review.py`，`test_code_view_section.py` 替换为 `test_review_section.py`
+- `pg-fix-issue-v2` 目录删除，命名空间彻底退役
+- 品构品牌命名：`pg-skills` 保持为 git 路径名和 CLI 工具名不变，用户面称谓从本版本起统一为「品构」
+
+### 新增
+
+- **pg-build v2 取代 v1（破坏性合并）**：原 `pg-build-v2` 重命名为 `pg-build`，并吸收原 v1 的 `pg-pipeline-runner.py` 行为（v1 过程式状态机 + 51 个 `save_state` 调用被彻底替换）。`pg-build-v2` 目录删除、`/3-pg-build-v2` 命令删除、`_deprecated_README.md` 删除、`src/opencode/skills/pg-build-v2/scripts/pg-pipeline-runner.py` 删除。SKILL.md 重写（871 → 265 行），直接暴露 5 个 CLI 子命令（`bootstrap` / `next` / `record` / `progress` / `env-action` / `env-action-result`）。`/3-pg-build` 命令重写为直接调用 runner 编排
+- **路径简化（破坏性）**：caller 维度日志目录从 `<env>/logs` 改为 `<env>-logs`，影响所有 5 个 caller 命名空间（pg-build / pg-regression / pg-fix-issue / pg-agent / ad-hoc）。`pg-invoke-hook.py` 的 `pg_log_dir_for_skill` 同步更新；`pg-run-hook.py` 示例、SKILL.md 路径示意、init-project Phase 5 drift 清单示例同步更新。**既有项目**：pg-build 自动迁移 `2-build/<env>/logs` → `2-build/<env>-logs`；其它 caller 仍需手工迁移或重建
+- **execution-manifest.yaml 成为环境 SSOT（破坏性）**：v1 遗留的 `environment.yaml` 弃用，per-change 的环境选择写入 `execution-manifest.yaml.stages[i].environment`，由 `pg-build` 直接读取。`pg-propose` 阶段 2d 产物清单硬约束 4 个文件（proposal.md / design.md / execution-manifest.yaml / tasks.md），严禁生成 `environment.yaml`
+- **`pg-verify-and-merge` AffectedTracks 推断 5 层 fallback**：新增 `execution-manifest.yaml` 优先级（`__meta.affected_tracks_source = "manifest"`），pg-gen-manifest.py 已自动过滤全部 `- 无` 的 track，比 tasks.md 更精确。`pg-parse-config.py --json-only` flag 抑制 banner，stdout 纯净
+- **pg-verify-and-merge lint 日志独立空间**：lint 输出落到 `<change>/3-merge/lint-logs/lint-<track>-<ts>.log`（与 `2-build/` 解耦），成功时静默，失败时 `tail -50`。archive 路径自动推断：编排器优先传 archive 路径；`pg-parse-config.py` 输出 `__meta.change_dir` 不存在时回退到 `glob archive/*-<change>` 查找
+- **pg-regression 自动修复边界（A/B/C 三分类）**：fix-test agent 必须按下表判定每条失败属于哪一类，决定自动修或上报：
+  - 🟢 **A 类**（必须自动修，不上报）：A1 断言期望值漂移、A2 选择器过期、A3 等待逻辑、A4 框架 API 误用、A5 fixture 写错、A6 测试隔离、A7 env 硬编码、A8 断言精度
+  - 🟡 **B 类**（条件性自动修，必须附 `rationale`）：B1 断言放宽、B2 新增 helper、B3 mock 匹配新接口、B4 重命名局部变量、B5 调整 cleanup、B6 加 retry 限制
+  - 🔴 **C 类**（禁止自动修，必须上报）：C1 生产 bug、C2 接口语义变更、C3 schema、C4 环境配置、C5 测试数据缺失、C6 新增 skip/fixme、C7 弱化断言、C8 跨服务契约、C9 第三方依赖、C10 并发偶发、C11 删/合并用例
+- **`pg-check-fix-test-boundary.py`（边界守护）**：编排器在 fix-test agent 返回后、Phase 2a 提交前必须扫描 git diff，命中 C6（新增 skip/only/todo/@Disabled/@Ignore/xit/xdescribe）、C7（断言数量减少）、C11（删 it/test/@Test）、C5（改 fixtures/seeds/sql/test-data）任一硬规则 → 立即 `git checkout -- <test_files>` 回滚，把这些用例转写为 `unfixableIssues` 上报
+- **pg-regression `skippedUnits` 分析（Phase 2b）**：Phase 1.2 输出的 `phase1-failures.json` 现包含 `skippedUnits` 字段（按文件分组的跳过测试清单）。编排器读 `skippedUnits` 按 skip 原因分类（C5 测试数据缺失 / C2 生产代码未实现 / C10 环境不足 / 其他），C2 类追加到 `unfixableIssues` 走生产代码修复流程；C5 写入 `skipped_targets` 记录已知跳过
+- **`.pg/regression/<suite>.json` schema 扩展**：每条 issue 新增 `auto_fixed`（bool，缺省 `false`）、`rationale`（仅 B 类有值）、`category`（`A<id>`/`B<id>`/`C<id>`）字段。Phase 4 runner 只处理 `auto_fixed=false` 的 issue（已自动修的不再重复处理）
+- **`pg-build-result` 工具**：独立的 result 落盘 CLI，`--output-path` 强制落盘到指定路径，编排器校验 `result.json` 落盘后派生路径工具 `derive_result_path`，避免 LLM 自作主张。`pipeline.events` 写盘前必须先有 `result.json`
+- **env-action 钩子架构拆分（v2.1.1）**：`pg-pipeline-runner.py` 的 env hook 执行从主循环拆出为独立的 `env-action` / `env-action-result` 子命令，配合 `--phase prepare_env|clean_env --stage <stage> --env <env>` 三元组定位。`--success` 布尔语义（`ok` → `success` 重命名）明确"hook 是否成功执行"，与 record 的 `--status` 字段语义解耦
+- **env-action 日志记录**：每次 env hook 执行落 `<change>/2-build/<env>-logs/role.*.<action>@<ts>.log`，`prepare_env` / `clean_env` 日志同样路由
+- **pg-init-project pg-skip-agents-md-migration**：新增 `PG_SKIP_AGENTS_MD_MIGRATION` 兜底开关，用户拒绝时仍强行生成 patch 清单的场景被禁止；CI 跑 pg-init-project 时 `.pg/context/` 下不再出现污染 artifacts
+- **`pg-parse-test-results.py` skipped 解析**：playwright + junit 输出解析新增 skipped 单元聚合（按文件/类分组），与 failedUnits 同构
+
+### 修复
+
+- **pg-build runner `--tasks-updated` 参数位置错误**：v1 风格的 positional arg 改为 `--flag` 形式（`--tasks-updated t1 --tasks-updated t2`），避免输入参数位置错误
+- **pg-build runner record 传参错误**：`record` 子命令新增 `--result-json` 参数，强制指定 result.json 路径，杜绝 LLM 把 result.json 写到错误位置的问题
+- **pg-build runner `pg-invoke-hook` 漏传 `--skill`**：env hook 调度时 `--skill` 参数硬编码传入（不再依赖环境变量），避免日志落到错误的 caller 命名空间
+- **pg-build verify → fix 派遣路由**：修复 verify ESCALATE 后无法正确派遣到 fix agent 的问题（dispatch_file 注入 `context.verify_report_path`，fix agent 自行读源 verify 报告，runner 不解析 V-N 章节、不提取结构化字段）
+- **pg-build prepare_env 阶段错选**：修复 state persist bug 导致 prepare_env 阶段选择错误的根因
+- **pg-build archive 后 `pipeline.events` 写入错误路径**：修复 `pg-build` 完成 archive 后仍向旧 change 目录写入 `pipeline.events` 的问题
+- **pg-fix-issue `max_per_iteration_subcalls` 移除**：`max_per_iteration_subcalls`（单次 iteration 内 executor 重派上限）从 schema 与默认配置中删除，统一收敛到 `max_iteration_count` 一个计数器（避免双计数器混淆与回归 ESCALATE 判定）
+- **pg-fix-issue `tracks.<id>.max_fix_retries` 移除**：`tracks.<id>.max_fix_retries`（subagent 重试上限）从 SKILL.md、配置示例、`fix_issue_context` 表中删除，与 `max_iteration_count`（主 agent 整体迭代上限）不再有"双计数器"语义混淆
+- **`pg-run-hook.py` 路径示例更新**：示例 log_path 与新 `<env>-logs` 路由一致
+- **`pg-parse-config.py` banner 截断问题**：新增 `--json-only` flag，抑制 stderr banner，让 stdout 纯净（LLM 直接 `json.load()` 无需 python 管道截断）
+- **`pg-parse-config.py` banner 边界对齐**：banner 分隔符从 64 个 `=` 改为 60 个（视觉对齐）
+
+### 变更
+
+- **pg-fix-issue actions 列表加 `restart`/`health_check`**：`environments.<env>.roles.<role>.actions.{start,stop,restart,logs,tail,health_check}` 一致化，pg-invoke-hook.py 同步支持
+- **`pg-invoke-hook.py` 新增 flag**：`--log-dir`（agent 调试用，显式覆盖日志目录）、`--timeout-override`（ad-hoc 调试用，CLI 显式传时输出 WARN）、`--no-wait-for-bg`（start action 的 fire-and-forget 开关，hook `pg_start_bg` setsid detach 后立即返回）、`--wait-for-completion`（强制等 hook 跑完，覆盖 start 默认）
+- **编排器职责收紧**：禁止编排器读取 `dispatch.md` 文件（避免它自作主张调整 prompt），禁止编排器修改 prompt 模板
+- **`build_rules` 字段注入扩展**：`build_rules` 同时注入 `pg-build/dev` 与 `pg-build/verify` prompt（之前只在 verify 阶段）
+- **pg-parse-config.py Maven Surefire 解析清理**：删除冗余的"Find the full class name by looking at context"逻辑；正则调整（保留兼容的 part 顺序）
+- **pg-propose tasks.md 两阶段骨架填充法**：LLM 遵行两阶段法——先按 `stage.tracks` 数组顺序机械生成所有章节标题骨架（simple=1 个 heading，standard=4 个 heading，N 连续递增），heading 骨架确认无误后再逐个填充 body 内容。禁止在填充阶段调整 heading 顺序、跳过非 affected track 或调换 simple/standard 先后顺序
+- **pg-propose track 级 `on_conditions`**：若 track 定义了 `on_conditions`，所有条件未命中时该 track 不生成任何章节（完全跳过，不占章节号）
+
+### 备注
+
+- `pg-build` 与 `pg-build-v2` 命名空间合一（v2 内容吸收到 `pg-build`，原 `pg-build-v2` 目录物理删除）；`/3-pg-build-v2` 命令同步删除
+- 路径简化（`<env>/logs` → `<env>-logs`）对**既有项目**有迁移成本：pg-build 自动迁移 `2-build/<env>/logs` → `2-build/<env>-logs`，但 pg-regression / pg-fix-issue / pg-agent / ad-hoc 命名空间仍需手工迁移或重建
+- `execution-manifest.yaml` 取代 `environment.yaml` 是**破坏性**变更：旧 change 的 `environment.yaml` pg-build 不再读取，必须重新跑 `pg-propose` 生成 `execution-manifest.yaml`
+- pg-regression A/B/C 分类边界是 fix-test agent 行为的**强约束**：A/B 类自动修但必须落 rationale 到 `auto_fixed=true`；C 类禁止自动修（包括 C6 新增 skip、C7 弱化断言、C11 删用例）；`pg-check-fix-test-boundary.py` 二次守护
+- 39 commits，144 文件变更（+9191 / -25260 LOC）。旧 v1 过程式状态机代码全部删除（`pg_pipeline_state_v2.py` 1163 行、`pg_context_chain.py` 229 行、`pg_pipeline_common.py` 1235 行等）
+- 新增 9 个测试文件：`test_derive_result_path.py`、`test_error_path.py`、`test_fix_routing.py`、`test_pg_build_result.py`、`test_record_flags.py`、`test_record_result_json.py`、`test_event_log.py`、`pg-check-fix-test-boundary.py` 等
+- `pg-skip-agents-md-migration` 兜底开关：CI 中可设置 `PG_SKIP_AGENTS_MD_MIGRATION=1` 跳过 AGENTS.md drift 清单生成
+
 ## [0.7.0] - 2026-07-05
 
 ### 新增
