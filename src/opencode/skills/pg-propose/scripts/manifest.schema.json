@@ -52,14 +52,15 @@
                 },
                 "phase_prompts": {
                   "type": "object",
-                  "description": "Required for standard tracks: maps each sub-phase to its tasks.md section",
+                  "description": "Required for standard tracks: maps each sub-phase to its tasks.md section. v3.x: code-view is optional, present iff tracks.<id>.code_review_enabled=true",
                   "minProperties": 4,
-                  "maxProperties": 4,
+                  "maxProperties": 5,
                   "required": ["test", "dev", "verify", "gate"],
                   "additionalProperties": false,
                   "properties": {
                     "test":   { "$ref": "#/$defs/phase_prompt" },
                     "dev":    { "$ref": "#/$defs/phase_prompt" },
+                    "code-view": { "$ref": "#/$defs/phase_prompt" },
                     "verify": { "$ref": "#/$defs/phase_prompt" },
                     "gate":   { "$ref": "#/$defs/phase_prompt" }
                   }

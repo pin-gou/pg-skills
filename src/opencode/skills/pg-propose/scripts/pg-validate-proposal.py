@@ -151,6 +151,7 @@ def _validate_track(track, prefix):
             if not isinstance(pp, dict):
                 issues.append((f"{prefix}_phase_prompts_not_object", f"{prefix} phase_prompts 必须是 object"))
             else:
+                # v3.x: 4 个核心 sub 必填，code-view optional
                 for required_sub in ("test", "dev", "verify", "gate"):
                     if required_sub not in pp:
                         issues.append((f"{prefix}_missing_sub_{required_sub}",
@@ -158,6 +159,15 @@ def _validate_track(track, prefix):
                     elif not isinstance(pp[required_sub], dict) or "tasks_md_section" not in pp[required_sub]:
                         issues.append((f"{prefix}_invalid_sub_{required_sub}",
                                        f"{prefix} phase_prompts.{required_sub} 缺少或无效 tasks_md_section"))
+                # code-view 若存在必须 valid
+                if "code-view" in pp:
+                    if not isinstance(pp["code-view"], dict) or "tasks_md_section" not in pp["code-view"]:
+                        issues.append((f"{prefix}_invalid_sub_code-view",
+                                       f"{prefix} phase_prompts.code-view 缺少或无效 tasks_md_section"))
+                # 反向校验：simple track 不应出现 code-view
+                if track_type == "simple" and "code-view" in pp:
+                    issues.append((f"{prefix}_simple_track_with_code_view",
+                                   f"{prefix} type=simple 不应包含 code-view sub"))
         if "commands" in track:
             issues.append((f"{prefix}_unexpected_commands",
                            f"{prefix} type=standard 不应包含 commands 字段"))
@@ -185,7 +195,7 @@ def _validate_manifest_vs_tasks(manifest, tasks_sections):
         for track_idx, track in enumerate(stage.get("tracks", [])):
             if track.get("type") == "simple":
                 continue
-            for sub_name in ("test", "dev", "verify", "gate"):
+            for sub_name in ("test", "dev", "code-view", "verify", "gate"):
                 pp = track.get("phase_prompts", {})
                 if sub_name not in pp:
                     continue

@@ -156,8 +156,14 @@ def build_manifest(change: str) -> dict:
                 entry["commands"] = commands
             else:
                 # Standard track: include phase_prompts
+                # v3.x: tasks.md 实际生成的 sub 列表决定 phase_prompts
+                # 不再硬编码 4/5 sub，按 tasks.md sections parse 出来的内容动态决定
+                # （code-view 是否存在取决于 tracks.<id>.code_review_enabled，
+                #   tasks.md skeleton 生成时已按此决定）
                 prompts = {}
-                for sub_name in ("test", "dev", "verify", "gate"):
+                # 按 SUB_PHASES 顺序遍历，确保 manifest 顺序稳定
+                sub_order = ("test", "dev", "code-view", "verify", "gate")
+                for sub_name in sub_order:
                     if sub_name in track_info["phases"]:
                         prompts[sub_name] = {
                             "tasks_md_section": track_info["phases"][sub_name]

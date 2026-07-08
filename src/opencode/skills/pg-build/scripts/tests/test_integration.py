@@ -57,8 +57,12 @@ def _setup_initial_state(tmp_root: str, change: str = "test-change") -> Orchestr
         pipeline_order=("dev.backend", "dev.frontend"),
         status="running",
         tracks={
-            "dev.backend": TrackState.create("dev.backend", modules=("backend",)),
-            "dev.frontend": TrackState.create("dev.frontend", modules=("frontend",)),
+            "dev.backend": TrackState.create(
+                "dev.backend", modules=("backend",), code_view_enabled=True,
+            ),
+            "dev.frontend": TrackState.create(
+                "dev.frontend", modules=("frontend",), code_view_enabled=True,
+            ),
         },
     )
     save_snapshot(tmp_root, state)
@@ -385,8 +389,12 @@ class TestIntegrationSimpleTrack(unittest.TestCase):
             track_types={"proto-gen": "simple"},
             status="running",
             tracks={
-                "dev.backend": TrackState.create("dev.backend", modules=("backend",)),
-                "proto-gen": TrackState.create("proto-gen", modules=(), max_fail_retries=1),
+                "dev.backend": TrackState.create(
+                    "dev.backend", modules=("backend",), code_view_enabled=True,
+                ),
+                "proto-gen": TrackState.create(
+                    "proto-gen", modules=(), max_fail_retries=1, code_view_enabled=False,
+                ),
             },
         )
         save_snapshot(self.tmp, state)

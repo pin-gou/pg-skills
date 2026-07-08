@@ -193,7 +193,8 @@ class TestBuildSections(unittest.TestCase):
     def _config(self, stages, tracks):
         return {"stages": stages, "tracks": tracks}
 
-    def test_single_standard_track_yields_4_sections_plus_final(self):
+    def test_single_standard_track_yields_5_sections_plus_final(self):
+        """v3.x: default code_review_enabled=True → 5 sub sections + final-gate."""
         cfg = self._config(
             stages=[{
                 "name": "dev", "test_key": "unit",
@@ -202,11 +203,17 @@ class TestBuildSections(unittest.TestCase):
             }],
             tracks={"backend": {"modules": ["backend"]}},
         )
-        sections = skel.build_sections(cfg, {"backend"})
-        self.assertEqual(len(sections), 5)
+        sections = skel.build_sections(cfg, {"backend"}, set())
+        self.assertEqual(len(sections), 6)  # 5 sub + final-gate
         self.assertEqual(sections[0]["n"], 1)
         self.assertEqual(sections[-1]["track"], "final-gate")
-        self.assertEqual(sections[-1]["n"], 5)
+        self.assertEqual(sections[-1]["n"], 6)
+        # 5 sub names in order
+        sub_names = [s["sub"] for s in sections[:-1]]
+        self.assertEqual(
+            sub_names,
+            ["test", "dev", "code-view", "verify", "gate"],
+        )
 
     def test_simple_track_yields_1_section(self):
         cfg = self._config(
@@ -217,7 +224,7 @@ class TestBuildSections(unittest.TestCase):
             }],
             tracks={"openapi-gen": {"type": "simple", "commands": ["pnpm openapi"]}},
         )
-        sections = skel.build_sections(cfg, set())
+        sections = skel.build_sections(cfg, {"openapi-gen"}, set())
         # simple track: 1 section + final-gate = 2
         self.assertEqual(len(sections), 2)
         self.assertTrue(sections[0]["is_simple"])
@@ -225,6 +232,7 @@ class TestBuildSections(unittest.TestCase):
         self.assertEqual(sections[1]["n"], 2)
 
     def test_mixed_tracks_yields_correct_count(self):
+        """v3.x: default code_review_enabled=True → 5 sub per standard track."""
         cfg = self._config(
             stages=[{
                 "name": "dev", "test_key": "unit",
@@ -237,15 +245,15 @@ class TestBuildSections(unittest.TestCase):
                 "frontend": {"modules": ["frontend"]},
             },
         )
-        sections = skel.build_sections(cfg, {"backend", "frontend"})
-        # backend: 4 sections
-        # openapi-gen: 1 section
-        # frontend: 4 sections
+        sections = skel.build_sections(cfg, {"backend", "frontend"}, set())
+        # openapi-gen 不在 affected_tracks → 被跳过
+        # backend: 5 sections (含 code-view)
+        # frontend: 5 sections
         # final-gate: 1
-        # total: 10
-        self.assertEqual(len(sections), 10)
-        # numbering should be sequential 1..10
-        self.assertEqual([s["n"] for s in sections], list(range(1, 11)))
+        # total: 11
+        self.assertEqual(len(sections), 11)
+        # numbering should be sequential 1..11
+        self.assertEqual([s["n"] for s in sections], list(range(1, 12)))
         # is_affected flags
         self.assertTrue(all(s["is_affected"] for s in sections
                             if s["track"] == "backend"))
@@ -268,20 +276,18 @@ class TestBuildSections(unittest.TestCase):
             },
         )
         # only backend is affected
-        sections = skel.build_sections(cfg, {"backend"})
+        sections = skel.build_sections(cfg, {"backend"}, set())
         backend_sections = [s for s in sections if s["track"] == "backend"]
         frontend_sections = [s for s in sections if s["track"] == "frontend"]
-        # all sections still exist (no skipping)
-        self.assertEqual(len(backend_sections), 4)
-        self.assertEqual(len(frontend_sections), 4)
+        # v3.x: backend (affected) 5 sections; frontend (not affected) 0 sections (skipped)
+        self.assertEqual(len(backend_sections), 5)
+        self.assertEqual(len(frontend_sections), 0)
         # backend affected → True
         self.assertTrue(all(s["is_affected"] for s in backend_sections))
-        # frontend not affected → False
-        self.assertFalse(all(s["is_affected"] for s in frontend_sections))
 
     def test_no_stages_returns_just_final_gate(self):
         cfg = self._config(stages=[], tracks={})
-        sections = skel.build_sections(cfg, set())
+        sections = skel.build_sections(cfg, set(), set())
         self.assertEqual(len(sections), 1)
         self.assertEqual(sections[0]["track"], "final-gate")
 
@@ -388,7 +394,7 @@ class TestBuildTasksMd(unittest.TestCase):
 
     def test_top_block_quote_present(self):
         cfg = self._minimal_config()
-        sections = skel.build_sections(cfg, {"backend"})
+        sections = skel.build_sections(cfg, {"backend"}, set())
         text = skel.build_tasks_md(
             sections, {"dev": "dev-local"}, cfg, [], ""
         )
@@ -396,29 +402,36 @@ class TestBuildTasksMd(unittest.TestCase):
 
     def test_all_sections_present_no_skipping(self):
         cfg = self._minimal_config()
-        sections = skel.build_sections(cfg, {"backend"})
+        sections = skel.build_sections(cfg, {"backend", "frontend"}, set())
         text = skel.build_tasks_md(
             sections, {"dev": "dev-local"}, cfg, [], ""
         )
-        # backend (4) + frontend (4) + final-gate (1) = 9 headings
-        self.assertEqual(text.count("## "), 9)
+        # backend (5, 含 code-view) + frontend (5, 含 code-view) + final-gate (1) = 11 headings
+        self.assertEqual(text.count("## "), 11)
 
     def test_unaffected_body_is_noop(self):
+        """v3.x: 不在 affected_tracks 的 track → 章节不生成（v2.6 行为是 body=-无，v3.x 改为不生成）。
+        
+        行为差异：v2.6 保留 heading 写 - 无；v3.x 直接跳过。理由：减少 tasks.md 噪声，
+        runner 已知道哪些 track 不需要执行（pipeline_order 不含）。
+        """
         cfg = self._minimal_config()
-        sections = skel.build_sections(cfg, {"backend"})
+        sections = skel.build_sections(cfg, {"backend"}, set())
         text = skel.build_tasks_md(
             sections, {"dev": "dev-local"}, cfg, [], ""
         )
-        # frontend sections should contain "- 无"
-        # frontend starts at section 5 (after backend's 4 sections)
-        frontend_start = text.index("## 5. dev.frontend:test")
-        next_section = text.index("## ", frontend_start + 10)
-        frontend_chunk = text[frontend_start:next_section]
-        self.assertIn("- 无", frontend_chunk)
+        # frontend (not affected) → 不出现在 sections，text 中没有 frontend 章节
+        self.assertNotIn("dev.frontend", text)
+        # backend (affected) → 5 sub
+        self.assertIn("## 1. dev.backend:test", text)
+        self.assertIn("## 2. dev.backend:dev", text)
+        self.assertIn("## 3. dev.backend:code-view", text)
+        self.assertIn("## 4. dev.backend:verify", text)
+        self.assertIn("## 5. dev.backend:gate", text)
 
     def test_affected_body_has_tasks(self):
         cfg = self._minimal_config()
-        sections = skel.build_sections(cfg, {"backend", "frontend"})
+        sections = skel.build_sections(cfg, {"backend", "frontend"}, set())
         text = skel.build_tasks_md(
             sections, {"dev": "dev-local"}, cfg, [], ""
         )
@@ -432,11 +445,12 @@ class TestBuildTasksMd(unittest.TestCase):
 
     def test_final_gate_present(self):
         cfg = self._minimal_config()
-        sections = skel.build_sections(cfg, {"backend"})
+        sections = skel.build_sections(cfg, {"backend"}, set())
         text = skel.build_tasks_md(
             sections, {"dev": "dev-local"}, cfg, [], ""
         )
-        self.assertIn("## 9. final-gate", text)
+        # v3.x: backend (5 sub) + final-gate → N=6
+        self.assertIn("## 6. final-gate", text)
         self.assertIn("Gate Assessment", text)
 
     def test_on_conditions_comment_present(self):
@@ -451,7 +465,7 @@ class TestBuildTasksMd(unittest.TestCase):
             }],
             "tracks": {"env": {"modules": ["env"]}},
         }
-        sections = skel.build_sections(cfg, {"env"})
+        sections = skel.build_sections(cfg, {"env"}, set())
         text = skel.build_tasks_md(
             sections, {}, cfg,
             [".pg/hooks/setup.sh"], ""
@@ -580,14 +594,16 @@ class TestCliE2E(unittest.TestCase):
         ])
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         json_out = json.loads(result.stdout)
-        self.assertEqual(json_out["section_count"], 5)
+        # v3.x: backend (5 sub, 含 code-view) + final-gate = 6
+        self.assertEqual(json_out["section_count"], 6)
         tasks_path = json_out["tasks_md_written"]
         self.assertTrue(os.path.isfile(tasks_path))
         with open(tasks_path) as f:
             text = f.read()
         self.assertIn("> - **environment 选择**：dev → dev-local", text)
         self.assertIn("## 1. dev.backend:test", text)
-        self.assertIn("## 5. final-gate", text)
+        self.assertIn("## 3. dev.backend:code-view", text)
+        self.assertIn("## 6. final-gate", text)
 
     def test_simple_track(self):
         self._write_project_yaml(textwrap.dedent("""
@@ -604,7 +620,7 @@ class TestCliE2E(unittest.TestCase):
         """))
         self._write_proposal("Basic proposal.")
         result = self._run([
-            "--affected-tracks", "",
+            "--affected-tracks", "openapi-gen",
             "--environment", "dev→dev-local",
         ])
         self.assertEqual(result.returncode, 0, msg=result.stderr)
@@ -674,6 +690,7 @@ class TestCliE2E(unittest.TestCase):
         self.assertIn("✅", text)  # keyword hit
 
     def test_unaffected_chapter_body_is_noop(self):
+        """v3.x: 不在 affected_tracks 的 track → 章节不生成（v2.6 行为是 body=-无）。"""
         self._write_project_yaml(textwrap.dedent("""
             stages:
               - name: dev
@@ -694,13 +711,12 @@ class TestCliE2E(unittest.TestCase):
         tasks_path = json.loads(result.stdout)["tasks_md_written"]
         with open(tasks_path) as f:
             text = f.read()
-        # frontend section body should be "- 无"
-        frontend_start = text.index("dev.frontend:test")
-        next_section = text.index("## ", frontend_start + 10)
-        frontend_body = text[frontend_start:next_section]
-        self.assertIn("- 无", frontend_body)
-        # but heading still present (not deleted)
-        self.assertIn("## 5. dev.frontend:test", text)
+        # v3.x: frontend 不在 affected_tracks → 章节不生成
+        self.assertNotIn("dev.frontend", text)
+        # backend 5 sub 全在
+        self.assertIn("## 1. dev.backend:test", text)
+        self.assertIn("## 3. dev.backend:code-view", text)
+        self.assertIn("## 5. dev.backend:gate", text)
 
     def test_invalid_environment_arg_exits_nonzero(self):
         self._write_project_yaml(textwrap.dedent("""

@@ -287,20 +287,21 @@ class Orchestrator:
                 tasks_by_phase=tasks_by_phase,
                 commands=tuple(cfg.get("commands", [])),
                 timeout_seconds=cfg.get("timeout_seconds", 1800),
-                # v2.6: code-view 配置
-                code_review_enabled=cfg.get("code_review_enabled", True),
-                code_review_profiles=tuple(cfg.get("code_review_profiles", ())),
-                code_review_profile=cfg.get("code_review_profile", ""),
-                code_review_languages=resolve_module_languages(project_config, module_names),
+                # v3.x: code-view 是否派发由 manifest 的 phase_prompts.code-view 决定
+                # 旧字段 code_review_enabled 在 propose 阶段已读，但 pg-build 不再读
+                # 派生字段 code_view_enabled 由下方 manifest 解析后填充
+                code_view_enabled=False,  # 默认 false，下面覆盖
             )
             is_simple = cfg.get("type") == "simple"
             if is_simple:
                 track_types[tid] = "simple"
-                # v2.6: simple track 自动跳过 code-view（无需配置）
-                tracks[tid] = tracks[tid].replace(code_review_enabled=False)
 
         # 确定当前 stage
         first_stage = PipelineState.extract_stage(order[0]) if order else ""
+
+        # v3.x: 从 execution-manifest.yaml 派生 code_view_enabled
+        # SSOT: phase_prompts 是否含 "code-view" sub
+        tracks = self._derive_code_view_enabled(tracks, order)
 
         self.state = self.state.replace(
             pipeline_order=tuple(order),
@@ -428,6 +429,49 @@ class Orchestrator:
                 pass
 
         return order, track_configs
+
+    def _derive_code_view_enabled(
+        self, tracks: dict, order: list,
+    ) -> dict:
+        """v3.x: 从 execution-manifest.yaml 派生 code_view_enabled。
+
+        SSOT：phase_prompts 是否含 "code-view" sub。
+        - 含 → code_view_enabled=True（派发 code-view sub-agent）
+        - 不含 / simple track → code_view_enabled=False（dispatcher 跳过 code-view phase）
+
+        simple track 由 manifest 不生成 phase_prompts → 天然不派发。
+        旧 change（manifest 无 code-view sub）→ 天然 fallback。
+        """
+        manifest_path = os.path.join(self.change_root, "execution-manifest.yaml")
+        if not os.path.isfile(manifest_path):
+            return tracks
+
+        try:
+            import yaml as _yaml
+            with open(manifest_path, encoding="utf-8") as f:
+                manifest = _yaml.safe_load(f) or {}
+        except Exception:
+            return tracks
+
+        # 收集所有 (stage.track) → 是否有 code-view sub
+        cv_enabled_tracks: set[str] = set()
+        for stage in (manifest.get("stages") or []):
+            stage_name = stage.get("name", "")
+            for track in (stage.get("tracks") or []):
+                if not isinstance(track, dict):
+                    continue
+                tid = track.get("id", "")
+                qualified = f"{stage_name}.{tid}" if stage_name else tid
+                phase_prompts = track.get("phase_prompts") or {}
+                if "code-view" in phase_prompts:
+                    cv_enabled_tracks.add(qualified)
+
+        # 更新 tracks
+        new_tracks: dict = {}
+        for tid, t in tracks.items():
+            enabled = tid in cv_enabled_tracks
+            new_tracks[tid] = t.replace(code_view_enabled=enabled)
+        return new_tracks
 
     def _detect_stage_config(self) -> tuple[list[str], dict[str, str]]:
         """从 execution-manifest.yaml 读取 stage 顺序和环境映射。

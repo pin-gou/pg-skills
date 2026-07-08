@@ -293,7 +293,21 @@ def _handle_linear_phase(
                 return new_state, PipelineAction(kind="advance", track=track)
 
             # test / dev → 下一个 phase
+            # v3.x: 若下一 phase 是 code-view 且 track.code_view_enabled=False
+            #       跳过 code-view，直接推进到 verify
             next_phase = _next_phase(phase)
+            while next_phase == "code-view" and not t.code_view_enabled:
+                t = _update_phase(
+                    t, "code-view",
+                    status="completed",
+                    summary="code-view disabled by manifest (no phase_prompts.code-view)",
+                )
+                new_state = new_state.replace(
+                    tracks={**new_state.tracks, track: t}
+                )
+                next_phase = _next_phase("code-view")
+                if next_phase is None:
+                    return new_state, PipelineAction(kind="advance", track=track)
             if next_phase is None:
                 return new_state, PipelineAction(kind="advance", track=track)
             new_state = new_state.replace(

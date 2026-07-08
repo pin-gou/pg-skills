@@ -107,11 +107,11 @@ class TrackState:
     phases: dict[str, PhaseState] = field(default_factory=dict)
     sub_pipelines: tuple[Any, ...] = ()  # SubPipeline
     accepted_gaps: tuple[dict[str, Any], ...] = ()
-    # code-view 配置（v2.6）
-    code_review_enabled: bool = True
-    code_review_profiles: tuple[str, ...] = ()
-    code_review_profile: str = ""  # 向后兼容：单 profile 写法
-    code_review_languages: tuple[str, ...] = ()  # 派生：module_details[].language
+    # code-view 配置（v2.6 → v3.x 重构）
+    # v3.x 移除：code_review_enabled / code_review_profiles / code_review_profile / code_review_languages
+    # 改由 execution-manifest.yaml 的 phase_prompts.code-view 是否存在作为唯一 SSOT，
+    # orchestrator bootstrap 时派生 code_view_enabled 字段。
+    code_view_enabled: bool = False  # 派生字段：从 manifest 的 phase_prompts.code-view 派生
 
     # 富化上下文（由 _first_next 从 project.yaml 预填充）
     module_roots: str = ""               # "[webvirt-backend, webvirt-agent-proto]"
@@ -161,10 +161,7 @@ class TrackState:
             "tasks_by_phase": dict(self.tasks_by_phase),
             "commands": list(self.commands),
             "timeout_seconds": self.timeout_seconds,
-            "code_review_enabled": self.code_review_enabled,
-            "code_review_profiles": list(self.code_review_profiles),
-            "code_review_profile": self.code_review_profile,
-            "code_review_languages": list(self.code_review_languages),
+            "code_view_enabled": self.code_view_enabled,
         }
 
     @classmethod
@@ -202,10 +199,13 @@ class TrackState:
             tasks_by_phase=d.get("tasks_by_phase", {}),
             commands=tuple(d.get("commands", [])),
             timeout_seconds=d.get("timeout_seconds", 1800),
-            code_review_enabled=d.get("code_review_enabled", True),
-            code_review_profiles=tuple(d.get("code_review_profiles", ())),
-            code_review_profile=d.get("code_review_profile", ""),
-            code_review_languages=tuple(d.get("code_review_languages", ())),
+            # v3.x 兼容：旧 snapshot 含 code_review_enabled → 派生出 code_view_enabled。
+            # 优先使用新字段 code_view_enabled；若缺则从旧字段回填（保留 v2.6 行为）。
+            code_view_enabled=(
+                bool(d.get("code_view_enabled"))
+                if d.get("code_view_enabled") is not None
+                else bool(d.get("code_review_enabled", True))
+            ),
         )
 
     def replace(self, **kwargs: Any) -> "TrackState":

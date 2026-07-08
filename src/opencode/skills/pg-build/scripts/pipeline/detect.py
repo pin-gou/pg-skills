@@ -134,6 +134,9 @@ def next_pending(state: PipelineState) -> PipelineAction:
                 # 从下一 phase 开始找
                 for i in range(idx, len(SUB_PHASES)):
                     phase = SUB_PHASES[i]
+                    # v3.x: code-view 派生 disabled → 视为 completed 跳过
+                    if phase == "code-view" and not track.code_view_enabled:
+                        continue
                     ph = track.phases.get(phase)
                     if ph is not None and ph.status == "completed":
                         continue

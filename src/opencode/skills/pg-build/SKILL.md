@@ -295,17 +295,32 @@ profiles:
 # .pg/project.yaml
 tracks:
   backend:
-    code_review_enabled: true          # 默认 true
-    code_review_profiles: []           # 不写 → 按 language 自动派发
+    code_review_enabled: true          # v3.x: 决定 tasks.md 含/不含 code-view 章节
     max_code_view_fix_retries: 3       # 默认 3
   auth-service:
     code_review_enabled: true
-    code_review_profiles:              # 显式指定（按顺序 = 优先级）
-      - security
-      - java-spring
   proto-gen:
     # simple track 自动 code_review_enabled=false（无需配置）
 ```
+
+### v3.x 变化：execution-manifest.yaml 为唯一 SSOT
+
+**v2.6 → v3.x 重大重构**：
+
+- pg-build 内部 `TrackState.code_review_*` 字段已**全部删除**（`code_review_enabled` / `code_review_profiles` / `code_review_profile` / `code_review_languages`）
+- 改由 **execution-manifest.yaml** 的 `phase_prompts.code-view` 是否存在作为**唯一 SSOT**
+- orchestrator bootstrap 时从 manifest 派生 `code_view_enabled: bool` 字段
+
+```
+execution-manifest.yaml
+  phases:
+    code-view: present  → code_view_enabled=True  → 派发 pg-build/code-view agent
+                         → 缺失   → code_view_enabled=False → reducer 自动完成 code-view phase（silent skip）
+```
+
+**兼容 v2.6**：旧 snapshot 含 `code_review_enabled` 字段 → `from_dict` 自动派生到 `code_view_enabled`（True/False 一致迁移）。
+
+**profile 选择**：pg-build 不再读 `track.code_review_profiles` / `code_review_profile`，完全由 `.pg/code-review.yaml` 全局 + `module_details[].language` 自动派发（java→java-spring, ts→vue3, go→go）。
 
 ### Score 协议
 
@@ -341,7 +356,8 @@ code-view.code_view_fix_cycles  ← code-view escalate 计数（独立）
 
 ### 关闭方式
 
-- `track.code_review_enabled: false` — 关闭单个 track
+- `track.code_review_enabled: false` — 关闭单个 track（在 propose 阶段生效，决定 manifest 是否含 code-view sub）
+- simple track 自动跳过（manifest 不生成 phase_prompts，pg-build 派生 `code_view_enabled=False`）
 - `track_types[tid] == "simple"` — simple track 自动关闭（无需配置）
 
 ---

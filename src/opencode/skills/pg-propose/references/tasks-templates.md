@@ -14,14 +14,21 @@ tasks.md 的章节顺序由 **stages × tracks** 二维展开驱动。
 > environment block quote + final-gate + on_conditions 机械评估注释**——全部由
 > `pg-gen-tasks-skeleton.py` 机械生成。LLM 只负责按骨架填充 body 内容，不再维护
 > 章节编号、heading 顺序、simple/standard 分流逻辑。
+>
+> **v3.3 升级（code-review 阶段适配）**：
+> - standard track 占 **4 或 5** 章节号（取决于 `tracks.<id>.code_review_enabled`）
+>   - `code_review_enabled=true` → 5 sub：`test / dev / code-view / verify / gate`
+>   - `code_review_enabled=false` → 4 sub：`test / dev / verify / gate`
+> - **章节号 N 跨 change 不一致**（同一 track 在不同 change 编号不同，已接受的硬冲突）
+> - `code-view` 阶段 body 由脚本预填 placeholder，runner 不展开命令
 
 ### 阶段零：调用骨架生成脚本
 
 ```bash
 python3 .opencode/skills/pg-propose/scripts/pg-gen-tasks-skeleton.py \
   --change <change-name> \
-  --proposal-md .pg/changes/<change>/proposal.md \
-  --affected-tracks "<track1>,<track2>,..." \
+  --proposal-md <path/to/proposal.md> \
+  --affected-tracks <track1,track2,...> \
   --environment "<stage1>→<env1>,<stage2>→<env2>,..."
 ```
 
@@ -38,7 +45,7 @@ python3 .opencode/skills/pg-propose/scripts/pg-gen-tasks-skeleton.py \
 
 - `.pg/changes/<change>/tasks.md`：完整骨架
 - `.pg/changes/<change>/1-propose-review/on-conditions-eval.md`：on_conditions 评估模板
-- stdout JSON：sections 数组（章节清单 + 元数据）
+- stdout JSON：sections 数组（章节清单 + 元数据，含 `code_review_enabled` 派生的 sub 数量）
 
 ### 阶段一：脚本生成骨架（机械，全量展开）
 
@@ -57,7 +64,10 @@ for stage in config.stages:                       # ← 按 config.stages 原序
             append_section(N, stage, track_id, sub=None, is_simple=True)
             N += 1
         else:
-            for sub in ["test", "dev", "verify", "gate"]:
+            # v3.x: 动态 4/5 sub 决定
+            code_view_enabled = bool(track_cfg.get("code_review_enabled", True))
+            subs = STANDARD_SUBS if code_view_enabled else [s for s in STANDARD_SUBS if s[0] != "code-view"]
+            for sub in subs:
                 append_section(N, stage, track_id, sub=sub, is_simple=False)
                 N += 1
 
@@ -70,8 +80,10 @@ append_section(N, "final", "final-gate", sub=None, is_simple=False)
 - 章节编号 N 从 1 开始**顺序递增，不跳过任何值**
 - 每个 stage × track × sub 都生成一个 heading（**不受 on_conditions 影响**）
 - on_conditions 评估结果以 **HTML 注释**形式嵌入每个章节 heading 下方
-- simple track 占 1 个章节号，standard track 占 4 个章节号
+- simple track 占 1 个章节号
+- standard track 占 **4 或 5** 章节号（取决于 `code_review_enabled`，v3.x 新增）
 - 末尾追加 final-gate 章节（占 1 个章节号）
+- **章节号 N 跨 change 不一致**（v3.x 已接受的硬冲突：同一 track 在不同 change 编号可能不同）
 
 ### 阶段二：LLM 按骨架顺序填充 body
 
@@ -215,6 +227,34 @@ per-change environment 选择由
 ```markdown
 - 无
 ```
+
+### track:code-view（静态代码审查，v3.x 新增）
+
+v3.x 起，仅当 `tracks.<id>.code_review_enabled=true` 时此章节才出现在 tasks.md。runner 不展开命令，code-view agent 自己读 `.pg/code-review.yaml` 解析 profile。
+
+**脚本预填 placeholder**（LLM 不需要替换 body 内容）：
+
+```markdown
+## {N}. {stage.name}.{track_id}:code-view - 静态代码审查
+
+- [ ] {N}.1 code-view agent 读 design.md + tasks.md + .pg/code-review.yaml 细则
+- [ ] {N}.2 code-view agent 对 git diff feat/pg/{change} 做静态审查
+- [ ] {N}.3 code-view agent 输出 cv_score + p0_failures 到 2-build/{seq}-{track_id}-code-view.md
+- [ ] {N}.4 score < pass_threshold → escalate 至 fix-code-view；score < escalate_threshold → workflow_failed
+```
+
+**禁止**：
+- 禁止在 placeholder 后面追加具体 shell 命令
+- 禁止引用 `modules.<m>.lint` 等 placeholder 命令
+- 禁止替换 placeholder 文本（除非 design.md 明确声明本次需要额外检查项）
+
+**允许**（可选）：
+- 在 `<!-- on_conditions_eval -->` HTML 注释**下面**追加一段 `> **本次变更 code-view 关注点**：`说明本次 CV-* 检查重点（不超过 5 行）
+- 不影响 placeholder 默认 body
+
+**何时本章节不出现**：
+- `tracks.<id>.code_review_enabled=false` → 脚本跳过此 sub，章节号 N 减少 1
+- simple track → 不走 4/5 sub 模板，本章节天然不出现
 
 ### track:verify（集成验证）
 

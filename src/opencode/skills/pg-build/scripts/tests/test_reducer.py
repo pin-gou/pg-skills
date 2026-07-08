@@ -57,9 +57,12 @@ from pipeline.sub_pipeline import (
 )
 
 
-def _make_track(track_id: str, status: str = "pending") -> TrackState:
+def _make_track(
+    track_id: str, status: str = "pending", code_view_enabled: bool = True,
+) -> TrackState:
     # v2.3: fix_routing 已废弃，默认行为就是 fix→verify
-    return TrackState.create(track_id, status=status)
+    # v3.x: 测试默认开启 code-view（与 v2.6 测试意图一致，验证 dev → code-view 路径）
+    return TrackState.create(track_id, status=status, code_view_enabled=code_view_enabled)
 
 
 def _make_phase_state(status: str = "pending", attempt: int = 0) -> PhaseState:

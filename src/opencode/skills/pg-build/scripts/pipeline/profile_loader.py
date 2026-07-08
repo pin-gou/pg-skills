@@ -187,25 +187,31 @@ def load_markdown_rule(project_root: str, profile_name: str, check_name: str) ->
 # ============================================================
 
 def resolve_profile_names(
-    track_code_review_profiles: tuple[str, ...],
-    track_code_review_profile: str,  # legacy 单 profile 字段
-    track_code_review_languages: tuple[str, ...],
+    track_code_review_profiles: tuple[str, ...] = (),  # v2.6 legacy 字段
+    track_code_review_profile: str = "",  # v2.6 legacy 字段
+    track_code_review_languages: tuple[str, ...] = (),
 ) -> list[str]:
-    """v2.6: 按优先级解析要加载的 profile 链。
+    """v3.x: 按优先级解析要加载的 profile 链。
+
+    v2.6 → v3.x 变化：
+      - pg-build 内部 TrackState 删除 code_review_* 字段
+      - 函数签名保留 v2.6 行为（兼容旧调用）
+      - pg-build 主流程不传 track_code_review_profiles/profile（依赖 language 自动派发）
+      - 显式 profile 优先于 language（保留 v2.6 行为）
 
     优先级（高 → 低）：
-      1. track.code_review_profiles（用户显式，按顺序 = 优先级）
-      2. track.code_review_profile（旧字段，单 profile）
-      3. language 自动派发（按 module_details[].language，依次查 LANGUAGE_PROFILE_MAP）
+      1. track_code_review_profiles（用户显式，按顺序 = 优先级）
+      2. track_code_review_profile（旧字段，单 profile）
+      3. language 自动派发（按 module_details[].language）
       4. 默认 ['default']（兜底）
 
     返回有序列表（高优先级在前），Union 合并时按列表顺序应用。
     """
-    # 1. 显式 profiles 列表（最高优先级）
+    # 1. 显式 profiles 列表（最高优先级，保留 v2.6 行为）
     if track_code_review_profiles:
         return list(track_code_review_profiles)
 
-    # 2. legacy 单 profile
+    # 2. legacy 单 profile（保留 v2.6 行为）
     if track_code_review_profile:
         return [track_code_review_profile]
 
@@ -309,13 +315,18 @@ def load_effective_profile(
 
 def resolve_profile_for_track(
     project_root: str,
-    track_code_review_profiles: tuple[str, ...],
-    track_code_review_profile: str,
-    track_code_review_languages: tuple[str, ...],
+    track_code_review_profiles: tuple[str, ...] = (),  # v2.6 legacy
+    track_code_review_profile: str = "",  # v2.6 legacy
+    track_code_review_languages: tuple[str, ...] = (),
 ) -> Profile:
-    """v2.6: 单步解析 — 给定 track 配置，返回 effective profile。
+    """v3.x: 单步解析 — 给定 track 的 module_languages，返回 effective profile。
 
-    这是 orchestrator._first_next 应该调用的主入口。
+    v2.6 → v3.x 变化：
+      - pg-build 不再传 track_code_review_profiles / track_code_review_profile
+      - 这些参数保留以兼容旧调用（被忽略）
+      - profile 完全由 language 自动派发（参考 resolve_profile_names）
+
+    这是 orchestrator 应该调用的主入口。
     """
     names = resolve_profile_names(
         track_code_review_profiles,

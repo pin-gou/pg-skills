@@ -5,7 +5,7 @@ license: MIT
 compatibility: 需要 `.pg/changes/` 目录结构和 `.pg/project.yaml` 统一配置文件。
 metadata:
   author: pg
-  version: "3.1"
+  version: "3.3"
 ---
 
 # pg-propose
@@ -320,6 +320,15 @@ review-notes.md 必含段：
 ---
 
 ## 文档变更记录
+
+- **v3.3（2026-07-08）**：适配 pg-build v2.6 code-review 阶段。
+  - `pg-gen-tasks-skeleton.py` 的 `STANDARD_SUBS` 增加 `code-view`；`build_sections` 按 `tracks.<id>.code_review_enabled` 决定 4/5 sub。
+  - `pg-gen-manifest.py` / `manifest.schema.json` / `pg-validate-proposal.py` 适配：phase_prompts 4 必填 + code-view optional，minProperties=4/maxProperties=5。
+  - `references/tasks-templates.md` 新增 `track:code-view` 章节模板与不变量说明。
+  - **破坏性变更**：章节号 N 跨 change 不一致（同一 track 在不同 change 编号可能不同）。下游消费方必须基于脚本输出 sections JSON 的 N 值填，不许硬编码。
+  - 协调：pg-build 内部 `TrackState.code_review_*` 字段已删除，改用 `code_view_enabled`（从 execution-manifest.yaml 派生的 bool 字段）。
+
+- **v3.2（前置版本）**：tasks.md 章节标题骨架 + 章节编号 N + simple/standard 分流 + on_conditions 评估注释全部由 `pg-gen-tasks-skeleton.py` 机械生成。
 
 - **v3.1（2026-07-08）**：重构 SKILL.md 与 references 的内容分工。SKILL.md 仅保留流程编排、阶段契约、黑/白名单；模板字符串、字段定义、规则清单全部下放到 references/ 单一 SSOT；顶部新增「文档导航」routing table。本变更由用户对 add-user-reset-password 提案执行 `pg-propose` 后自审暴露的问题驱动，详见 `.pg/changes/add-user-reset-password/`。
 - **v3.0**：初始当前形态。
