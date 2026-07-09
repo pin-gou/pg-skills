@@ -53,7 +53,8 @@ python3 .pg/skills/src/runtime/bin/pg init
 # 4. 在 opencode 中输入提示词： 加载并执行 pg-init-project skill
 #    （opencode 自动扫描仓库结构，生成 .pg/context/repo-scan.md + 实打实的 .pg/project.yaml）
 
-# 5. (可选) 同步 hook 公共库: 上游 SSOT 改动后, 用 cp 覆盖
+# 5. (可选) 同步 hook 公共库: 仅升级后需要；`pg init` 已自动复制 common.sh。
+#    如 `pg doctor` 报 `pg_resolve_paths` 缺失则手动 cp：
 #    cp .pg/skills/examples/shell/hooks/lib/common.sh .pg/hooks/lib/common.sh
 #    默认是 .pg/skills/examples/shell/hooks/lib/common.sh 的副本 (顶部含 SSOT 同步标记).
 #    项目特有工具 (port 探测 / 自定义 health check) 可加在 SSOT 标记之后, 不会被同步覆盖.
@@ -67,10 +68,9 @@ python3 .pg/skills/src/runtime/bin/pg init
 ├── agents/   <── symlinks: explore.md, pg-manager.md, pg-build/, pg-fix-issue/, pg-quick-build/, pg-regression/
 ├── commands/ <── symlinks: pg-1-define.md, pg-2-propose.md, pg-2.1-propose-refine.md, pg-2b-quick-build.md,
 │                          pg-3-build.md, pg-4-regression.md, pg-5-fix-issue.md, pg-6-archive.md
-├── skills/   <── symlinks: git-workflow-and-versioning/, pg-archive/, pg-build/, pg-fix-issue/,
-│                          pg-propose/, pg-propose-refine/, pg-quick-build/, pg-regression/,
-│                          pg-systematic-diagnosing/, pg-verify-and-merge/, security-and-hardening/,
-│                          using-agent-skills/, pg-browser-testing-with-devtools/
+├── skills/   <── symlinks: pg-archive/, pg-browser-testing-with-devtools/, pg-build/, pg-fix-issue/,
+│                          pg-init-project/, pg-propose/, pg-propose-refine/, pg-quick-build/,
+│                          pg-regression/, pg-systematic-diagnosing/, pg-verify-and-merge/
 └── (无 scripts/ —— pg-skills 的 scripts/ 不通过 symlink 暴露)
 ```
 
@@ -99,13 +99,13 @@ git commit -m "feat: 接入 pg-skills $(cat .pg/skills/VERSION)"
 
 ```
 pg-skills/
-├── VERSION                       # semver （当前: 0.6.0）
+├── VERSION                       # semver （当前: 0.8.0）
 ├── CHANGELOG.md
 ├── README.md                     # 本文件
 ├── src/
 │   ├── opencode/
 │   │   ├── commands/             # 8 个 slash 命令（/1-pg-define, /2-pg-propose, ...）
-│   │   ├── skills/               # 13 个 SKILL.md 文件（pg-propose, pg-build, ...）
+│   │   ├── skills/               # 11 个活跃 SKILL.md（pg-archive, pg-browser-testing-with-devtools, pg-build, pg-fix-issue, pg-init-project, pg-propose, pg-propose-refine, pg-quick-build, pg-regression, pg-systematic-diagnosing, pg-verify-and-merge）
 │   │   └── agents/               # 子 agent（explore, pg-manager, ...）
 │   └── runtime/                  # 运行时层
 │       ├── bin/                  # CLI 入口（pg, pg-invoke-hook.py, ...）
@@ -189,8 +189,9 @@ pg-skills/
 | **0.4.x** | v4 Hook 协议 — caller × session 双维度路由 + pg-run 菜单 |
 | **0.5.x** | 字段统一为 snake_case + 配置重构 |
 | **0.6.x** | pg-build 事件溯源引擎 + pg-agent workflow + health check |
-| **0.7.x** | pg-build v2 取代 v1 + 路径简化 + execution-manifest.yaml SSOT + pg-regression A/B/C 修复边界 —— **当前** |
-| **1.0.x** | 生产就绪，在 2+ 外部项目 dogfood |
+| **0.7.x** | pg-build v2 取代 v1 + 路径简化 + execution-manifest.yaml SSOT + pg-regression A/B/C 修复边界 |
+| **0.8.0** | pg-build v2.6 review 阶段 + code-review profile 引擎（5 profile）+ pg-propose tasks.md 骨架脚本外化 + pg-fix-issue v3.2 重构 + code_view→code_review 重命名 + 品构品牌命名 —— **当前** |
+| **1.0.x** | 生产就绪，在 2+ 外部项目 dogfood（未达） |
 
 ### 升级命令
 
@@ -199,7 +200,7 @@ pg-skills/
 pg upgrade
 
 # 升级到指定版本
-pg upgrade v0.3.0
+pg upgrade v0.8.0
 
 # 查看远程可用版本
 pg upgrade --list

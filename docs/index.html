@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>品构 Workshop · 让 AI 写出可托付的代码</title>
+<title>品构 pg-skills · 让 AI 写出可托付的代码</title>
 <style>
 :root {
   --bg: #f8f9fa;
@@ -237,15 +237,18 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 }
 
 .flex-row { display: flex; align-items: flex-start; gap: 10px; }
+
+.muted-hint { font-size:11px; color:var(--muted); margin-left:8px; vertical-align:middle; }
+@media (max-width: 768px) { .muted-hint { display:none; } }
 </style>
 </head>
 <body>
 
 <div id="progress-bar"></div>
-<button id="theme-toggle">🌙 暗色</button>
+<button id="theme-toggle">🌙 暗色</button><span class="muted-hint">💡 侧栏点击会同步 URL，可分享章节链接</span>
 
 <nav id="sidebar">
-  <h2>📘 品构 Workshop</h2>
+  <h2>📘 品构 pg-skills</h2>
   <p style="padding:0 16px;margin:-6px 0 8px;font-size:12px;color:var(--muted);font-style:italic">让 AI 写出可托付的代码</p>
 
   <span class="section-group">基础概念</span>
@@ -264,8 +267,8 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <a href="#sec4-define">4.2 定界</a>
   <a href="#sec4-propose">4.3 提案</a>
   <a href="#sec4-build">4.4 构建</a>
-  <a href="#sec4-build" class="sub">4.4.5 simple track</a>
-  <a href="#sec4-build" class="sub">4.4.6 gate-score</a>
+  <a href="#sec4-4-5" class="sub">4.4.5 simple track</a>
+  <a href="#sec4-4-6" class="sub">4.4.6 gate-score</a>
   <a href="#sec5">5. Bug 修复</a>
   <a href="#sec6">6. 回归测试</a>
   <a href="#sec7">7. 动手实操</a>
@@ -455,7 +458,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <rect x="40" y="20" width="620" height="110" rx="10" fill="url(#g1)" opacity="0.15"/>
   <rect x="40" y="20" width="620" height="110" rx="10" stroke="url(#g1)" stroke-width="2" fill="none"/>
   <text x="60" y="50" font-size="14" font-weight="700" fill="var(--text)">L1：pg-skills 共享能力层</text>
-  <text x="60" y="72" font-size="12" fill="var(--muted)">.opencode/skills/ 下的 13 个 SKILL 定义（跨项目复用）</text>
+  <text x="60" y="72" font-size="12" fill="var(--muted)">.opencode/skills/ 下的 11 个活跃 SKILL 定义（跨项目复用）</text>
   <rect x="60" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
   <text x="72" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-propose</text>
   <rect x="158" y="85" width="116" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
@@ -465,7 +468,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <rect x="384" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
   <text x="396" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-regression</text>
   <rect x="492" y="85" width="80" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
-  <text x="504" y="104" font-size="12" font-weight="600" fill="var(--text)">+ 9 个</text>
+  <text x="504" y="104" font-size="12" font-weight="600" fill="var(--text)">+ 8 个</text>
 
   <!-- Arrow -->
   <line x1="350" y1="130" x2="350" y2="150" stroke="var(--muted)" stroke-width="2" marker-end="url(#arrow)"/>
@@ -688,7 +691,7 @@ modules:
 </pre>
 
 <div class="info-card card">
-  <p style="margin:0"><strong><code>review_level</code>（pg-build review phase 开关，schema 默认 <code>standard</code>）</strong>：pg-init-project 按 language 推断初值——<code>java/kotlin/scala/go/proto</code> → <code>security</code>（含服务端核心/协议/凭据类代码），<code>typescript/javascript/python</code> → <code>standard</code>，<code>shell</code> → <code>none</code>，其他 → <code>standard</code>。该字段控制 review 阶段是否进入该 module 的静态审查；如需 opt-in security profile，配合 <code>tracks.&lt;id&gt;.code_review_profiles: [security, ...]</code> 使用。</p>
+  <p style="margin:0"><strong><code>review_level</code>（pg-build review phase 敏感度，schema 默认 <code>standard</code>）</strong>：pg-init-project 按 language 推断初值——<code>java/kotlin/scala/go/proto</code> → <code>security</code>（含服务端核心/协议/凭据类代码），<code>typescript/javascript/python</code> → <code>standard</code>，<code>shell</code> → <code>none</code>，其他 → <code>standard</code>。该字段控制 gate-score 中 security 维度的权重。Security profile 由 <code>pg-init-project</code> Phase 2.5 推一份 <code>.pg/code-review/security/</code> 后，在 <code>.pg/code-review.yaml</code> 中通过 union 合并拾起；<strong>不再</strong>通过 <code>tracks.&lt;id&gt;.code_review_profiles</code> 配置（0.8.0 该字段已被 runner 忽略）。</p>
 </div>
 
 <h3>environments 段</h3>
@@ -715,15 +718,13 @@ tracks:
   backend:
     modules: [backend, agent-proto]
     max_fix_retries: 5
-    code_review_enabled: true
-    code_review_profiles: [security]   <span style="color:#94a3b8"># 鉴权/协议/凭据类变更，手动 opt-in</span>
+    <span style="color:#94a3b8"># 0.8.0 起 review profile 不再写在 tracks 上；由 .pg/code-review.yaml + module language 自动派发</span>
   agent:
     modules: [agent, agent-proto]
-    code_review_enabled: true
   frontend:
     modules: [frontend]
   proto-gen:
-    type: simple                       <span style="color:#94a3b8"># simple track 自动 code_review_enabled=false</span>
+    type: simple                       <span style="color:#94a3b8"># simple track 自动跳过 review 阶段</span>
 
 <span style="color:#94a3b8"># stages：定义 pipeline 阶段编排（on_conditions 决定 change 是否进入该 stage）</span>
 stages:
@@ -746,8 +747,8 @@ stages:
     <li><code>modules</code>：本 track 关联的 module id 列表（runner 用此定位 build/lint/test 命令）</li>
     <li><code>max_fix_retries</code>：verify→fix 子 pipeline 的总次数上限（默认 5）</li>
     <li><code>type</code>：<code>standard</code>（默认，TDRVG 四阶段 + 可选 review）/<code>simple</code>（commands 列表直跑，自动跳过 review）</li>
-    <li><code>code_review_enabled</code>：是否派发 <code>pg-build/review</code> agent。propose 阶段由 <code>pg-gen-tasks-skeleton.py</code> 按 <code>track.code_review_enabled</code> 决定 tasks.md 含 4 还是 5 sub（不含 review 即 silent skip）</li>
-    <li><code>code_review_profiles</code>：可选。手指定派的 profile 列表，按顺序合并（Union）；常见的 <code>default</code> 兜底 + <code>security</code> opt-in；语言自动派发的 profile（java→java-spring / go→go / ts→vue3）由 pg-build 直接读 <code>.pg/code-review.yaml</code>，<strong>不</strong>需要在这里配置</li>
+    <li><code>code_review_enabled</code>：是否派发 <code>pg-build/review</code> agent。propose 阶段由 <code>pg-gen-tasks-skeleton.py</code> 按 manifest 的 <code>phases.review</code> 是否存在决定 tasks.md 含 4 还是 5 sub（不含 review 即 silent skip）；simple track 自动跳过 review</li>
+    <li><code>code_review_profiles</code>：⚠ <strong>已废弃（0.8.0 不再读）</strong>。历史文档会看到这个字段；保留仅作兼容说明，runner 当前仅依赖 <code>.pg/code-review.yaml</code> 全局 + module language 自动派发。</li>
   </ul>
 </div>
 </div>
@@ -1526,7 +1527,7 @@ stages:
   <tr><td><code>tracks[].id</code></td><td>track 名</td><td><code>backend</code></td></tr>
   <tr><td><code>tracks[].modules</code></td><td>本 track 涉及的 modules（用于定位 build/lint/test 命令）</td><td><code>[backend, agent-proto]</code></td></tr>
   <tr><td><code>tracks[].type</code></td><td>track 类型</td><td><code>standard</code>（默认 TDRVG 4-5 sub）/ <code>simple</code>（commands 列表直跑，自动跳过 review）</td></tr>
-  <tr><td><code>tracks[].code_review_enabled</code></td><td>是否派发 review sub-agent；propose 决定 tasks.md 含 review sub；missing 时 silent skip</td><td><code>true</code> / <code>false</code></td></tr>
+  <tr><td><code>tracks[].code_review_enabled</code></td><td>是否派发 review sub-agent；propose 决定 tasks.md 含 review sub；missing 时 silent skip。<strong>SSOT 已下沉</strong>到 <code>execution-manifest.yaml.phases.review</code> 是否存在；0.8.0 起 manifest schema 不再含 <code>code_review_profiles</code> / <code>code_review_profile</code> 字段。</td><td><code>true</code> / <code>false</code></td></tr>
   <tr><td><code>tracks[].phase_prompts</code></td><td>对应 4-5 sub 的 prompt 模板（test/dev/verify/gate；含 review 时多 review）</td><td>由 <code>pg-gen-manifest.py</code> 派生</td></tr>
 </table>
 
@@ -1692,7 +1693,7 @@ stages:
   <p style="margin:0"><strong>v0.7 变更</strong>：移除 <code>environment.yaml</code>（per-stage environment 已并入 <code>execution-manifest.yaml.stages[i].environment</code>）。<strong>v0.7/v0.8 变更</strong>：新增 review / fix-review 报告（pg-build v2.6 code-review phase），与 verify / fix 报告并列；新增 <code>on-conditions-eval.md</code>（pg-propose 阶段用于复核 stage/track 过滤评估）。</p>
 </div>
 
-<h2>4.4.5 simple track —— 跳过 sub-agent 的轻量编排</h2>
+<h2 id="sec4-4-5">4.4.5 simple track —— 跳过 sub-agent 的轻量编排</h2>
 
 <p>并非所有 track 都需要完整 TDRVG 四 / 五阶段。对于纯代码生成、文档同步、模板替换这类<strong>无设计决策</strong>的小活，可以用 <code>simple</code> 类型的 track：</p>
 
@@ -1775,7 +1776,7 @@ tracks:
   <p style="margin:0"><strong>选择原则</strong>：如果 track 不需要"设计决策 → 代码 → 验证 → 门控"四步走、且失败信号可直接从命令 exit code 读出，就用 <code>simple</code>。否则用 <code>standard</code>。simple track 无 review 阶段（不在 language 自动派发范围内），适合纯机械脚本。</p>
 </div>
 
-<h2>4.4.6 gate-score —— 5 维加权评分</h2>
+<h2 id="sec4-4-6">4.4.6 gate-score —— 5 维加权评分</h2>
 
 <p>每个 track 在进入 <code>gate</code> 阶段时，由 <code>pg-build/gate</code> sub-agent 按 5 个维度打分，<strong>总分 ≥ 80 才视为 gate 通过</strong>。相比传统的 bool 通过/失败，gate-score 能区分"差一点点"和"差很多"：</p>
 
@@ -2174,6 +2175,34 @@ pg doctor
     <p>判断标准很简单：看它在 project.yaml 中配置在<strong>哪个位置</strong>——modules 下的都是 module 命令，environments 下的都是 hook。</p>
   </div>
 </div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>propose 之后只改了一行产品描述，要不要再 propose 一遍？</strong></div>
+  <div class="collapse-body">
+    <p>文案 / 术语 / 数字这类纯文档微调，直接编辑 <code>proposal.md</code> 然后跑 <code>/2.1-pg-propose-refine</code>；如果改了 <code>design.md</code> 的接口、数据结构或 stage/tracks 编排，必须重跑 <code>/2-pg-propose</code> 让 <code>execution-manifest.yaml</code> 重新生成。</p>
+  </div>
+</div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>feat/pg/&lt;change&gt; 分支要 push 吗？要不要 PR？</strong></div>
+  <div class="collapse-body">
+    <p>pg-build 完成后会自动调 <code>pg-verify-and-merge</code> 模拟合 master → 真合 master；本机操作不必手动 push。<strong>多机协作时</strong>仍需 <code>git push origin feat/pg/&lt;change&gt;</code> 让 CI 跑；<code>pg-verify-and-merge</code> 处理实际的合并逻辑。</p>
+  </div>
+</div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>从 0.7.x 升 0.8.0 后，旧 change 还能 build 吗？</strong></div>
+  <div class="collapse-body">
+    <p>可以。0.8.0 向后兼容 0.7.x 的 <code>execution-manifest.yaml</code> 形态；但<strong>含 review 子阶段的 tasks.md</strong>需要用 <code>pg-gen-tasks-skeleton.py --selected-stages</code> 重新生成一次，章节号 N 会重排（下游消费方必须读 sections JSON 的 N 值，不要硬编码）。具体迁移步骤见 <code>pg upgrade</code> 升级日志。</p>
+  </div>
+</div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>多人同时跑 pg-init-project 谁最后说了算？</strong></div>
+  <div class="collapse-body">
+    <p><code>pg init</code> 幂等可重跑；但 <code>pg-init-project</code> 是 AI 推断，<strong>生成完一定要人工 review</strong>（参见 §3.5 checklist "人工核对自动产物" 段）。建议先在分支跑一次 → PR 合 master → 其他人 rebase。<code>.pg/code-review/</code> 目录 Phase 2.5 幂等，不会自动覆盖已存在文件。</p>
+  </div>
+</div>
 </div>
 
 <!-- ============================================================ -->
@@ -2232,7 +2261,7 @@ pg doctor
 </table>
 
 <p style="text-align:center; margin-top:48px; color:var(--muted); font-size:13px">
-  <strong>品构</strong> Workshop · 「让 AI 写出可托付的代码」 · 更多文档见 <code>.pg/skills/README.md</code>
+  <strong>品构</strong> pg-skills · 「让 AI 写出可托付的代码」 · 更多文档见 <code>.pg/skills/README.md</code>
 </p>
 
 </div><!-- /section -->
@@ -2264,6 +2293,7 @@ navLinks.forEach(link => {
     document.getElementById(id).classList.add('active');
     navLinks.forEach(l => l.classList.remove('active'));
     link.classList.add('active');
+    history.replaceState(null, '', '#' + id);
     window.scrollTo({ top: 0, behavior: 'smooth' });
   });
 });
@@ -2277,6 +2307,8 @@ const observer = new IntersectionObserver((entries) => {
         l.classList.remove('active');
         if (l.getAttribute('href') === '#' + id) l.classList.add('active');
       });
+      const currentId = window.location.hash.slice(1);
+      if (currentId !== id) history.replaceState(null, '', '#' + id);
     }
   });
 }, { threshold: 0.3 });
