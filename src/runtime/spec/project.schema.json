@@ -313,6 +313,11 @@
           "description": "verify 失败时如何分派修复: source=本 track 内修; auto=按 git diff 跳到对应 module track; manual=ESCALATE LLM"
         },
         "review_level": { "type": "string", "enum": ["none", "standard", "security"], "default": "standard" },
+        "on_conditions": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "本 track 是否启用的自然语言规则 (pg-propose 解析). 任一命中即启用 track (OR 语义). 字段缺省 = track 视为常驻 (永远生成 tasks.md 对应章节). 主要用于 type=simple 的 track, 避免每次变更都跑不必要的代码生成."
+        },
         "description":  { "type": "string" }
       }
     },

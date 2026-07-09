@@ -36,7 +36,7 @@ from pipeline.profile_loader import (
 
 
 def _write_yaml(project_root: str, content: str) -> None:
-    """写 .pg/code-review.yaml。"""
+    """写 .pg/code-review/code-review.yaml。"""
     path = profile_index_path(project_root)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:

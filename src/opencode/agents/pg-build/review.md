@@ -78,7 +78,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 ### 必读源文档
 
 1. **`.pg/changes/{change_name}/design.md`** — 期望实现的 API/DTO/数据结构
-2. **`.pg/code-review.yaml`** — profile 配置
+2. **`.pg/code-review/code-review.yaml`** — profile 配置
 3. **`.pg/code-review/<profile>/<check>.md`** — 每项检查的执行细则（在 `code_review_rule_docs` 中已注入）
 
 ## 工作流程

@@ -223,7 +223,7 @@ reducer 返回 `kind="error"` 时：
 - **Bootstrap**: `scripts/bootstrap.py` (pipeline 启动副作用)
 - **Templates**: `prompt-templates/*.yaml` (9 个 phase 模板，含 review / fix-review)
 - **v2.6 Code View**:
-  - `.pg/code-review.yaml` (profile 索引)
+  - `.pg/code-review/code-review.yaml` (profile 索引)
   - `.pg/code-review/<profile>/*.md` (检查项执行细则)
   - `.opencode/agents/pg-build/review.md` (sub-agent 定义)
   - `.opencode/agents/pg-build/fix-review.md` (fix sub-agent 定义)
@@ -254,7 +254,7 @@ review 是**新 phase**（不是 verify 内部的步骤），由独立的 `pg-bu
 
 ### Profile 配置
 
-`review` 检查项由 **profile** 控制，位于 `.pg/code-review.yaml`：
+`review` 检查项由 **profile** 控制，位于 `.pg/code-review/code-review.yaml`：
 
 ```yaml
 profiles:
@@ -320,7 +320,7 @@ execution-manifest.yaml
 
 **兼容 v2.6**：旧 snapshot 含 `code_review_enabled` 字段 → `from_dict` 自动派生到 `code_review_enabled`（True/False 一致迁移）。
 
-**profile 选择**：pg-build 不再读 `track.code_review_profiles` / `code_review_profile`，完全由 `.pg/code-review.yaml` 全局 + `module_details[].language` 自动派发（java→java-spring, ts→vue3, go→go）。
+**profile 选择**：pg-build 不再读 `track.code_review_profiles` / `code_review_profile`，完全由 `.pg/code-review/code-review.yaml` 全局 + `module_details[].language` 自动派发（java→java-spring, ts→vue3, go→go）。
 
 ### Score 协议
 

@@ -107,7 +107,7 @@ v3.3 起，pg-build 引入 review 阶段。propose 阶段需自审：
 | `tracks.<id>.code_review_enabled` 配置一致 | tasks.md 含/不含 `:review` 章节必须与 `tracks.<id>.code_review_enabled` 一致（脚本自动保证，但 LLM 需自审逻辑分支） |
 | `execution-manifest.yaml` phase_prompts 一致 | phase_prompts 是否含 `review` sub 必须与 tasks.md 章节一致（脚本自动保证） |
 | 本次变更是否需要 code-review | 涉及架构/API/安全/核心数据模型变更时，`code_review_enabled` 应为 true；纯文档/README/typo fix 可设为 false |
-| profile 自动派发正确性 | `.pg/code-review.yaml` 的 language 自动派发是否覆盖本 track 的主要语言（java→java-spring, ts→vue3, go→go） |
+| profile 自动派发正确性 | `.pg/code-review/code-review.yaml` 的 language 自动派发是否覆盖本 track 的主要语言（java→java-spring, ts→vue3, go→go） |
 
 ---
 

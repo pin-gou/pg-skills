@@ -459,7 +459,7 @@ def format_section_body(section: dict) -> str:
     if section["sub"] == "review":
         # v3.x: review 阶段 placeholder（runner 不展开命令，agent 自己读 profile 配置）
         return (
-            f"- [ ] {section['n']}.1 review agent 读 design.md + tasks.md + .pg/code-review.yaml 细则\n"
+            f"- [ ] {section['n']}.1 review agent 读 design.md + tasks.md + .pg/code-review/code-review.yaml 细则\n"
             f"- [ ] {section['n']}.2 review agent 对 git diff feat/pg/{{change}} 做静态审查\n"
             f"- [ ] {section['n']}.3 review agent 输出 review_score + p0_failures 到 2-build/{{seq}}-{section['track']}-review.md\n"
             f"- [ ] {section['n']}.4 score < pass_threshold → escalate 至 fix-review；score < escalate_threshold → workflow_failed"
