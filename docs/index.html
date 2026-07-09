@@ -253,7 +253,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <a href="#sec2">2. 架构全景</a>
 
   <span class="section-group">新项目接入</span>
-  <a href="#sec3-onboard">3.1 四步接入</a>
+  <a href="#sec3-onboard">3.1 五步接入</a>
   <a href="#sec3-yaml">3.2 project.yaml</a>
   <a href="#sec3-hook">3.3 Hook 协议</a>
   <a href="#sec3-demo">3.4 执行演示</a>
@@ -565,37 +565,37 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 <h2>3.1 五步接入</h2>
 <div class="card">
 <ol>
-  <li><strong>git subtree 拉入 pg-skills</strong>（含 <code>.pg/skills/examples/code-review/</code> 模板：default / java-spring / go / vue3 / security 五个 profile）</li>
-  <li><strong>pg init 生成骨架 + symlink</strong></li>
-  <li><strong>重启 opencode</strong>（加载 slash commands + skills + sub-agents，含新 <code>pg-build/review</code> / <code>pg-build/fix-review</code>）</li>
-  <li><strong>在 opencode 中触发 pg-init-project skill</strong>（AI 自动扫描仓库，生成 project.yaml + hooks + .pg/code-review/）</li>
   <li><strong>配置 opencode 模型路由</strong>——pg-skills 使用三个路由别名
     <code>pg-router/pg-associate</code>（轻量）、<code>pg-router/pg-expert</code>（主力）、
     <code>pg-router/pg-master</code>（规划），需在 <code>opencode.json</code> 中映射到实际模型。
     推荐使用 <a href="https://github.com/zhangzhongnan/omniroute">omniroute</a>
     或 <a href="https://github.com/PinGou/9router">9router</a> 等工具进行模型路由选择。</li>
+  <li><strong>git subtree 拉入 pg-skills</strong>（含 <code>.pg/skills/examples/code-review/</code> 模板：default / java-spring / go / vue3 / security 五个 profile）</li>
+  <li><strong>pg init 生成骨架 + symlink</strong></li>
+  <li><strong>重启 opencode</strong>（加载 slash commands + skills + sub-agents，含新 <code>pg-build/review</code> / <code>pg-build/fix-review</code>）</li>
+  <li><strong>在 opencode 中触发 pg-init-project skill</strong>（AI 自动扫描仓库，生成 project.yaml + hooks + .pg/code-review/）</li>
 </ol>
 </div>
 
 <pre>
-<span style="color:#94a3b8"># ① 用 git subtree 把 pg-skills 同步进项目</span>
-git remote add pg-skills git@github.com:pin-gou/pg-skills.git
-git fetch pg-skills
-git subtree add --prefix=.pg/skills pg-skills master --squash
-
-<span style="color:#94a3b8"># ② 跑 pg init 创建 .pg/ 骨架 + .opencode/ symlink</span>
-python3 .pg/skills/src/runtime/bin/pg init
-
-<span style="color:#94a3b8"># ③ 重启 opencode 后，在 opencode 中执行 pg-init-project</span>
-<span style="color:#94a3b8">#    （Phase 1 扫仓库 → Phase 2 写 .pg/project.yaml（含 review_level）→ Phase 2.5 按 language 派发 review profile → Phase 3 写 .pg/hooks/ → Phase 4 doctor 校验）</span>
-<span style="color:#94a3b8"># ④ 验证</span>
-python3 .pg/skills/src/runtime/bin/pg doctor
-
-<span style="color:#94a3b8"># ⑤ 在 opencode.json 中配置模型路由</span>
+<span style="color:#94a3b8"># ① 在 opencode.json 中配置模型路由</span>
 <span style="color:#94a3b8"># 使用 omniroute / 9router 映射三模型：</span>
 <span style="color:#94a3b8">#   pg-router/pg-associate → minimax-m2.7（轻量）</span>
 <span style="color:#94a3b8">#   pg-router/pg-expert    → deepseek-v4-flash（主力）</span>
 <span style="color:#94a3b8">#   pg-router/pg-master    → deepseek-v4-pro 或 minimax-m3（规划）</span>
+<span style="color:#94a3b8"></span>
+<span style="color:#94a3b8"># ② 用 git subtree 把 pg-skills 同步进项目</span>
+git remote add pg-skills git@github.com:pin-gou/pg-skills.git
+git fetch pg-skills
+git subtree add --prefix=.pg/skills pg-skills master --squash
+
+<span style="color:#94a3b8"># ③ 跑 pg init 创建 .pg/ 骨架 + .opencode/ symlink</span>
+python3 .pg/skills/src/runtime/bin/pg init
+
+<span style="color:#94a3b8"># ④ 重启 opencode 后，在 opencode 中执行 pg-init-project</span>
+<span style="color:#94a3b8">#    （Phase 1 扫仓库 → Phase 2 写 .pg/project.yaml（含 review_level）→ Phase 2.5 按 language 派发 review profile → Phase 3 写 .pg/hooks/ → Phase 4 doctor 校验）</span>
+<span style="color:#94a3b8"># ⑤ 验证</span>
+python3 .pg/skills/src/runtime/bin/pg doctor
 </pre>
 
 <div class="tip-card card">
