@@ -213,6 +213,11 @@
           "description": "脚本参数, 支持模板 {role} / {instance.name} / {instance.host}"
         },
         "timeout_seconds": { "type": "integer", "minimum": 1, "description": "执行超时 (秒)" },
+        "wait_for_completion": {
+          "type": "boolean",
+          "default": true,
+          "description": "True=runner 等待 hook 进程结束 (proc.wait), 超时走 SIGTERM→SIGKILL; False=fire-and-forget, hook 后台跑, SIGKILL 不算失败. pg-invoke-hook.py:554 读取, pg-run-hook.py:285/315 据此切换行为. CLI --no-wait-for-bg / --wait-for-completion 可临时覆盖."
+        },
         "description": { "type": "string", "description": "动作语义说明, 仅供 LLM 阅读" }
       },
       "anyOf": [
