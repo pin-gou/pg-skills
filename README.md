@@ -35,7 +35,7 @@ pg-skills 仓库（独立远程）               您的项目仓库
 
 ```bash
 # 1. 用 git subtree 把 pg-skills 同步进项目
-git remote add pg-skills git@gitee.com:shao_hq/pg-skills.git
+git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
 git subtree add --prefix=.pg/skills pg-skills master --squash
 
@@ -83,7 +83,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 ### 一次性命令速览
 
 ```bash
-git remote add pg-skills git@gitee.com:shao_hq/pg-skills.git
+git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
 git subtree add --prefix=.pg/skills pg-skills master --squash
 python3 .pg/skills/src/runtime/bin/pg init
@@ -739,7 +739,7 @@ SSOT 见 `src/runtime/spec/error-categories.yaml`。
 
 ```bash
 # Clone
-git clone git@gitee.com:shao_hq/pg-skills.git
+git clone git@github.com:pin-gou/pg-skills.git
 cd pg-skills
 
 # 跑运行时测试

@@ -439,7 +439,7 @@ def _upgrade_check(project_root: Path, current: str) -> int:
     )
     if check.returncode != 0:
         print(f'ERROR: remote "{remote}" not configured.')
-        print(f'  Run: git remote add {remote} git@gitee.com:shao_hq/pg-skills.git')
+        print(f'  Run: git remote add {remote} git@github.com:pin-gou/pg-skills.git')
         return 1
 
     subprocess.run(
@@ -491,7 +491,7 @@ def _upgrade_pull(project_root: Path, current: str, ref: str, force: bool = Fals
     )
     if check.returncode != 0:
         print(f'ERROR: remote "{remote}" not configured.')
-        print(f'  Run: git remote add {remote} https://gitee.com/shao_hq/pg-skills.git')
+        print(f'  Run: git remote add {remote} https://github.com/pin-gou/pg-skills.git')
         print(f'  Run: git fetch {remote}')
         return 1
 
@@ -539,8 +539,8 @@ def _upgrade_by_copy(project_root: Path, pg_skills_dir: Path, ref: str) -> int:
     import shutil
     import tempfile
 
-    remote_https = f'https://gitee.com/shao_hq/pg-skills.git'
-    remote_ssh = f'git@gitee.com:shao_hq/pg-skills.git'
+    remote_https = f'https://github.com/pin-gou/pg-skills.git'
+    remote_ssh = f'git@github.com:pin-gou/pg-skills.git'
 
     # 1. 备份现有 .pg/skills/
     backup_dir = None

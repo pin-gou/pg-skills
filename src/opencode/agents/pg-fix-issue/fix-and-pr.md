@@ -126,7 +126,7 @@ git checkout "$DEFAULT_BRANCH"
   "status": "success",
   "commitSha": "abc1234...",
   "filesChanged": ["path/to/file.java"],
-  "prUrl": "https://gitee.com/owner/repo/pull/123",
+  "prUrl": "https://github.com/owner/repo/pull/123",
   "prNumber": 123,
   "errorMessage": null,
   "duration_s": 312.5,

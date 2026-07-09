@@ -33,7 +33,9 @@ ISSUES_DIR = PROJECT_ROOT / ".pg" / "regression"
 DEFAULT_BRANCH = "master"
 
 GITEE_TOKEN = os.environ.get("GITEE_TOKEN", "")
+GITHUB_TOKEN = os.environ.get("GITHUB_TOKEN", "")
 GITEE_API_BASE = os.environ.get("GITEE_API_BASE", "https://gitee.com/api/v5")
+GITHUB_API_BASE = os.environ.get("GITHUB_API_BASE", "https://api.github.com")
 
 FIX_PROD_AGENT = "pg-regression/fix-prod"
 
@@ -90,6 +92,14 @@ def _run_git(*args, timeout=30):
     return result.stdout.strip()
 
 
+def _detect_platform():
+    """Detect platform from git remote origin URL. Returns 'github' or 'gitee'."""
+    url = _run_git("remote", "get-url", "origin")
+    if "github.com" in url:
+        return "github"
+    return "gitee"
+
+
 def _detect_owner_repo():
     """Parse owner/repo from git remote origin."""
     url = _run_git("remote", "get-url", "origin")
@@ -107,29 +117,42 @@ def _detect_owner_repo():
     return cleaned
 
 
-def _create_gitee_pr(branch, base, title, body):
-    """Create a PR via Gitee Open API. Returns (pr_url, pr_number)."""
-    if not GITEE_TOKEN:
-        print("❌ GITEE_TOKEN 未设置，跳过 PR 创建", file=sys.stderr)
+def _create_pr(branch, base, title, body):
+    """Create a PR via GitHub or Gitee API (auto-detected from origin remote). Returns (pr_url, pr_number)."""
+    platform = _detect_platform()
+
+    if platform == "github":
+        token = GITHUB_TOKEN
+        token_label = "GITHUB_TOKEN"
+    else:
+        token = GITEE_TOKEN
+        token_label = "GITEE_TOKEN"
+
+    if not token:
+        print(f"❌ {token_label} 未设置，跳过 PR 创建", file=sys.stderr)
         return None, None
 
     owner_repo = _detect_owner_repo()
-    api_url = f"{GITEE_API_BASE.rstrip('/')}/repos/{owner_repo}/pulls"
+    api_base = GITHUB_API_BASE if platform == "github" else GITEE_API_BASE
+    api_url = f"{api_base.rstrip('/')}/repos/{owner_repo}/pulls"
 
     payload = {
         "head": branch,
         "base": base,
         "title": title,
         "body": body,
-        "auto_merge": False,
     }
+    if platform == "gitee":
+        payload["auto_merge"] = False
+
+    auth_header = f"Bearer {token}" if platform == "github" else f"token {token}"
 
     req = urllib.request.Request(
         api_url,
         data=json.dumps(payload).encode("utf-8"),
         headers={
             "Content-Type": "application/json",
-            "Authorization": f"token {GITEE_TOKEN}",
+            "Authorization": auth_header,
         },
         method="POST",
     )
@@ -138,15 +161,19 @@ def _create_gitee_pr(branch, base, title, body):
         with urllib.request.urlopen(req, timeout=30) as resp:
             data = json.loads(resp.read().decode("utf-8"))
     except urllib.error.HTTPError as e:
-        body = ""
+        error_body = ""
         try:
-            body = e.read().decode("utf-8")
+            error_body = e.read().decode("utf-8")
         except Exception:
             pass
-        if 400 <= e.code < 500 and ("已存在" in body or "already exists" in body.lower()):
+        if 400 <= e.code < 500 and (
+            "已存在" in error_body
+            or "already exists" in error_body.lower()
+            or "Validation Error" in error_body
+        ):
             print("  ⚠️  PR 已存在，跳过创建", file=sys.stderr)
             return None, None
-        print(f"  ❌ 创建 PR 失败 ({e.code}): {body}", file=sys.stderr)
+        print(f"  ❌ 创建 PR 失败 ({e.code}): {error_body}", file=sys.stderr)
         return None, None
     except Exception as e:
         print(f"  ❌ 创建 PR 异常: {e}", file=sys.stderr)
@@ -326,7 +353,7 @@ def process_issue(issue: dict, suite: str, run_dir: Path, seq: int = 0) -> dict:
         f"---\n**禁止自动 merge** - 需人工审核后合并。"
     )
     pr_title = f"fix({suite}): {title}"
-    pr_url, pr_number = _create_gitee_pr(branch, DEFAULT_BRANCH, pr_title, pr_body)
+    pr_url, pr_number = _create_pr(branch, DEFAULT_BRANCH, pr_title, pr_body)
     if pr_url:
         result["prUrl"] = pr_url
         result["prNumber"] = pr_number
