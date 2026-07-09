@@ -562,13 +562,18 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 <p style="color:var(--muted); font-style:italic; margin-bottom:4px">「让 AI 写出可托付的代码」—— 我们先把骨架钉死在项目里。骨架对，AI 在里面写代码就是"合结构"的；骨架错，AI 写得越多越危险。</p>
 <p class="muted">接入新项目，最重要的三件事：<strong>写对 project.yaml（含 review_level）</strong> + <strong>写对 hooks</strong> + <strong>写对 <code>.pg/code-review/</code></strong></p>
 
-<h2>3.1 四步接入</h2>
+<h2>3.1 五步接入</h2>
 <div class="card">
 <ol>
   <li><strong>git subtree 拉入 pg-skills</strong>（含 <code>.pg/skills/examples/code-review/</code> 模板：default / java-spring / go / vue3 / security 五个 profile）</li>
   <li><strong>pg init 生成骨架 + symlink</strong></li>
   <li><strong>重启 opencode</strong>（加载 slash commands + skills + sub-agents，含新 <code>pg-build/review</code> / <code>pg-build/fix-review</code>）</li>
   <li><strong>在 opencode 中触发 pg-init-project skill</strong>（AI 自动扫描仓库，生成 project.yaml + hooks + .pg/code-review/）</li>
+  <li><strong>配置 opencode 模型路由</strong>——pg-skills 使用三个路由别名
+    <code>pg-router/pg-associate</code>（轻量）、<code>pg-router/pg-expert</code>（主力）、
+    <code>pg-router/pg-master</code>（规划），需在 <code>opencode.json</code> 中映射到实际模型。
+    推荐使用 <a href="https://github.com/zhangzhongnan/omniroute">omniroute</a>
+    或 <a href="https://github.com/PinGou/9router">9router</a> 等工具进行模型路由选择。</li>
 </ol>
 </div>
 
@@ -585,6 +590,12 @@ python3 .pg/skills/src/runtime/bin/pg init
 <span style="color:#94a3b8">#    （Phase 1 扫仓库 → Phase 2 写 .pg/project.yaml（含 review_level）→ Phase 2.5 按 language 派发 review profile → Phase 3 写 .pg/hooks/ → Phase 4 doctor 校验）</span>
 <span style="color:#94a3b8"># ④ 验证</span>
 python3 .pg/skills/src/runtime/bin/pg doctor
+
+<span style="color:#94a3b8"># ⑤ 在 opencode.json 中配置模型路由</span>
+<span style="color:#94a3b8"># 使用 omniroute / 9router 映射三模型：</span>
+<span style="color:#94a3b8">#   pg-router/pg-associate → minimax-m2.7（轻量）</span>
+<span style="color:#94a3b8">#   pg-router/pg-expert    → deepseek-v4-flash（主力）</span>
+<span style="color:#94a3b8">#   pg-router/pg-master    → deepseek-v4-pro 或 minimax-m3（规划）</span>
 </pre>
 
 <div class="tip-card card">
@@ -947,6 +958,9 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <li><input type="checkbox" style="margin-left:24px"> <code>./pg-run --env &lt;env&gt; --role &lt;role&gt; --instance &lt;i&gt; --action logs</code> 验证 hook 可加载（只读）</li>
   <li><input type="checkbox" style="margin-left:24px"> 菜单 <strong>"准备环境并启动所有实例"</strong> → <strong>"停止所有实例并清理环境"</strong> 一键验证所有角色 + 环境级 hook（便捷）</li>
   <li><input type="checkbox" style="margin-left:24px"> 或单独验证：<code>./pg-run --env &lt;env&gt; --role &lt;role&gt; --instance &lt;i&gt; --action start/stop</code> + <code>./pg-run --env &lt;env&gt; --action prepare_env / clean_env</code></li>
+  <li style="margin-top:12px"><strong>配置 opencode 模型路由</strong></li>
+  <li><input type="checkbox" style="margin-left:24px"> opencode.json 中配置 model.router，将 pg-router/pg-associate / pg-expert / pg-master 映射到实际 LLM 模型（如 minimax-m2.7 / deepseek-v4-flash / deepseek-v4-pro 等）</li>
+  <li><input type="checkbox" style="margin-left:24px"> 推荐使用 omniroute 或 9router 管理模型路由</li>
 </ul>
 </div>
 
