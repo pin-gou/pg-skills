@@ -208,18 +208,7 @@ def process_issue(issue: dict, suite: str, run_dir: Path, seq: int = 0) -> dict:
     print(f"  分支: {branch}")
     print(f"{'='*60}")
 
-    # 1. Abort if working tree is dirty (test fix should have been committed in Phase 2a)
-    try:
-        status = _run_git("status", "--porcelain")
-        if status.strip():
-            result["status"] = "failed"
-            result["errorMessage"] = f"working tree is dirty; Phase 2a did not commit test fixes. Uncommitted: {status[:200]}"
-            print(f"  ❌ {result['errorMessage']}", file=sys.stderr)
-            return result
-    except subprocess.CalledProcessError:
-        pass
-
-    # 2. Git: checkout master → pull → create branch
+    # Git: checkout master → pull → create branch
     try:
         _run_git("checkout", DEFAULT_BRANCH)
         _run_git("pull", "--ff-only", "origin", DEFAULT_BRANCH)
@@ -522,67 +511,86 @@ def main():
     print(f"Run dir: {run_dir}")
     print("=" * 60)
 
-    # 1. Read all issue JSON files
-    all_issues = []
-    suite_files = sorted(p for p in ISSUES_DIR.glob("*.json") if not p.name.startswith("summary-"))
-    if not suite_files:
-        print("❌ .pg/regression/ 中无 suite JSON 文件")
-        print("   请先运行 pg-regression 产出问题清单")
-        sys.exit(0)
+    # 1a. Auto-stash: ensure clean working tree before creating fix branches.
+    stashed = False
+    try:
+        status = _run_git("status", "--porcelain")
+        if status.strip():
+            _run_git("stash", "push", "-m", "pg-fix-regression-runner: auto-stash dirty changes")
+            stashed = True
+            print(f"  📦 Auto-stashed {len(status.splitlines())} dirty file(s)")
+    except subprocess.CalledProcessError:
+        pass
 
-    for f in suite_files:
-        try:
-            data = json.loads(f.read_text(encoding="utf-8"))
-        except json.JSONDecodeError as e:
-            print(f"⚠️  跳过 {f}: JSON 解析失败: {e}", file=sys.stderr)
-            continue
-        suite = data.get("suite", f.stem)
-        for iss in data.get("issues", []):
-            iss["_suite"] = suite
-            if not iss.get("id"):
-                slug = _make_slug(iss.get("title", "fix"))
-                h = hashlib.md5(f"{suite}:{iss.get('title', '')}".encode()).hexdigest()[:6]
-                iss["id"] = f"{slug}-{h}"
-            all_issues.append(iss)
+    try:
+        # 1. Read all issue JSON files
+        all_issues = []
+        suite_files = sorted(p for p in ISSUES_DIR.glob("*.json") if not p.name.startswith("summary-"))
+        if not suite_files:
+            print("❌ .pg/regression/ 中无 suite JSON 文件")
+            print("   请先运行 pg-regression 产出问题清单")
+            sys.exit(0)
 
-    if not all_issues:
-        print("无生产代码问题待修复")
-        sys.exit(0)
+        for f in suite_files:
+            try:
+                data = json.loads(f.read_text(encoding="utf-8"))
+            except json.JSONDecodeError as e:
+                print(f"⚠️  跳过 {f}: JSON 解析失败: {e}", file=sys.stderr)
+                continue
+            suite = data.get("suite", f.stem)
+            for iss in data.get("issues", []):
+                iss["_suite"] = suite
+                if not iss.get("id"):
+                    slug = _make_slug(iss.get("title", "fix"))
+                    h = hashlib.md5(f"{suite}:{iss.get('title', '')}".encode()).hexdigest()[:6]
+                    iss["id"] = f"{slug}-{h}"
+                all_issues.append(iss)
 
-    # 1a. 过滤 auto_fixed=True（已由 fix-test 自动修，跳过 Phase 4）
-    skipped_auto_fixed = [iss for iss in all_issues if iss.get("auto_fixed") is True]
-    all_issues = [iss for iss in all_issues if iss.get("auto_fixed") is not True]
+        if not all_issues:
+            print("无生产代码问题待修复")
+            sys.exit(0)
 
-    if skipped_auto_fixed:
-        print(f"\n⏭️  跳过 {len(skipped_auto_fixed)} 个 auto_fixed=True 项（已由 fix-test 自动修）：")
-        for iss in skipped_auto_fixed:
-            cat = iss.get("category", "?")
-            print(f"  [{iss['_suite']}] {iss.get('id', '?')}: {iss.get('title', '')} ({cat})")
+        # 1a. 过滤 auto_fixed=True（已由 fix-test 自动修，跳过 Phase 4）
+        skipped_auto_fixed = [iss for iss in all_issues if iss.get("auto_fixed") is True]
+        all_issues = [iss for iss in all_issues if iss.get("auto_fixed") is not True]
+
+        if skipped_auto_fixed:
+            print(f"\n⏭️  跳过 {len(skipped_auto_fixed)} 个 auto_fixed=True 项（已由 fix-test 自动修）：")
+            for iss in skipped_auto_fixed:
+                cat = iss.get("category", "?")
+                print(f"  [{iss['_suite']}] {iss.get('id', '?')}: {iss.get('title', '')} ({cat})")
+            print()
+
+        if not all_issues:
+            print("无 production-code issue 待修复（全部由 fix-test 自动修）")
+            sys.exit(0)
+
+        print(f"\n共 {len(all_issues)} 个 production-code issue 待处理:\n")
+        for iss in all_issues:
+            print(f"  [{iss['_suite']}] {iss.get('id', '?')}: {iss.get('title', '')}")
         print()
 
-    if not all_issues:
-        print("无 production-code issue 待修复（全部由 fix-test 自动修）")
-        sys.exit(0)
+        # 2. Serial loop over all issues
+        results = []
+        for i, iss in enumerate(all_issues):
+            suite = iss["_suite"]
+            r = process_issue(iss, suite, run_dir, seq=i+1)
+            results.append(r)
 
-    print(f"\n共 {len(all_issues)} 个 production-code issue 待处理:\n")
-    for iss in all_issues:
-        print(f"  [{iss['_suite']}] {iss.get('id', '?')}: {iss.get('title', '')}")
-    print()
+        # 3. Summary
+        write_summary(results, run_dir)
 
-    # 2. Serial loop over all issues
-    results = []
-    for i, iss in enumerate(all_issues):
-        suite = iss["_suite"]
-        r = process_issue(iss, suite, run_dir, seq=i+1)
-        results.append(r)
-
-    # 3. Summary
-    write_summary(results, run_dir)
-
-    success = sum(1 for r in results if r["status"] == "success")
-    print(f"\n{'='*60}")
-    print(f"完成: {success}/{len(results)} 成功")
-    print(f"{'='*60}")
+        success = sum(1 for r in results if r["status"] == "success")
+        print(f"\n{'='*60}")
+        print(f"完成: {success}/{len(results)} 成功")
+        print(f"{'='*60}")
+    finally:
+        if stashed:
+            try:
+                _run_git("stash", "pop", timeout=10)
+                print("  📦 Stash popped, working tree restored")
+            except subprocess.CalledProcessError as e:
+                print(f"  ⚠️ stash pop failed (may need manual resolution): {e.stderr.strip()}", file=sys.stderr)
 
 
 if __name__ == "__main__":
