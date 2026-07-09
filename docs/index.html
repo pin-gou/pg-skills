@@ -281,7 +281,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 
 <div class="card" style="border-left:4px solid var(--primary); font-size:16px; line-height:2; margin-top:8px; padding:18px 22px">
   <div><span class="tag tag-purple" style="font-size:13px">品构</span> = <strong>品</strong>质 × <strong>构</strong>造。</div>
-  <div style="margin-top:6px">我们不"让 AI 写代码"——我们让 AI 在一个<strong>被 SSOT 钉死的结构</strong>里写代码：每一行都有出处，每一个阶段都有产物，每一个失败都有回放。</div>
+  <div style="margin-top:6px">我们不"让 AI 写代码"——我们让 AI 在一个<strong>被配置钉死的结构</strong>里写代码：每一行都有出处，每一个阶段都有产物，每一个失败都有回放。</div>
   <div style="font-size:13px; color:var(--muted); margin-top:6px">
     故名「品构」：可托付的代码，靠<strong>结构本身</strong>托付，而不是靠人盯。
   </div>
@@ -305,7 +305,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
     <ul>
       <li><strong>三件套追责</strong>：每段都有 proposal / design / tasks，按谱追责</li>
       <li><strong>一键 replay</strong>：<code>pipeline.events</code> JSONL 全留痕，事件溯源</li>
-      <li><strong>环境归零</strong>：<code>project.yaml</code> SSOT + hook 协议，差异归零</li>
+      <li><strong>环境归零</strong>：<code>project.yaml</code> 统一定义 + hook 协议，差异归零</li>
       <li><strong>门控 + 签字</strong>：TDRVG 评分 ≥80 + final-gate 人工一行</li>
     </ul>
   </div>
@@ -334,13 +334,13 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <rect x="30" y="120" width="620" height="60" rx="10" stroke="url(#gg2)" stroke-width="2" fill="none"/>
   <text x="50" y="155" font-size="22" font-weight="700" fill="var(--text)">构</text>
   <text x="92" y="155" font-size="14" font-weight="700" fill="#1d4ed8">构造</text>
-  <text x="92" y="173" font-size="11" fill="#475569">SSOT 钉死边界，pipeline 钉死流程，task checkbox 钉死交付</text>
+  <text x="92" y="173" font-size="11" fill="#475569">配置钉死边界，pipeline 钉死流程，task checkbox 钉死交付</text>
 
   <text x="350" y="210" font-size="11" font-style="italic" fill="#64748b" text-anchor="middle">品质不是流程写在文档里 —— 是流程对每个 commit 都收一次口。</text>
 </svg>
 </div>
 
-<p style="color:var(--muted); margin-top:8px"><strong>命名释义</strong>：质量靠<strong>结构本身</strong>托付——SSOT（<code>project.yaml</code>、<code>execution-manifest.yaml</code>）钉死"该有什么"，pipeline（<code>stages × tracks × TDRVG</code>）钉死"该怎么走"，每个 sub-agent 落一 checkbox 钉死"做没做完"。AI 在这套结构里写代码，写错了也是系统先看见。</p>
+<p style="color:var(--muted); margin-top:8px"><strong>命名释义</strong>：质量靠<strong>结构本身</strong>托付——SSOT（Single Source of Truth，唯一事实来源，如 <code>project.yaml</code>、<code>execution-manifest.yaml</code>）钉死"该有什么"，pipeline（<code>stages × tracks × TDRVG</code>）钉死"该怎么走"，每个 sub-agent 落一 checkbox 钉死"做没做完"。AI 在这套结构里写代码，写错了也是系统先看见。</p>
 
 <h2>1.3 托付的 4 个支柱</h2>
 
@@ -364,7 +364,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
     <td><strong>3</strong></td>
     <td>环境归零</td>
     <td>在我机器上能跑</td>
-    <td><code>project.yaml</code> 是项目级 SSOT；<code>environments</code> 段 + hook 协议（<code>pg-invoke-hook.py</code>）抹平机器差异，所有 role 启停走同一套 <code>PG_*</code> env vars</td>
+    <td><code>project.yaml</code> 是项目级唯一配置入口；<code>environments</code> 段 + hook 协议（<code>pg-invoke-hook.py</code>）抹平机器差异，所有 role 启停走同一套 <code>PG_*</code> env vars</td>
   </tr>
   <tr>
     <td><strong>4</strong></td>
@@ -427,7 +427,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <tr><td>一句话定位</td><td>AI 是执笔者</td><td>AI 是被结构约束的执笔者</td><td>—</td></tr>
   <tr><td>一段代码的"出生证明"</td><td>没有</td><td><code>commit · author · tasks.md 行号 · V-* 验收点</code> 四件套</td><td>被 task_id + V-* 钉死</td></tr>
   <tr><td>出问题时</td><td>谁改的？为什么这么改？证据在哪？<strong>全靠口述</strong></td><td><code>pipeline.events</code> JSONL 重放，按文件/阶段/事件类型过滤</td><td>旁观者 + 自动取证员</td></tr>
-  <tr><td>跨 stage 联调</td><td>"我机器能跑" → master 挂</td><td>同一份 <code>execution-manifest.yaml</code> + hook 协议 → 环境差异归零</td><td>适应 SSOT 的"代码工人"</td></tr>
+  <tr><td>跨 stage 联调</td><td>"我机器能跑" → master 挂</td><td>同一份 <code>execution-manifest.yaml</code> + hook 协议 → 环境差异归零</td><td>适应统一约定的"代码工人"</td></tr>
   <tr><td>谁来最后拍板</td><td>reviewer 凭眼力</td><td><code>pg-build/gate</code> 5 维评分 ≥80 + final-gate 人工一行签字</td><td>兜底签字人（机器）+ 兜底责任人（人）</td></tr>
   <tr><td>回归测试</td><td>改完就跑一次 ad-hoc 验证，回归靠手工</td><td><code>/4-pg-regression</code> 按 suite 声明自动跑测试 + fix-test 自动修脚本 + 输出 JSON 问题清单</td><td>测试修缮工（A/B 类） / 旁观者（C 类）</td></tr>
   <tr><td>交付前最后一关</td><td>reviewer 眼力 + 心情</td><td>final-gate 5 维评分（correctness 35% / security 25% / maintainability 15% / performance 15% / spec_coverage 10%）</td><td>评分被拒不签字</td></tr>
@@ -474,7 +474,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <!-- L2 -->
   <rect x="40" y="155" width="620" height="110" rx="10" fill="url(#g2)" opacity="0.15"/>
   <rect x="40" y="155" width="620" height="110" rx="10" stroke="url(#g2)" stroke-width="2" fill="none"/>
-  <text x="60" y="185" font-size="14" font-weight="700" fill="var(--text)">L2：.pg/ 项目配置层（SSOT）</text>
+  <text x="60" y="185" font-size="14" font-weight="700" fill="var(--text)">L2：.pg/ 项目配置层（唯一配置来源）</text>
   <text x="60" y="207" font-size="12" fill="var(--muted)">.pg/project.yaml = 单一可信源，所有 SKILL 以此为驱动</text>
   <rect x="60" y="220" width="96" height="28" rx="6" fill="url(#g2)" opacity="0.3"/>
   <text x="72" y="239" font-size="12" font-weight="600" fill="var(--text)">project.yaml</text>
@@ -538,7 +538,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 │   ├── role-agent-start.sh
 │   ├── env-dev-local-prepare.sh
 │   └── ...
-├── code-review/                  # pg-build v2.6 review phase SSOT（由 pg-init-project Phase 2.5 生成）
+├── code-review/                  # review phase 的检查项源头（由 pg-init-project Phase 2.5 生成）
 │   ├── code-review.yaml          # profile 索引（default + 语言 profile 的 Union）
 │   ├── default/                  # 兜底 profile（含 design_alignment / scope_creep 等）
 │   ├── java-spring/              # java/kotlin/scala 自动派发
@@ -948,7 +948,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
   <li><input type="checkbox" style="margin-left:24px"> fix_issue / regression：参数是否合理</li>
   <li><input type="checkbox" style="margin-left:24px"> 每个 role 的 start / stop / logs 脚本：业务命令是否准确（<code>CMD_PLACEHOLDER</code> 是否替换）</li>
   <li><input type="checkbox" style="margin-left:24px"> 每个 env 的 prepare_env / clean_env 脚本：环境准备/清理逻辑是否对</li>
-  <li><input type="checkbox" style="margin-left:24px"> lib/common.sh SSOT：是否正确复制到 <code>.pg/hooks/lib/</code></li>
+  <li><input type="checkbox" style="margin-left:24px"> lib/common.sh 是否复制到 <code>.pg/hooks/lib/</code></li>
   <li><input type="checkbox" style="margin-left:24px"> <code>.pg/code-review/</code> 是否按 language 派发（java → java-spring, go → go, ts → vue3）；security profile <strong>未</strong>自动拷（opt-in）</li>
   <li><input type="checkbox" style="margin-left:24px"> （可选）声明 <code>actions.health_check</code> → <code>pg-init-project</code> 自动生成 health_check hook</li>
   <li style="margin-top:12px"><strong>通过 pg-run 验证 hooks</strong></li>
@@ -1158,7 +1158,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <div id="sec4-propose" class="section">
 <h1>4.3 提案 —— `/2-pg-propose`</h1>
 
-<p style="color:var(--muted); font-style:italic">"边界有了，现在出图纸。图纸分四份人类可读文档 + 两份机器 SSOT，每份给不同的对象看。"</p>
+<p style="color:var(--muted); font-style:italic">"边界有了，现在出图纸。图纸分四份人类可读文档 + 两份机器配置文件，每份给不同的对象看。"</p>
 
 <h2>四份文档 + 一份 SSOT</h2>
 <table>
@@ -1171,7 +1171,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 </table>
 
 <div class="tip-card card">
-  <p style="margin:0"><strong>v0.7 变更点</strong>：v1 的 <code>environment.yaml</code> 已弃用，per-change 的环境选择写入 <code>execution-manifest.yaml.stages[i].environment</code>。manifest 是 5 类产物的<strong>唯一机器 SSOT</strong>，由 <code>pg-gen-manifest.py</code> 基于 tasks.md 结构化生成，<strong>LLM 不直接写</strong>。</p>
+  <p style="margin:0"><strong>v0.7 变更点</strong>：v1 的 <code>environment.yaml</code> 已弃用，per-change 的环境选择写入 <code>execution-manifest.yaml.stages[i].environment</code>。manifest 是 5 类产物的<strong>唯一机器事实来源</strong>，由 <code>pg-gen-manifest.py</code> 基于 tasks.md 结构化生成，<strong>LLM 不直接写</strong>。</p>
 </div>
 
 <h2>核心机制：tasks.md 的 stages × tracks  展开</h2>
@@ -1286,7 +1286,7 @@ stages:
     <li>用错的 hook 脚本 → 端口冲突或环境变量缺失</li>
     <li>跨机通信走错网段 → 联调失败</li>
   </ul>
-  <p><code>execution-manifest.yaml.stages[i].environment</code> <strong>缺失 → workflow_failed 硬性终止</strong>。这是 SSOT 的硬约束：runner 不知道该用哪个环境，宁可终止也不猜。v1 遗留的 <code>environment.yaml</code> pg-build v2 <strong>不再读取</strong>。</p>
+  <p><code>execution-manifest.yaml.stages[i].environment</code> <strong>缺失 → workflow_failed 硬性终止</strong>。这是来自 manifest 的硬约束：runner 不知道该用哪个环境，宁可终止也不猜。v1 遗留的 <code>environment.yaml</code> pg-build v2 <strong>不再读取</strong>。</p>
 </div>
 
 <h2>评审闭环：review-notes.md + /2.1-pg-propose-refine</h2>
@@ -1531,7 +1531,7 @@ stages:
 </table>
 
 <div class="info-card card">
-  <p style="margin:0"><strong>为什么需要 manifest？</strong><code>tasks.md</code> 是带 checkbox 的人类文档（LLM 友好），但 runner 是程序（机器友好）。manifest 把 <code>tasks.md</code> 的 stages × tracks 二维结构<strong>扁平化</strong>成确定性数据结构：每个 stage 的 environment、test_key、track 顺序都<strong>冻结</strong>到 manifest，避免 runner 在执行时再次解析 markdown 带来的不确定性。manifest 是 <strong>disposable</strong>（可重新生成），但作为执行期 SSOT 必须存在。</p>
+  <p style="margin:0"><strong>为什么需要 manifest？</strong><code>tasks.md</code> 是带 checkbox 的人类文档（LLM 友好），但 runner 是程序（机器友好）。manifest 把 <code>tasks.md</code> 的 stages × tracks 二维结构<strong>扁平化</strong>成确定性数据结构：每个 stage 的 environment、test_key、track 顺序都<strong>冻结</strong>到 manifest，避免 runner 在执行时再次解析 markdown 带来的不确定性。manifest 是 <strong>disposable</strong>（可重新生成），但作为执行期唯一事实来源必须存在。</p>
 </div>
 
 <p>manifest 由 pg-propose 在生成 tasks.md 后<strong>自动产出</strong>（LLM <strong>不直接写</strong>，通过 CLI 工具基于 tasks.md 生成）。runner 启动时一次性读取，决定：</p>
@@ -1848,7 +1848,7 @@ tracks:
 
 <div class="danger-card card">
   <h4 style="margin:0 0 8px">⚠ 分数驱动 ≠ 形式主义</h4>
-  <p style="margin:0">gate-score 不是为了让 AI "凑分数"。<strong>权重和阈值在 pg-skills 上游 SSOT 定义</strong>，项目内不可随意调。如发现某维度评分与人类判断长期偏离，应反馈到上游调整 prompt 模板，而非本地 hack。</p>
+  <p style="margin:0">gate-score 不是为了让 AI "凑分数"。<strong>权重和阈值在 pg-skills 上游统一定义</strong>，项目内不可随意调。如发现某维度评分与人类判断长期偏离，应反馈到上游调整 prompt 模板，而非本地 hack。</p>
 </div>
 
 <h2>4.5 流程差异速查表</h2>
@@ -2085,7 +2085,7 @@ ls .opencode/skills/pg-propose/references/
 <!-- ============================================================ -->
 <div id="sec8" class="section">
 <h1>8. 常见问题与排查</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「让 AI 写出可托付的代码」—— 卡壳时不要靠猜。pipeline.events + tasks.md checkbox + journal 都是 SSOT，错误分类写在 <code>error-categories.yaml</code> 里。先取证，再动手。</p>
+<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「让 AI 写出可托付的代码」—— 卡壳时不要靠猜。pipeline.events + tasks.md checkbox + journal 都是客观记录，错误分类写在 <code>error-categories.yaml</code> 里。先取证，再动手。</p>
 
 <h2>Q&A</h2>
 
