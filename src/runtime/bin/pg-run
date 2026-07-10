@@ -486,11 +486,11 @@ def _run_env_start_all(
     print()
 
 
-def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path):
+def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path, suppress_stats: bool = False):
     roles = cfg.get("roles", {})
     if not roles:
         print(f"  {env_name} 没有定义 roles，没有实例可停止")
-        return
+        return [], 0
 
     hook = find_invoke_hook(project_root)
     overall_start = time.time()
@@ -561,27 +561,30 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path):
             )
 
     overall_elapsed = time.time() - overall_start
-    succeeded = sum(1 for r in results if r["ok"])
-    failed = len(results) - succeeded
-    print()
-    print(_c("1;36", "=" * 60))
-    print(_c("1;36", f"  {action_label}统计"))
-    print(_c("1;36", "=" * 60))
-    print(f"  总计: {overall_elapsed:.1f}s")
-    print(_c("1", f"  成功: {succeeded}") + f" | 失败: {failed}")
-    if results:
-        print("  " + "-" * 40)
-        for r in results:
-            color = "32" if r["ok"] else "31"
-            sym = "✓" if r["ok"] else "✗"
-            print(
-                _c(
-                    color,
-                    f"  {r['role']:12s} / {r['instance']:12s}  {r['duration']:6.1f}s  {sym}",
+    if not suppress_stats:
+        succeeded = sum(1 for r in results if r["ok"])
+        failed = len(results) - succeeded
+        print()
+        print(_c("1;36", "=" * 60))
+        print(_c("1;36", f"  {action_label}统计"))
+        print(_c("1;36", "=" * 60))
+        print(f"  总计: {overall_elapsed:.1f}s")
+        print(_c("1", f"  成功: {succeeded}") + f" | 失败: {failed}")
+        if results:
+            print("  " + "-" * 40)
+            for r in results:
+                color = "32" if r["ok"] else "31"
+                sym = "✓" if r["ok"] else "✗"
+                print(
+                    _c(
+                        color,
+                        f"  {r['role']:12s} / {r['instance']:12s}  {r['duration']:6.1f}s  {sym}",
+                    )
                 )
-            )
-    print(_c("1;36", "=" * 60))
-    print()
+        print(_c("1;36", "=" * 60))
+        print()
+
+    return results, overall_elapsed
 
 
 # ----- 主菜单快捷函数 -----
@@ -713,23 +716,28 @@ def _exec_quick_action(idx: int, env_name: str, config: dict, project_root: Path
         hook = find_invoke_hook(project_root)
         print()
         print(_c("1;36", "=" * 60))
-        print(_c("1;33", f"  停止所有实例: {env_name}"))
+        print(_c("1;33", f"  停止所有实例并清理环境: {env_name}"))
         print(_c("1;36", "=" * 60))
-        _run_env_stop_all(env_name, cfg, project_root)
+        stop_results, _ = _run_env_stop_all(
+            env_name, cfg, project_root, suppress_stats=True
+        )
 
         clean_cfg = cfg.get("clean_env")
+        clean_start = time.time()
+        clean_ok = False
         if clean_cfg:
             print()
             print(_c("1;36", "=" * 60))
             print(_c("1;33", f"  清理环境: {env_name}"))
             print(_c("1;36", "=" * 60))
+            clean_rc: int = -1
             if hook.is_file():
                 cmd = (
                     f"python3 {shlex.quote(str(hook))} invoke-hook"
                     f" --env {shlex.quote(env_name)}"
                     f" --action clean_env --session manual"
                 )
-                run_shell(
+                clean_rc = run_shell(
                     cmd,
                     cwd=project_root,
                     timeout=clean_cfg.get("timeout_seconds", 300),
@@ -737,11 +745,29 @@ def _exec_quick_action(idx: int, env_name: str, config: dict, project_root: Path
             else:
                 cmd, timeout = extract_command(clean_cfg)
                 if cmd:
-                    run_shell(
+                    clean_rc = run_shell(
                         f"bash {shlex.quote(cmd)}", cwd=project_root, timeout=timeout
                     )
+            clean_ok = clean_rc == 0
         else:
             print("  clean_env 未定义，跳过清理")
+            clean_ok = True
+        clean_duration = time.time() - clean_start
+
+        all_results = [
+            {
+                "label": f"{r['role']} / {r['instance']}",
+                "duration": r["duration"],
+                "ok": r["ok"],
+            }
+            for r in stop_results
+        ]
+        all_results.append({
+            "label": "清理环境",
+            "duration": clean_duration,
+            "ok": clean_ok,
+        })
+        _print_exec_stats("停止 + 清理", all_results)
     elif idx == 2:
         _run_env_start_all(env_name, cfg, project_root)
     elif idx == 3:
@@ -829,7 +855,7 @@ def _exec_module_action(
     print(_c("1;33", f"  {a_label}: {label}"))
     print(_c("1;36", "=" * 60))
     print(f"    命令: {cmd}")
-    print(f"    workdir: {module_root}")
+    print(f"    workdir: {project_root}")
 
     start = time.time()
     rc = run_shell(cmd, cwd=project_root, timeout=timeout, extra_env=env)
