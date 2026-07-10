@@ -278,7 +278,7 @@ review-notes.md 必含段：
   - 问题清单：把 `[ ]` 改为 `[x]`（已修复）或 `[~]` + 加 `> SKIP：理由`（豁免）
 - 编辑后调用 `/2.1-pg-propose-refine {change-name}` 应用决策
 - 下一步可执行 `/3-pg-build {change-name}` 开始实现
-- 如希望修复 review-notes.md 中的"阻塞/重要"问题后再 apply，回复"修复 review-notes 中的问题"，由本会话继续处理
+- 如希望修复 review-notes.md 中的"阻塞/重要"问题后再 build，回复"修复 review-notes 中的问题"，由本会话继续处理
 
 ---
 

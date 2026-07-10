@@ -30,10 +30,10 @@
 
 ## 自审发现的问题
 
-### 阻塞（必须修复后再 apply）
+### 阻塞（必须修复后再 build）
 - [ ] （无）
 
-### 重要（建议修复后再 apply）
+### 重要（建议修复后再 build）
 - [ ] **{文件名或章节} {简述}**
   - 目标：{目标文件与章节}
   - 推荐动作：{具体修改建议}
@@ -102,7 +102,7 @@
 | 符号 | 含义 | 后续动作 |
 |------|------|----------|
 | `[ ]` | 待定，保留推荐修复 | `/2.1-pg-propose-refine {change-name}` 自动 FIX |
-| `[~]` | SKIP，跳过此项 | 在条目下加 `> SKIP：{理由}`，直接进入 apply |
+| `[~]` | SKIP，跳过此项 | 在条目下加 `> SKIP：{理由}`，直接进入 build |
 | `[ ]` + `> FIX：` | 反向决策（建议 → 修） | `/2.1-pg-propose-refine {change-name}` 强制修复 |
 | `[x]` | 已修复 | 加 `- 修复：{摘要}` + `- 修复时间：{timestamp}` |
 
@@ -116,7 +116,7 @@
    - 接受推荐修复 → 调用 `/2.1-pg-propose-refine {change-name}`，skill 自动按决策 FIX
    - 全部 SKIP → 直接调用 `/3-pg-build {change-name}`
    - 部分修复 → 调用 `/2.1-pg-propose-refine {change-name}` 处理剩余推荐修复项
-4. **进入 apply**：apply 阶段读取 review-notes.md（已被 refine 修改过）作为最终决策依据
+4. **进入 build**：build 阶段读取 review-notes.md（已被 refine 修改过）作为最终决策依据
 
 ---
 
