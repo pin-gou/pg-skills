@@ -2,7 +2,7 @@
 description: 静态代码审查 agent，dev 后 verify 前对代码做结构化 diff 与模式一致性检查
 mode: subagent
 hidden: true
-model: pg-router/pg-expert
+model: pg-router/pg-master
 reasoning_effort: high
 temperature: 0.1
 permission:
