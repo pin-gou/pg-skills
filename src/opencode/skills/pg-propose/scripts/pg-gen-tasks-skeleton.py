@@ -432,8 +432,14 @@ def build_on_conditions_comment(section: dict, config: dict,
     return "\n".join(lines)
 
 
-def format_section_body(section: dict) -> str:
-    """Format the body content for a single section."""
+def format_section_body(section: dict, change_name: str = "<change>") -> str:
+    """Format the body content for a single section.
+
+    Args:
+        section: section config dict
+        change_name: change name (known at skeleton-gen time via --change arg).
+                     review section fills it directly, avoiding raw {change} token.
+    """
     if section["stage"] == "final":
         n = section["n"]
         return (
@@ -457,11 +463,12 @@ def format_section_body(section: dict) -> str:
     if section["sub"] == "dev":
         return f"- [ ] {section['n']}.1 实现功能：待 LLM 填充"
     if section["sub"] == "review":
-        # v3.x: review 阶段 placeholder（runner 不展开命令，agent 自己读 profile 配置）
+        # {change} 由 generator 阶段已知 --change arg → 填入真实值
+        # {seq} 是 runtime 由 orchestrator 分配的 report seq，generator 无法预知，改用抽象描述
         return (
             f"- [ ] {section['n']}.1 review agent 读 design.md + tasks.md + .pg/code-review/code-review.yaml 细则\n"
-            f"- [ ] {section['n']}.2 review agent 对 git diff feat/pg/{{change}} 做静态审查\n"
-            f"- [ ] {section['n']}.3 review agent 输出 review_score + p0_failures 到 2-build/{{seq}}-{section['track']}-review.md\n"
+            f"- [ ] {section['n']}.2 review agent 对 git diff feat/pg/{change_name} 做静态审查\n"
+            f"- [ ] {section['n']}.3 review agent 输出 review_score + p0_failures 到本 section 对应的 review 报告（路径由 dispatch 注入）\n"
             f"- [ ] {section['n']}.4 score < pass_threshold → escalate 至 fix-review；score < escalate_threshold → workflow_failed"
         )
     if section["sub"] == "verify":
@@ -486,7 +493,7 @@ def format_section_evidence_block(section: dict) -> str:
 
 def build_tasks_md(sections: list[dict], env_map: dict[str, str],
                    config: dict, affected_paths: list[str],
-                   proposal_text: str) -> str:
+                   proposal_text: str, change_name: str = "<change>") -> str:
     """Generate the full tasks.md skeleton content."""
     out_lines = []
 
@@ -509,7 +516,7 @@ def build_tasks_md(sections: list[dict], env_map: dict[str, str],
         out_lines.append(comment)
         out_lines.append("")
 
-        out_lines.append(format_section_body(sec))
+        out_lines.append(format_section_body(sec, change_name))
         out_lines.append("")
 
     return "\n".join(out_lines).rstrip() + "\n"
@@ -621,7 +628,8 @@ def main():
     )
 
     tasks_content = build_tasks_md(
-        sections, env_map, config, affected_paths, proposal_text
+        sections, env_map, config, affected_paths, proposal_text,
+        change_name=args.change,
     )
     eval_content = build_on_conditions_eval_md(
         config, affected_paths, proposal_text
