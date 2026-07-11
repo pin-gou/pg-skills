@@ -317,15 +317,49 @@ def build_ctx(
         # build_rules prompt injection — 由 renderer 在 prompt 拼接时使用
         "build_rules_prepend": _build_rules_prepend,
         "build_rules_append": _build_rules_append,
+        # === P0-A (v2.7)：父报告路径 + ROLLBACK 上下文注入 ===
+        # 新增字段：code_view_report_path, failed_at, source, escalation_reason,
+        # failed_v_tasks_inline。旧字段 verify_report_path 也回填。
+        "code_view_report_path": "",
+        "failed_at": "",
+        "source": "",
+        "escalation_reason": "",
+        "failed_v_tasks_inline": "",
     }
 
-    # 加入 rollback_context（如果有）
+    # === P0-A (v2.7)：从 current_sub_pipeline 注入父报告路径 + ROLLBACK 上下文 ===
+    # 修复 5 个原本被硬编码空串的占位符：
+    #   {verify_report_path} / {code_view_report_path} — fix/fix-review dispatch
+    #   {failed_at} / {reason} / {source} — ROLLBACK CONTEXT 块
+    # 任一字段为空时，模板侧会显示「（未提供）」，便于审计。
     if state.current_sub_pipeline is not None:
         sp = state.current_sub_pipeline
+        # 父报告路径（绝对路径）：dispatch fix 时是 verify.md，fix-review 时是 review.md
+        ctx["verify_report_path"] = sp.parent_report_path or ""
+        # gate fix 时同样需要父 gate report（已知 _gate_report_path 已从 state 取）
+        if phase == "fix-gate" and not ctx["gate_report_path"]:
+            ctx["gate_report_path"] = sp.parent_report_path or ""
+        # code view（review 子 pipeline 的父报告）= sp.parent_report_path
+        if sp.kind == "review-cycle":
+            ctx["code_view_report_path"] = sp.parent_report_path or ""
+
+        # failed_v_tasks_inline: 拼成 "V-backend-1, V-backend-3" 形式给任务清单用
+        if sp.failed_v_tasks:
+            ctx["failed_v_tasks_inline"] = ", ".join(sp.failed_v_tasks)
+
+        # rollback_context 字段
+        ctx["failed_at"] = sp.created_at or ""
+        ctx["source"] = sp.parent_phase or ""
+        ctx["escalation_reason"] = sp.escalation_reason or ""
+        # rollback.yaml 模板使用 {reason} 占位符（而非 {escalation_reason}），
+        # 提供顶层别名以兼容旧模板。
+        ctx["reason"] = sp.escalation_reason or f"{sp.kind} cycle {sp.cycle}"
+
+        # 保留旧的 rollback_context dict 形式以避免破坏既有模板渲染
         ctx["rollback_context"] = {
-            "failed_at": "",
-            "reason": f"{sp.kind} cycle {sp.cycle}",
-            "source": sp.parent_phase,
+            "failed_at": ctx["failed_at"],
+            "reason": ctx["reason"],
+            "source": ctx["source"],
         }
 
     return ctx

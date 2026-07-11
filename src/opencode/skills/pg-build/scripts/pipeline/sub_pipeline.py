@@ -30,6 +30,15 @@ class SubPipeline:
     的 reducer（相同的 match 逻辑），区别在于：
       - 子 pipeline 的 phase 序列走完即完成
       - 子 pipeline 完成后触发主 pipeline 的对应 phase 推进
+
+    P0-A 字段（v2.7 起）：
+      - parent_report_path: 父 phase 产出报告的绝对路径，用于 dispatch 的
+        {verify_report_path} / {code_view_report_path} 占位符注入
+      - escalation_reason: 触发 escalate / fail 的父 phase summary，
+        用于 dispatch 的 {reason} 占位符
+      - failed_v_tasks: 父 verify phase 中标记为 FAIL 的 V-* ID 列表，
+        用于 fix dispatch 的任务清单
+      - created_at: 子 pipeline 创建时间（ISO 8601），用于 {failed_at}
     """
 
     pipeline_id: str            # e.g. "dev.backend.fix-1"
@@ -40,6 +49,11 @@ class SubPipeline:
     phases: tuple[str, ...]     # phase 序列
     current_index: int = 0      # 当前在 phases 中的下标
     status: str = "pending"     # pending | running | completed
+    # === P0-A 新增字段（旧快照 missing 时默认空值，向后兼容） ===
+    parent_report_path: str = ""
+    escalation_reason: str = ""
+    failed_v_tasks: tuple[str, ...] = ()
+    created_at: str = ""
 
     def advance(self) -> "SubPipeline":
         """将 current_index 推进到下一 phase。返回新的 SubPipeline（不可变）。"""
@@ -88,6 +102,11 @@ class SubPipeline:
             "phases": list(self.phases),
             "current_index": self.current_index,
             "status": self.status,
+            # === P0-A 新增字段 ===
+            "parent_report_path": self.parent_report_path,
+            "escalation_reason": self.escalation_reason,
+            "failed_v_tasks": list(self.failed_v_tasks),
+            "created_at": self.created_at,
         }
 
     @classmethod
@@ -101,6 +120,11 @@ class SubPipeline:
             phases=tuple(d.get("phases", ())),
             current_index=d.get("current_index", 0),
             status=d.get("status", "pending"),
+            # === P0-A 新增字段，缺失时走 default 保持向后兼容 ===
+            parent_report_path=d.get("parent_report_path", ""),
+            escalation_reason=d.get("escalation_reason", ""),
+            failed_v_tasks=tuple(d.get("failed_v_tasks", ())),
+            created_at=d.get("created_at", ""),
         )
 
     @staticmethod
@@ -109,8 +133,25 @@ class SubPipeline:
         return f"{track}.{kind}-{cycle}"
 
 
-def create_fix_cycle(track: str, cycle: int) -> SubPipeline:
-    """创建 fix 子 pipeline（verify escalate 时调用）。"""
+def create_fix_cycle(
+    track: str,
+    cycle: int,
+    *,
+    parent_report_path: str = "",
+    escalation_reason: str = "",
+    failed_v_tasks: tuple[str, ...] | list[str] = (),
+    created_at: str = "",
+) -> SubPipeline:
+    """创建 fix 子 pipeline（verify escalate 时调用）。
+
+    P0-A 新增参数（v2.7 起）：
+      - parent_report_path: verify 报告的绝对路径，注入到 fix dispatch 的
+        {verify_report_path} 占位符
+      - escalation_reason: verify escalate 的 summary，注入到 {reason}
+      - failed_v_tasks: verify 中标记 FAIL 的 V-* ID 列表，
+        注入到 fix dispatch 的任务清单
+      - created_at: ISO 8601 时间戳，注入到 {failed_at}
+    """
     return SubPipeline(
         pipeline_id=SubPipeline.build_id(track, FIX_CYCLE, cycle),
         parent_track=track,
@@ -120,11 +161,26 @@ def create_fix_cycle(track: str, cycle: int) -> SubPipeline:
         phases=FIX_CYCLE_PHASES,
         current_index=0,
         status="running",
+        parent_report_path=parent_report_path,
+        escalation_reason=escalation_reason,
+        failed_v_tasks=tuple(failed_v_tasks),
+        created_at=created_at,
     )
 
 
-def create_gate_fix_cycle(track: str, cycle: int) -> SubPipeline:
-    """创建 gate-fix 子 pipeline（gate fail 时调用）。"""
+def create_gate_fix_cycle(
+    track: str,
+    cycle: int,
+    *,
+    parent_report_path: str = "",
+    escalation_reason: str = "",
+    failed_v_tasks: tuple[str, ...] | list[str] = (),
+    created_at: str = "",
+) -> SubPipeline:
+    """创建 gate-fix 子 pipeline（gate fail 时调用）。
+
+    P0-A 新增参数：同 create_fix_cycle。
+    """
     return SubPipeline(
         pipeline_id=SubPipeline.build_id(track, GATE_FIX_CYCLE, cycle),
         parent_track=track,
@@ -134,13 +190,26 @@ def create_gate_fix_cycle(track: str, cycle: int) -> SubPipeline:
         phases=GATE_FIX_CYCLE_PHASES,
         current_index=0,
         status="running",
+        parent_report_path=parent_report_path,
+        escalation_reason=escalation_reason,
+        failed_v_tasks=tuple(failed_v_tasks),
+        created_at=created_at,
     )
 
 
-def create_review_cycle(track: str, cycle: int) -> SubPipeline:
+def create_review_cycle(
+    track: str,
+    cycle: int,
+    *,
+    parent_report_path: str = "",
+    escalation_reason: str = "",
+    failed_v_tasks: tuple[str, ...] | list[str] = (),
+    created_at: str = "",
+) -> SubPipeline:
     """创建 review 子 pipeline（review escalate 时调用）。
 
     v2.6 新增：与 verify→fix 循环解耦，独立计数 review_fix_cycles。
+    v2.7 起携带父 report 路径 / escalation_reason / 失败 R-*（或 V-*）list。
     """
     return SubPipeline(
         pipeline_id=SubPipeline.build_id(track, REVIEW_CYCLE, cycle),
@@ -151,4 +220,8 @@ def create_review_cycle(track: str, cycle: int) -> SubPipeline:
         phases=REVIEW_CYCLE_PHASES,
         current_index=0,
         status="running",
+        parent_report_path=parent_report_path,
+        escalation_reason=escalation_reason,
+        failed_v_tasks=tuple(failed_v_tasks),
+        created_at=created_at,
     )

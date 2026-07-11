@@ -43,6 +43,7 @@ from pipeline.sub_pipeline import (
     GATE_FIX_CYCLE_PHASES,
     REVIEW_CYCLE_PHASES,
 )
+from pipeline.tasks_md import extract_failed_v_tasks
 
 
 # ============================================================
@@ -65,6 +66,22 @@ def _now_iso() -> str:
     """v2.1: 当前时间 ISO 格式字符串 — 给 accepted_gaps 打时间戳用。"""
     from datetime import datetime, timezone
     return datetime.now(timezone.utc).isoformat(timespec="seconds")
+
+
+def _resolve_escalation_reason(record: PipelineRecord) -> str:
+    """P0-A (v2.7)：从 record 中抽取 escalate / fail 的根因描述。
+
+    优先用 summary（sub-agent 已写明原因），fallback 到 issues（字符串）。
+    """
+    reason = (getattr(record, "summary", "") or "").strip()
+    if reason:
+        return reason
+    issues = (getattr(record, "issues", "") or "").strip()
+    if issues:
+        # issues 可能是 "issue1,issue2," 或分号分隔，最多截前 5 项避免冗长
+        parts = [p.strip() for p in issues.replace(";", ",").split(",") if p.strip()]
+        return "; ".join(parts[:5])
+    return ""
 
 
 def _make_gap_entry(
@@ -387,7 +404,21 @@ def _handle_verify(
             return new_state, _dispatch_action(track, "gate", cycle=1)
 
         # 创建 fix 子 pipeline
-        sp = create_fix_cycle(track, fix_cycles + 1)
+        # P0-A (v2.7)：从 record + verify phase 抽取父上下文，
+        # 注入到 fix dispatch 的 {verify_report_path}/{reason}/{failed_at}/{source} 占位符。
+        verify_report_path = verify.report_path or ""
+        # failed_v_tasks 优先从 verify 报告 markdown 中解析（更可靠），
+        # fallback 到 record.tasks_updated。
+        failed_v = extract_failed_v_tasks(verify_report_path) if verify_report_path else []
+        if not failed_v and record.tasks_updated:
+            failed_v = list(record.tasks_updated)
+        sp = create_fix_cycle(
+            track, fix_cycles + 1,
+            parent_report_path=verify_report_path,
+            escalation_reason=_resolve_escalation_reason(record),
+            failed_v_tasks=failed_v,
+            created_at=_now_iso(),
+        )
         # 记录 fix_cycle 信息到 verify phase
         verify = verify.replace(
             fix_cycles=(*verify.fix_cycles, {
@@ -476,7 +507,16 @@ def _handle_review(
             return new_state, _dispatch_action(track, "verify")
 
         # 创建 review 子 pipeline
-        sp = create_review_cycle(track, cv_fix_cycles + 1)
+        # P0-A (v2.7)：从 record + review phase 抽取父上下文，
+        # 注入到 fix-review dispatch 的 {code_view_report_path}/{reason} 等占位符。
+        review_report_path = code_view.report_path or record.report_path or ""
+        sp = create_review_cycle(
+            track, cv_fix_cycles + 1,
+            parent_report_path=review_report_path,
+            escalation_reason=_resolve_escalation_reason(record),
+            failed_v_tasks=tuple(record.tasks_updated or []),
+            created_at=_now_iso(),
+        )
         code_view = code_view.replace(
             review_fix_cycles=(*code_view.review_fix_cycles, {
                 "cycle": cv_fix_cycles + 1,
@@ -727,7 +767,16 @@ def _handle_gate(
             return new_state, PipelineAction(kind="advance", track=track)
 
         # 创建 gate-fix 子 pipeline
-        sp = create_gate_fix_cycle(track, gate_cycles + 1)
+        # P0-A (v2.7)：从 record + gate phase 抽取父上下文，
+        # 注入到 fix-gate dispatch 的 {gate_report_path}/{reason} 等占位符。
+        gate_report_path = gate.report_path or record.report_path or ""
+        sp = create_gate_fix_cycle(
+            track, gate_cycles + 1,
+            parent_report_path=gate_report_path,
+            escalation_reason=_resolve_escalation_reason(record),
+            failed_v_tasks=tuple(record.tasks_updated or []),
+            created_at=_now_iso(),
+        )
         gate = gate.replace(
             gate_cycles=(*gate.gate_cycles, {
                 "cycle": gate_cycles + 1,
