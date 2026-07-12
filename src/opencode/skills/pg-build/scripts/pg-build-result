@@ -83,6 +83,15 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--tasks-updated", action="append", default=[],
         help="task_id 列表（可多次传：--tasks-updated 1.1 --tasks-updated 2.1）"
     )
+    # ── v2.7 新增：design.md fault 标记 ──
+    p.add_argument(
+        "--design-md-fault", action="store_true", default=False,
+        help="v2.7: fix-review 检测到 design.md 文档层缺陷，无法由代码修复",
+    )
+    p.add_argument(
+        "--design-md-fault-location", default="",
+        help="v2.7: 文档缺陷位置 (file:line)",
+    )
     # ── v2.4 新增：强制落盘参数 ──
     p.add_argument(
         "--output-path", default="",
@@ -114,7 +123,7 @@ def _validate(args: argparse.Namespace) -> tuple[bool, str]:
 
 def _build_result_dict(args: argparse.Namespace) -> dict[str, Any]:
     """构造 sub-agent 返回的 JSON dict。"""
-    return {
+    result = {
         "summary": args.summary,
         "outputs": [s.strip() for s in args.outputs.split(",") if s.strip()],
         "tasks_updated": list(args.tasks_updated),
@@ -122,6 +131,12 @@ def _build_result_dict(args: argparse.Namespace) -> dict[str, Any]:
         "evidence_paths": list(args.evidence),
         "report_path": args.report,
     }
+    # v2.7: design.md fault 标记
+    if args.design_md_fault:
+        result["design_md_fault"] = True
+        if args.design_md_fault_location:
+            result["design_md_fault_location"] = args.design_md_fault_location
+    return result
 
 
 def _write_output_file(args: argparse.Namespace, result: dict[str, Any]) -> tuple[bool, str]:
@@ -180,6 +195,10 @@ def _emit_runner_mode(args: argparse.Namespace) -> int:
         parts.append(f"--outputs {args.outputs}")
     if args.issues:
         parts.append(f"--issues {args.issues}")
+    if args.design_md_fault:
+        parts.append("--design-md-fault")
+        if args.design_md_fault_location:
+            parts.append(f"--design-md-fault-location \"{args.design_md_fault_location}\"")
     # runner record CLI: <change> --status <status> [--report <path>] [--summary <文本>] ...
     # 这里只输出 --status 之后的参数；编排器需要自行加上 change
     print(" ".join(p for p in parts))

@@ -473,6 +473,8 @@ class Orchestrator:
         issues: str = "",
         evidence_paths: list[str] | None = None,  # v2.2
         tasks_updated: list[str] | None = None,  # v2.2
+        design_md_fault: bool = False,  # v2.7
+        design_md_fault_location: str = "",  # v2.7
     ) -> dict[str, Any]:
         """记录一次 sub-agent 完成事件。
 
@@ -549,6 +551,8 @@ class Orchestrator:
             issues=issues,
             evidence_paths=tuple(evidence_paths or []),
             tasks_updated=tuple(tasks_updated or []),
+            design_md_fault=design_md_fault,  # v2.7
+            design_md_fault_location=design_md_fault_location,  # v2.7
         )
 
         # reducer
@@ -840,13 +844,11 @@ class Orchestrator:
     def _collect_missing_gate_assessments(self) -> list[str]:
         """收集所有缺少 gate assessment 报告的 track id。
 
-        v2.1: 用于 final-gate 派遣前门控。
+        v2.7: 优先信任 snapshot.phases.gate.report_path 字段；
+        仅当该字段为空或指向不存在的文件时，退化到 glob 扫描。
+        glob 仅匹配 -gate.md 一种命名（统一命名约定）。
 
-        规则：
-          - 只检查 status == "completed" 的 track（避免查未完成的）
-          - simple track 跳过（无 gate-assessment）
-          - gate assessment 路径约定: 2-build/{seq}-{track}-gate-report.md
-            或 *.gate.md / *.gate-assessment.md
+        v2.1: 原始实现（完全依赖 glob 扫描，匹配多种命名）。
 
         Returns:
             缺少 gate assessment 的 track id 列表
@@ -869,24 +871,20 @@ class Orchestrator:
             if not t or t.status != "completed":
                 continue
 
-            # 检查是否存有该 track 的 gate assessment
-            # 文件命名约定（dispatch.py 实际产出）:
-            #   {seq}-{track}-gate.md            ← 实际命名（如 006-dev.backend-gate.md）
-            #   {seq}-{track}-gate-assessment.md ← SKILL 文档约定
-            #   {seq}-{track}-gate-report.md     ← 旧命名
+            # ── v2.7: 优先信任 snapshot 中已记录的 report_path ──
+            gate_phase = t.phases.get("gate", PhaseState())
+            report_path = gate_phase.report_path
+            if report_path and os.path.isfile(report_path):
+                continue
+
+            # ── 退化：glob 扫描（仅 -gate.md 一种命名）──
             track_bare = tid.rsplit(".", 1)[-1]
             candidates = [
                 f for f in existing
                 if f.endswith(".md")
                 and (
-                    # 实际命名：必须包含完整 track id + "-gate" 后缀
                     f.endswith(f"-{track_bare}-gate.md")
-                    or f.endswith(f"-{track_bare}-gate-assessment.md")
-                    or f.endswith(f"-{track_bare}-gate-report.md")
-                    # 也兼容：完整 track id 带 -gate 后缀
                     or f.endswith(f"-{tid}-gate.md")
-                    or f.endswith(f"-{tid}-gate-assessment.md")
-                    or f.endswith(f"-{tid}-gate-report.md")
                 )
             ]
             if not candidates:

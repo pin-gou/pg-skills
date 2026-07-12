@@ -585,6 +585,26 @@ def _handle_fix_review(
         return _sub_pipeline_advance(new_state, sp=sp)
 
     elif record.status == STATUS_FAILED:
+        # ── v2.7: design.md fault 检测 ──
+        # fix-review agent 检测到根因在 design.md / tasks.md 文档层
+        # （无法由代码修复）→ 立即终止 workflow，由人工介入修正 design.md
+        if record.design_md_fault:
+            location = record.design_md_fault_location or "unknown"
+            reason = (
+                f"design.md / tasks.md 文档层缺陷 (at {location})："
+                f"fix-review 检测到根因无法由代码修复。"
+                f"请运行 pg-propose-refine 修正 design.md 后重跑 pipeline。"
+            )
+            t = _update_phase(
+                t, "review", status="failed",
+                summary=reason, report_path=record.report_path,
+            )
+            new_state = state.replace(
+                tracks={**state.tracks, track: t},
+                current_track="", current_phase="",
+            )
+            return _fail_action(new_state, track, "review", reason)
+
         # 失败时不重试 fix-review 自身，进入 review 让其判定
         code_view = t.phases.get("review", PhaseState())
         cv_fix_cycles = list(code_view.review_fix_cycles)

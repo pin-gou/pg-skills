@@ -826,6 +826,41 @@ class TestFixReviewPhase(unittest.TestCase):
         cv = new_state.tracks["dev.backend"].phases["review"]
         self.assertEqual(cv.review_fix_cycles[-1]["status"], "failed")
 
+    def test_fix_review_design_md_fault_triggers_workflow_failed(self):
+        """v2.7: fix-review 返回 design_md_fault=True → workflow_failed（跳过 review 重审）"""
+        state, _ = self._make_sub_state()
+        record = PipelineRecord(
+            track="dev.backend", phase="fix-review", status="failed",
+            design_md_fault=True,
+            design_md_fault_location="design.md:183",
+            summary="field 10 已被 disk_write_bytes 占用，design.md spec 错误",
+            report_path="/tmp/fix-cv.md",
+            tasks_updated=("R-1",),
+        )
+        new_state, action = reduce_state(state, record)
+        self.assertEqual(action.kind, "workflow_failed")
+        self.assertIn("design.md:183", action.detail["reason"])
+        self.assertIn("pg-propose-refine", action.detail["reason"])
+        # review_fix_cycles 不应递增（直接终止）
+        cv = new_state.tracks["dev.backend"].phases["review"]
+        self.assertEqual(len(cv.review_fix_cycles), 1)  # 保持 cycle 1 pending 状态
+        self.assertEqual(cv.review_fix_cycles[0]["status"], "pending")
+
+    def test_fix_review_design_md_fault_false_still_regression(self):
+        """v2.7: design_md_fault=False 时现有路径不受影响"""
+        state, _ = self._make_sub_state()
+        record = PipelineRecord(
+            track="dev.backend", phase="fix-review", status="failed",
+            design_md_fault=False,
+            summary="regular code bug not fixed",
+            report_path="/tmp/fix-cv.md",
+            tasks_updated=("R-1",),
+        )
+        new_state, action = reduce_state(state, record)
+        # 应保持现有行为：进入 review 重审
+        self.assertEqual(action.kind, "dispatch")
+        self.assertEqual(action.phase, "review")
+
 
 class TestSubReviewPhase(unittest.TestCase):
     """review-cycle 子 pipeline 中的 review 重审阶段。"""

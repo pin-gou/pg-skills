@@ -415,3 +415,53 @@ result.json 文件由 `pg-build-result --mode agent --output-path <path>` 生成
 
 - **CLI 入口**: `scripts/pg-pipeline-runner.py` (record 分支：`--result-json` + 7 字段合并)
 - **测试**: `scripts/tests/test_record_result_json.py` (6 个 case)
+
+---
+
+## v2.7 design.md 缺陷协议
+
+### 触发条件
+
+fix-review agent 在 source review 报告中识别到 R-* 项的根因位于 **设计层**（design.md / tasks.md 文档错误），而非代码实现错误。
+
+典型场景：
+- proto 字段编号已被占用（design.md 与代码实际占用冲突）
+- API 契约与物理约束矛盾（如 size 字段类型不匹配实际存储）
+- tasks.md 任务编号与 design.md 章节引用不一致
+
+### 协议流程
+
+1. **fix-review agent 检测**（在执行代码修复前）
+   - 标注 `status: failed`
+   - 在 result.json 写入 `design_md_fault: true`
+   - 写入 `design_md_fault_location: "<file>:<line>"`
+
+2. **reducer 响应**（`_handle_fix_review`）
+   - 检测 `design_md_fault == True`
+   - 立即触发 `workflow_failed` action
+   - `reason` 包含 fault location + 修复指引
+
+3. **编排器响应**
+   - 收到 `action: workflow_failed, fatal: true`
+   - 展示 reason 给用户
+   - 提示运行 `pg-propose-refine` 修复 design.md
+   - 用户修正后重新触发 pg-build
+
+### 与 review-fix 循环的关系
+
+`design_md_fault` 路径**完全跳过** review 重审与 `max_review_fix_retries` 计数
+（design.md bug 是客观文档错误，review agent 复核无意义）。
+
+### 重置方式
+
+修正 design.md 后，用户重跑 `pg-propose-refine` → `pg-build`，无需手动重置 pipeline state。
+
+### 相关代码位置
+
+| 组件 | 文件 | 行号 |
+|------|------|------|
+| `PipelineRecord.design_md_fault` 字段 | `scripts/pipeline/events.py` | 67 |
+| `_handle_fix_review` 检测逻辑 | `scripts/pipeline/reducer.py` | 558 |
+| fix-review agent prompt 模板 | `prompt-templates/fix-review.yaml` | 13-28 |
+| `pg-build-result --design-md-fault` CLI | `scripts/pg-build-result` | 86-91 |
+| `pg-pipeline-runner.py record` CLI | `scripts/pg-pipeline-runner.py` | 170-175 |

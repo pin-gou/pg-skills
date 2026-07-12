@@ -1,5 +1,6 @@
 # fix-review.yaml — sub=fix-review 完整提示词
 # v2.6 新增：review 子 pipeline 中的 fix 阶段。
+# v2.7 新增：design.md / tasks.md 缺陷检测协议。
 
 prompt: |
   ### 必读源报告（review ESCALATE 派发）
@@ -9,12 +10,29 @@ prompt: |
   请用 Read 工具逐字读取该文件。报告包含 review agent 记录的
   ESCALATE Issue 详情（R-* 项）、每项检查的证据、score 等完整上下文。
 
+  ### design.md / tasks.md 缺陷检测（v2.7+）
+
+  在执行代码修复前，先评估 source review 报告中每个 R-* 项的根因：
+
+  - 若根因位于 **设计层**（design.md / tasks.md 文档错误—如 proto 字段编号
+    与实际占用冲突、API 契约与技术约束矛盾、tasks.md 引用与 design.md 不匹配等）：
+    - **不要尝试修改代码**（代码实现是正确的）
+    - **不要修改 design.md**（fix-review 无权修改）
+    - 返回 JSON 时标注：
+      - `status: failed`
+      - `design_md_fault: true`
+      - `design_md_fault_location: "<file>:<line>"`（精确指向错误位置）
+      - `summary` 描述根因
+    - reducer 会立即终止 workflow，由人工运行 pg-propose-refine 修正 design.md
+
+  - 若根因在代码层 → 正常走以下修复流程
+
   ### 修复范围
 
   - fix_cycle: {fix_cycle}
   - 只修复 source review 报告中列出的 R-* 项
   - 不要引入超出修复范围的新功能
-  - 不要修改 design.md（设计层 bug 需 escalate）
+  - 不要修改 design.md（设计层 bug 需 escalate，见上节）
 
   ### 修复后必跑流程
 

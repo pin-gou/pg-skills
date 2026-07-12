@@ -167,6 +167,11 @@ def main() -> None:
                                 help="v2.5: 从此 result.json 文件加载 7 字段填充 record 参数"
                                      "（status/summary/report_path/outputs/issues/evidence_paths/tasks_updated）。"
                                      "CLI 显式非空参数优先于文件内容。可与现有参数混用。")
+        # v2.7: design.md fault 标记
+        rec_parser.add_argument("--design-md-fault", action="store_true", default=False,
+                                help="v2.7: fix-review 检测到 design.md 文档层缺陷")
+        rec_parser.add_argument("--design-md-fault-location", default="",
+                                help="v2.7: 文档缺陷位置 (file:line)")
         rec_args = rec_parser.parse_args(sys.argv[3:])
 
         # ── v2.5: 加载 --result-json（如指定）──
@@ -259,6 +264,14 @@ def main() -> None:
                     normalized_tasks_cli.append(part)
         tasks_updated = _merge_list("tasks_updated", normalized_tasks_cli)
 
+        # ── v2.7: design_md_fault 从文件加载（CLI 优先级高于文件）──
+        design_md_fault = rec_args.design_md_fault
+        design_md_fault_location = rec_args.design_md_fault_location
+        if not design_md_fault:
+            design_md_fault = file_values.get("design_md_fault", False)
+        if not design_md_fault_location:
+            design_md_fault_location = file_values.get("design_md_fault_location", "")
+
         # ── status 兜底必填（CLI/文件都没有 → fatal）──
         if not status:
             print(json.dumps({
@@ -284,6 +297,8 @@ def main() -> None:
             outputs, issues,
             evidence_paths=evidence_paths,
             tasks_updated=tasks_updated,
+            design_md_fault=design_md_fault,
+            design_md_fault_location=design_md_fault_location,
         )
 
     elif command == "progress":
@@ -298,7 +313,7 @@ def _usage(msg: str = "") -> None:
     print("用法:", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py bootstrap <change>                                          # 执行 bootstrap 副作用", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py next <change>                                              # 获取下一步 action", file=sys.stderr)
-    print("  python3 pg-pipeline-runner.py record <change> --status <status> [--report <path>] [--summary <文本>] [--outputs <...>] [--issues <...>] [--evidence <...>] [--tasks-updated <t1,t2,...|--tasks-updated t1 --tasks-updated t2>]", file=sys.stderr)
+    print("  python3 pg-pipeline-runner.py record <change> --status <status> [--report <path>] [--summary <文本>] [--outputs <...>] [--issues <...>] [--evidence <...>] [--tasks-updated <t1,t2,...|--tasks-updated t1 --tasks-updated t2>] [--design-md-fault] [--design-md-fault-location <file:line>]", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py record <change> --result-json <result.json 路径>     # v2.5: 从 sub-agent 落盘的 result.json 加载 7 字段", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py progress <change>                                           # 查看进度", file=sys.stderr)
     print("  python3 pg-pipeline-runner.py env-action <change> --phase prepare_env|clean_env --stage <stage> --env <env> [--timeout <秒>]", file=sys.stderr)

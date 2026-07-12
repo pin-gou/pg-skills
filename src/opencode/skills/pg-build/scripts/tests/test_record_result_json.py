@@ -56,12 +56,15 @@ def _run_record_in_process(args: list[str], change: str = "v25-test"):
             pass
 
         def record(self, status, report_path, summary, outputs, issues,
-                   evidence_paths=None, tasks_updated=None):
+                   evidence_paths=None, tasks_updated=None,
+                   design_md_fault=False, design_md_fault_location=""):
             captured["calls"].append({
                 "status": status, "report_path": report_path,
                 "summary": summary, "outputs": outputs, "issues": issues,
                 "evidence_paths": list(evidence_paths or []),
                 "tasks_updated": list(tasks_updated or []),
+                "design_md_fault": design_md_fault,
+                "design_md_fault_location": design_md_fault_location,
             })
             return {"action": "advance", "captured": True}
 

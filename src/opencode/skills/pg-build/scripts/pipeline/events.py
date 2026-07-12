@@ -77,6 +77,8 @@ class PipelineRecord:
     cycle: int = 1
     evidence_paths: tuple[str, ...] = ()  # v2.2: evidence 文件列表
     tasks_updated: tuple[str, ...] = ()  # v2.2: escalate 时必填（失败 V-* 的 task_id）
+    design_md_fault: bool = False  # v2.7: fix-review 检测到 design.md 文档层缺陷
+    design_md_fault_location: str = ""  # v2.7: 文档缺陷位置 (file:line)
 
 
 @dataclass(frozen=True)
