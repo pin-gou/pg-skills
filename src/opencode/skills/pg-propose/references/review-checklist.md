@@ -109,6 +109,20 @@ v3.3 起，pg-build 引入 review 阶段。propose 阶段需自审：
 | 本次变更是否需要 code-review | 涉及架构/API/安全/核心数据模型变更时，`code_review_enabled` 应为 true；纯文档/README/typo fix 可设为 false |
 | profile 自动派发正确性 | `.pg/code-review/code-review.yaml` 的 language 自动派发是否覆盖本 track 的主要语言（java→java-spring, ts→vue3, go→go） |
 
+## 3.5.8 Verify / Gate 一致性（v3.4 新增）
+
+v3.4 起，verify 和 gate 也支持按 track 关闭（与 review 关闭模式对齐）。propose 阶段需自审：
+
+| 检查项 | 说明 |
+|--------|------|
+| `tracks.<id>.verify_enabled` 配置一致 | tasks.md 含/不含 `:verify` 章节必须与 `tracks.<id>.verify_enabled` 一致 |
+| `tracks.<id>.gate_enabled` 配置一致 | tasks.md 含/不含 `:gate` 章节必须与 `tracks.<id>.gate_enabled` 一致 |
+| `execution-manifest.yaml` phase_prompts 一致 | phase_prompts 是否含 `verify` / `gate` sub 必须与 tasks.md 章节一致（脚本自动保证） |
+| 质量门约束 | manifest phase_prompts 必须含 verify 或 gate 至少一项；review 单独存在不算质量门。validator 自动拒绝违规配置 |
+| 本次变更是否需要 verify | 涉及跨模块集成 / 服务启动 / API 调用验证时 `verify_enabled=true`；纯文档/单文件 typo 可设为 false |
+| 本次变更是否需要 gate | 涉及架构 / API 契约 / 安全相关变更时 `gate_enabled=true`；纯元数据/配置/类型声明可设为 false |
+| 关闭 verify 后的回归风险 | 关闭 verify 后 fix 循环不会触发（fix 由 verify.escalate 触发）；代码改动越大越不建议关闭 |
+
 ---
 
 ## 阶段三行为契约

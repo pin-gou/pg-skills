@@ -329,13 +329,21 @@ def build_sections(config: dict, affected_tracks: set,
                 })
                 N += 1
             else:
-                # v3.x: 动态 4/5 sub 决定
+                # v3.4: 动态 2/3/4/5 sub 决定
+                #   按 review_enabled / verify_enabled / gate_enabled 三个开关过滤
+                #   test / dev 永不禁用；review/verify/gate 可独立关闭
                 track_cfg = tracks_cfg.get(track_id) or {}
-                code_review_enabled = bool(track_cfg.get("code_review_enabled", True))
+                disabled_subs = set()
+                if not track_cfg.get("code_review_enabled", True):
+                    disabled_subs.add("review")
+                if not track_cfg.get("verify_enabled", True):
+                    disabled_subs.add("verify")
+                if not track_cfg.get("gate_enabled", True):
+                    disabled_subs.add("gate")
                 subs = (
-                    STANDARD_SUBS  # 5 sub
-                    if code_review_enabled
-                    else [s for s in STANDARD_SUBS if s[0] != "review"]  # 4 sub
+                    STANDARD_SUBS
+                    if not disabled_subs
+                    else [s for s in STANDARD_SUBS if s[0] not in disabled_subs]
                 )
                 for sub_name, label_fn in subs:
                     sections.append({

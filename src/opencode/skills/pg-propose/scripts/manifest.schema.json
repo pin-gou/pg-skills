@@ -52,10 +52,10 @@
                 },
                 "phase_prompts": {
                   "type": "object",
-                  "description": "Required for standard tracks: maps each sub-phase to its tasks.md section. v3.x: code-view is optional, present iff tracks.<id>.code_review_enabled=true",
-                  "minProperties": 4,
+                  "description": "Required for standard tracks: maps each sub-phase to its tasks.md section. v3.4: test/dev strongly required; review/verify/gate each optional (controlled by tracks.<id>.{code_review,verify,gate}_enabled). At least one of verify or gate must be present as a quality gate.",
+                  "minProperties": 2,
                   "maxProperties": 5,
-                  "required": ["test", "dev", "verify", "gate"],
+                  "required": ["test", "dev"],
                   "additionalProperties": false,
                   "properties": {
                     "test":   { "$ref": "#/$defs/phase_prompt" },

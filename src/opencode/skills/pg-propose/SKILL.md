@@ -321,11 +321,19 @@ review-notes.md 必含段：
 
 ## 文档变更记录
 
+- **v3.4（2026-07-12）**：适配 pg-build verify / gate 按 track 关闭。
+  - `pg-gen-tasks-skeleton.py` 的 `build_sections` 按 `verify_enabled` / `gate_enabled` / `code_review_enabled` 联合过滤 STANDARD_SUBS，允许 2-5 sub。
+  - `manifest.schema.json`：`minProperties=2`、`required=["test","dev"]`。
+  - `pg-validate-proposal.py`：必填逻辑改为 test+dev 强必填 + verify/gate 至少一项（防止绕过所有运行时质量门）；返回新错误码 `_no_quality_gate`。
+  - `references/tasks-templates.md`：track:verify / track:gate 章节末尾补"何时本章节不出现"小节。
+  - `references/review-checklist.md`：新增 §3.5.8 Verify / Gate 一致性。
+  - 协调：pg-build `TrackState` 增加 `verify_enabled` / `gate_enabled` 字段（与 v3.x `code_review_enabled` 对齐，默认 True）。
+
 - **v3.3（2026-07-08）**：适配 pg-build v2.6 code-review 阶段。
   - `pg-gen-tasks-skeleton.py` 的 `STANDARD_SUBS` 增加 `review`；`build_sections` 按 `tracks.<id>.code_review_enabled` 决定 4/5 sub。
   - `pg-gen-manifest.py` / `manifest.schema.json` / `pg-validate-proposal.py` 适配：phase_prompts 4 必填 + review optional，minProperties=4/maxProperties=5。
   - `references/tasks-templates.md` 新增 `track:review` 章节模板与不变量说明。
-  - **破坏性变更**：章节号 N 跨 change 不一致（同一 track 在不同 change 编号可能不同）。下游消费方必须基于脚本输出 sections JSON 的 N 值填，不许硬编码。
+
   - 协调：pg-build 内部 `TrackState.code_review_*` 字段：`code_review_enabled` / `code_review_profiles` / `code_review_profile` / `code_review_languages`。
 
 - **v3.2（前置版本）**：tasks.md 章节标题骨架 + 章节编号 N + simple/standard 分流 + on_conditions 评估注释全部由 `pg-gen-tasks-skeleton.py` 机械生成。

@@ -310,21 +310,23 @@ def _handle_linear_phase(
                 return new_state, PipelineAction(kind="advance", track=track)
 
             # test / dev → 下一个 phase
-            # v3.x: 若下一 phase 是 review 且 track.code_review_enabled=False
-            #       跳过 review，直接推进到 verify
+            # v3.4: 通用 silent-skip —— 任一被禁用的 phase（review/verify/gate）
+            #       都直接标记为 completed 跳过，summary 写明 disabled 原因
+            # v3.x 旧逻辑：仅 review 单独处理；v3.4 统一走 _phase_enabled
             next_phase = _next_phase(phase)
-            while next_phase == "review" and not t.code_review_enabled:
+            while next_phase is not None and not _phase_enabled(t, next_phase):
                 t = _update_phase(
-                    t, "review",
+                    t, next_phase,
                     status="completed",
-                    summary="review disabled by manifest (no phase_prompts.review)",
+                    summary=(
+                        f"{next_phase} disabled by manifest "
+                        f"(no phase_prompts.{next_phase})"
+                    ),
                 )
                 new_state = new_state.replace(
                     tracks={**new_state.tracks, track: t}
                 )
-                next_phase = _next_phase("review")
-                if next_phase is None:
-                    return new_state, PipelineAction(kind="advance", track=track)
+                next_phase = _next_phase(next_phase)
             if next_phase is None:
                 return new_state, PipelineAction(kind="advance", track=track)
             new_state = new_state.replace(
@@ -1157,6 +1159,24 @@ def _next_phase(current: str) -> str | None:
         return None
     except ValueError:
         return None
+
+
+def _phase_enabled(track: TrackState, phase: str) -> bool:
+    """v3.4: 判断 track 在指定 phase 是否启用。
+
+    - test / dev 永不禁用
+    - review → track.code_review_enabled
+    - verify → track.verify_enabled
+    - gate   → track.gate_enabled
+    - 未知 phase 视为启用（防御未来扩展）
+    """
+    if phase == "review":
+        return track.code_review_enabled
+    if phase == "verify":
+        return track.verify_enabled
+    if phase == "gate":
+        return track.gate_enabled
+    return True
 
 
 def verify_attempt(state: PipelineState, track: str) -> int:

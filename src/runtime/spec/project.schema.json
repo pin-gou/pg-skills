@@ -318,6 +318,21 @@
           "description": "verify 失败时如何分派修复: source=本 track 内修; auto=按 git diff 跳到对应 module track; manual=ESCALATE LLM"
         },
         "review_level": { "type": "string", "enum": ["none", "standard", "security"], "default": "standard" },
+        "code_review_enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "v3.x: 关闭此 track 的 review 阶段 (静态代码审查). 由 pg-propose 派生到 tasks.md / execution-manifest.yaml; pg-build reducer 走通用 silent-skip 模式 (silently 标记 review phase 为 completed 并跳过). 默认 true."
+        },
+        "verify_enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "v3.4 新增: 关闭此 track 的 verify 阶段. SSOT=project.yaml, 派生到 manifest phase_prompts.verify 存在与否. 关闭后 fix 循环不触发 (fix 由 verify.escalate 触发). 默认 true. 至少 verify 或 gate 必有其一 (pg-validate-proposal.py 强制约束)."
+        },
+        "gate_enabled": {
+          "type": "boolean",
+          "default": true,
+          "description": "v3.4 新增: 关闭此 track 的 gate 阶段. 关闭后 fix-gate 循环不触发 (fix-gate 由 gate.fail 触发). final-gate 不受影响 (跨 track 的最终 gate, 不读本字段). 默认 true. 至少 verify 或 gate 必有其一."
+        },
         "on_conditions": {
           "type": "array",
           "items": { "type": "string" },
@@ -412,6 +427,74 @@
             "enum": ["diag_logs", "call_chain_analysis", "phase2_output", "executor_json_history", "git_diff_state"]
           },
           "description": "ESCALATE 时保留的诊断产物清单, 切人工修复时输出."
+        },
+        "default_verify_level": {
+          "type": "string",
+          "default": "L1",
+          "description": "Phase 3 默认 verify_level (e.g. L0=单元 / L1=集成 / L2=E2E). Phase 3 默认读取此字段, 用户可覆盖. 配置值需与 pg-fix-issue 接受的 level 名一致."
+        },
+        "default_completion_threshold": {
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 0.8,
+          "description": "默认达成度阈值. 修复迭代用此阈值判断 success_criteria 通过率. 0~1, 推荐 0.7~0.9."
+        },
+        "default_sub_problem_strategy": {
+          "type": "string",
+          "default": "auto_split",
+          "description": "子问题处理策略. 常见值: auto_split=自动拆分子问题; defer=延后到下个迭代; abort=中止. Phase 6 解释此值."
+        },
+        "sub_problem_split_trigger": {
+          "type": "object",
+          "description": "子问题分拆触发条件. Phase 6 读取此字段判断是否分拆.",
+          "additionalProperties": false,
+          "properties": {
+            "min_exposed_problems": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 3,
+              "description": "暴露问题数达到此阈值触发分拆."
+            },
+            "max_completion_rate": {
+              "type": "number",
+              "minimum": 0,
+              "maximum": 1,
+              "default": 0.5,
+              "description": "完成率低于此值时触发分拆."
+            }
+          }
+        },
+        "termination_conditions": {
+          "type": "object",
+          "description": "强制终止条件. Phase 6 读取此字段决定是否中止迭代.",
+          "additionalProperties": false,
+          "properties": {
+            "rate_stagnant_iterations": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 2,
+              "description": "连续 N 轮达成度无提升则终止."
+            },
+            "net_regression_max": {
+              "type": "integer",
+              "minimum": 0,
+              "default": 0,
+              "description": "净回归 (新引入失败数) 超过此值则终止."
+            },
+            "problem_explosion_threshold": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 10,
+              "description": "暴露问题数超过此值则终止."
+            },
+            "same_root_cause_threshold": {
+              "type": "integer",
+              "minimum": 1,
+              "default": 3,
+              "description": "同一根因反复出现 N 次则终止."
+            }
+          }
         }
       }
     },

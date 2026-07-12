@@ -135,7 +135,12 @@ def next_pending(state: PipelineState) -> PipelineAction:
                 for i in range(idx, len(SUB_PHASES)):
                     phase = SUB_PHASES[i]
                     # v3.x: review 派生 disabled → 视为 completed 跳过
+                    # v3.4: verify / gate 同样按 *_enabled 派生跳过
                     if phase == "review" and not track.code_review_enabled:
+                        continue
+                    if phase == "verify" and not track.verify_enabled:
+                        continue
+                    if phase == "gate" and not track.gate_enabled:
                         continue
                     ph = track.phases.get(phase)
                     if ph is not None and ph.status == "completed":

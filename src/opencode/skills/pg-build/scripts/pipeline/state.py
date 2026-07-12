@@ -112,6 +112,13 @@ class TrackState:
     code_review_profiles: tuple[str, ...] = ()
     code_review_profile: str = ""
     code_review_languages: tuple[str, ...] = ()
+    # v3.4 新增：verify / gate 也支持按 track 关闭
+    # 语义与 code_review_enabled 对齐：从 execution-manifest.yaml 的
+    # phase_prompts.verify / phase_prompts.gate 是否存在派生。
+    # 关闭后该 phase 标记为 completed 自动跳过（silent skip），
+    # summary 写 '<phase> disabled by manifest (no phase_prompts.<phase>)'。
+    verify_enabled: bool = True
+    gate_enabled: bool = True
 
     # 富化上下文（由 _first_next 从 project.yaml 预填充）
     module_roots: str = ""               # "[webvirt-backend, webvirt-agent-proto]"
@@ -165,6 +172,8 @@ class TrackState:
             "code_review_profiles": list(self.code_review_profiles),
             "code_review_profile": self.code_review_profile,
             "code_review_languages": list(self.code_review_languages),
+            "verify_enabled": self.verify_enabled,
+            "gate_enabled": self.gate_enabled,
         }
 
     @classmethod
@@ -206,6 +215,8 @@ class TrackState:
             code_review_profiles=tuple(d.get("code_review_profiles", ())),
             code_review_profile=d.get("code_review_profile", ""),
             code_review_languages=tuple(d.get("code_review_languages", ())),
+            verify_enabled=d.get("verify_enabled", True),
+            gate_enabled=d.get("gate_enabled", True),
         )
 
     def replace(self, **kwargs: Any) -> "TrackState":

@@ -362,6 +362,86 @@ review.review_fix_cycles  ← review escalate 计数（独立）
 
 ---
 
+## v3.4 Verify / Gate 阶段也支持按 track 关闭
+
+**背景**：v2.6 引入 review 阶段按 track 关闭的能力，但 verify / gate 始终派发。某些场景下用户希望跳过这些阶段：
+
+- 简单改动（如 isolated docs / README typo fix）不需要 verify
+- 配置 / 元数据变更不需要 gate
+- 跨 track 的 final-gate 仍派发（不在此范围内）
+
+### 配置
+
+完全沿用 review 关闭模式 —— `project.yaml` 配置 + execution-manifest.yaml 派生 SSOT：
+
+```yaml
+tracks:
+  backend:
+    modules: [backend]
+    code_review_enabled: true   # 旧字段
+    verify_enabled: true        # v3.4 新增（默认 true，向后兼容）
+    gate_enabled: true          # v3.4 新增（默认 true，向后兼容）
+```
+
+propose 阶段：
+
+| 开关 | tasks.md | manifest phase_prompts |
+|------|----------|------------------------|
+| `code_review_enabled=false` | 去除 `:review` 章节 | 不含 review sub |
+| `verify_enabled=false` | 去除 `:verify` 章节 | 不含 verify sub |
+| `gate_enabled=false` | 去除 `:gate` 章节 | 不含 gate sub |
+
+**SSOT**：与 review 完全一致 —— orchestrator bootstrap 时从 `execution-manifest.yaml` 的 `phase_prompts` 是否含 `verify` / `gate` 派生 `TrackState.verify_enabled` / `gate_enabled`。
+
+### Phase 数量约束
+
+manifest 的 `phase_prompts` 允许 **2-5 个 sub**（test / dev 强必填，review/verify/gate 可选）：
+
+| phase_prompts 组成 | 含义 |
+|--------------------|------|
+| test + dev + review + verify + gate（5） | 默认全开 |
+| test + dev + review + verify（4） | gate_enabled=false |
+| test + dev + review + gate（4） | verify_enabled=false |
+| test + dev + review（3） | verify+gate 双关（**review 单独存在不是质量门**） |
+| test + dev + verify（3） | review+gate 双关（保留质量门） |
+| test + dev + gate（3） | review+verify 双关（保留质量门） |
+| test + dev（2） | 三关（review+verify+gate）—— **必须 ≥1 个质量门（verify/gate）** |
+
+**质量门强制**：validate-proposal.py 校验 manifest 必须含 `verify` 或 `gate` 至少一项。`review` 单独存在不算质量门 —— 静态审查不替代运行时验证。
+
+### reducer / detect 行为
+
+关闭后的 phase 沿用 review 的 **silent-skip** 模式：
+
+- **reducer**：`_handle_linear_phase`（test / dev 完成分支）通用 silent-skip 循环，任一被禁用的 phase（review / verify / gate）直接标记 completed 跳过，summary 写明 `<phase> disabled by manifest (no phase_prompts.<phase>)`
+- **detect**：`next_pending` 在每条 SUB_PHASES 循环里检查 `track.{code_review,verify,gate}_enabled`，禁用则 continue
+
+**fix 循环自洽**：verify 关闭 → verify.escalate 永不触发 → 无 fix 循环。gate 关闭 → gate.fail 永不触发 → 无 fix-gate 循环。这与 review 关闭后 review.escalate 不触发 fix-review 循环的行为对齐。
+
+### simple track 行为
+
+simple track 仍然三关全闭（orchestrator bootstrap 后 `code_review_enabled=False` 且 `verify_enabled=False` 且 `gate_enabled=False`），但这不影响 simple 走 `simple` phase 的派发路径。
+
+### final-gate 不受影响
+
+final-gate（跨 track 的最终 gate）始终派发，不在本开关范围内。final-gate 由 `detect.py:175` 的 `FINAL_GATE_TRACK` 分支硬派发，不读 track 开关。
+
+### 关闭方式
+
+- `track.verify_enabled: false` / `track.gate_enabled: false` — 关闭单个 track（propose 阶段生效，决定 manifest 是否含 verify/gate sub）
+- simple track 自动跳过（同 v2.6）
+
+### 测试覆盖
+
+| 测试文件 | 覆盖 |
+|----------|------|
+| `scripts/tests/test_state_verify_gate.py` | TrackState verify_enabled / gate_enabled 字段、序列化、legacy 兼容 |
+| `scripts/tests/test_detect_skip_disabled.py` | detect 跳过禁用 phase 的多种组合 |
+| `scripts/tests/test_reducer_silent_skip.py` | reducer 通用 silent-skip |
+| `scripts/tests/.../test_phase_gate_section.py` | propose 端 tasks.md + manifest + validator 联动 |
+
+---
+
 ## v2.5 record 命令支持 --result-json
 
 ### 背景

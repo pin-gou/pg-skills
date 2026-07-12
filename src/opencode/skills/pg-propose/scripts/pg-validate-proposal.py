@@ -141,7 +141,6 @@ def _validate_track(track, prefix):
     if track_type not in ("standard", "simple"):
         issues.append((f"{prefix}_invalid_type",
                        f"{prefix} type 必须是 'standard' 或 'simple', 实际: {track_type!r}"))
-
     if track_type == "standard":
         if "phase_prompts" not in track:
             issues.append((f"{prefix}_missing_phase_prompts",
@@ -149,21 +148,28 @@ def _validate_track(track, prefix):
         else:
             pp = track["phase_prompts"]
             if not isinstance(pp, dict):
-                issues.append((f"{prefix}_phase_prompts_not_object", f"{prefix} phase_prompts 必须是 object"))
+                issues.append((f"{prefix}_phase_prompts_not_object",
+                               f"{prefix} phase_prompts 必须是 object"))
             else:
-                # v3.x: 4 个核心 sub 必填，review optional
-                for required_sub in ("test", "dev", "verify", "gate"):
+                # v3.4: test / dev 强必填；review/verify/gate 都 optional
+                for required_sub in ("test", "dev"):
                     if required_sub not in pp:
                         issues.append((f"{prefix}_missing_sub_{required_sub}",
                                        f"{prefix} phase_prompts 缺少 {required_sub}"))
                     elif not isinstance(pp[required_sub], dict) or "tasks_md_section" not in pp[required_sub]:
                         issues.append((f"{prefix}_invalid_sub_{required_sub}",
                                        f"{prefix} phase_prompts.{required_sub} 缺少或无效 tasks_md_section"))
-                # review 若存在必须 valid
-                if "review" in pp:
-                    if not isinstance(pp["review"], dict) or "tasks_md_section" not in pp["review"]:
-                        issues.append((f"{prefix}_invalid_sub_review",
-                                       f"{prefix} phase_prompts.review 缺少或无效 tasks_md_section"))
+                # review / verify / gate 若存在必须 valid
+                for optional_sub in ("review", "verify", "gate"):
+                    if optional_sub in pp:
+                        if not isinstance(pp[optional_sub], dict) or "tasks_md_section" not in pp[optional_sub]:
+                            issues.append((f"{prefix}_invalid_sub_{optional_sub}",
+                                           f"{prefix} phase_prompts.{optional_sub} 缺少或无效 tasks_md_section"))
+                # 必须保留至少一个质量门：verify 或 gate 二者必有其一
+                # （review 单独存在不算质量门——它是静态审查，不替代运行时验证）
+                if "verify" not in pp and "gate" not in pp:
+                    issues.append((f"{prefix}_no_quality_gate",
+                                   f"{prefix} phase_prompts 必须包含 verify 或 gate 至少一项（review 单独存在不算质量门）"))
                 # 反向校验：simple track 不应出现 review
                 if track_type == "simple" and "review" in pp:
                     issues.append((f"{prefix}_simple_track_with_code_view",

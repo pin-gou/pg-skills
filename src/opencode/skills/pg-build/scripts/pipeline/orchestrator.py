@@ -291,11 +291,19 @@ class Orchestrator:
                 code_review_profiles=tuple(cfg.get("code_review_profiles", ())),
                 code_review_profile=cfg.get("code_review_profile", ""),
                 code_review_languages=resolve_module_languages(project_config, module_names),
+                verify_enabled=cfg.get("verify_enabled", True),
+                gate_enabled=cfg.get("gate_enabled", True),
             )
             is_simple = cfg.get("type") == "simple"
             if is_simple:
                 track_types[tid] = "simple"
-                tracks[tid] = tracks[tid].replace(code_review_enabled=False)
+                # v3.x: simple track 自动跳过 review（manifest 不生成 phase_prompts）
+                # v3.4: 同时跳过 verify / gate（simple track 不走 TDVG）
+                tracks[tid] = tracks[tid].replace(
+                    code_review_enabled=False,
+                    verify_enabled=False,
+                    gate_enabled=False,
+                )
 
         # 确定当前 stage
         first_stage = PipelineState.extract_stage(order[0]) if order else ""

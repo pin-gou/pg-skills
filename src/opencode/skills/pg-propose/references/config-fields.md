@@ -82,6 +82,12 @@ tracks:
     review_level: <level>           # 审查级别
     on_conditions: [<str>, ...]     # 可选：自然语言启用条件，任一命中则生成该 track heading
     description: <text>
+    # v3.x 起按 track 关闭可选阶段（默认全部 true，向后兼容）
+    code_review_enabled: <bool>     # 关闭后该 track 不生成 review 章节
+    verify_enabled: <bool>          # v3.4 新增：关闭后不生成 verify 章节
+    gate_enabled: <bool>            # v3.4 新增：关闭后不生成 gate 章节
+                                     # 约束：verify + gate 同时为 false 不允许
+                                     # （必须保留至少一个运行时质量门）
 ```
 
 ### stages
