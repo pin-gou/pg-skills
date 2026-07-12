@@ -1,138 +1,54 @@
-# sub_agent_contract.yaml — sub-agent 返回契约块（v2.1 重写）
-# 此块被 base.yaml 通过 {sub_agent_contract_block} 占位符引用，
-# 注入到所有 dispatch prompt 的尾部，强制 sub-agent 按契约返回 JSON。
+# sub_agent_contract.yaml — sub-agent 返回契约块（v2.6 精简）
+# 此块被 renderer.py 通过 {sub_agent_contract_block} 占位符引用，
+# 注入到所有 dispatch prompt 的尾部。
 #
-# v2.1 重写要点：
-#   - 不再要求 sub-agent 手动构造 JSON（容易出错）
-#   - 改为要求 sub-agent 调用 pg-build-result 脚本生成返回值
-#   - 双模式：--mode agent 给你 JSON，--mode runner 给编排器 CLI 字符串
-#
-# 编排器在 record 阶段会按 sub_agent_contract.validate_record_args 校验返回值：
-#   - 必填字段缺失 → schema_violation (hard fail)
-#   - verify/gate/fix-gate/final-gate 的 evidence_paths 为空 → evidence_missing (hard fail)
-#   - report_path 指向的文件不存在 → report_missing (hard fail)
-#   - status 与 phase 不匹配 → schema_violation (v2.1 新增)
+# v2.6 重写要点：
+#   - 按 phase 裁剪必填字段表与 status 矩阵（renderer.py 注入策略占位符）
+#   - result.json 路径只在命令模板里出现一次（{result_json_path}），不再展开绝对路径
+#   - 删除"为什么用脚本"、"失败示例"等与完成任务无关的说明
+#   - 保留全部硬约束：强制落盘、重试+fatal、status 矩阵、tasks_updated 必填、gate gate_score
 
 block: |
-  ## Sub-agent 返回契约（强制 — v2.4）
+  ## Sub-agent 返回契约
 
-  **完成本任务后，必须通过 `pg-build-result` 脚本生成最终返回值，不要手动拼 JSON**。
+  **完成后调用 `pg-build-result` 生成返回值并落盘，不要手写 JSON。**
 
-  ### ⚠️ 强制落盘（v2.4 新增 — 重试 + fatal 保护）
+  ### 必填字段（本阶段：{phase}）
 
-  **必须**调用 `pg-build-result --output-path <result.json>` 把结果写到指定文件。
-  - 不调用 = 编排器视为未完成 → **重试一次**
-  - 重试后仍未生成 result.json = 编排器 **fatal 停止**
+  | 字段 | 本阶段要求 |
+  |------|-----------|
+  | `--status` | 必填（见下方 status 矩阵） |
+  | `--summary` | 必填，<= 200 字 |
+  | `--track` | 必填（如 `dev.backend`） |
+  | `--phase` | 必填（当前阶段） |
+  | `--report` | {report_policy} |
+  | `--evidence` | {evidence_policy} |
+  | `--tasks-updated` | {tasks_updated_policy} |
+  | `--outputs` / `--issues` | 选填 |
 
-  result.json 路径由编排器注入到你的 dispatch prompt（变量 `{result_json_path}`），
-  典型格式：`<change_dir>/2-build/<seq>-<track>-<phase>.result.json`
+  ### status 矩阵（本阶段允许）
 
-  ### 步骤 1: 收集必填字段
+  {status_matrix_for_phase}
 
-  根据本任务阶段，收集以下字段：
-
-  | 字段 | 必填 | 说明 |
-  |------|------|------|
-  | `--status` | ✅ | 见下方 status 选择矩阵 |
-  | `--summary` | ✅ | 一句话中文摘要，**<= 200 字** |
-  | `--track` | ✅ | 如 `dev.backend` / `dev.frontend` |
-  | `--phase` | ✅ | `test` / `dev` / `verify` / `gate` / `fix` / `fix-gate` / `simple` |
-  | `--report` | verify/gate 必填 | 报告文件绝对路径，**文件必须已写盘**（生成后需 `ls` / `cat` 验证文件确实存在） |
-  | `--evidence` | verify/gate 至少 1 个 | 证据文件绝对路径（可多次传） |
-  | `--outputs` | 选填 | 产物文件列表，逗号分隔 |
-  | `--issues` | 选填 | 问题列表，逗号分隔 |
-  | `--tasks-updated` | **必填** (`test` / `dev` / `fix` / `fix-gate`) | task_id 列表；可多次传或逗号分隔 |
-  | `--tasks-updated` | **必填** (`verify` 且 `status=escalate`) | 失败 V-* ID 列表 |
-  | `--tasks-updated` | 选填 (`verify completed` / `gate` / `simple`) | 不必填 |
-
-  ### 步骤 2: status 选择矩阵（按 phase）
-
-  | phase | 允许的 status |
-  |-------|---------------|
-  | `test`, `dev`, `simple` | `completed` / `failed` |
-  | `verify` | `completed` / `escalate` / `failed` |
-  | `fix`, `fix-gate` | `completed` / `failed` |
-  | `gate` (含 final-gate) | `pass` / `fail` |
-
-  **错误示例**：`--phase gate --status completed` 会被拒（gate 必须用 pass/fail）。
-
-  ### 步骤 3: 调用 pg-build-result
-
-  **Agent 模式（v2.4 — 必须含 --output-path 强制落盘）：**
+  ### 调用命令
 
   ```bash
   python3 .opencode/skills/pg-build/scripts/pg-build-result \
       --mode agent \
       --status <status> \
-      --summary "<=200 字摘要>" \
+      --summary "<=200 字>" \
       --track <dev.xxx> \
-      --phase <phase> \
+      --phase {phase} \
       --output-path {result_json_path} \
       --require-output \
       [--report <绝对路径>] \
-      [--evidence <绝对路径>] \
-      [--evidence <绝对路径>] \
+      [--evidence <绝对路径>]... \
       [--outputs <p1>,<p2>,...] \
-      [--issues "<issue1>,<issue2>,"]
-      [--tasks-updated <task_id>] \
-      [--tasks-updated <task_id>]
+      [--issues "<issue1>,<issue2>,"] \
+      [--tasks-updated <id>]...
   ```
 
-  **占位符**：
-  - `{result_json_path}` — 由编排器注入的 result JSON 落盘绝对路径
-  - 脚本会用 `{result_json_path}` 写入 JSON，**并在写入失败时 exit 2**
-  - 编排器会**检查该文件是否存在**——缺失 = 任务失败
-
-  脚本会校验所有字段。**校验失败 exit 1 + stderr 错误信息** —— 你必须修复后重试。
-
-  **Gate 阶段额外要求**：summary 末尾必须含 `gate_score: <0-100>, p0_failures: [...]`，
-  例：`"8/9 检查通过, gate_score: 91, p0_failures: []"`。
-
-  ### 步骤 4: 把脚本输出复制到 task() 返回值
-
-  脚本 stdout 输出完整 JSON：
-
-  ```json
-  {
-    "summary": "...",
-    "outputs": [...],
-    "tasks_updated": [...],
-    "status": "...",
-    "evidence_paths": [...],
-    "report_path": "..."
-  }
-  ```
-
-  把 `tasks_updated` 字段填充为本任务实际标记的 task_id 列表，然后把整个对象作为 task() 的返回值。
-
-  ### 失败示例（这些会被拒）
-
-  - 缺字段：`{"summary": "...", "outputs": [...]}` ← 缺 status
-  - 证据缺失：verify agent 返回的 `evidence_paths: []` ← 触发 hard fail
-  - 报告不存在：`--report /tmp/not_exist.md` ← 触发 report_missing
-  - status 不匹配 phase：`--phase gate --status completed` ← 触发 schema_violation
-  - gate summary 无 gate_score：`"8/9 检查通过"` ← 触发 schema_violation
-  - 空 report_path：`"report_path": ""` ← 后续 verify/gate 阶段可能因缺少历史报告而中断
-
-  ### 为什么用脚本而不是手写 JSON
-
-  1. **校验前置**：字段问题在 sub-agent 阶段就发现，不必绕回编排器
-  2. **字段一致**：避免 LLM 自然语言返回时漏字段或字段名拼错
-  3. **gate_score 强制**：脚本会拒绝没有 gate_score 的 gate 摘要
-  4. **报告路径存在性**：脚本会检查 report_path 文件真实存在
-
-  ### ⚠️ MANDATORY: tasks_updated 字段约束（v2.3 新增）
-
-  **以下 phase 必须传 --tasks-updated 非空**，否则脚本会 exit 1：
-    - `test` —— 列出覆盖的 task_id（红 phase 即认为任务完成）
-    - `dev` —— 列出实现的 task_id
-    - `fix` / `fix-gate` —— 列出修复的 V-* 或 task_id
-    - `verify --status=escalate` —— 列出失败的 V-* ID
-
-  **以下 phase 不必传**：
-    - `verify --status=completed` / `gate` / `final-gate` / `simple`
-
-  传法：可多次 `--tasks-updated X`，或逗号分隔。空值 `[""]` `[" "]` 也算未填。
-  绕过脚本手写 JSON 不会被这里拦截（因为脚本不参与），但 orchestrator 的 `mark_all_tasks_in_phase` fallback 会污染 tasks.md，且不会给出清晰的错误提示。**请务必调用脚本**。
-
-  
+  - `{result_json_path}` 来自本 dispatch 上下文注入，**直接照抄**
+  - **不调用 `--output-path` 或脚本 exit 2** → 编排器先重试一次，仍缺失则 fatal
+  - 脚本 exit 1 → 字段校验失败，stderr 输出错误信息，照提示修复后重跑
+  - **gate / final-gate**：summary 末尾追加 `"gate_score: <0-100>, p0_failures: [...]"`，否则 schema_violation

@@ -68,6 +68,73 @@ def _safe_format(text: str, ctx: dict[str, Any]) -> str:
         return re.sub(r"\{(\w+)\}", _replacer, text)
 
 
+# v2.6 新增：按 phase 推导 sub-agent 返回契约的策略占位符
+# 让 sub_agent_contract.yaml 同一份模板渲染出与 phase 匹配的精简字段表
+_CONTRACT_PHASE_POLICIES: dict[str, dict[str, str]] = {
+    "test": {
+        "status_matrix": "| phase=`test` | `completed` / `failed` |",
+        "report_policy": "选填",
+        "evidence_policy": "选填",
+        "tasks_updated_policy": "**必填**（覆盖的 task_id 列表，可多次传或逗号分隔）",
+    },
+    "dev": {
+        "status_matrix": "| phase=`dev` | `completed` / `failed` |",
+        "report_policy": "选填",
+        "evidence_policy": "选填",
+        "tasks_updated_policy": "**必填**（实现的 task_id 列表，可多次传或逗号分隔）",
+    },
+    "verify": {
+        "status_matrix": "| phase=`verify` | `completed` / `escalate` / `failed` |",
+        "report_policy": "**必填**（报告文件绝对路径，文件必须已写盘）",
+        "evidence_policy": "**至少 1 个**（证据文件绝对路径，可多次传）",
+        "tasks_updated_policy": "仅 `status=escalate` 时**必填**（失败 V-* ID 列表）；`completed` 时不必填",
+    },
+    "gate": {
+        "status_matrix": "| phase=`gate` | `pass` / `fail` |",
+        "report_policy": "**必填**（报告文件绝对路径，文件必须已写盘）",
+        "evidence_policy": "**至少 1 个**（证据文件绝对路径，可多次传）",
+        "tasks_updated_policy": "选填",
+    },
+    "final-gate": {
+        "status_matrix": "| phase=`final-gate` | `pass` / `fail` |",
+        "report_policy": "**必填**（报告文件绝对路径，文件必须已写盘）",
+        "evidence_policy": "**至少 1 个**（证据文件绝对路径，可多次传）",
+        "tasks_updated_policy": "选填",
+    },
+    "fix": {
+        "status_matrix": "| phase=`fix` | `completed` / `failed` |",
+        "report_policy": "选填",
+        "evidence_policy": "选填",
+        "tasks_updated_policy": "**必填**（修复的 V-* 或 task_id 列表，可多次传或逗号分隔）",
+    },
+    "fix-gate": {
+        "status_matrix": "| phase=`fix-gate` | `completed` / `failed` |",
+        "report_policy": "选填",
+        "evidence_policy": "选填",
+        "tasks_updated_policy": "**必填**（修复的 V-* 或 task_id 列表，可多次传或逗号分隔）",
+    },
+    "simple": {
+        "status_matrix": "| phase=`simple` | `completed` / `failed` |",
+        "report_policy": "选填",
+        "evidence_policy": "选填",
+        "tasks_updated_policy": "选填",
+    },
+}
+
+
+def _build_contract_phase_policies(phase: str) -> dict[str, str]:
+    """返回当前 phase 对应的契约策略占位符（缺省为 empty policy，不抛错）。"""
+    return _CONTRACT_PHASE_POLICIES.get(
+        phase,
+        {
+            "status_matrix": "| phase=`" + phase + "` | （未知 phase，使用前请补 _CONTRACT_PHASE_POLICIES） |",
+            "report_policy": "选填",
+            "evidence_policy": "选填",
+            "tasks_updated_policy": "选填",
+        },
+    )
+
+
 def render_dispatch(
     phase: str,
     ctx: dict[str, Any],
@@ -129,6 +196,16 @@ def render_dispatch(
         contract_data = _load_yaml(contract_path)
         block_contract = contract_data.get("block", "")
 
+    # v2.6 新增：按 phase 注入契约块的策略占位符（status 矩阵 / report / evidence / tasks_updated 必填策略）
+    # 让同一份 sub_agent_contract.yaml 渲染出与当前 phase 匹配的精简字段表
+    _phase_policies = _build_contract_phase_policies(phase)
+    ctx_phase_policies = {
+        "status_matrix_for_phase": _phase_policies["status_matrix"],
+        "report_policy": _phase_policies["report_policy"],
+        "evidence_policy": _phase_policies["evidence_policy"],
+        "tasks_updated_policy": _phase_policies["tasks_updated_policy"],
+    }
+
     # v2.2: 按 phase 决定是否注入 env 块
     #  - PHASES_WITH_ENV (dev/verify/fix/fix-gate): 注入 header_env（紧跟 Stage 配置，含
     #    env_instances + env_hooks + 运行时环境操作指令 + ROLE/INSTANCE 来源解释）
@@ -149,7 +226,8 @@ def render_dispatch(
         sections.append(_safe_format(block_rollback, ctx))
     # v2.1: 契约块始终在最后，强调返回值约束
     if block_contract:
-        sections.append(_safe_format(block_contract, ctx))
+        # v2.6: 把 phase 策略注入 ctx，_safe_format 才能替换契约块里的占位符
+        sections.append(_safe_format(block_contract, {**ctx, **ctx_phase_policies}))
 
     result = "\n\n---\n\n".join(sections)
 
