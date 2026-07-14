@@ -1,0 +1,11 @@
+change: test-bootstrap-v3
+schema_version: '2026-06-30'
+stages:
+- environment: dev-local
+  name: dev
+  tracks:
+  - id: backend
+    phase_prompts:
+      test:
+        tasks_md_section: 1. dev.backend:test
+    type: standard

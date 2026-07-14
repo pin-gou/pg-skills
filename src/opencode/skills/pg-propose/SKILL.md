@@ -243,15 +243,47 @@ LLM **不直接写** execution-manifest.yaml，通过 CLI 工具基于 tasks.md 
 
 **on_conditions 评估复核**（3.5.7）：见 [references/orchestration-model.md](./references/orchestration-model.md)「on_conditions & 机械评估」段。
 
+**manifest 决策复核**（v3 新增，3.5.8）：见本节末尾"manifest 决策复核"段。
+pg-gen-manifest.py 已在 manifest.tracks[].enabled / reason / on_conditions_eval
+字段中写入机械评估结果；阶段三 LLM 复核时把决策表同步到 review-notes.md。
+
 **review-notes.md 格式 + 决策符号 + 5 项通用决策默认值**：见 [references/review-notes-format.md](./references/review-notes-format.md)。
 
 review-notes.md 必含段：
 
 - 5 项通用决策表（error_response_strategy / auth_scope / data_migration_strategy / transaction_boundary / frontend_interaction_style）
 - on_conditions 评估记录段（从 `on-conditions-eval.md` 合并）
+- **manifest 决策复核段**（v3 新增，从 `execution-manifest.yaml` 的 tracks[].enabled / reason / on_conditions_eval 同步）
 - 6 类自审发现的问题清单（按 阻塞 / 重要 / 建议 三档）
 - 一致性检查结果（✅/⚠️/❌）
 - 评审说明段（编辑指引）
+
+### manifest 决策复核（v3 新增）
+
+`pg-gen-manifest.py` 在生成 `execution-manifest.yaml` 时，已为每个 track 填入：
+
+- `enabled: bool` — 是否启用（pg-build 派发唯一依据）
+- `reason: str` — 决策理由（on_conditions 命中项 + LLM 决策依据）
+- `on_conditions_eval: {matched_rules, unmatched_rules, path_hit_count, semantic_hit_count}` — 机械评估结果
+- `target_module: str`（e2e track 必填）— 限定修复模块
+
+阶段三 LLM 复核时，需要把以下表格同步写入 review-notes.md：
+
+| track | 机械评估 | manifest.enabled | 理由 | 一致 | 最终 |
+|-------|---------|-----------------|------|------|------|
+| backend-e2e | on_conditions 全部未命中 | false | LLM 未列入 affected_tracks | ✅ | [ ] |
+| frontend-e2e | on_conditions 命中 2 条 | true | 命中 + LLM 决策启用 | ✅ | [ ] |
+| agent-e2e | on_conditions 命中 1 条 | true | 命中 + LLM 决策启用 | ✅ | [ ] |
+| real-integration | (无 on_conditions, 常驻) | true | LLM 决策启用 | ✅ | [ ] |
+
+**复核动作**：
+
+1. 对每行"最终"勾选 `[x]`（同意 manifest 决策）或 `[~]` + 写依据（覆盖）
+2. 不一致项（如 on_conditions 未命中但 enabled=true）必须在 review-notes.md 标注"建议禁用"或"建议人工介入"
+3. e2e track 必须确认 target_module 填写正确
+4. manifest 缺 enabled 字段的旧 change 走 pg-propose-refine 重新生成
+
+### 阶段三行为契约
 
 ### 阶段三行为契约
 

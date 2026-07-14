@@ -474,7 +474,12 @@ def run_bootstrap(
 # ============================================================
 
 def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
-    """从 execution-manifest.yaml + project.yaml 检测 pipeline 配置。"""
+    """从 execution-manifest.yaml + project.yaml 检测 pipeline 配置。
+
+    v3: 严格按 manifest.tracks[].enabled 决定派发顺序。
+        enabled=false 的 track 不加入 pipeline_order。
+        旧 manifest 缺 enabled 字段时默认禁用（v3 安全策略）。
+    """
     from pipeline.events import FINAL_GATE_TRACK
     order: list[str] = []
     track_configs: dict[str, dict] = {}
@@ -483,33 +488,61 @@ def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
     config_path = os.path.join(PROJECT_ROOT, ".pg", "project.yaml")
 
     manifest_path = os.path.join(CHANGES_DIR, change, "execution-manifest.yaml")
+    manifest = None
     if os.path.isfile(manifest_path):
         try:
             import yaml as _yaml
             with open(manifest_path, encoding="utf-8") as f:
                 manifest = _yaml.safe_load(f) or {}
-            for stage in manifest.get("stages", []):
-                name = stage.get("name", "")
-                if not name:
-                    continue
-                stage_order.append(name)
-                env = stage.get("environment", "")
-                if isinstance(env, str):
-                    stage_env_map[name] = env
-                elif isinstance(env, dict):
-                    stage_env_map[name] = env.get("name", "dev-local")
-                else:
-                    stage_env_map[name] = "dev-local"
-                for track in stage.get("tracks", []):
-                    tid = track["id"] if isinstance(track, dict) else track
+        except Exception:
+            manifest = None
+
+    if manifest is not None:
+        for stage in manifest.get("stages", []):
+            name = stage.get("name", "")
+            if not name:
+                continue
+            stage_order.append(name)
+            env = stage.get("environment", "")
+            if isinstance(env, str):
+                stage_env_map[name] = env
+            elif isinstance(env, dict):
+                stage_env_map[name] = env.get("name", "dev-local")
+            else:
+                stage_env_map[name] = "dev-local"
+            for track in stage.get("tracks", []):
+                if not isinstance(track, dict):
+                    tid = track
                     qualified = f"{name}.{tid}" if name else tid
                     order.append(qualified)
-                    if isinstance(track, dict) and track.get("commands"):
-                        track_configs[qualified] = {"commands": track["commands"]}
-            if manifest.get("final_gate"):
-                order.append(FINAL_GATE_TRACK)
-        except Exception:
-            pass
+                    continue
+
+                tid = track.get("id", "")
+                # v3: 严格按 enabled 决定派发；缺字段时默认禁用
+                if "enabled" not in track:
+                    print(
+                        f"[bootstrap] WARN: track {tid!r} in stage {name!r} "
+                        f"manifest 缺 enabled 字段，默认禁用（建议重跑 pg-propose-refine）",
+                        file=sys.stderr,
+                    )
+                    continue
+                if not track["enabled"]:
+                    continue
+
+                qualified = f"{name}.{tid}" if name else tid
+                order.append(qualified)
+
+                tcfg: dict[str, Any] = {}
+                if track.get("commands"):
+                    tcfg["commands"] = track["commands"]
+                if track.get("target_module"):
+                    tcfg["target_module"] = track["target_module"]
+                if track.get("type"):
+                    tcfg["type"] = track["type"]
+                track_configs[qualified] = tcfg
+
+        if manifest.get("final_gate"):
+            order.append(FINAL_GATE_TRACK)
 
     if not order and os.path.isfile(config_path):
         try:

@@ -137,10 +137,23 @@ def _validate_track(track, prefix):
     elif not isinstance(track["id"], str) or not track["id"].strip():
         issues.append((f"{prefix}_invalid_id", f"{prefix} id 必须是非空字符串"))
 
+    # v3: enabled 字段必填（pg-build 派发唯一依据）
+    if "enabled" not in track:
+        issues.append((f"{prefix}_missing_enabled",
+                       f"{prefix} 缺少 enabled 字段（v3 必填，pg-build 派发依据）"))
+    elif not isinstance(track["enabled"], bool):
+        issues.append((f"{prefix}_invalid_enabled",
+                       f"{prefix} enabled 必须是 bool, 实际: {type(track['enabled']).__name__}"))
+
+    # v3: e2e track 必填 target_module
+    if track.get("type") == "e2e" and not track.get("target_module"):
+        issues.append((f"{prefix}_e2e_missing_target_module",
+                       f"{prefix} type=e2e 必须包含 target_module"))
+
     track_type = track.get("type")
-    if track_type not in ("standard", "simple"):
+    if track_type not in ("standard", "simple", "e2e", "scenario"):
         issues.append((f"{prefix}_invalid_type",
-                       f"{prefix} type 必须是 'standard' 或 'simple', 实际: {track_type!r}"))
+                       f"{prefix} type 必须是 'standard' / 'simple' / 'e2e' / 'scenario', 实际: {track_type!r}"))
     if track_type == "standard":
         if "phase_prompts" not in track:
             issues.append((f"{prefix}_missing_phase_prompts",
@@ -201,7 +214,9 @@ def _validate_manifest_vs_tasks(manifest, tasks_sections):
         for track_idx, track in enumerate(stage.get("tracks", [])):
             if track.get("type") == "simple":
                 continue
-            for sub_name in ("test", "dev", "review", "verify", "gate"):
+            # v3: 增加 e2e / scenario 子章节引用校验
+            # v3.5 兼容性：保留 verify（Phase 2 才会移除）
+            for sub_name in ("test", "dev", "review", "verify", "e2e", "scenario", "gate"):
                 pp = track.get("phase_prompts", {})
                 if sub_name not in pp:
                     continue
@@ -233,15 +248,28 @@ def _validate_tracks_against_tasks(manifest, tasks_sections, config):
         for track in stage.get("tracks", []):
             track_id = track.get("id", "")
             expected_type = get_track_type(config, track_id)
-
             manifest_type = track.get("type")
+
+            # v3: e2e / scenario track 在 pg_pipeline_common 中归类为 "track"，
+            # manifest 端需匹配其显式 type
+            track_cfg = (config.get("tracks") or {}).get(track_id, {})
+            explicit_type = track_cfg.get("type")
+            if explicit_type in ("e2e", "scenario"):
+                if manifest_type != explicit_type:
+                    issues.append((
+                        "manifest_track_type_mismatch",
+                        f"track {track_id!r} 在 project.yaml 中是 {explicit_type} 类型，"
+                        f"但 manifest 中标记为 {manifest_type!r}"
+                    ))
+                continue
+
             if expected_type == "phase" and manifest_type != "simple":
                 issues.append((
                     "manifest_track_type_mismatch",
                     f"track {track_id!r} 在 project.yaml 中是 simple 类型，"
                     f"但 manifest 中标记为 {manifest_type!r}"
                 ))
-            if expected_type == "track" and manifest_type != "standard":
+            if expected_type == "track" and manifest_type not in ("standard", "e2e", "scenario"):
                 issues.append((
                     "manifest_track_type_mismatch",
                     f"track {track_id!r} 在 project.yaml 中是 standard 类型，"

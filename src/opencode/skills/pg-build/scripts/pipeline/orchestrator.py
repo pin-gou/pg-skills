@@ -294,6 +294,8 @@ class Orchestrator:
                 gate_enabled=cfg.get("gate_enabled", True),
             )
             is_simple = cfg.get("type") == "simple"
+            is_e2e = cfg.get("type") == "e2e"
+            is_scenario = cfg.get("type") == "scenario"
             if is_simple:
                 track_types[tid] = "simple"
                 # v3.x: simple track 自动跳过 review（manifest 不生成 phase_prompts）
@@ -303,6 +305,12 @@ class Orchestrator:
                     verify_enabled=False,
                     gate_enabled=False,
                 )
+            elif is_e2e:
+                # v3: e2e track 独立类型，runner 走 e2e → fix-e2e → e2e 循环
+                track_types[tid] = "e2e"
+            elif is_scenario:
+                # v3: scenario track 独立类型，runner 走 scenario → gate
+                track_types[tid] = "scenario"
 
         # 确定当前 stage
         first_stage = PipelineState.extract_stage(order[0]) if order else ""

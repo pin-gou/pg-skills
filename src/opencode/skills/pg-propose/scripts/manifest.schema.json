@@ -38,7 +38,7 @@
             "minItems": 1,
             "items": {
               "type": "object",
-              "required": ["id", "type"],
+              "required": ["id", "type", "enabled"],
               "additionalProperties": false,
               "properties": {
                 "id": {
@@ -47,8 +47,30 @@
                 },
                 "type": {
                   "type": "string",
-                  "enum": ["standard", "simple"],
-                  "description": "standard = TDVG sub-agent sequence; simple = commands-only"
+                  "enum": ["standard", "simple", "e2e", "scenario"],
+                  "description": "standard = TDVG sub-agent sequence; simple = commands-only; e2e = e2e test + fix loop; scenario = real-world user journey"
+                },
+                "enabled": {
+                  "type": "boolean",
+                  "description": "v3: per-change 决策结果，pg-build 派发唯一依据。旧 manifest 缺此字段时 pg-build 默认禁用并 warning"
+                },
+                "target_module": {
+                  "type": "string",
+                  "description": "e2e track 限定修复范围的模块名（如 frontend、agent）"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "v3: 启用/禁用决策的理由（on_conditions 命中项 + LLM 决策依据）"
+                },
+                "on_conditions_eval": {
+                  "type": "object",
+                  "description": "v3: on_conditions 机械评估结果",
+                  "properties": {
+                    "matched_rules": { "type": "array", "items": { "type": "string" } },
+                    "unmatched_rules": { "type": "array", "items": { "type": "string" } },
+                    "path_hit_count": { "type": "integer" },
+                    "semantic_hit_count": { "type": "integer" }
+                  }
                 },
                 "phase_prompts": {
                   "type": "object",
@@ -81,6 +103,10 @@
               {
                 "if": { "properties": { "type": { "const": "simple" } } },
                 "then": { "required": ["commands"] }
+              },
+              {
+                "if": { "properties": { "type": { "const": "e2e" } } },
+                "then": { "required": ["target_module"] }
               }
             ]
           }
