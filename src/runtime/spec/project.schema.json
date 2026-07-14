@@ -115,7 +115,6 @@
           "description": "测试命令集合, key 是测试类型 (unit/integration/e2e/mock_integration/real_integration)",
           "additionalProperties": { "$ref": "#/definitions/executable_command" }
         },
-        "review_level": { "type": "string", "enum": ["none", "standard", "security"], "default": "standard" },
         "description": { "type": "string" }
       }
     },
@@ -317,7 +316,6 @@
           "default": "source",
           "description": "verify 失败时如何分派修复: source=本 track 内修; auto=按 git diff 跳到对应 module track; manual=ESCALATE LLM"
         },
-        "review_level": { "type": "string", "enum": ["none", "standard", "security"], "default": "standard" },
         "code_review_enabled": {
           "type": "boolean",
           "default": true,

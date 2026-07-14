@@ -36,7 +36,6 @@ def _ctx(phase: str = "test") -> dict:
         "modules": ["backend"],
         "module_details": "- module: backend\n  - root: webvirt-backend\n  - language: java",
         "module_roots": "['webvirt-backend']",
-        "review_level": "standard",
         "max_fix_retries": 5,
         "stage_name": "dev",
         "test_key": "unit",

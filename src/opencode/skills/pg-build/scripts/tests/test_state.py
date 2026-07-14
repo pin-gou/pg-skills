@@ -118,7 +118,6 @@ class TestTrackState(unittest.TestCase):
             module_roots="['webvirt-backend']",
             module_details="- module: backend\n  - root: webvirt-backend",
             test_commands="cd webvirt-backend && mvn test",
-            review_level="security",
             env_name="dev-local",
             env_instances_yaml="backend:\n  - name: backend-1\n    host: localhost\n    port: 9080",
             hooks_yaml="backend:\n  start:\n    script: .pg/hooks/role-backend-start.sh",
@@ -132,7 +131,6 @@ class TestTrackState(unittest.TestCase):
         self.assertEqual(t.module_roots, t2.module_roots)
         self.assertEqual(t.module_details, t2.module_details)
         self.assertEqual(t.test_commands, t2.test_commands)
-        self.assertEqual(t.review_level, t2.review_level)
         self.assertEqual(t.env_name, t2.env_name)
         self.assertEqual(t.env_instances_yaml, t2.env_instances_yaml)
         self.assertEqual(t.hooks_yaml, t2.hooks_yaml)

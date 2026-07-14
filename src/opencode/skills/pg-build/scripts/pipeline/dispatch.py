@@ -190,7 +190,6 @@ def build_ctx(
             lazy_env_instances = resolve_env_instances(pc, env_name) or ""
             lazy_hooks_yaml = resolve_hooks(pc, env_name) or ""
             lazy_env_name = env_name
-            lazy_review_level = ""
         else:
             lazy_module_roots = "[]"
             lazy_module_details = ""
@@ -198,7 +197,6 @@ def build_ctx(
             lazy_env_instances = ""
             lazy_hooks_yaml = ""
             lazy_env_name = "dev-local"
-            lazy_review_level = ""
     else:
         lazy_module_roots = t.module_roots or "[]"
         lazy_module_details = t.module_details or ""
@@ -206,7 +204,6 @@ def build_ctx(
         lazy_env_instances = t.env_instances_yaml or ""
         lazy_hooks_yaml = t.hooks_yaml or ""
         lazy_env_name = t.env_name or "dev-local"
-        lazy_review_level = t.review_level or ""
 
     # === 惰性 tasks：tasks.md 内容为空时现场读取 ===
     tasks_preformatted = t.tasks_by_phase.get(phase, "")
@@ -271,7 +268,6 @@ def build_ctx(
         "modules": list(t.modules),
         "module_roots": lazy_module_roots,
         "module_details": lazy_module_details,
-        "review_level": lazy_review_level,
         "max_fix_retries": t.max_fix_retries,
         # stage
         "stage_name": track.rsplit(".", 1)[0] if "." in track else "dev",
@@ -362,7 +358,52 @@ def build_ctx(
             "source": ctx["source"],
         }
 
+    # === v3.x: 加载 code review 规则文档（修复 dispatcher 死代码）===
+    # 之前 load_markdown_rule 已实现但 dispatch.py 从未调用，导致 review agent
+    # 看不到 .pg/code-review/<profile>/*.md 的具体 FAIL 判定。本段对每个
+    # enabled check 调一次 load_markdown_rule，把 markdown 内容塞进 ctx。
+    if phase == "review" and project_root:
+        try:
+            from pipeline.profile_loader import (
+                resolve_profile_for_track,
+                load_markdown_rule,
+            )
+            effective_profile = resolve_profile_for_track(
+                project_root=project_root,
+                track_code_review_profiles=t.code_review_profiles,
+                track_code_review_profile=t.code_review_profile,
+                track_code_review_languages=t.code_review_languages,
+            )
+            rule_docs: dict[str, str] = {}
+            for check_name, _check_cfg in effective_profile.checks:
+                content = load_markdown_rule(
+                    project_root, effective_profile.name, check_name
+                )
+                if content:
+                    rule_docs[check_name] = content
+            ctx["code_review_rule_docs"] = rule_docs
+            ctx["code_review_p0_checks"] = list(effective_profile.p0_check_names())
+            ctx["code_review_rule_docs_yaml"] = _format_rule_docs_block(rule_docs)
+        except Exception as exc:  # noqa: BLE001 — 容错：不阻断 dispatch
+            ctx["code_review_rule_docs"] = {}
+            ctx["code_review_p0_checks"] = []
+            ctx["code_review_rule_docs_yaml"] = (
+                f"⚠️ 加载规则文档失败: {type(exc).__name__}: {exc}"
+            )
+
     return ctx
+
+
+def _format_rule_docs_block(rule_docs: dict[str, str]) -> str:
+    """把 rule_docs 字典格式化为 markdown 块，便于 review agent prompt 渲染。"""
+    if not rule_docs:
+        return "（未提供规则文档，请按通用 prompt 执行 review）"
+    lines: list[str] = []
+    for name in sorted(rule_docs.keys()):
+        lines.append(f"#### {name}\n")
+        lines.append(rule_docs[name].strip())
+        lines.append("")  # 空行分隔
+    return "\n".join(lines)
 
 
 def build_action(

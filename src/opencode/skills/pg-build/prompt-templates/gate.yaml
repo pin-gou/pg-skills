@@ -1,11 +1,32 @@
 # gate.yaml — sub=gate 完整提示词
 # v2.1: 引入 gate-score 加权评估，PASS 必须 ≥ 80 分且无 P0 失败
+# v3.x: 增加"实现完整性"维度（硬标记扫描 + tasks-V 映射核查）
 
 prompt: |
   ### 门控审查要求（v2.1 加权评分）
 
   审查上一轮 verify 报告，逐项核查 tasks.md 的 G-* 门控项，
   **并对每个维度独立打分**（0-100），最后综合计算 gate-score。
+
+  ### 🔴 v3.x 新增：实现完整性维度（10%，P0 硬约束）
+
+  **必须**对 `git diff feat/pg/{_change}` 单独执行实现完整性核查。
+  这是 v3.x 新增的硬约束，防止"代码存在但未实质实现"绕过 verify 阶段的 MockMvc 测试。
+
+  执行命令：
+
+  ```bash
+  # 硬标记扫描
+  git diff feat/pg/{_change} | grep -nE '//\s*(TODO|FIXME|XXX|stub|not implemented)|@todo|UnsupportedOperationException' | grep -v '\[skip-review\]'
+
+  # tasks-V 映射核查（人工提取 tasks.md 关键 API 关键词，在 diff 中 grep）
+  ```
+
+  判定：
+
+  - 命中 ≥ 1 处（除豁免）→ 维度分 = 0，整个 gate FAIL
+  - 豁免 ≥ 3 → 维度分 = 0，整个 gate FAIL
+  - 完全 PASS → 维度分 = 100
 
   ### 加权评分维度
 
@@ -15,7 +36,9 @@ prompt: |
   | design.md 一致性 | 20% | 缺核心 API/DTO 改动 |
   | scope creep 检查 | 15% | 修改了未在 proposal 声明的文件 |
   | 测试质量 | 10% | 新代码无单测覆盖 |
-  | 安全审查 (review_level=security) | 5% | 高危漏洞 |
+  | **实现完整性**（v3.x） | **10%** | **diff 中存在 TODO/stub 或 task-V 缺失 → 整体 FAIL** |
+
+  > v3.x 起实现完整性维度占 10% 权重，原"测试质量"维度相应降为可选 0%（合并到实现完整性）。
 
   ### gate-score 计算
 
@@ -29,12 +52,14 @@ prompt: |
 
   - **PASS**：gate-score ≥ 80 且无 P0 失败，返回 `gate pass`
   - **FAIL**：gate-score < 80 或存在 P0 失败，返回 `gate fail`（需列出具体 G-N 项 + 维度分）
+  - **🔴 P0 触发条件**（v3.x）：实现完整性维度 FAIL → 无论 gate-score 多高，整体 FAIL
 
   ### 返回契约
 
   除 Sub-agent 返回契约的 6 字段外，还必须包含：
   - 在 summary 中附加: `"gate_score: <0-100>, p0_failures: [G-N, ...]"`
   - 在 report_path 文件中提供每个维度的分数明细
+  - **必须**含实现完整性维度的 grep 输出与豁免列表
 
   ### 写盘要求
 
@@ -43,3 +68,4 @@ prompt: |
   - 每个 G-* 项的结论（PASS / FAIL）及依据
   - 每个维度的分数（0-100）和权重
   - 最终 gate-score 和 PASS/FAIL 判定
+  - **实现完整性核查段**：含 grep 输出、豁免列表、tasks-V 映射核查结论

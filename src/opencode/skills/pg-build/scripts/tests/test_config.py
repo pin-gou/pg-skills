@@ -32,13 +32,11 @@ class TestResolveModuleDetails(unittest.TestCase):
                         "unit": "cd webvirt-backend && mvn test",
                         "integration": {"cmd": ".pg/hooks/backend-test.sh", "timeout_seconds": 3600},
                     },
-                    "review_level": "security",
                 },
                 "agent-proto": {
                     "root": "webvirt-agent-proto",
                     "language": "proto",
                     "build": "cd webvirt-agent && make proto",
-                    "review_level": "security",
                 },
             },
         }
@@ -48,7 +46,6 @@ class TestResolveModuleDetails(unittest.TestCase):
         self.assertIn("module: backend", result)
         self.assertIn("root: webvirt-backend", result)
         self.assertIn("test.unit: cd webvirt-backend && mvn test", result)
-        self.assertIn("review_level: security", result)
 
     def test_multiple_modules(self):
         result = resolve_module_details(self.config, ["backend", "agent-proto"])

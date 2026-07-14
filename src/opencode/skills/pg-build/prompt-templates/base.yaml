@@ -15,7 +15,6 @@ header: |
 
   ### Track 配置
   - track.id: {id}
-  - track.review_level: {review_level}
   - track.modules: {modules}
   - track.max_fix_retries: {max_fix_retries}
 

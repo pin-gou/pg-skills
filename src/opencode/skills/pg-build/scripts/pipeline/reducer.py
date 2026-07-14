@@ -10,6 +10,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 from typing import Any
 
 from pipeline.state import (
@@ -456,6 +457,15 @@ def _handle_verify(
 # 子 reducer：review
 # ============================================================
 
+def _parse_p0_failures_safe(summary: str) -> tuple[str, ...]:
+    """从 summary 解析 p0_failures，parse 失败时返回 ()。"""
+    try:
+        from pipeline.sub_agent_contract import parse_p0_failures
+        return parse_p0_failures(summary or "")
+    except Exception:  # noqa: BLE001
+        return ()
+
+
 def _handle_review(
     state: PipelineState, record: PipelineRecord,
 ) -> tuple[PipelineState, PipelineAction]:
@@ -464,6 +474,10 @@ def _handle_review(
     - STATUS_COMPLETED → dispatch verify
     - STATUS_ESCALATE  → 创建 review-cycle 子 pipeline（独立计数 review_fix_cycles）
     - STATUS_FAILED    → attempt++ 重试，耗尽进 workflow_failed
+
+    v3.x: 即使 sub-agent 返回 status=completed，若 summary.p0_failures 含
+    `implementation_completeness`，仍强制 escalate（绕过 score pass）—— 防止
+    dev agent 提交的 TODO/stub 通过 review。
     """
     track = record.track
     if track not in state.tracks:
@@ -471,6 +485,31 @@ def _handle_review(
     t = state.tracks[track]
 
     if record.status == STATUS_COMPLETED:
+        # v3.x: 检查 P0 implementation_completeness 硬约束
+        p0_failures = _parse_p0_failures_safe(record.summary)
+        if "implementation_completeness" in p0_failures:
+            # 把 status=completed 降级为 escalate，强制走 fix-review 循环
+            escalated_tasks = (
+                record.tasks_updated
+                if record.tasks_updated
+                else tuple(p0_failures)
+            )
+            escalated_record = dataclasses.replace(
+                record,
+                status=STATUS_ESCALATE,
+                tasks_updated=escalated_tasks,
+                summary=(
+                    record.summary
+                    + " | P0 implementation_completeness FAIL → force escalate"
+                ),
+            )
+            # 直接走 escalate 分支（避免递归）
+            record = escalated_record
+            # fall through 不可行 — 用 goto 风格：改 status 后手动跳到 escalate 分支
+            # 用 return 直接调用 _handle_review 已经 status=ESCALATE 的 record，
+            # 此时不会再次进入 completed 分支。
+            return _handle_review(state, escalated_record)
+
         # review 通过 → 推进到 verify
         t = _update_phase(t, "review", status="completed",
                           summary=record.summary, report_path=record.report_path)

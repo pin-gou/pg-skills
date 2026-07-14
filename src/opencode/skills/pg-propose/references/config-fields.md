@@ -68,7 +68,6 @@ modules:
       unit: <shell cmd>     # 单元测试（可选）
       integration: <shell cmd>  # 集成测试（可选）
       e2e: <shell cmd>      # E2E 测试（可选）
-    review_level: <level>   # security / none
 ```
 
 ### tracks
@@ -79,7 +78,6 @@ tracks:
     modules: [<module-name>, ...]  # 该 track 包含的 modules
     max_fix_retries: <int>          # 最大修复重试次数
     fix_routing: source|auto        # 失败时分派路由
-    review_level: <level>           # 审查级别
     on_conditions: [<str>, ...]     # 可选：自然语言启用条件，任一命中则生成该 track heading
     description: <text>
     # v3.x 起按 track 关闭可选阶段（默认全部 true，向后兼容）

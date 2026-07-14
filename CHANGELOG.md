@@ -5,6 +5,23 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [Unreleased]
+
+### 移除（破坏性）
+
+- **`review_level` 字段全量移除**：v2.6 时期的 `modules.<m>.review_level` 与 `tracks.<id>.review_level` 字段已删除（schema.json、prompt-templates、agent docs、pg-init-project 推断逻辑、`pg-propose/references/config-fields.md` 全部清理）。v3.x 的 review phase 开关已统一到 `tracks.<id>.code_review_enabled` / `code_review_profile(s)` / `code_review_languages`，profile 集合由 `.pg/code-review/<profile>/*.md` 定义。**迁移指南**：
+  - `review_level: security` → `code_review_profiles: [security]` + 把 `.pg/skills/examples/code-review/security/*.md` 拷到 `.pg/code-review/security/`
+  - `review_level: standard` → 删除字段（默认行为）
+  - `review_level: none` → `code_review_enabled: false`
+- **gate agent "步骤 6 安全敏感变更检查"删除**：auth/secret/permission/concurrency 类检查已由 review phase 的 security profile（`auth_bypass` / `secret_leak` / `error_silence`）自动执行（`dispatch.py` 把 `.pg/code-review/security/*.md` 注入 review agent prompt），gate 不再重复。Gate Assessment 检查项从 9 项减为 8 项
+- **`pg-init-project` Phase 2 review_level 推断逻辑删除**：不再按 language 自动推断 `modules.<m>.review_level`（该字段已无意义）。review profile 仍按 language 自动派发（`LANGUAGE_PROFILE_MAP`），security profile 保持 opt-in
+
+### 备注
+
+- 影响面：5 个 pg-build 脚本（state / orchestrator / dispatch / config / bootstrap）+ schema.json + 3 个 prompt 模板（base / gate / final-gate）+ 6 个 agent doc（dev / test / fix / verify / fix-gate / gate）+ 5 个测试文件 + 2 个 SKILL 文档（pg-init-project / pg-propose references）+ 1 个项目侧 `.pg/project.yaml`
+- 不向后兼容：旧 `.pg/project.yaml` 仍写 `review_level` 会触发 schema validation 警告（保持严格不兼容原则）
+- 安全审查职责已转移到 review phase（dispatch.py 自动注入 security profile markdown 到 review agent），无审查盲区
+
 ## [0.8.0] - 2026-07-09
 
 ### 新增

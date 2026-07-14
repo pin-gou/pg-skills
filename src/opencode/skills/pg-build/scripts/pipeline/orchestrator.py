@@ -278,7 +278,6 @@ class Orchestrator:
                 module_roots=resolve_module_roots(project_config, module_names),
                 module_details=resolve_module_details(project_config, module_names),
                 test_commands=resolve_test_commands(project_config, module_names),
-                review_level=cfg.get("review_level", ""),
                 env_name=env_name,
                 env_instances_yaml=resolve_env_instances(project_config, env_name),
                 hooks_yaml=resolve_hooks(project_config, env_name),
@@ -427,7 +426,6 @@ class Orchestrator:
                         "max_fix_retries": cfg.get("max_fix_retries", 5),
                         "max_gate_fix_retries": cfg.get("max_gate_fix_retries", 2),
                         "type": cfg.get("type", "standard"),
-                        "review_level": cfg.get("review_level", ""),
                         "description": cfg.get("description", ""),
                     }
             except Exception:

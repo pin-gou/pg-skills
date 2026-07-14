@@ -30,7 +30,6 @@ def resolve_module_details(config: dict[str, Any], module_names: list[str]) -> s
         - build: cd webvirt-backend && mvn clean install -DskipTests
         - lint: cd webvirt-backend && mvn checkstyle:check
         - test.unit: cd webvirt-backend && mvn test
-        - review_level: security
     """
     modules = config.get("modules", {})
     lines: list[str] = []
@@ -52,8 +51,6 @@ def resolve_module_details(config: dict[str, Any], module_names: list[str]) -> s
             cmd = val if isinstance(val, str) else val.get("cmd", "")
             if cmd:
                 lines.append(f"    - test.integration: {cmd}")
-        if mod.get("review_level"):
-            lines.append(f"    - review_level: {mod['review_level']}")
     return "\n".join(lines)
 
 

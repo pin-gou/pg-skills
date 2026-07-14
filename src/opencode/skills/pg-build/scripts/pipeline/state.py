@@ -124,7 +124,6 @@ class TrackState:
     module_roots: str = ""               # "[webvirt-backend, webvirt-agent-proto]"
     module_details: str = ""             # "- module: backend\n  - root: webvirt-backend\n..."
     test_commands: str = ""              # "cd webvirt-backend && mvn test"
-    review_level: str = ""               # "security" | "standard" | "none"
     env_name: str = ""                   # "dev-local"
     env_instances_yaml: str = ""         # 环境实例的 YAML 文本
     hooks_yaml: str = ""                 # 环境 hooks 的 YAML 文本
@@ -159,7 +158,6 @@ class TrackState:
             "module_roots": self.module_roots,
             "module_details": self.module_details,
             "test_commands": self.test_commands,
-            "review_level": self.review_level,
             "env_name": self.env_name,
             "env_instances_yaml": self.env_instances_yaml,
             "hooks_yaml": self.hooks_yaml,
@@ -202,7 +200,6 @@ class TrackState:
             module_roots=d.get("module_roots", ""),
             module_details=d.get("module_details", ""),
             test_commands=d.get("test_commands", ""),
-            review_level=d.get("review_level", ""),
             env_name=d.get("env_name", ""),
             env_instances_yaml=d.get("env_instances_yaml", ""),
             hooks_yaml=d.get("hooks_yaml", ""),

@@ -81,7 +81,6 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 ### Track 配置（来自 config.yaml）
 
 - `track.id` — 阶段限定的 track 名称（e.g. `dev-isolated.backend`），报告文件名中会嵌入此值以区分不同 stage
-- `track.review_level` — 审查级别
 
 ### Module 配置（runner 通过 `module_details` 注入）
 

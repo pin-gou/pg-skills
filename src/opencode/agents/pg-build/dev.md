@@ -41,7 +41,6 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 ### Track 配置
 
 - `track.id` — 阶段限定的 track 名称（e.g. `dev-isolated.backend`），报告文件名中会嵌入此值以区分不同 stage
-- `track.review_level` — 审查级别（"none" / "standard" / "security"）
 - `track.modules` — Maven module 名称列表
 - `track.max_fix_retries` — 最大修复重试次数
 - `track.fix_routing` — fix 路由策略

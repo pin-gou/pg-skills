@@ -26,7 +26,6 @@ class TestRenderer(unittest.TestCase):
             "id": "dev.backend",
             "label": "后端测试",
             "_change": "my-change",
-            "review_level": "standard",
             "modules": "['backend']",
             "max_fix_retries": 5,
             "module_details": "- module: backend",
@@ -49,7 +48,7 @@ class TestRenderer(unittest.TestCase):
 
     def test_render_verify_phase(self):
         ctx = {"id": "dev.backend", "_change": "x", "report_filename": "verify-report.md",
-               "review_level": "", "modules": "", "max_fix_retries": 3,
+               "modules": "", "max_fix_retries": 3,
                "module_details": "", "stage_name": "", "test_key": "", "gate": "",
                "env_required": "", "env_name": "", "prepare_status": "", "prepare_log_path": "",
                "test_commands": "", "module_roots": "", "tasks_preformatted": "",
@@ -60,7 +59,7 @@ class TestRenderer(unittest.TestCase):
     def test_render_fix_phase(self):
         ctx = {"id": "backend", "_change": "x", "verify_report_path": "/tmp/verify.md",
                "fix_cycle": "1", "test_commands": "mvn test",
-               "fix_report_filename": "fix-report.md", "review_level": "", "modules": "",
+               "fix_report_filename": "fix-report.md", "modules": "",
                "max_fix_retries": 3, "module_details": "", "stage_name": "",
                "test_key": "", "gate": "", "env_required": "", "env_name": "",
                "prepare_status": "", "prepare_log_path": "", "module_roots": "",
@@ -72,7 +71,7 @@ class TestRenderer(unittest.TestCase):
 
     def test_render_gate_phase(self):
         ctx = {"id": "backend", "_change": "x", "report_filename": "gate-report.md",
-               "review_level": "", "modules": "", "max_fix_retries": 3,
+               "modules": "", "max_fix_retries": 3,
                "module_details": "", "stage_name": "", "test_key": "", "gate": "",
                "env_required": "", "env_name": "", "prepare_status": "", "prepare_log_path": "",
                "test_commands": "", "module_roots": "", "tasks_preformatted": "",
@@ -83,7 +82,7 @@ class TestRenderer(unittest.TestCase):
     def test_render_all_phases(self):
         """所有 8 个 phase 都可以渲染。"""
         phases = ["test", "dev", "verify", "gate", "fix", "fix-gate", "simple", "final-gate"]
-        ctx = {"id": "x", "_change": "x", "review_level": "", "modules": "",
+        ctx = {"id": "x", "_change": "x", "modules": "",
                "max_fix_retries": 3, "module_details": "",
                "stage_name": "", "test_key": "", "gate": "", "env_required": "",
                "env_name": "", "prepare_status": "", "prepare_log_path": "",
@@ -108,7 +107,7 @@ class TestRenderer(unittest.TestCase):
     def test_render_and_write_file(self):
         """render_dispatch_file 写入文件并返回路径。"""
         tmp = tempfile.mkdtemp()
-        ctx = {"id": "dev.backend", "_change": "test-change", "review_level": "",
+        ctx = {"id": "dev.backend", "_change": "test-change",
                "modules": "", "max_fix_retries": 3, "module_details": "",
                "stage_name": "", "test_key": "", "gate": "", "env_required": "",
                "env_name": "", "prepare_status": "", "prepare_log_path": "",
@@ -201,7 +200,6 @@ class TestBuildCtx(unittest.TestCase):
                     "build": "cd webvirt-backend && mvn clean install -DskipTests",
                     "lint": "cd webvirt-backend && mvn checkstyle:check",
                     "test": {"unit": "cd webvirt-backend && mvn test"},
-                    "review_level": "security",
                 },
             },
             "environments": {
@@ -287,8 +285,6 @@ class TestBuildCtx(unittest.TestCase):
                       "env_name 应通过惰性解析填充")
         self.assertIn("backend-1", str(ctx["env_instances"]),
                       "env_instances 应通过惰性解析填充")
-        self.assertEqual(ctx["review_level"], "",
-                         "review_level 不在 tracks 段时默认为空")
 
         # 验证 YAML 块渲染
         self.assertIn("backend-1", ctx["env_instances_block"],

@@ -1,5 +1,6 @@
 # review.yaml — sub=review 完整提示词
 # v2.6 新增：dev 后 verify 前的静态代码审查 phase。
+# v3.x: 增加 rule_docs 注入与 P0 implementation_completeness 强制约束。
 
 prompt: |
   ### 阶段定位
@@ -14,25 +15,54 @@ prompt: |
   - **profile 配置**: `.pg/code-review/code-review.yaml` — 检查项 + 权重 + threshold
   - **profile 规则**: `.pg/code-review/<profile>/<check>.md` — 每项检查的执行细则
 
+  ### ⚠️ 必读：本 track 的具体规则文档（已注入）
+
+  下面是从 `.pg/code-review/<effective_profile>/` 加载的每条 enabled check 的完整规则。
+  **必须**对每条规则**完整执行**（逐项核对"FAIL 判定"段），不能跳过。
+
+  __RULE_DOCS_PLACEHOLDER__
+
+  ### 🔴 P0 硬约束清单
+
+  本 track 中标记为 `p0: true` 的 check（即使 score 达标，FAIL 也强制 escalate）：
+
+  __P0_CHECKS_PLACEHOLDER__
+
+  **summary 中 p0_failures 必须使用 check 名称**（如 `implementation_completeness`），
+  reducer 直接匹配 check 名（不依赖 R-N 编号）：
+
+  - ❌ `p0_failures: [R-6]` — reducer 无法识别
+  - ✅ `p0_failures: [implementation_completeness]` — reducer 识别为 P0 硬约束
+
   ### 审查范围
 
   - 仅检查 dev agent 在 `git diff feat/pg/{_change}` 中的新增/修改文件
   - 不重跑测试（那是 verify 阶段的工作）
   - 不修改源码
 
+  ### 审查执行协议（v3.x 强化）
+
+  1. 读上列每条 check 的 markdown 规则文档
+  2. 找到该 check 对应的 R-* ID（顺序：`R-1`=`design_alignment` / `R-2`=`scope_creep` / `R-3`=`pattern_consistency` / `R-4`=`file_location` / `R-5`=`test_contract` / `R-6`=`implementation_completeness` / 等等，按 enabled check 顺序递增）
+  3. 逐项 grep `git diff feat/pg/{_change}` 验证
+  4. 标记 PASS / FAIL / WARN，把 evidence 写入报告
+  5. 计算 `review_score`（加权平均，仅含 PASS 的 check）
+
   ### 评分协议（必填）
 
   summary 必须包含：
   - `review_score: <0-100>` — 加权平均分
-  - `p0_failures: [R-1, R-3]` — P0 失败项列表（R-* ID）
+  - `p0_failures: [check_name, ...]` — P0 失败项列表（**使用 check 名称，不是 R-N 编号**）
 
   ### 输出报告
 
   - 报告路径: `.pg/changes/{_change}/2-build/{report_filename}`
   - 报告内含每项检查的 PASS/FAIL 判定与证据
+  - **必须**对 `implementation_completeness` check 单独列出 TODO/stub/task-V 缺失的证据行
 
   ### 触发 fix 循环
 
   - score < escalate_threshold（默认 60） → 直接 workflow_failed
   - pass_threshold（默认 80）≤ score < escalate_threshold → escalate 走 fix-review 循环
   - score ≥ pass_threshold → completed → 进入 verify
+  - **⚠️ P0 implementation_completeness FAIL**：即使 score ≥ pass_threshold，reducer 也会强制走 fix-review 循环（这是 v3.x 的硬约束，绕过 review_score 的兜底）

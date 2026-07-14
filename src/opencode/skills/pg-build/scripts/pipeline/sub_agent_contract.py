@@ -289,3 +289,25 @@ def parse_gate_score(summary: str) -> int | None:
         except ValueError:
             return None
     return None
+
+
+def parse_p0_failures(summary: str) -> tuple[str, ...]:
+    """从 summary 解析 p0_failures 列表。
+
+    支持格式：
+      - 'p0_failures: []'  → 空 tuple
+      - 'p0_failures: [R-1, R-3]'  → ('R-1', 'R-3')
+      - 'p0_failures: [G-1]'  → ('G-1',)
+
+    Returns:
+        tuple[str, ...]: 失败项 ID 列表；未找到时返回 ()
+    """
+    import re
+    m = re.search(r'p0_failures\s*[=:]\s*\[([^\]]*)\]', summary)
+    if not m:
+        return ()
+    raw = m.group(1).strip()
+    if not raw:
+        return ()
+    items = [s.strip().strip("'\"") for s in raw.split(",") if s.strip()]
+    return tuple(items)

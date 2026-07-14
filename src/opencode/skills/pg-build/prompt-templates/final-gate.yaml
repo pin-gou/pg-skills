@@ -9,7 +9,6 @@ prompt: |
 
   ### Track 配置
   - track.id: final（特殊标记）
-  - track.review_level: standard
 
   ### 产物路径
   - proposal: {proposal_path}

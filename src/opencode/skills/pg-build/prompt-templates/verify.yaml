@@ -1,4 +1,5 @@
 # verify.yaml — sub=verify 完整提示词
+# v3.x: 增加"实现完整性核查"段落，防止 dev agent 提交的 TODO/stub 通过 MockMvc 测试。
 
 prompt: |
   ### 验证要求
@@ -6,7 +7,39 @@ prompt: |
   按 tasks.md V-* 验证项逐项检查。
   必须对所有 V-* 项覆盖验证，不能跳过。
 
+  ### 🔴 实现完整性核查（强制项，v3.x 新增）
+
+  除 V-* 验证项外，**必须**对 `git diff feat/pg/{_change}` 单独执行实现完整性核查。
+  这是 v3.x 新增的硬约束，专门防止"代码存在但未实质实现"的 stub 通过 MockMvc 测试。
+
+  执行命令：
+
+  ```bash
+  # 1. 硬标记扫描（任一命中即 FAIL）
+  git diff feat/pg/{_change} | grep -nE '//\s*(TODO|FIXME|XXX|stub|not implemented)|@todo|UnsupportedOperationException|NotImplementedException' | grep -v '\[skip-review\]'
+  ```
+
+  ```bash
+  # 2. 空方法体扫描（人工识别方法体仅 log 后 return 的 void 方法）
+  # 由 LLM 逐方法检查
+  ```
+
+  ```bash
+  # 3. tasks-V 映射核查：对 tasks.md §<track>:dev 每条 task 的"实现描述"，提取 3-5 个关键 API 关键词
+  # 在 git diff feat/pg/{_change} 中 grep 每个关键词
+  ```
+
+  判定：
+
+  - 硬标记命中 ≥ 1 处（除 `[skip-review]` 豁免）→ 报告 "implementation_completeness FAIL" 并记入 V-* 失败
+  - 空方法体 ≥ 1 处 → FAIL
+  - tasks-V 缺失 ≥ 1 条 task → FAIL
+
+  豁免规则：dev agent 可在代码末尾加 `// [skip-review]` 注释豁免单条 TODO。
+  但豁免数 ≥ 3 视为整体设计不完整，整体 FAIL。
+
   ### 写盘要求
 
   完成验证后，自行用 cat > 写盘到 2-build/{report_filename}。
   格式：Markdown，包含每项验证的结论（PASS / FAIL）及证据。
+  **必须**含"实现完整性核查"段，含上面 3 个检查命令的输出与判定。

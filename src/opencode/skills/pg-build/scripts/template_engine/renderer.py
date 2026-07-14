@@ -231,7 +231,16 @@ def render_dispatch(
 
     result = "\n\n---\n\n".join(sections)
 
-    # 5. build_rules prompt injection — prepend 在 prompt 最前,
+    # 5. v3.x: 替换特殊占位符（rule_docs / p0_checks）.
+    # 这些占位符在 YAML 模板里用 __XXX__ 标记（避免 `{` 被 YAML 解析为 flow mapping）。
+    # 替换在所有 _safe_format 完成后执行，支持多行 markdown 内容。
+    rule_docs_yaml = ctx.get("code_review_rule_docs_yaml") or ""
+    p0_checks = ctx.get("code_review_p0_checks") or []
+    p0_checks_str = ", ".join(p0_checks) if p0_checks else "（无）"
+    result = result.replace("__RULE_DOCS_PLACEHOLDER__", rule_docs_yaml)
+    result = result.replace("__P0_CHECKS_PLACEHOLDER__", p0_checks_str)
+
+    # 6. build_rules prompt injection — prepend 在 prompt 最前,
     #    append 在 prompt 最后（晚于 sub_agent_contract 块）。
     #    与 pg-build v1 的 _merge_prompt_injection 行为一致。
     build_rules_prepend = (ctx.get("build_rules_prepend") or "").strip()

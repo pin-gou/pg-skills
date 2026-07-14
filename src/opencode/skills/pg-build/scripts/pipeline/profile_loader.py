@@ -45,6 +45,7 @@ class CheckConfig:
     enabled: bool
     weight: int
     doc: str = ""  # markdown 文件名（不含路径），位于 <profile_dir>/<doc>.md
+    p0: bool = False  # P0 硬约束：FAIL 时即使 score ≥ pass_threshold 也要 escalate
 
 
 @dataclasses.dataclass(frozen=True)
@@ -76,6 +77,10 @@ class Profile:
             "pass_threshold": self.pass_threshold,
             "escalate_threshold": self.escalate_threshold,
         }
+
+    def p0_check_names(self) -> tuple[str, ...]:
+        """返回所有 p0=True 的 check 名（顺序与 self.checks 一致）。"""
+        return tuple(n for n, c in self.checks if c.p0)
 
 
 # ============================================================
@@ -115,6 +120,7 @@ def _parse_check(name: str, raw: dict[str, Any]) -> CheckConfig:
         enabled=bool(raw.get("enabled", True)),
         weight=int(raw.get("weight", 0)),
         doc=str(raw.get("doc", name)),
+        p0=bool(raw.get("p0", False)),
     )
 
 
@@ -284,6 +290,7 @@ def load_effective_profile(
                     enabled=old.enabled or check.enabled,
                     weight=max(old.weight, check.weight),
                     doc=old.doc or check.doc,
+                    p0=old.p0 or check.p0,
                 )
             else:
                 merged_checks[name] = check
