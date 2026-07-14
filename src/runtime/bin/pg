@@ -229,7 +229,6 @@ tracks:
 stages:
   - name: placeholder
     tracks: [placeholder]
-    test_key: unit
     gate: all_pass
     environment:
       required: false

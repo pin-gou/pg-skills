@@ -53,10 +53,9 @@ runner 执行 test 命令时按以下规则查找：
 
 ```
 (stage, track) → track.modules[*] → 每个 module:
-  1. test_key = stages[?].test_key（命中当前 stage）
-  2. test_cmd = modules[m].test[test_key]
-  3. lint_cmd = modules[m].lint
-  4. build_cmd = modules[m].build
+  1. test_cmd = modules[m].test.unit
+  2. lint_cmd = modules[m].lint
+  3. build_cmd = modules[m].build
 ```
 
 ### stages × tracks × modules 的真实样例（来自 config.yaml）
@@ -231,7 +230,7 @@ for stage in config.stages:
         for module_name in track.modules:
             cmd = config.modules[module_name]
             run(cmd.lint)
-            run(cmd.test[stage.test_key])
+            run(cmd.test.unit)
 
         # 启动服务（仅 verify 阶段需要）
         if stage.requires_deployment:

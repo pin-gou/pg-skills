@@ -193,15 +193,15 @@ per-change environment 选择由
 ### track:test（测试先行）
 
 ```markdown
-## {N}. {stage.name}.{track_id}:test - {stage.name} 测试先行（{stage.test_key}）
+## {N}. {stage.name}.{track_id}:test - {stage.name} 测试先行
 
-- [ ] {N}.1 编写 {stage.test_key} 测试：{具体测试场景描述}
+- [ ] {N}.1 编写单元测试：{具体测试场景描述}
 ```
 
 未改动的 track 该章节写：
 
 ```markdown
-## {N}. {stage.name}.{track_id}:test - {stage.name} 测试先行（{stage.test_key}）
+## {N}. {stage.name}.{track_id}:test - {stage.name} 测试先行
 
 - 无
 ```
@@ -271,7 +271,7 @@ tasks.md 的 verify 阶段只需写：
 ## {N}. {stage.name}.{track_id}:verify - {stage.name} 集成验证
 
 - [ ] {N}.1 执行 lint（runner 通过 modules.<track.modules>.lint 注入命令）
-- [ ] {N}.2 执行测试（runner 通过 modules.<track.modules>.test.<{stage.test_key}> 注入命令）
+- [ ] {N}.2 执行测试（runner 通过 modules.<track.modules>.test.unit 注入命令）
 - [ ] {N}.3 启动服务：
   - 常规 stage：runner 按 environments.<stage.env_name>.roles.<role>.actions.start 查找并执行
   - real-integration：runner 按 environments.<stage.env_name>.actions.verify 查找并执行

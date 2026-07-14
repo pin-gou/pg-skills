@@ -62,11 +62,11 @@ from pg_pipeline_common import (
 # ============================================================
 
 STANDARD_SUBS = [
-    ("test",  lambda stage_name, test_key: f"{stage_name} 测试先行（{test_key}）"),
-    ("dev",   lambda stage_name, test_key: "实现开发"),
-    ("review", lambda stage_name, test_key: "静态代码审查"),
-    ("verify", lambda stage_name, test_key: f"{stage_name} 集成验证"),
-    ("gate",  lambda stage_name, test_key: f"{stage_name} 门控审查"),
+    ("test",  lambda stage_name: f"{stage_name} 测试先行"),
+    ("dev",   lambda stage_name: "实现开发"),
+    ("review", lambda stage_name: "静态代码审查"),
+    ("verify", lambda stage_name: f"{stage_name} 集成验证"),
+    ("gate",  lambda stage_name: f"{stage_name} 门控审查"),
 ]
 
 
@@ -305,7 +305,6 @@ def build_sections(config: dict, affected_tracks: set,
     N = 1
     for stage in stages:
         stage_name = stage["name"]
-        test_key = stage.get("test_key", "unit")
 
         for track_id in stage.get("tracks") or []:
             # 2) Skip tracks not in affected_tracks
@@ -353,7 +352,7 @@ def build_sections(config: dict, affected_tracks: set,
                         "sub": sub_name,
                         "is_simple": False,
                         "is_affected": True,
-                        "label": label_fn(stage_name, test_key),
+                        "label": label_fn(stage_name),
                         "env": None,
                     })
                     N += 1

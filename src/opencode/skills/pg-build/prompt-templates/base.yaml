@@ -23,7 +23,6 @@ header: |
 
   ### Stage 配置
   - stage.name: {stage_name}
-  - stage.test_key: {test_key}
   - stage.gate: {gate}
   - stage.environment.required: {env_required}
   - stage.environment.name: {env_name}

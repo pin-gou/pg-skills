@@ -271,7 +271,6 @@ def build_ctx(
         "max_fix_retries": t.max_fix_retries,
         # stage
         "stage_name": track.rsplit(".", 1)[0] if "." in track else "dev",
-        "test_key": "unit",
         "gate": "all_pass",
         "env_required": True,
         "env_name": lazy_env_name,
