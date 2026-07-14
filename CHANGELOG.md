@@ -7,6 +7,21 @@
 
 ## [Unreleased]
 
+<!-- 下一版本在此累积 -->
+
+## [0.8.1] - 2026-07-14
+
+### 新增
+
+- **Verify / Gate 按 track 关闭（破坏性）**：`project.yaml` 新增 `tracks.<id>.verify_enabled` / `gate_enabled` 字段（默认 `true`，向后兼容），关闭后的 phase 沿用 review 的 silent-skip 模式（reducer 通用 `_phase_enabled` + detect `next_pending` 跳过）。关闭逻辑与 v3.x `code_review_enabled` 对齐：由 `execution-manifest.yaml` 的 `phase_prompts` 是否含该 phase 作为 SSOT 派生。simple track 自动关闭
+  - **propose 侧**（pg-propose v3.4）：`pg-gen-tasks-skeleton.py` 的 `build_sections` 按 `verify_enabled` / `gate_enabled` / `code_review_enabled` 联合过滤 STANDARD_SUBS；`manifest.schema.json`：`minProperties=2`、`required=["test","dev"]`；`pg-validate-proposal.py`：必填逻辑改为 test+dev 强必填 + verify/gate 至少一项（`_no_quality_gate` 错误码）；`references/tasks-templates.md` track:verify / track:gate 末尾补"何时本章节不出现"小节；`references/review-checklist.md` 新增 §3.5.8 Verify / Gate 一致性
+  - **pg-build 侧**：`TrackState` 增加 `verify_enabled` / `gate_enabled` 字段；`reducer.py` 通用 `_phase_enabled` 函数 + `_handle_linear_phase` 通用 silent-skip 循环；`detect.py` `next_pending` 同步识别跳过；`orchestrator.py` bootstrap 时从 manifest 派生
+- **design.md 缺陷协议（v2.7）**：fix-review agent 检测到 R-* 根因位于设计层（design.md / tasks.md 文档错误）时，写 `design_md_fault: true` + `design_md_fault_location: "<file>:<line>"`，reducer 检测后立即触发 `workflow_failed`（跳过 review 重审与 `max_review_fix_retries` 计数），提示用户运行 `pg-propose-refine` 修复
+- **SubPipeline P0-A 字段增强**：`create_fix_cycle` / `create_gate_fix_cycle` / `create_review_cycle` 新增 `parent_report_path` / `escalation_reason` / `failed_v_tasks` / `created_at` 参数（v2.7），从 reducer 将父 phase 的 report 路径、escalation 原因、失败 task 列表、时间戳注入到 fix dispatch 的 `{verify_report_path}` / `{reason}` / `{failed_at}` / `{source}` 占位符
+- **P0 硬约束机制**：`profile_loader.py` CheckConfig 新增 `p0` 字段 + Profile `p0_check_names()`；`sub_agent_contract.py` 新增 `parse_p0_failures()`；reducer `_handle_review` 检测 `implementation_completeness` P0 FAIL 时强制 escalate（绕过 score 阈值）
+- **Review rule docs 注入**：dispatch.py `build_ctx(phase='review')` 修复死代码，实际调用 `load_markdown_rule()` 将 `.pg/code-review/<profile>/*.md` 注入 ctx；renderer.py 替换 `__RULE_DOCS_PLACEHOLDER__` / `__P0_CHECKS_PLACEHOLDER__` 占位符
+- **pg-run 停止+清理统计算法**：`_run_env_stop_all` 返回结果列表，`停止所有实例并清理环境` 菜单项统一展示停止+清理的统计表
+
 ### 移除（破坏性）
 
 - **`review_level` 字段全量移除**：v2.6 时期的 `modules.<m>.review_level` 与 `tracks.<id>.review_level` 字段已删除（schema.json、prompt-templates、agent docs、pg-init-project 推断逻辑、`pg-propose/references/config-fields.md` 全部清理）。v3.x 的 review phase 开关已统一到 `tracks.<id>.code_review_enabled` / `code_review_profile(s)` / `code_review_languages`，profile 集合由 `.pg/code-review/<profile>/*.md` 定义。**迁移指南**：
@@ -18,9 +33,10 @@
 
 ### 备注
 
-- 影响面：5 个 pg-build 脚本（state / orchestrator / dispatch / config / bootstrap）+ schema.json + 3 个 prompt 模板（base / gate / final-gate）+ 6 个 agent doc（dev / test / fix / verify / fix-gate / gate）+ 5 个测试文件 + 2 个 SKILL 文档（pg-init-project / pg-propose references）+ 1 个项目侧 `.pg/project.yaml`
-- 不向后兼容：旧 `.pg/project.yaml` 仍写 `review_level` 会触发 schema validation 警告（保持严格不兼容原则）
+- 影响面：8 个 pg-build 脚本（state / orchestrator / dispatch / config / bootstrap / reducer / detect / events）+ schema.json + 3 个 prompt 模板（base / gate / final-gate）+ 6 个 agent doc（dev / test / fix / verify / fix-gate / gate）+ 11 个测试文件（新增 5 个：`test_dispatch_review_rule_docs.py` / `test_state_verify_gate.py` / `test_detect_skip_disabled.py` / `test_reducer_silent_skip.py` / `test_phase_gate_section.py`）+ 2 个 SKILL 文档（pg-init-project / pg-propose）+ 1 个项目侧 `.pg/project.yaml`
+- 不向后兼容：旧 `.pg/project.yaml` 仍写 `review_level` 会触发 schema validation 警告（保持严格不兼容原则）；verify/gate 关闭后 manifesto 的 phase_prompts 不会自动补充（需重跑 pg-propose）
 - 安全审查职责已转移到 review phase（dispatch.py 自动注入 security profile markdown 到 review agent），无审查盲区
+- 9 commits，55 文件变更（+3862 / -314 LOC）。核心新增：verify/gate 按 track 关闭（4 个新测试文件）、design.md 缺陷协议（events / reducer / CLI 三端联动）、P0 硬约束（profile_loader + reducer + contract）
 
 ## [0.8.0] - 2026-07-09
 
