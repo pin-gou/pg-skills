@@ -272,11 +272,25 @@ def check_keyword_match(rule: str, proposal_text: str) -> bool:
 
 
 def evaluate_on_conditions(rule: str, affected_paths: list[str],
-                            proposal_text: str) -> dict:
+                            proposal_text: str,
+                            affected_tracks: set[str] = set()) -> dict:
     """Evaluate a single on_conditions rule mechanically.
 
     Returns dict with rule / path_hit / semantic_hit / recommendation.
     """
+
+    # Special case: rules mentioning "affected_tracks" check against the
+    # --affected-tracks CLI argument rather than proposal text keywords.
+    if affected_tracks and ("affected_tracks" in rule):
+        for track in affected_tracks:
+            if track in rule:
+                return {
+                    "rule": rule,
+                    "path_hit": False,
+                    "semantic_hit": True,
+                    "matched": True,
+                }
+
     path_hit = check_glob_match(rule, affected_paths)
     semantic_hit = check_keyword_match(rule, proposal_text)
     matched = path_hit or semantic_hit
@@ -439,7 +453,8 @@ def format_env_block_quote(env_map: dict[str, str]) -> str:
 
 def build_on_conditions_comment(section: dict, config: dict,
                                   affected_paths: list[str],
-                                  proposal_text: str) -> str:
+                                  proposal_text: str,
+                                  affected_tracks: set[str] = set()) -> str:
     """Build HTML comment block for a section heading.
 
     Documents:
@@ -459,7 +474,7 @@ def build_on_conditions_comment(section: dict, config: dict,
     if stage_rules:
         lines.append(f"     stage={section['stage']}")
         for rule in stage_rules:
-            ev = evaluate_on_conditions(rule, affected_paths, proposal_text)
+            ev = evaluate_on_conditions(rule, affected_paths, proposal_text, affected_tracks)
             verdict = "命中" if ev["matched"] else "未命中"
             rationale_parts = []
             if ev["path_hit"]:
@@ -477,7 +492,7 @@ def build_on_conditions_comment(section: dict, config: dict,
         if track_rules:
             lines.append(f"     track={section['track']}")
             for rule in track_rules:
-                ev = evaluate_on_conditions(rule, affected_paths, proposal_text)
+                ev = evaluate_on_conditions(rule, affected_paths, proposal_text, affected_tracks)
                 verdict = "命中" if ev["matched"] else "未命中"
                 rationale_parts = []
                 if ev["path_hit"]:
@@ -606,7 +621,8 @@ def format_section_evidence_block(section: dict) -> str:
 
 def build_tasks_md(sections: list[dict], env_map: dict[str, str],
                    config: dict, affected_paths: list[str],
-                   proposal_text: str, change_name: str = "<change>") -> str:
+                   proposal_text: str, change_name: str = "<change>",
+                   affected_tracks: set[str] = set()) -> str:
     """Generate the full tasks.md skeleton content."""
     out_lines = []
 
@@ -625,7 +641,7 @@ def build_tasks_md(sections: list[dict], env_map: dict[str, str],
         out_lines.append(heading)
         out_lines.append("")
 
-        comment = build_on_conditions_comment(sec, config, affected_paths, proposal_text)
+        comment = build_on_conditions_comment(sec, config, affected_paths, proposal_text, affected_tracks)
         out_lines.append(comment)
         out_lines.append("")
 
@@ -684,8 +700,9 @@ def _compute_scenario_decision(
 
 
 def build_on_conditions_eval_md(config: dict, affected_paths: list[str],
-                                 proposal_text: str,
-                                 scenario_decision: dict | None = None) -> str:
+                                  proposal_text: str,
+                                  affected_tracks: set[str] = set(),
+                                  scenario_decision: dict | None = None) -> str:
     """Generate on-conditions-eval.md content (for stage 3 review)."""
     lines = [
         "# on_conditions 评估记录",
@@ -718,7 +735,7 @@ def build_on_conditions_eval_md(config: dict, affected_paths: list[str],
         lines.append("| # | 规则 | 机械评估 (path) | 机械评估 (semantic) | 建议 | 最终决策 | 依据 |")
         lines.append("|---|------|----------------|--------------------|------|----------|------|")
         for i, rule in enumerate(rules, 1):
-            ev = evaluate_on_conditions(rule, affected_paths, proposal_text)
+            ev = evaluate_on_conditions(rule, affected_paths, proposal_text, affected_tracks)
             path_cell = "✅" if ev["path_hit"] else "❌"
             sem_cell = "✅" if ev["semantic_hit"] else "❌"
             verdict = "命中" if ev["matched"] else "未命中"
@@ -738,7 +755,7 @@ def build_on_conditions_eval_md(config: dict, affected_paths: list[str],
         lines.append("| # | 规则 | 机械评估 (path) | 机械评估 (semantic) | 建议 | 最终决策 | 依据 |")
         lines.append("|---|------|----------------|--------------------|------|----------|------|")
         for i, rule in enumerate(rules, 1):
-            ev = evaluate_on_conditions(rule, affected_paths, proposal_text)
+            ev = evaluate_on_conditions(rule, affected_paths, proposal_text, affected_tracks)
             path_cell = "✅" if ev["path_hit"] else "❌"
             sem_cell = "✅" if ev["semantic_hit"] else "❌"
             verdict = "命中" if ev["matched"] else "未命中"
@@ -815,7 +832,7 @@ def main():
 
     tasks_content = build_tasks_md(
         sections, env_map, config, affected_paths, proposal_text,
-        change_name=args.change,
+        change_name=args.change, affected_tracks=affected_tracks,
     )
     # v3.5: 注入 scenario_test_decision 段到 eval_content
     scenario_decision_info = _compute_scenario_decision(
@@ -823,6 +840,7 @@ def main():
     )
     eval_content = build_on_conditions_eval_md(
         config, affected_paths, proposal_text,
+        affected_tracks=affected_tracks,
         scenario_decision=scenario_decision_info,
     )
 

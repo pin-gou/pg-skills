@@ -66,7 +66,8 @@ def _read_scenario_decision(change: str) -> dict | None:
     section = section.split("\n## ", 1)[0]
 
     def _val(line: str) -> str:
-        return line.split("|", 2)[2].strip().strip("*").strip()
+        parts = line.split("|")
+        return parts[2].strip().strip("*").strip() if len(parts) >= 3 else ""
 
     decision: dict = {"enabled": False, "reason": "", "mode": "", "source": ""}
     for line in section.splitlines():
