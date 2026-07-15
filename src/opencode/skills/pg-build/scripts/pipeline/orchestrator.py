@@ -240,12 +240,72 @@ class Orchestrator:
         return self._action_to_dict(action)
 
     def _first_next(self) -> dict[str, Any]:
-        """首次 next：检测配置 + 初始化 TrackState（bootstrap 已由独立命令完成）。
+        """首次 next：检测配置 + 初始化 TrackState（含 git 守卫 + git init 兜底）。
+
+        执行顺序：
+          1. default_branch 守卫（修复 1a）：当前分支既不是 default_branch
+             也不是 feat/pg/<change> 时 → 通过 workflow_failed 协议终止。
+          2. git init 兜底（修复 1b）：调 ensure_feature_branch + auto_commit_on_init，
+             幂等；即使编排器跳过了显式 bootstrap，这里也保证 git 就绪。
+          3. 初始化 TrackState + save snapshot + 写 EVT_PIPELINE_STARTED
+             （state 中填充 init_committed / init_commit_sha / feature_branch，修复 2）
 
         与 bootstrap CLI 命令的分工：
-          - bootstrap 命令：migrate / feature branch / init commit / prepare_env
-          - _first_next：读取 manifest + project.yaml，创建 TrackState，写 snapshot
+          - bootstrap 命令：default_branch 守卫 + migrate / feature branch / init commit
+          - _first_next：default_branch 守卫（双保险） + git init 兜底 + 读 manifest +
+            project.yaml 创建 TrackState + 写 snapshot + 填充 git 字段
         """
+        # ── 步骤 1: default_branch 守卫（修复 1a）──
+        # 当前本地分支既不是 default_branch 也不是 feat/pg/<change> 时，
+        # 通过 workflow_failed 协议终止流程，写入 EVT_WORKFLOW_FAILED。
+        project_config = load_project_config(bootstrap.PROJECT_ROOT)
+        matched, current_branch, expected_branch = bootstrap.assert_default_branch(
+            bootstrap.PROJECT_ROOT, project_config
+        )
+        feat_branch = f"feat/pg/{self.change}"
+        if not matched and current_branch != feat_branch:
+            reason = (
+                f"当前本地分支 {current_branch!r} 既不是 default_branch "
+                f"({expected_branch!r})，也不是 feat/pg 分支 ({feat_branch!r})。"
+                f"pg-build 要求从 default_branch 或既有 feat/pg 分支启动。"
+                f"请先 `git checkout {expected_branch}` 再启动 pg-build。"
+                f"或者修改 .pg/project.yaml 的 git.default_branch 配置。"
+            )
+            self.event_log.append(EVT_WORKFLOW_FAILED, {
+                "reason": reason,
+                "source": "default_branch_assertion",
+                "current_branch": current_branch,
+                "expected_branch": expected_branch,
+            })
+            self.state = self.state.replace(
+                status="failed",
+                failed_reason=reason,
+            )
+            save_snapshot(self.change_root, self.state)
+            return {
+                "action": "workflow_failed",
+                "fatal": True,
+                "reason": reason,
+                "error_category": "branch_mismatch",
+                "current_branch": current_branch,
+                "expected_branch": expected_branch,
+            }
+
+        # ── 步骤 2: git init 兜底（修复 1b）──
+        # 幂等：ensure_feature_branch 在已存在分支上返回 already_on；
+        # auto_commit_on_init 在干净工作区返回 committed=False。
+        branch_result = bootstrap.ensure_feature_branch(self.change)
+        init_commit: dict[str, Any] | None = None
+        if not self.state.init_committed:
+            init_commit = bootstrap.auto_commit_on_init(self.change)
+            if init_commit and init_commit.get("committed"):
+                self.event_log.append(EVT_GIT_COMMIT, {
+                    "sha": init_commit["sha"],
+                    "message": init_commit["message"],
+                    "branch": f"feat/pg/{self.change}",
+                })
+
+        # ── 步骤 3: 初始化 TrackState（保留现有逻辑）──
         # 找 pipeline_order + track 配置 + stage 配置
         order, track_configs = self._detect_pipeline_config()
         stage_order, stage_env_map = self._detect_stage_config()
@@ -340,6 +400,9 @@ class Orchestrator:
         # 确定当前 stage
         first_stage = PipelineState.extract_stage(order[0]) if order else ""
 
+        # ── 修复 2: state 字段填充 git 信息 ──
+        git_committed = bool(init_commit and init_commit.get("committed"))
+        git_sha = (init_commit or {}).get("sha") if git_committed else None
         self.state = self.state.replace(
             pipeline_order=tuple(order),
             tracks=tracks,
@@ -349,6 +412,9 @@ class Orchestrator:
             stage_env_timeout=stage_env_timeout,
             current_stage=first_stage,
             status="running",
+            init_committed=git_committed,
+            init_commit_sha=git_sha,
+            feature_branch=branch_result.get("branch", feat_branch),
         )
 
         # v2.1.1: 不再预设 stage_prepared={first_stage}。

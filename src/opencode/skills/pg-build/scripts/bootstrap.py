@@ -34,6 +34,7 @@ from pipeline.events import (
     EVT_CLEAN_ENV_STARTED, EVT_CLEAN_ENV_COMPLETED,
 )
 from pipeline.event_log import EventLog
+from pipeline.config import load_project_config
 
 
 # Shanghai timezone
@@ -121,6 +122,41 @@ def _git(*args: str, capture: bool = True) -> subprocess.CompletedProcess:
         kwargs["capture_output"] = True
         kwargs["text"] = True
     return subprocess.run(["git", *args], **kwargs)
+
+
+def assert_default_branch(
+    project_root: str,
+    config: dict[str, Any],
+) -> tuple[bool, str, str]:
+    """检查当前本地分支是否符合 pg-build 启动要求（feat 分支判断由 caller 决定）。
+
+    pg-build 要求从以下任一分支启动：
+      - project.yaml.git.default_branch（默认 master）
+      - feat/pg/<change>（已启动过此 change 的 resume 场景，由 caller 决定）
+
+    Args:
+        project_root: 项目根目录（用于 _git cwd）
+        config: project.yaml 解析后的 dict
+
+    Returns:
+        (matched, current_branch, expected_branch)
+          - matched=True  → 当前是 default_branch，或无法检测分支（如非 git 仓库）
+          - matched=False → 当前是其他分支（detached HEAD 也算不匹配）
+
+    Note:
+        不检查 origin/master / origin/HEAD，仅检查本地分支。
+        不调用 sys.exit，由 caller 决定走 workflow_failed 协议还是 result.ok=false。
+        当 git 命令本身失败（无 git repo、git 不可用等），返回 matched=True 以
+        避免在非生产环境（测试 / 临时目录）中错误阻断。这是宽松策略：
+        真实 git 仓库里分支才会被检查。
+    """
+    expected = (config.get("git") or {}).get("default_branch", "master")
+    result = _git("rev-parse", "--abbrev-ref", "HEAD")
+    if result.returncode != 0:
+        # 非 git 仓库 / git 不可用 → 不阻断（caller 假定 PG 上下文正常）
+        return (True, "", expected)
+    current = result.stdout.strip()
+    return (current == expected, current, expected)
 
 
 def ensure_feature_branch(change: str) -> dict[str, Any]:
@@ -646,6 +682,29 @@ def cli_bootstrap(change: str) -> dict[str, Any]:
         "pipeline_config": None,
         "error": None,
     }
+
+    # ── default_branch 守卫（修复 1a）：
+    # 与 _first_next() 一致，要求当前本地分支是 default_branch 或 feat/pg/<change>。
+    # 不一致时通过 result.ok=false 终止流程（编排器应展示错误并停止调用 next）。
+    try:
+        project_config = load_project_config(PROJECT_ROOT)
+        matched, current_branch, expected_branch = assert_default_branch(
+            PROJECT_ROOT, project_config
+        )
+        feat_branch = f"feat/pg/{change}"
+        if not matched and current_branch != feat_branch:
+            result["ok"] = False
+            result["error"] = (
+                f"当前本地分支 {current_branch!r} 既不是 {expected_branch!r}，"
+                f"也不是 {feat_branch!r}。"
+                f"请先 `git checkout {expected_branch}` 再启动 pg-build。"
+                f"或者修改 .pg/project.yaml 的 git.default_branch 配置。"
+            )
+            return result
+    except Exception as e:
+        result.setdefault("warnings", []).append(
+            f"default_branch assertion failed: {e}"
+        )
 
     try:
         moved = migrate_legacy_state_files(change)

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -214,6 +215,109 @@ environments:
             f.write("stages: []\n")
         plan = bootstrap._build_env_hook_plan("test-change", "prepare_env", explicit_stage_name="dev")
         self.assertTrue(plan.get("skipped"))
+
+
+class TestAssertDefaultBranch(unittest.TestCase):
+    """git.default_branch 守卫测试（修复 1a）。
+
+    assert_default_branch 只检查本地分支，不执行 sys.exit。
+    feat/pg/<change> 的放行由 caller 决定。
+    """
+
+    def setUp(self):
+        """准备 tempfile + 初始化 git repo + 默认配置"""
+        self.tmp = tempfile.mkdtemp()
+        self.old_root = os.environ.get("PG_PROJECT_ROOT")
+        os.environ["PG_PROJECT_ROOT"] = self.tmp
+        bootstrap.PROJECT_ROOT = self.tmp
+        bootstrap.CHANGES_DIR = os.path.join(self.tmp, ".pg", "changes")
+
+        # git init
+        subprocess.run(["git", "init", "-q"], cwd=self.tmp, check=True)
+        subprocess.run(
+            ["git", "config", "user.email", "test@example.com"],
+            cwd=self.tmp, check=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Test"],
+            cwd=self.tmp, check=True,
+        )
+        # 创建初始 commit (避免 detached HEAD)
+        (Path(self.tmp) / "README.md").write_text("init")
+        subprocess.run(["git", "add", "-A"], cwd=self.tmp, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "init", "-q"],
+            cwd=self.tmp, check=True,
+        )
+
+    def tearDown(self):
+        if self.old_root:
+            os.environ["PG_PROJECT_ROOT"] = self.old_root
+        else:
+            os.environ.pop("PG_PROJECT_ROOT", None)
+
+    def _checkout(self, branch: str):
+        """在测试 repo 内 checkout 指定分支（不存在则创建）"""
+        r = subprocess.run(
+            ["git", "checkout", "-q", branch],
+            cwd=self.tmp, capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            subprocess.run(
+                ["git", "checkout", "-q", "-b", branch],
+                cwd=self.tmp, check=True,
+            )
+
+    def test_matches_default_branch(self):
+        """当前在 master, default_branch=master → matched=True"""
+        self._checkout("master")
+        config = {"git": {"default_branch": "master"}}
+        matched, current, expected = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertTrue(matched)
+        self.assertEqual(current, "master")
+        self.assertEqual(expected, "master")
+
+    def test_mismatched_branch_returns_false(self):
+        """当前在 vxlan, default_branch=master → matched=False"""
+        self._checkout("vxlan")
+        config = {"git": {"default_branch": "master"}}
+        matched, current, expected = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertFalse(matched)
+        self.assertEqual(current, "vxlan")
+        self.assertEqual(expected, "master")
+
+    def test_uses_master_when_config_missing(self):
+        """project.yaml 无 git 段 → expected 默认 master"""
+        self._checkout("master")
+        config = {}  # 无 git 段
+        matched, current, expected = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertTrue(matched)
+        self.assertEqual(expected, "master")
+
+    def test_uses_master_when_git_section_empty(self):
+        """git: {} 无 default_branch → expected 默认 master"""
+        self._checkout("master")
+        config = {"git": {}}
+        matched, current, expected = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertTrue(matched)
+        self.assertEqual(expected, "master")
+
+    def test_non_master_default_branch(self):
+        """default_branch=main, 当前在 main → matched=True"""
+        self._checkout("main")
+        config = {"git": {"default_branch": "main"}}
+        matched, current, expected = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertTrue(matched)
+        self.assertEqual(current, "main")
+        self.assertEqual(expected, "main")
+
+    def test_does_not_exit_or_throw(self):
+        """assert_default_branch 不得抛异常或 sys.exit（由 caller 决定协议）"""
+        self._checkout("any-random-branch")
+        config = {"git": {"default_branch": "master"}}
+        # 不应抛任何异常
+        result = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertEqual(len(result), 3)
 
 
 class TestCliBootstrap(unittest.TestCase):
