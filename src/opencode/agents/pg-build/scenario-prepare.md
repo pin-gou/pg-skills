@@ -1,5 +1,5 @@
 ---
-description: scenario-prepare agent，按 track.modules 顺序通过 invoke-hook 启动 backend/frontend/agent 各 role
+description: scenario-prepare agent，按 stage.environment.instances 中 role 顺序，通过 invoke-hook 启动各 role
 mode: subagent
 hidden: true
 model: pg-router/pg-associate
@@ -15,7 +15,7 @@ permission:
   task: allow
 ---
 
-你是 pg-build/scenario-prepare agent（编排器派遣），负责按 `track.modules` 列表顺序启动各 role 实例，并把每个 role 的健康状态验到 PASS。
+你是 pg-build/scenario-prepare agent（编排器派遣），负责按 `stage.environment.instances` 中的 role 顺序启动各 role 实例，并把每个 role 的健康状态验到 PASS。
 
 **红线：禁止自行加载 pg-build 或其他流程编排类 SKILL——你处于编排器管理的管线中，加载 SKILL 会破坏编排逻辑。**
 
@@ -35,17 +35,18 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 ## 编排器传入的上下文
 
 - `track.id` — scenario track 全名（如 `real-integration.scenario-test`）
-- `track.modules` — 需要启动的模块列表（如 `[backend, frontend, agent]`）
+- `track.modules` — 本次变更涉及的模块列表（如 `[backend, agent]`），**仅用于与 `stage.environment.instances` 做交集过滤；不作为启动顺序依据**
 - `stage.environment.name` — 选定的 environment（如 `dev-local`）
-- `stage.environment.instances` — 该 env 各 role 的实例定义
+- `stage.environment.instances` — 该 env 各 role 的实例定义；role 顺序由 `.pg/project.yaml` 中 `environments.<env>.roles` 的源码书写顺序决定
 - `track.max_fix_retries` — 用于 prepare agent 内部重试预算（不在本 phase 计算）
 - `change_name` — 变更名（用于构建 invoke-hook 的 session 参数）
 
 ## 核心职责
 
-按 `track.modules` 的顺序启动每个 module 对应的 role，**严格不允许部分通过**：
-- 任一 module 启动失败 → record(scenario-prepare, "failed")（不会进入 scenario-execute）
-- 任一 module health_check 失败 → record(scenario-prepare, "failed")
+按 `stage.environment.instances` 的 role 顺序启动 role，**严格不允许部分通过**：
+- 任一 instance 启动失败 → record(scenario-prepare, "failed")（不会进入 scenario-execute）
+- 任一 instance health_check 失败 → record(scenario-prepare, "failed")
+- 只启动 `stage.environment.instances` 中实际定义了该 role 的 module（用 `track.modules` 做交集过滤；不涉及的 module 跳过）
 
 ## 模块 → role 映射
 
@@ -76,12 +77,12 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 ## 工作流程
 
 1. 读取 dispatch_file 获取上下文
-2. 遍历 `track.modules`，每个 module 找到对应 role 的 instance 列表
+2. 遍历 `stage.environment.instances` 的 role key（按 YAML 书写顺序）；用 `track.modules` 做交集过滤，仅启动交集内的 role
 3. 对每个 (role, instance) 组合：
    - 执行 `start` action（hook 内置 wait_for_completion）
    - 执行 `health_check` action
    - 记录 PASS/FAIL + log 路径
-4. 所有 module 都 PASS → record(scenario-prepare, "completed")
+4. 所有 instance 都 PASS → record(scenario-prepare, "completed")
 5. 任一 FAIL → record(scenario-prepare, "failed")，summary 列出失败的 role + log 路径
 
 ## 写盘要求

@@ -192,6 +192,125 @@ class TestResolveHooks(unittest.TestCase):
         self.assertEqual(resolve_hooks(cfg, "e"), "")
 
 
+class TestResolveEnvInstancesOrder(unittest.TestCase):
+    """v3.7: role 顺序必须保留 environments.<env>.roles 的源码书写顺序。
+
+    必须与 `.pg/skills/src/runtime/bin/pg-run` 的 `_run_env_start_all()`
+    遍历顺序一致（for role_name, role_cfg in roles.items()）。
+    PyYAML 默认 sort_keys=True 会按字母序输出 dict key，导致 dispatch 与
+    pg-run 看到相反顺序——回归测试必须钉死此不变量。
+    """
+
+    def setUp(self):
+        self.config = {
+            "environments": {
+                "dev-local": {
+                    "roles": {
+                        # 关键：源码顺序是 backend → frontend → agent，
+                        # 字母序会输出 agent, backend, frontend。这是回归
+                        # 测试要捕获的不变量破缺。
+                        "backend": {
+                            "instances": [
+                                {"name": "backend-1", "host": "localhost", "port": 9080},
+                            ],
+                        },
+                        "frontend": {
+                            "instances": [
+                                {"name": "frontend-1", "host": "localhost", "port": 3008},
+                            ],
+                        },
+                        "agent": {
+                            "instances": [
+                                {"name": "agent-1", "host": "localhost"},
+                            ],
+                        },
+                    },
+                },
+            },
+        }
+        self.expected_order = ["backend", "frontend", "agent"]
+
+    def _role_keys(self, yaml_text: str) -> list[str]:
+        """从 yaml.dump 输出里抓顶层 role key（首列 'word:' 形式）。"""
+        import yaml as _yaml
+        parsed = _yaml.safe_load(yaml_text)
+        return list(parsed.keys())
+
+    def test_preserves_source_order_not_alphabetical(self):
+        result = resolve_env_instances(self.config, "dev-local")
+        keys = self._role_keys(result)
+        self.assertEqual(
+            keys, self.expected_order,
+            f"role 顺序应保留源码顺序 {self.expected_order}，"
+            f"实际拿到 {keys}。PyYAML 默认 sort_keys=True 会导致字母序"
+            f"输出（agent, backend, frontend），必须显式 sort_keys=False"
+            f"才能与 pg-run._run_env_start_all() 的遍历顺序对齐。"
+        )
+
+    def test_matches_roles_items_traversal_order(self):
+        """与 pg-run._run_env_start_all() 中 for r in roles.items() 顺序一致。"""
+        result = resolve_env_instances(self.config, "dev-local")
+        # pg-run 等价遍历
+        pgrun_order = list(self.config["environments"]["dev-local"]["roles"].keys())
+        import yaml as _yaml
+        dispatched_order = list(_yaml.safe_load(result).keys())
+        self.assertEqual(
+            dispatched_order, pgrun_order,
+            "dispatch 渲染顺序必须与 pg-run._run_env_start_all 遍历顺序一致"
+        )
+
+
+class TestResolveHooksOrder(unittest.TestCase):
+    """v3.7: 同样为 resolve_hooks 钉死源码顺序。"""
+
+    def setUp(self):
+        self.config = {
+            "environments": {
+                "dev-local": {
+                    "roles": {
+                        "backend": {
+                            "actions": {
+                                "start": {
+                                    "host": "localhost",
+                                    "script": ".pg/hooks/role-backend-start.sh",
+                                    "timeout_seconds": 300,
+                                },
+                            },
+                        },
+                        "frontend": {
+                            "actions": {
+                                "start": {
+                                    "host": "localhost",
+                                    "script": ".pg/hooks/role-frontend-start.sh",
+                                    "timeout_seconds": 120,
+                                },
+                            },
+                        },
+                        "agent": {
+                            "actions": {
+                                "start": {
+                                    "host": "localhost",
+                                    "script": ".pg/hooks/role-agent-start.sh",
+                                    "timeout_seconds": 120,
+                                },
+                            },
+                        },
+                    },
+                },
+            },
+        }
+
+    def test_preserves_source_order_not_alphabetical(self):
+        result = resolve_hooks(self.config, "dev-local")
+        import yaml as _yaml
+        keys = list(_yaml.safe_load(result).keys())
+        self.assertEqual(
+            keys, ["backend", "frontend", "agent"],
+            f"hooks 顺序应保留源码顺序，实际拿到 {keys}。"
+            f"PyYAML 默认 sort_keys=True 会按字母序输出 dict key。"
+        )
+
+
 class TestResolveBuildRules(unittest.TestCase):
     def test_matches_target(self):
         config = {

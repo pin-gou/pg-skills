@@ -114,6 +114,11 @@ def resolve_env_instances(config: dict[str, Any], env_name: str) -> str:
         - name: frontend-1
           host: localhost
           port: 3008
+
+    role 顺序保留 environments.<env>.roles 的源码书写顺序（与
+    `.pg/skills/src/runtime/bin/pg-run` 的 `_run_env_start_all()` 一致）。
+    PyYAML 默认 sort_keys=True 会按字母序输出 dict key，导致 dispatch 与
+    pg-run 看到相反的 role 顺序——必须显式 sort_keys=False。
     """
     env = config.get("environments", {}).get(env_name, {})
     roles = env.get("roles", {})
@@ -130,7 +135,12 @@ def resolve_env_instances(config: dict[str, Any], env_name: str) -> str:
             ]
     if not instance_map:
         return ""
-    return _yaml.dump(instance_map, default_flow_style=False, allow_unicode=True).strip()
+    return _yaml.dump(
+        instance_map,
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
+    ).strip()
 
 
 def resolve_hooks(config: dict[str, Any], env_name: str) -> str:
@@ -144,6 +154,9 @@ def resolve_hooks(config: dict[str, Any], env_name: str) -> str:
           timeout_seconds: 300
         stop:
           ...
+
+    role 顺序保留 environments.<env>.roles 的源码书写顺序（与
+    `pg-run._run_env_start_all()` 一致）——必须显式 sort_keys=False。
     """
     env = config.get("environments", {}).get(env_name, {})
     roles = env.get("roles", {})
@@ -165,7 +178,12 @@ def resolve_hooks(config: dict[str, Any], env_name: str) -> str:
                 action_map[role_name] = simplified
     if not action_map:
         return ""
-    return _yaml.dump(action_map, default_flow_style=False, allow_unicode=True).strip()
+    return _yaml.dump(
+        action_map,
+        default_flow_style=False,
+        allow_unicode=True,
+        sort_keys=False,
+    ).strip()
 
 
 def resolve_build_rules(

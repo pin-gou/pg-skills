@@ -562,7 +562,7 @@ def _format_scenario_body(section: dict, change_name: str) -> str:
     if sub == "scenario-prepare":
         return (
             f"#### 步骤组 1：service start\n\n"
-            f"- [ ] {n}.1 scenario-prepare agent 按 track.modules 顺序 invoke-hook start 各 role instance\n"
+            f"- [ ] {n}.1 scenario-prepare agent 按 `stage.environment.instances` 中 role 的源码书写顺序（与 `pg-run` \"启动所有实例\" 一致——由 `.pg/project.yaml` 的 `environments.<env>.roles` 决定；**不要**按 `track.modules` 排）invoke-hook start 各 role instance\n"
             f"- [ ] {n}.2 每个 role 启动后立刻 invoke-hook health_check 验证就绪\n"
             f"- [ ] {n}.3 全部 health_check PASS → record(scenario-prepare, \"completed\")\n"
             f"- [ ] {n}.4 任一 role 启动 / health_check FAIL → record(scenario-prepare, \"failed\") → workflow_failed"
