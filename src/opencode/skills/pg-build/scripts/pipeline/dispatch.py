@@ -459,7 +459,7 @@ def build_action(
 
     # 分配全局 seq
     dispatch_seq = _allocate_seq(change_root)
-    report_seq = dispatch_seq + 1
+    report_seq = dispatch_seq
     ds = _format_seq(dispatch_seq)
     rs = _format_seq(report_seq)
     ctx["dispatch_seq"] = ds
@@ -510,7 +510,7 @@ def build_final_gate_action(
 
     # 分配全局 seq
     dispatch_seq = _allocate_seq(change_root)
-    report_seq = dispatch_seq + 1
+    report_seq = dispatch_seq
     ds = _format_seq(dispatch_seq)
     rs = _format_seq(report_seq)
     ctx["dispatch_seq"] = ds

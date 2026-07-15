@@ -330,7 +330,7 @@ class TestBuildAction(unittest.TestCase):
         self.assertIn("dispatch_seq", result)
         self.assertIn("report_seq", result)
         self.assertEqual(result["dispatch_seq"], "001")
-        self.assertEqual(result["report_seq"], "002")
+        self.assertEqual(result["report_seq"], "001")
 
     def test_build_action_seq_prefix_in_filename(self):
         """dispatch 文件名带 seq 前缀。"""
