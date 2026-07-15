@@ -233,9 +233,9 @@
       "properties": {
         "type": {
           "type": "string",
-          "enum": ["standard", "simple"],
+          "enum": ["standard", "simple", "scenario"],
           "default": "standard",
-          "description": "standard=完整 TDVG 序列 (test→dev→verify→gate); simple=跳过所有 sub-agent, runner 直接串行执行 tracks.<id>.commands 列表, 命令 exit 0 即视为 track 通过. 失败时按命令 on_failure 策略处理 (默认 workflow_failed 整体终止)."
+          "description": "standard=完整 TDVG 序列 (test→dev→verify→gate); simple=跳过所有 sub-agent, runner 直接串行执行 tracks.<id>.commands 列表; scenario=按结构化 Scenario 执行端到端用户旅程验证 (对应 scenario-test 类 track). 失败时按命令 on_failure 策略处理 (默认 workflow_failed 整体终止)."
         },
         "lint": {
           "type": "object",
@@ -529,8 +529,8 @@
         "test_keys": {
           "type": "array",
           "minItems": 1,
-          "items": { "type": "string", "enum": ["unit", "integration", "e2e", "mock_integration", "real_integration"] },
-          "description": "要跑的 test 类型列表, 串行执行. 每项必须对应 modules.<m>.test.* 中已定义的 key."
+          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
+          "description": "要跑的 test 类型列表, 串行执行. 每项必须对应 modules.<m>.test.* 中已定义的 key. 运行时 (pg-parse-config / pg-regression) 会校验实际有效性."
         },
         "environment": {
           "type": "object",
