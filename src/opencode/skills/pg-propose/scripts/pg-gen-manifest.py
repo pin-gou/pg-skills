@@ -153,6 +153,66 @@ def _extract_affected_paths_from_proposal(change: str) -> list[str]:
     return out
 
 
+def _read_scenario_decision_from_path(eval_path: str) -> dict | None:
+    """v3.5: 从指定路径的 on-conditions-eval.md 读取 scenario_test_decision 段。
+
+    Returns:
+        dict with keys {enabled: bool, reason: str, mode: str, source: str}
+        或 None (eval.md 不存在 / 段缺失)
+    """
+    if not os.path.isfile(eval_path):
+        return None
+    try:
+        with open(eval_path, encoding="utf-8") as f:
+            content = f.read()
+    except Exception:
+        return None
+
+    # 简单文本解析：找到 "## scenario_test_decision (v3.5)" 段
+    marker = "## scenario_test_decision (v3.5)"
+    if marker not in content:
+        return None
+    section = content.split(marker, 1)[1]
+    # 只取下一个 ## 之前的内容
+    section = section.split("\n## ", 1)[0]
+
+    def _val(line: str) -> str:
+        parts = line.split("|")
+        # line: "| enabled | **True** |" → parts: ['', ' enabled ', ' **True** ', '']
+        # value is parts[2]
+        if len(parts) >= 3:
+            return parts[2].strip().strip("*")
+        return ""
+
+    decision: dict = {"enabled": False, "reason": "", "mode": "", "source": ""}
+    for line in section.splitlines():
+        if line.startswith("| enabled"):
+            decision["enabled"] = (_val(line).lower() == "true")
+        elif line.startswith("| mode"):
+            decision["mode"] = _val(line)
+        elif line.startswith("| source"):
+            decision["source"] = _val(line)
+        elif line.startswith("| reason"):
+            decision["reason"] = _val(line)
+    return decision if decision["mode"] else None
+
+
+def _read_scenario_decision(change: str) -> dict | None:
+    """从 on-conditions-eval.md 读取 scenario_test_decision 段（SSOT）。
+    change 可以是 change 名或绝对路径。
+    """
+    if os.path.isabs(change):
+        eval_path = os.path.join(change, "1-propose-review", "on-conditions-eval.md")
+    else:
+        eval_path = os.path.join(CHANGES_DIR, change, "1-propose-review", "on-conditions-eval.md")
+    return _read_scenario_decision_from_path(eval_path)
+
+
+def _read_scenario_decision_absolute(change_root: str) -> dict | None:
+    """从指定 change 根目录绝对路径读取 SSOT (供测试用)。"""
+    return _read_scenario_decision(change_root)
+
+
 def _build_track_enabled_decision(
     track_id: str,
     track_cfg: dict,
@@ -272,6 +332,9 @@ def build_manifest(change: str) -> dict:
         except Exception:
             proposal_text = ""
 
+    # v3.5: 从 on-conditions-eval.md 读取 scenario_test_decision (SSOT)
+    scenario_decision = _read_scenario_decision(change)
+
     # 解析 LLM 在 stage 2c 决策的 affected_tracks（来自 tasks.md 实际生成的 track 列表）
     affected_tracks_set = set()
     for sec in sections:
@@ -329,9 +392,13 @@ def build_manifest(change: str) -> dict:
     for stage_name, tracks_dict in stage_tracks.items():
         manifest_tracks = []
         for track_id, track_info in tracks_dict.items():
-            # v3.5: scenario track 即使 all_noop 也不跳过（常驻节点，必出现在 manifest 中）
+            # v3.5: scenario track 按 decision SSOT 决定是否进入 manifest
             is_scenario = (track_info["type"] == "scenario")
-            if track_info["all_noop"] and not is_scenario:
+            if is_scenario:
+                # scenario-test 禁用时根本不进 manifest（避免冗余）
+                if scenario_decision is not None and not scenario_decision["enabled"]:
+                    continue
+            elif track_info["all_noop"]:
                 continue
 
             # v3: 计算 enabled / reason / on_conditions_eval / target_module
@@ -339,9 +406,15 @@ def build_manifest(change: str) -> dict:
             rules = track_cfg.get("on_conditions") or []
             eval_dict = _evaluate_on_conditions(rules, affected_paths, proposal_text)
             in_affected = track_id in affected_tracks_set
-            enabled, reason = _build_track_enabled_decision(
-                track_id, track_cfg, eval_dict, in_affected,
-            )
+
+            # v3.5: scenario track 启用决策由 SSOT (on-conditions-eval.md scenario_test_decision) 决定
+            if is_scenario and scenario_decision is not None:
+                enabled = scenario_decision["enabled"]
+                reason = scenario_decision["reason"]
+            else:
+                enabled, reason = _build_track_enabled_decision(
+                    track_id, track_cfg, eval_dict, in_affected,
+                )
 
             entry = {
                 "id": track_id,

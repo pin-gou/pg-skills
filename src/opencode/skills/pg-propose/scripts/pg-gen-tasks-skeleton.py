@@ -102,6 +102,16 @@ def parse_args():
                               "(e.g. 'dev'). Only stages in this list and their "
                               "affected tracks generate sections. "
                               "Empty = include all stages (backward compatible).")
+    # v3.5: scenario-test 启用决策
+    parser.add_argument("--scenario-test-enabled", default="auto",
+                         choices=["auto", "true", "false"],
+                         help="scenario-test track 启用决策 (auto=按 on_conditions 评估, "
+                              "true/false=LLM 显式决策). 默认 auto. 决策会写入 "
+                              "on-conditions-eval.md 的 scenario_test_decision 段, "
+                              "供 pg-gen-manifest.py 和 pg-gen-scenario.py 读取.")
+    parser.add_argument("--scenario-test-reason", default="",
+                         help="scenario-test 启用/禁用决策依据 (LLM 填写, "
+                              "仅当 --scenario-test-enabled != auto 时生效).")
     return parser.parse_args()
 
 
@@ -283,12 +293,13 @@ def evaluate_on_conditions(rule: str, affected_paths: list[str],
 # ============================================================
 
 def build_sections(config: dict, affected_tracks: set,
-                   selected_stages: set[str]) -> list[dict]:
+                   selected_stages: set[str],
+                   scenario_test_enabled: str = "auto") -> list[dict]:
     """Build the section list filtered by selected_stages and affected_tracks.
 
     - Only stages whose name is in selected_stages (or all if empty) are included.
     - Within a stage, only tracks that are in affected_tracks produce headings,
-      except scenario tracks which always produce headings (常驻节点).
+      except scenario tracks (which follow scenario_test_enabled).
     - Simple tracks in affected_tracks produce 1 heading; standard tracks produce 4
     - final-gate is always appended.
 
@@ -298,8 +309,11 @@ def build_sections(config: dict, affected_tracks: set,
         - enabled=false → 4 sub（test / dev / verify / gate）
       - 章节号 N 跨 change 不一致（已接受的硬冲突）
 
-    Returns list of dicts with keys:
-        n, stage, track, sub, is_simple, is_affected, label, env
+    v3.5: scenario-test 启用决策
+      - "auto"  → 默认按 project.yaml 中 scenario track 的"常驻"特性
+                  （即使 affected_tracks 不含也生成）
+      - "true"  → LLM 明确决策启用
+      - "false" → LLM 明确决策禁用（不生成 scenario 章节）
     """
     sections = []
     all_stages = config.get("stages") or []
@@ -311,6 +325,16 @@ def build_sections(config: dict, affected_tracks: set,
     else:
         stages = list(all_stages)
 
+    # v3.5: scenario-test 启用决策解析
+    # auto: 由 is_scenario 决定（保持向后兼容）
+    # true/false: 强制决定（不依赖 is_scenario）
+    if scenario_test_enabled == "false":
+        scenario_decision = False
+    elif scenario_test_enabled == "true":
+        scenario_decision = True
+    else:  # auto
+        scenario_decision = None  # 由 per-track is_scenario 决定
+
     N = 1
     for stage in stages:
         stage_name = stage["name"]
@@ -321,6 +345,10 @@ def build_sections(config: dict, affected_tracks: set,
             track_type = get_track_type(config, track_id)
             is_simple = (track_type == "phase")
             is_scenario = (track_type == "scenario")
+
+            # v3.5: 显式禁用场景时不生成 scenario 章节
+            if is_scenario and scenario_decision is False:
+                continue
 
             if not is_scenario and track_id not in affected_tracks:
                 continue
@@ -611,8 +639,53 @@ def build_tasks_md(sections: list[dict], env_map: dict[str, str],
 # on-conditions-eval.md (review stage helper)
 # ============================================================
 
+def _compute_scenario_decision(
+    config: dict, scenario_test_enabled_arg: str, reason: str,
+) -> dict:
+    """v3.5: 解析 scenario-test 启用决策.
+
+    Args:
+        config: project.yaml 解析后的 dict
+        scenario_test_enabled_arg: CLI 取值 (auto/true/false)
+        reason: LLM 决策依据（仅当 != auto 时）
+
+    Returns:
+        dict with keys:
+          - enabled: bool (final decision)
+          - mode: 'auto' | 'explicit'
+          - reason: str
+          - source: 决策来源描述
+    """
+    # 检查 project.yaml 中是否定义了 scenario track
+    has_scenario = any(
+        t.get("type") == "scenario"
+        for t in (config.get("tracks") or {}).values()
+    )
+
+    if scenario_test_enabled_arg == "auto":
+        return {
+            "enabled": has_scenario,
+            "mode": "auto",
+            "reason": (
+                "project.yaml 含 type=scenario track，按『常驻』特性默认生成"
+                if has_scenario
+                else "project.yaml 无 type=scenario track"
+            ),
+            "source": "project.yaml",
+        }
+
+    enabled = (scenario_test_enabled_arg == "true")
+    return {
+        "enabled": enabled,
+        "mode": "explicit",
+        "reason": reason or "（LLM 未填写依据）",
+        "source": "LLM 阶段二 2c 决策",
+    }
+
+
 def build_on_conditions_eval_md(config: dict, affected_paths: list[str],
-                                 proposal_text: str) -> str:
+                                 proposal_text: str,
+                                 scenario_decision: dict | None = None) -> str:
     """Generate on-conditions-eval.md content (for stage 3 review)."""
     lines = [
         "# on_conditions 评估记录",
@@ -626,9 +699,15 @@ def build_on_conditions_eval_md(config: dict, affected_paths: list[str],
         "- `semantic`：基于 proposal.md 全文的关键词匹配",
         "- `建议`：path 或 semantic 任一命中 → 命中",
         "",
-        "## stage 级",
-        "",
     ]
+
+    # v3.5: 注入 scenario_test_decision 段（SSOT，三个生成脚本的契约）
+    if scenario_decision is not None:
+        lines.extend(_format_scenario_decision_md(scenario_decision))
+        lines.append("")
+
+    lines.append("## stage 级")
+    lines.append("")
 
     for stage in (config.get("stages") or []):
         rules = stage.get("on_conditions") or []
@@ -673,9 +752,28 @@ def build_on_conditions_eval_md(config: dict, affected_paths: list[str],
     lines.append("")
     lines.append("1. 对每行「最终决策」勾选 `[x]`（同意机械评估）或 `[~]` + 写「依据」（覆盖机械评估）")
     lines.append("2. 复核完成后，把本文件表格内容**合并到** `.pg/changes/<change>/1-propose-review/review-notes.md` 的「on_conditions 评估记录」段")
-    lines.append("3. 合并后本文件可保留作为审计副本")
+    lines.append("3. scenario_test_decision 段的 `enabled` 字段是三个生成产物（tasks.md / manifest / scenario.yaml）的 SSOT，禁止手工修改")
+    lines.append("4. 合并后本文件可保留作为审计副本")
 
     return "\n".join(lines) + "\n"
+
+
+def _format_scenario_decision_md(decision: dict) -> list[str]:
+    """Format scenario_test_decision 段为 markdown 行。"""
+    return [
+        "## scenario_test_decision (v3.5)",
+        "",
+        "**SSOT**：`pg-gen-manifest.py` 和 `pg-gen-scenario.py` 都读此段决定是否生成对应产物。",
+        "修改本段会立即让三个产物（tasks.md / execution-manifest.yaml / scenario.yaml）不一致。",
+        "如需变更，**重跑** `pg-gen-tasks-skeleton.py --scenario-test-enabled {true\\|false}` + `pg-gen-manifest.py` + `pg-gen-scenario.py`，禁止手工编辑。",
+        "",
+        "| 字段 | 值 |",
+        "|------|---|",
+        f"| enabled | **{decision['enabled']}** |",
+        f"| mode | {decision['mode']} |",
+        f"| source | {decision['source']} |",
+        f"| reason | {decision['reason']} |",
+    ]
 
 
 # ============================================================
@@ -703,7 +801,10 @@ def main():
     proposal_text = read_proposal_text(args.proposal_md)
     affected_paths = extract_globs_from_proposal(proposal_text)
 
-    sections = build_sections(config, affected_tracks, selected_stages)
+    sections = build_sections(
+        config, affected_tracks, selected_stages,
+        scenario_test_enabled=args.scenario_test_enabled,
+    )
 
     output_tasks = args.output_tasks or os.path.join(
         CHANGES_DIR, args.change, "tasks.md"
@@ -716,8 +817,13 @@ def main():
         sections, env_map, config, affected_paths, proposal_text,
         change_name=args.change,
     )
+    # v3.5: 注入 scenario_test_decision 段到 eval_content
+    scenario_decision_info = _compute_scenario_decision(
+        config, args.scenario_test_enabled, args.scenario_test_reason,
+    )
     eval_content = build_on_conditions_eval_md(
-        config, affected_paths, proposal_text
+        config, affected_paths, proposal_text,
+        scenario_decision=scenario_decision_info,
     )
 
     os.makedirs(os.path.dirname(output_tasks), exist_ok=True)
@@ -731,6 +837,8 @@ def main():
         "tasks_md_written": output_tasks,
         "on_conditions_eval_written": output_eval,
         "section_count": len(sections),
+        "scenario_test_enabled": scenario_decision_info["enabled"],
+        "scenario_test_decision": scenario_decision_info,
         "sections": [
             {
                 "n": s["n"],

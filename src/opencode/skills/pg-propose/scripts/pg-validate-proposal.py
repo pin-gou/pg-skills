@@ -312,6 +312,59 @@ def _validate_tracks_against_tasks(manifest, tasks_sections, config):
     return issues
 
 
+def _validate_three_product_consistency(manifest, change_or_path) -> list[tuple[str, str]]:
+    """v3.5: tasks.md / manifest / scenario.yaml 三产物与 SSOT 一致性校验。
+
+    Args:
+        manifest: 已解析的 manifest dict
+        change_or_path: change 名 (从 CHANGES_DIR 拼) 或 change 根目录绝对路径
+
+    校验规则:
+      - manifest 含 type=scenario track (enabled=true) → scenario.yaml 必须存在
+      - manifest 含 type=scenario track (enabled=false) → scenario.yaml 必须不存在
+      - manifest 不含 type=scenario track → scenario.yaml 必须不存在
+
+    Returns: list of (code, msg)
+    """
+    issues = []
+    if os.path.isabs(change_or_path):
+        change_root = change_or_path
+    else:
+        change_root = os.path.join(CHANGES_DIR, change_or_path)
+    scenario_yaml_path = os.path.join(change_root, "scenario.yaml")
+    scenario_yaml_exists = os.path.isfile(scenario_yaml_path)
+
+    for stage_idx, stage in enumerate(manifest.get("stages", [])):
+        for track_idx, track in enumerate(stage.get("tracks", [])):
+            if track.get("type") != "scenario":
+                continue
+            track_enabled = track.get("enabled", False)
+            if track_enabled and not scenario_yaml_exists:
+                code = "scenario_yaml_missing"
+                msg = (f"stages[{stage_idx}].tracks[{track_idx}] 是 enabled=true 的 scenario track, "
+                       f"但 scenario.yaml 不存在: {scenario_yaml_path}")
+                issues.append((code, msg))
+            if not track_enabled and scenario_yaml_exists:
+                code = "scenario_yaml_should_not_exist"
+                msg = (f"stages[{stage_idx}].tracks[{track_idx}] 是 enabled=false 的 scenario track, "
+                       f"但 scenario.yaml 存在 (会变成冗余产物): {scenario_yaml_path}")
+                issues.append((code, msg))
+
+    # 反向: scenario.yaml 存在但 manifest 无 scenario track
+    if scenario_yaml_exists:
+        has_scenario_in_manifest = any(
+            track.get("type") == "scenario"
+            for stage in manifest.get("stages", [])
+            for track in stage.get("tracks", [])
+        )
+        if not has_scenario_in_manifest:
+            code = "scenario_yaml_orphan"
+            msg = (f"scenario.yaml 存在但 manifest 不含 type=scenario track: {scenario_yaml_path}")
+            issues.append((code, msg))
+
+    return issues
+
+
 def _validate_environment(manifest, config):
     """Validate all referenced environments exist in project.yaml."""
     issues = []
@@ -396,17 +449,9 @@ def cmd_manifest(change):
         print(f"  [{code}] {msg}", file=sys.stderr)
         all_issues.append(code)
 
-    # 7. v3.5: Validate scenario.yaml exists if manifest has scenario track
-    scenario_yaml_path = os.path.join(CHANGES_DIR, change, "scenario.yaml")
-    has_scenario = any(
-        track.get("type") == "scenario"
-        for stage in manifest.get("stages", [])
-        for track in stage.get("tracks", [])
-    )
-    if has_scenario and not os.path.isfile(scenario_yaml_path):
-        code = "scenario_yaml_missing"
-        msg = (f"manifest 包含 type=scenario 的 track 但 scenario.yaml 不存在: "
-               f"{scenario_yaml_path}")
+    # 7. v3.5: 三产物一致性校验
+    consistency_issues = _validate_three_product_consistency(manifest, change)
+    for code, msg in consistency_issues:
         print(f"  [{code}] {msg}", file=sys.stderr)
         all_issues.append(code)
 

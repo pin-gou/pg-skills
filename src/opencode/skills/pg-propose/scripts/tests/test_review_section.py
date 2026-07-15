@@ -311,9 +311,9 @@ class TestValidatorCodeView(unittest.TestCase):
             "--proposal-md", self.proposal_path,
             "--affected-tracks", "backend,frontend",
             "--environment", "dev→dev-local",
+            "--scenario-test-enabled", "false",
         ])
         _run_script("pg-gen-manifest.py", [self.change])
-        self._create_dummy_scenario_yaml()
         r = _run_script("pg-validate-proposal.py", ["manifest", self.change])
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         self.assertIn("OK", r.stdout)
@@ -325,9 +325,9 @@ class TestValidatorCodeView(unittest.TestCase):
             "--proposal-md", self.proposal_path,
             "--affected-tracks", "backend,frontend",
             "--environment", "dev→dev-local",
+            "--scenario-test-enabled", "false",
         ])
         _run_script("pg-gen-manifest.py", [self.change])
-        self._create_dummy_scenario_yaml()
         r = _run_script("pg-validate-proposal.py", ["manifest", self.change])
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         self.assertIn("OK", r.stdout)
