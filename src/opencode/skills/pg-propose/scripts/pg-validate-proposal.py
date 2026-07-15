@@ -396,6 +396,20 @@ def cmd_manifest(change):
         print(f"  [{code}] {msg}", file=sys.stderr)
         all_issues.append(code)
 
+    # 7. v3.5: Validate scenario.yaml exists if manifest has scenario track
+    scenario_yaml_path = os.path.join(CHANGES_DIR, change, "scenario.yaml")
+    has_scenario = any(
+        track.get("type") == "scenario"
+        for stage in manifest.get("stages", [])
+        for track in stage.get("tracks", [])
+    )
+    if has_scenario and not os.path.isfile(scenario_yaml_path):
+        code = "scenario_yaml_missing"
+        msg = (f"manifest 包含 type=scenario 的 track 但 scenario.yaml 不存在: "
+               f"{scenario_yaml_path}")
+        print(f"  [{code}] {msg}", file=sys.stderr)
+        all_issues.append(code)
+
     # 7. Result
     if all_issues:
         valid = False

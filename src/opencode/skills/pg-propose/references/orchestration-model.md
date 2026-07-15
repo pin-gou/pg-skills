@@ -30,7 +30,7 @@ stages ── 一组阶段（dev-isolated → dev-mock-integration → real-inte
 |------|---------|-------------|-----------------|
 | **standard** | `tracks.<id>.type` 不存在或 != `simple` / `scenario` | TDVG 四阶段（test → dev → verify → gate），由编排器派遣 sub-agent | 4 个子章节 |
 | **simple** | `tracks.<id>.type == "simple"` | runner 派遣 `pg-build/simple` sub-agent 执行 `tracks.<id>.commands`，无 TDVG | **1 个章节**（派遣 pg-build/simple agent 执行 commands） |
-| **scenario**（v3.5） | `tracks.<id>.type == "scenario"` | scenario-prepare → scenario-execute → (scenario-fix → scenario-execute)* → 完成。需 `scenario.md` 作为 SSOT | 3 个子章节（scenario-prepare / scenario-execute / scenario-fix 仅在 escalate 时物理存在） |
+| **scenario**（v3.5） | `tracks.<id>.type == "scenario"` | scenario-prepare → scenario-execute → (scenario-fix → scenario-execute)* → 完成。需 `scenario.yaml` 作为 SSOT | 3 个子章节（scenario-prepare / scenario-execute / scenario-fix 仅在 escalate 时物理存在） |
 | **e2e** | `tracks.<id>.type == "e2e"` | （TBD：参考 scenario 实现；不属本节 SSOT） | 1 个章节 |
 
 **判定时机**：pg-propose 阶段二 2e 生成 tasks.md 之前，按 `config.tracks[track_id].type` 判定；与 `affected_tracks` 无关。

@@ -28,7 +28,7 @@ prompt: |
 
   禁止编辑以下路径的文件：
   - 不在 {module_roots} 路径下的文件
-  - scenario.md（SSOT，**禁止修改**；如需修改须走 pg-propose-refine）
+  - scenario.yaml（SSOT，**禁止修改**；如需修改须走 pg-propose-refine）
 
   ### 修复后必跑流程
 
@@ -45,7 +45,7 @@ prompt: |
 
   修复时按以下顺序定位根因：
 
-  1. **业务逻辑错误**：对照 design.md / scenario.md 的 When/Then 描述，看是否漏处理某个分支
+  1. **业务逻辑错误**：对照 design.md / scenario.yaml 的 When/Then 描述，看是否漏处理某个分支
   2. **API 契约错误**：检查 Controller 注解、DTO 字段、序列化顺序
   3. **前后端契约错位**：检查前端 API 调用与后端响应字段命名/类型
   4. **数据库/迁移问题**：检查 Flyway 脚本、Entity 字段映射

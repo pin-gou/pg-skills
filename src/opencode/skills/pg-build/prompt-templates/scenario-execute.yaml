@@ -1,22 +1,22 @@
 # scenario-execute.yaml — sub=scenario-execute 完整提示词
 # v3.5: scenario track 专用 phase。
-# scenario-execute agent 读取 scenario.md（SSOT，**禁止重写**），按顺序执行每个 Scenario。
+# scenario-execute agent 读取 scenario.yaml（SSOT，**禁止重写**），按顺序执行每个 Scenario。
 # 每个 Scenario 必须含 Given/When/Then/And/Evidence 6 段，产出结构化 JSON 证据。
 
 prompt: |
   ### 场景执行（scenario-execute）
 
-  本 phase 是 real-integration 的核心：从 `.pg/changes/{_change}/scenario.md` 读取每个 Scenario，
+  本 phase 是 real-integration 的核心：从 `.pg/changes/{_change}/scenario.yaml` 读取每个 Scenario，
   按顺序执行，产出结构化 JSON 证据。
 
-  ### SSOT：scenario.md
+  ### SSOT：scenario.yaml
 
-  **禁止重写或修改 scenario.md**。scenario.md 由 pg-propose 阶段生成，是本 phase 的唯一输入。
+  **禁止重写或修改 scenario.yaml**。scenario.yaml 由 pg-propose 阶段生成，是本 phase 的唯一输入。
   如需修改场景，须通过 `pg-propose-refine` 流程回到 propose 阶段。
 
-  ### scenario.md 路径
+  ### scenario.yaml 路径
 
-  `{scenario_md_path}`
+  `{scenario_yaml_path}`
 
   ### Scenario 文件结构
 
@@ -47,7 +47,7 @@ prompt: |
 
   ### 执行流程
 
-  1. 读取 scenario.md，校验每个 Scenario 含 6 段（given / when / then / and / evidence / critical）
+  1. 读取 scenario.yaml，校验每个 Scenario 含 6 段（given / when / then / and / evidence / critical）
      - 校验失败 → record(scenario-execute, "failed")（workflow_failed）
      - 文件本身缺失 → record(scenario-execute, "failed")
 

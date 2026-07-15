@@ -156,15 +156,15 @@ def extract_design_verification_criteria(change_root: str, track: str) -> str:
     return "".join(result).rstrip()
 
 
-def _read_scenario_md(change_root: str) -> str:
-    """v3.5 新增：读取 .pg/changes/<change>/scenario.md 全文。
+def _read_scenario_yaml(change_root: str) -> str:
+    """v3.5 新增：读取 .pg/changes/<change>/scenario.yaml 全文。
 
-    scenario.md 是 pg-propose 阶段生成，scenario-execute agent 的唯一输入。
+    scenario.yaml 是 pg-propose 阶段生成，scenario-execute agent 的唯一输入。
     文件不存在时返回空字符串，scenario-execute agent 必须自己处理缺失场景。
     """
     if not change_root:
         return ""
-    scenario_path = os.path.join(change_root, "scenario.md")
+    scenario_path = os.path.join(change_root, "scenario.yaml")
     if not os.path.isfile(scenario_path):
         return ""
     try:
@@ -320,8 +320,8 @@ def build_ctx(
         "verify_report_path": "",
         "fix_report_filename": f"{track}-{phase}-fix-{cycle}.md",
         # v3.5: scenario track 专用字段
-        "scenario_md_path": os.path.join(change_root, "scenario.md"),
-        "scenario_md_content": _read_scenario_md(change_root),
+        "scenario_yaml_path": os.path.join(change_root, "scenario.yaml"),
+        "scenario_yaml_content": _read_scenario_yaml(change_root),
         # fix-gate
         "gate_report_path": _gate_report_path,
         "gate_cycles": cycle,

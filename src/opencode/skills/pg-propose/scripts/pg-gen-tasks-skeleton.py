@@ -490,6 +490,9 @@ def format_section_body(section: dict, change_name: str = "<change>") -> str:
             f"- [ ] {n}.1 执行 tracks.{track}.commands"
             f"（runner 派遣 pg-build/simple agent 按序执行）"
         )
+    # v3.5: scenario 章节不受 is_affected 限制，始终产出完整 skeleton body
+    if section.get("is_scenario"):
+        return _format_scenario_body(section, change_name)
     if not section["is_affected"]:
         return "- 无"
     if section["sub"] == "gate":
@@ -499,8 +502,6 @@ def format_section_body(section: dict, change_name: str = "<change>") -> str:
     if section["sub"] == "dev":
         return f"- [ ] {section['n']}.1 实现功能：待 LLM 填充"
     if section["sub"] == "review":
-        # {change} 由 generator 阶段已知 --change arg → 填入真实值
-        # {seq} 是 runtime 由 orchestrator 分配的 report seq，generator 无法预知，改用抽象描述
         return (
             f"- [ ] {section['n']}.1 review agent 读 design.md + tasks.md + .pg/code-review/code-review.yaml 细则\n"
             f"- [ ] {section['n']}.2 review agent 对 git diff feat/pg/{change_name} 做静态审查\n"
@@ -512,9 +513,19 @@ def format_section_body(section: dict, change_name: str = "<change>") -> str:
                f"- [ ] {section['n']}.2 执行测试（runner 通过 modules 注入命令）\n" \
                f"- [ ] {section['n']}.3 启动服务（如需）\n" \
                f"- [ ] {section['n']}.4 验证 V-{section['track']}-N：来自 design.md（N 由 design.md 决定，非章节号）"
-    # v3.5: scenario track 专用 body 模板
-    if section["sub"] == "scenario-prepare":
-        n = section["n"]
+    return "- 无"
+
+
+def _format_scenario_body(section: dict, change_name: str) -> str:
+    """v3.5: 生成 scenario track 章节的 skeleton body。
+
+    与 standard track 不同，scenario 章节即使 `is_affected=False` 也产出完整模板，
+    因为 scenario-test 是常驻节点，LLM 应始终填充。
+    """
+    n = section["n"]
+    sub = section["sub"]
+
+    if sub == "scenario-prepare":
         return (
             f"#### 步骤组 1：service start\n\n"
             f"- [ ] {n}.1 scenario-prepare agent 按 track.modules 顺序 invoke-hook start 各 role instance\n"
@@ -522,11 +533,11 @@ def format_section_body(section: dict, change_name: str = "<change>") -> str:
             f"- [ ] {n}.3 全部 health_check PASS → record(scenario-prepare, \"completed\")\n"
             f"- [ ] {n}.4 任一 role 启动 / health_check FAIL → record(scenario-prepare, \"failed\") → workflow_failed"
         )
-    if section["sub"] == "scenario-execute":
-        n = section["n"]
+
+    if sub == "scenario-execute":
         return (
-            f"#### 步骤组 1：scenario.md 读取\n\n"
-            f"- [ ] {n}.1 确认 `.pg/changes/{change_name}/scenario.md` 存在且每个 Scenario 含 6 段"
+            f"#### 步骤组 1：scenario.yaml 读取\n\n"
+            f"- [ ] {n}.1 确认 `.pg/changes/{change_name}/scenario.yaml` 存在且每个 Scenario 含 6 段"
             f"（scenario_id / critical / given / when / then / evidence；and 可选）\n"
             f"- [ ] {n}.2 校验 scenario_id 全局唯一、critical 字段为 bool\n\n"
             f"#### 步骤组 2：执行\n\n"
@@ -537,8 +548,8 @@ def format_section_body(section: dict, change_name: str = "<change>") -> str:
             f"→ record(scenario-execute, \"escalate\")\n"
             f"- [ ] {n}.7 全部通过 / scenario-execute agent 写盘报告到 `2-build/<seq>-scenario-execute.md`"
         )
-    if section["sub"] == "scenario-fix":
-        n = section["n"]
+
+    if sub == "scenario-fix":
         return (
             f"#### 步骤组 1：诊断\n\n"
             f"- [ ] {n}.1 读源 scenario-execute 报告 + design.md + proposal.md\n"
@@ -551,6 +562,7 @@ def format_section_body(section: dict, change_name: str = "<change>") -> str:
             f"- [ ] {n}.6 record(scenario-fix, \"completed\" / \"failed\") → 编排器自动 dispatch scenario-execute 重跑\n"
             f"- [ ] {n}.7 max_fix_retries 耗尽 → workflow_failed（不进入 gate）"
         )
+
     return "- 无"
 
 

@@ -94,7 +94,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 ## 红线
 
 1. 禁止加载任何 SKILL
-2. 禁止修改 `scenario.md` / `tasks.md` / `proposal.md` / `design.md`
+2. 禁止修改 `scenario.yaml` / `tasks.md` / `proposal.md` / `design.md`
 3. 禁止修改源码
 4. 不要修改 `2-build/.pipeline-state.json` / `2-build/.context-chain.state`
 5. 不允许"部分通过"——所有声明的 module 必须全部 PASS

@@ -219,6 +219,12 @@ class TestValidatorAcceptsSubset(_ProjectMixin, unittest.TestCase):
         r2 = _run_script("pg-gen-manifest.py", [self.change])
         if r2.returncode != 0:
             return r2.returncode, r2.stdout, r2.stderr
+        # 创建 dummy scenario.yaml（project.yaml 有 scenario-test track，validator 会检查）
+        change_dir = os.path.join(_PROJECT_ROOT, ".pg", "changes", self.change)
+        scenario_yaml = os.path.join(change_dir, "scenario.yaml")
+        if not os.path.isfile(scenario_yaml):
+            with open(scenario_yaml, "w") as f:
+                f.write("scenarios: []\n")
         r3 = _run_script("pg-validate-proposal.py", ["manifest", self.change])
         return r3.returncode, r3.stdout, r3.stderr
 
@@ -295,6 +301,12 @@ class TestValidatorRequiresQualityGate(_ProjectMixin, unittest.TestCase):
                     trk["phase_prompts"] = pp
         with open(manifest_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(manifest, f, default_flow_style=False, allow_unicode=True)
+        # 创建 dummy scenario.yaml（validator 检查）
+        change_dir = os.path.join(_PROJECT_ROOT, ".pg", "changes", self.change)
+        scenario_yaml = os.path.join(change_dir, "scenario.yaml")
+        if not os.path.isfile(scenario_yaml):
+            with open(scenario_yaml, "w") as f:
+                f.write("scenarios: []\n")
         # 3) 跑 validator：应有 _no_quality_gate 错误
         r3 = _run_script("pg-validate-proposal.py", ["manifest", self.change])
         return r3.returncode, r3.stdout, r3.stderr

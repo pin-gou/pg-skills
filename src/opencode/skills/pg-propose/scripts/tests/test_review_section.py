@@ -313,6 +313,7 @@ class TestValidatorCodeView(unittest.TestCase):
             "--environment", "dev→dev-local",
         ])
         _run_script("pg-gen-manifest.py", [self.change])
+        self._create_dummy_scenario_yaml()
         r = _run_script("pg-validate-proposal.py", ["manifest", self.change])
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         self.assertIn("OK", r.stdout)
@@ -326,9 +327,17 @@ class TestValidatorCodeView(unittest.TestCase):
             "--environment", "dev→dev-local",
         ])
         _run_script("pg-gen-manifest.py", [self.change])
+        self._create_dummy_scenario_yaml()
         r = _run_script("pg-validate-proposal.py", ["manifest", self.change])
         self.assertEqual(r.returncode, 0, msg=r.stderr)
         self.assertIn("OK", r.stdout)
+
+    def _create_dummy_scenario_yaml(self):
+        change_dir = os.path.join(_PROJECT_ROOT, ".pg", "changes", self.change)
+        scenario_yaml = os.path.join(change_dir, "scenario.yaml")
+        if not os.path.isfile(scenario_yaml):
+            with open(scenario_yaml, "w") as f:
+                f.write("scenarios: []\n")
 
 
 if __name__ == "__main__":

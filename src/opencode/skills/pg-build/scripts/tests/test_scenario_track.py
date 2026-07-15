@@ -544,19 +544,19 @@ class TestDispatchScenario(unittest.TestCase):
         # execute 含 escalate
         self.assertIn("escalate", dispatch_mod.PHASE_ALLOWED_STATUSES[SUB_SCENARIO_EXECUTE])
 
-    def test_read_scenario_md_empty_when_missing(self):
+    def test_read_scenario_yaml_empty_when_missing(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
-            result = dispatch_mod._read_scenario_md(tmp)
+            result = dispatch_mod._read_scenario_yaml(tmp)
             self.assertEqual(result, "")
 
-    def test_read_scenario_md_returns_content(self):
+    def test_read_scenario_yaml_returns_content(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
-            md_path = os.path.join(tmp, "scenario.md")
-            with open(md_path, "w", encoding="utf-8") as f:
+            yaml_path = os.path.join(tmp, "scenario.yaml")
+            with open(yaml_path, "w", encoding="utf-8") as f:
                 f.write("scenarios:\n  - scenario_id: S-test\n")
-            result = dispatch_mod._read_scenario_md(tmp)
+            result = dispatch_mod._read_scenario_yaml(tmp)
             self.assertIn("S-test", result)
 
 
