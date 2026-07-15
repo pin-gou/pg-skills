@@ -431,7 +431,7 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
         self.tmp = tempfile.mkdtemp()
         self.change_root = os.path.join(self.tmp, "test-change")
         os.makedirs(os.path.join(self.change_root, "2-build"), exist_ok=True)
-        with open(os.path.join(self.change_root, "scenario.yaml"), "w") as f:
+        with open(os.path.join(self.change_root, "scenario-scenario-test.yaml"), "w") as f:
             f.write("scenarios:\n  - scenario_id: S-mock\n    critical: true\n")
         state = PipelineState(
             change="test-change",

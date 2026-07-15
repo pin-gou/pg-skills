@@ -547,17 +547,27 @@ class TestDispatchScenario(unittest.TestCase):
     def test_read_scenario_yaml_empty_when_missing(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
-            result = dispatch_mod._read_scenario_yaml(tmp)
+            result = dispatch_mod._read_scenario_yaml(tmp, "scenario-test.yaml")
             self.assertEqual(result, "")
 
     def test_read_scenario_yaml_returns_content(self):
         import tempfile
         with tempfile.TemporaryDirectory() as tmp:
-            yaml_path = os.path.join(tmp, "scenario.yaml")
+            yaml_path = os.path.join(tmp, "scenario-test.yaml")
             with open(yaml_path, "w", encoding="utf-8") as f:
                 f.write("scenarios:\n  - scenario_id: S-test\n")
-            result = dispatch_mod._read_scenario_yaml(tmp)
+            result = dispatch_mod._read_scenario_yaml(tmp, "scenario-test.yaml")
             self.assertIn("S-test", result)
+
+    def test_read_scenario_yaml_default_filename(self):
+        """默认 filename=scenario.yaml 兼容旧 change。"""
+        import tempfile
+        with tempfile.TemporaryDirectory() as tmp:
+            yaml_path = os.path.join(tmp, "scenario.yaml")
+            with open(yaml_path, "w", encoding="utf-8") as f:
+                f.write("scenarios:\n  - scenario_id: S-legacy\n")
+            result = dispatch_mod._read_scenario_yaml(tmp)
+            self.assertIn("S-legacy", result)
 
 
 # ============================================================

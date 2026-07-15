@@ -156,15 +156,16 @@ def extract_design_verification_criteria(change_root: str, track: str) -> str:
     return "".join(result).rstrip()
 
 
-def _read_scenario_yaml(change_root: str) -> str:
-    """v3.5 新增：读取 .pg/changes/<change>/scenario.yaml 全文。
+def _read_scenario_yaml(change_root: str, filename: str = "scenario.yaml") -> str:
+    """v3.6: 读取 .pg/changes/<change>/<filename> 全文。
 
+    默认为 scenario.yaml（兼容旧 change），v3.6 起为 scenario-<track>.yaml。
     scenario.yaml 是 pg-propose 阶段生成，scenario-execute agent 的唯一输入。
     文件不存在时返回空字符串，scenario-execute agent 必须自己处理缺失场景。
     """
     if not change_root:
         return ""
-    scenario_path = os.path.join(change_root, "scenario.yaml")
+    scenario_path = os.path.join(change_root, filename)
     if not os.path.isfile(scenario_path):
         return ""
     try:
@@ -286,6 +287,11 @@ def build_ctx(
         _load_project_config_cached() or {}, target_agent,
     )
 
+    # v3.6: per-track scenario-<track>.yaml (兼容旧 scenario.yaml)
+    _scenario_filename = f"scenario-{track}.yaml"
+    if not os.path.isfile(os.path.join(change_root, _scenario_filename)):
+        _scenario_filename = "scenario.yaml"
+
     ctx: dict[str, Any] = {
         "_change": state.change,
         "id": track,
@@ -319,9 +325,9 @@ def build_ctx(
         "fix_cycle": cycle,
         "verify_report_path": "",
         "fix_report_filename": f"{track}-{phase}-fix-{cycle}.md",
-        # v3.5: scenario track 专用字段
-        "scenario_yaml_path": os.path.join(change_root, "scenario.yaml"),
-        "scenario_yaml_content": _read_scenario_yaml(change_root),
+        # v3.6: per-track scenario-<track>.yaml (兼容旧 scenario.yaml)
+        "scenario_yaml_path": os.path.join(change_root, _scenario_filename),
+        "scenario_yaml_content": _read_scenario_yaml(change_root, _scenario_filename),
         # fix-gate
         "gate_report_path": _gate_report_path,
         "gate_cycles": cycle,
