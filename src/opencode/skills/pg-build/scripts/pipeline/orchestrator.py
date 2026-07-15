@@ -310,8 +310,18 @@ class Orchestrator:
                 # v3: e2e track 独立类型，runner 走 e2e → fix-e2e → e2e 循环
                 track_types[tid] = "e2e"
             elif is_scenario:
-                # v3: scenario track 独立类型，runner 走 scenario → gate
+                # v3.6: scenario track 独立类型，runner 走 scenario-prepare → scenario-execute
+                # → [scenario-fix → scenario-execute]* 子 pipeline。
+                # 走自己专属的 phase_prompts.{scenario-prepare,scenario-execute}，
+                # 不在 standard SUB_PHASES（test/dev/review/verify/gate）里。
+                # 因此 standard 三个质量门均不应触发，并应在 final-gate 前置门控
+                # （_collect_missing_gate_assessments）中被豁免。
                 track_types[tid] = "scenario"
+                tracks[tid] = tracks[tid].replace(
+                    code_review_enabled=False,
+                    verify_enabled=False,
+                    gate_enabled=False,
+                )
 
         # 确定当前 stage
         first_stage = PipelineState.extract_stage(order[0]) if order else ""
@@ -890,8 +900,17 @@ class Orchestrator:
                 continue
             if self._is_simple_track(tid):
                 continue
+            # ── v3.6: scenario track 兜底豁免（即使 bootstrap 漏设 gate_enabled）──
+            if self._is_scenario_track(tid):
+                continue
             t = self.state.tracks.get(tid)
             if not t or t.status != "completed":
+                continue
+            # ── v3.6: 信任 TrackState.gate_enabled，gate 被 manifest 禁用 → 豁免 ──
+            # scenario track 的 bootstrap 显式设置 gate_enabled=False
+            # （与 simple track 对称），此处作为兜底防线，保证任何未来
+            # 新增的 track type 只要 gate_enabled=False 都被豁免。
+            if not t.gate_enabled:
                 continue
 
             # ── v2.7: 优先信任 snapshot 中已记录的 report_path ──
@@ -919,6 +938,17 @@ class Orchestrator:
         """判断 track 是否为 simple track（无需 gate-assessment）。"""
         track_types = getattr(self.state, "track_types", {}) or {}
         return track_types.get(track_id) == "simple"
+
+    def _is_scenario_track(self, track_id: str) -> bool:
+        """v3.6: 判断 track 是否为 scenario track（无需 gate-assessment）。
+
+        scenario track 走 scenario-prepare → scenario-execute → [scenario-fix → scenario-execute]*
+        子 pipeline，不在 standard SUB_PHASES 里。bootstrap 时已设置 gate_enabled=False，
+        此处作为兜底防线（defense in depth）：即使 bootstrap 漏设或 TrackState 被外部修改，
+        仍能通过 track_types 识别出 scenario 并豁免。
+        """
+        track_types = getattr(self.state, "track_types", {}) or {}
+        return track_types.get(track_id) == "scenario"
 
     def _auto_archive(self) -> dict[str, Any]:
         """调用 pg-archive.py 归档 change 目录 + git commit 归档。"""

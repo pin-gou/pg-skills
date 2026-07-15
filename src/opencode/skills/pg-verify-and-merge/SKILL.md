@@ -210,7 +210,13 @@ DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.
 
 # 切换到目标分支并以 squash 方式合并
 git checkout "$DEFAULT_BRANCH"
-git pull origin "$DEFAULT_BRANCH"
+
+# 处理本地 default_branch 与 origin 偏离（详见下方"本地 default_branch 偏离"小节）
+git pull --rebase origin "$DEFAULT_BRANCH" || {
+    echo "PULL_FAILED: 本地与 origin 偏离，请人工处理"
+    exit 1
+}
+
 git merge --squash --no-commit "origin/$CURRENT_BRANCH"
 
 if [ $? -ne 0 ]; then
@@ -238,6 +244,39 @@ fi
 ```
 
 **验证条件：** 无合并冲突。Phase 1 成功后，工作区处于模拟合并状态（squashed staged, not committed），`temp/merge-status.txt` 内容为 `MERGE_STATUS=CLEAN`。
+
+#### 本地 default_branch 与 origin 偏离
+
+`git pull origin "$DEFAULT_BRANCH"` 在本地分支已超前或分叉时会 fatal：
+
+```
+fatal: Need to specify how to reconcile divergent branches.
+```
+
+**处理策略**：
+
+1. **优先 `--rebase`**（`git pull --rebase origin "$DEFAULT_BRANCH"`）：
+   - 保持 history linear，便于 squash-merge 后的 commit 干净
+   - **推荐用于 pg-build 流程**（pg-build 自动产生的 `chore: auto-record` 系列 commit 不会污染 master 历史）
+2. **次选 `--no-rebase`**（merge 策略）：
+   - 会产生 merge commit，但保留完整本地历史
+   - 仅当 rebase 出现冲突时使用
+3. **绝不要 `--ff-only`**：
+   - 偏离场景下永远会失败，等于死锁
+
+**冲突处理**：
+
+rebase/merge 过程中若 default_branch 上有与 feature branch 冲突的提交：
+
+- rebase：按 git 提示解决后 `git rebase --continue`
+- merge：按 git 提示解决后 `git commit`（merge commit）
+
+常见冲突位置：
+- `execution-manifest.yaml`（pg-propose 自动生成）
+- `tasks.md`（tasks 标记更新）
+- `.pg/changes/<change>/2-build/pipeline.events`（pg-build 自动 append）
+
+**根因预防**：pg-build 完成后**不要**在 default_branch 上直接 commit，应保持工作区干净，pg-verify-and-merge 自然会 pull 一次到最新。
 
 **为什么用 `--squash` 而不是 `--no-ff`**：
 - 避免 feature branch 上的所有中间提交（特别是 `chore(<change>): auto-record ...` 系列与 `archive change ...`）逐条进 master 历史。
