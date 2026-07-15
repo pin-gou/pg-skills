@@ -98,8 +98,8 @@ class TestCodeViewSectionDynamic(unittest.TestCase):
         ])
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         json_out = json.loads(result.stdout)
-        # backend 5 + frontend 5 + scenario-test 3 + final-gate 1 = 14
-        self.assertEqual(json_out["section_count"], 14)
+        # backend 5 + frontend 5 + scenario-test 2 + final-gate 1 = 13
+        self.assertEqual(json_out["section_count"], 13)
         # 检查 review 在 sections 中出现 2 次
         cv_count = sum(1 for s in json_out["sections"] if s.get("sub") == "review")
         self.assertEqual(cv_count, 2)
@@ -116,8 +116,8 @@ class TestCodeViewSectionDynamic(unittest.TestCase):
         ])
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         json_out = json.loads(result.stdout)
-        # backend 4 + frontend 5 + scenario-test 3 + final-gate 1 = 13
-        self.assertEqual(json_out["section_count"], 13)
+        # backend 4 + frontend 5 + scenario-test 2 + final-gate 1 = 12
+        self.assertEqual(json_out["section_count"], 12)
         # review 只出现 1 次（frontend）
         cv_sections = [s for s in json_out["sections"] if s.get("sub") == "review"]
         self.assertEqual(len(cv_sections), 1)
@@ -167,8 +167,8 @@ class TestCodeViewSectionDynamic(unittest.TestCase):
         self.assertEqual(result.returncode, 0, msg=result.stderr)
         json_out = json.loads(result.stdout)
         ns = [s["n"] for s in json_out["sections"]]
-        # 1..14（backend 5 + frontend 5 + scenario-test 3 + final-gate 1）
-        self.assertEqual(ns, list(range(1, 15)))
+        # 1..13（backend 5 + frontend 5 + scenario-test 2 + final-gate 1）
+        self.assertEqual(ns, list(range(1, 14)))
         self.tearDown_extra()
 
 

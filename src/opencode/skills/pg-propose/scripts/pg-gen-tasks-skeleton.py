@@ -70,12 +70,10 @@ STANDARD_SUBS = [
 ]
 
 # v3.5: scenario track 专用的 sub 列表
-# scenario-prepare / scenario-execute / scenario-fix（scenario-fix 仅在 escalate 时物理存在，
-# 但 skeleton 始终生成 3 个 heading，让 LLM 在阶段二填充 body 时按需标注）
+# scenario-prepare / scenario-execute（scenario-fix 是子 pipeline，不出现在 tasks.md heading 中）
 SCENARIO_SUBS = [
     ("scenario-prepare", lambda stage_name: f"真机场景准备"),
     ("scenario-execute", lambda stage_name: f"真机场景执行"),
-    ("scenario-fix",     lambda stage_name: f"真机场景修复（仅 execute escalate 时存在）"),
 ]
 
 
