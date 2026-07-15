@@ -232,7 +232,7 @@ LLM **不直接写** execution-manifest.yaml，通过 CLI 工具基于 tasks.md 
 
 1. 读 `execution-manifest.yaml` 确认是否存在 scenario track（如 `real-integration` stage 中的 `scenario-test`）。
 
-2. 确认 design.md 中已包含 §Scenario 定义（每个 Scenario 含 `scenario_id` / `critical` / `given` / `when` / `then` / `evidence` 6 段；`and` cleanup 段可选）。
+2. scenario.yaml 是场景定义**唯一** SSOT。不需要在 design.md 中重复写 Scenario 定义。LLM 在阶段二 2b 生成 design.md 时，如果计划写 Scenario，应直接跳过——所有场景内容只写在 scenario.yaml 中。
 
 3. 生成 `.pg/changes/CHANGE_NAME/scenario.yaml`，严格遵循以下 schema（YAML 格式）：
 
