@@ -12,6 +12,8 @@ metadata:
 > **v4 起**，本 skill 从"双文档（review-decisions.yaml + review-notes.md）"架构简化为**单文档（review-notes.md）**架构。review-notes.md 同时承担"自审诊断"和"用户决策表"两个职责，markdown checkbox 作为状态指示。
 >
 > **v3 兼容**：仍能读取 v3 双文档格式（review-decisions.yaml + review-notes.md），旧变更可平滑迁移。
+>
+> **v3.7 增强**：本 skill 是 `pg-propose` 阶段四"4a 自动应用"分支的执行器——`pg-propose/scripts/pg-auto-refine-check.py` 检测到全推荐条件满足时，`pg-propose` 会自动调用本 skill 的"A. 全推荐场景"分支（第四步），无需用户手动触发。本 skill 的入口仍可独立调用以支持用户编辑 review-notes.md 后的二次 refine。
 
 ---
 

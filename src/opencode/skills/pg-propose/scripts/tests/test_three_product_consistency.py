@@ -273,9 +273,25 @@ class TestValidatorThreeProductConsistency(unittest.TestCase):
                 }],
             }],
         }
-        # scenario-scenario-test.yaml 存在
+        # v3.7 placeholder 校验: 必须含完整 scenario（不再接受空 scenarios: []）
         with open(os.path.join(self.change_dir, "scenario-scenario-test.yaml"), "w") as f:
-            f.write("scenarios: []\n")
+            f.write(
+                "scenarios:\n"
+                "  - scenario_id: S-test\n"
+                "    description: 测试\n"
+                "    given: ['已登录']\n"
+                "    when:\n"
+                "      - name: x\n"
+                "        method: GET\n"
+                "        url: /api/x\n"
+                "    then:\n"
+                "      - status_code == 200\n"
+                "    and:\n"
+                "      - name: cleanup\n"
+                "        action: HTTP DELETE\n"
+                "    evidence:\n"
+                "      - ./e.json\n"
+            )
         issues = _validator._validate_three_product_consistency(manifest, self.change_dir)
         self.assertEqual([], issues, f"unexpected issues: {issues}")
 

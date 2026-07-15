@@ -32,6 +32,22 @@ from pg_pipeline_common import (
     parse_tasks_sections,
 )
 
+# v3.7: 加载 pg-gen-scenario.py 以获取 placeholder 校验函数
+_PG_GEN_SCENARIO_PATH = os.path.join(_SCRIPT_DIR, "pg-gen-scenario.py")
+_spec = None
+try:
+    import importlib.util as _importlib_util
+    _spec = _importlib_util.spec_from_file_location("pg_gen_scenario_validator", _PG_GEN_SCENARIO_PATH)
+    if _spec is not None and _spec.loader is not None:
+        _pg_gen_scenario = _importlib_util.module_from_spec(_spec)
+        _spec.loader.exec_module(_pg_gen_scenario)
+    else:
+        _pg_gen_scenario = None
+except Exception as _e:
+    print(f"WARN: pg-gen-scenario.py 加载失败（跳过 placeholder 校验）: {_e}", file=sys.stderr)
+    _pg_gen_scenario = None
+
+
 MANIFEST_SCHEMA_PATH = os.path.join(_SCRIPT_DIR, "manifest.schema.json")
 
 
@@ -357,6 +373,33 @@ def _validate_three_product_consistency(manifest, change_or_path) -> list[tuple[
                 msg = (f"stages[{stage_idx}].tracks[{track_idx}] 是 enabled=false 的 scenario track "
                        f"({track_id}), 但 {expected_file} 存在 (会变成冗余产物)")
                 issues.append((code, msg))
+
+    # v3.7: placeholder 校验（仅对 enabled=true 的 track 对应的 yaml 文件）
+    if _pg_gen_scenario is not None:
+        for stage_idx, stage in enumerate(manifest.get("stages", [])):
+            for track_idx, track in enumerate(stage.get("tracks", [])):
+                if track.get("type") != "scenario":
+                    continue
+                if not track.get("enabled", False):
+                    continue
+                track_id = track.get("id", f"<track-{track_idx}>")
+                filename = f"scenario-{track_id}.yaml"
+                scenario_path = os.path.join(change_root, filename)
+                if not os.path.isfile(scenario_path):
+                    continue  # 已由 scenario_yaml_missing 报告
+                try:
+                    placeholder_issues = _pg_gen_scenario.check_scenario_file(scenario_path)
+                except Exception as e:
+                    placeholder_issues = [(
+                        "scenario_placeholder_unfilled",
+                        f"{filename} placeholder 校验异常: {e}"
+                    )]
+                for code, msg in placeholder_issues:
+                    prefixed = (
+                        f"stages[{stage_idx}].tracks[{track_idx}] "
+                        f"({track_id}) → {filename}: {msg}"
+                    )
+                    issues.append((code, prefixed))
 
     # 反向: 存在 scenario-*.yaml 但 manifest 无对应 scenario track
     expected_from_manifest = {
