@@ -1,29 +1,26 @@
 # scenario-prepare.yaml — sub=scenario-prepare 完整提示词
-# v3.5: scenario track 专用 phase。
-# scenario-prepare agent 按 track.modules 顺序用 invoke-hook 启动 backend/frontend/agent 各 role，
-# 每个 role 启动后做 health_check 验证就绪。任一 role 失败 → failed → workflow_failed。
+# v3.6: 重写为从 stage.environment.instances 动态读取所有 role+instance，
+# 按 project.yaml 定义的顺序串行启动，不再依赖 track.modules（scenario track 的 modules 为空）。
 
 prompt: |
   ### 场景准备（scenario-prepare）
 
-  本 phase 的目标是把 `track.modules` 列出的所有模块对应的 role 启动起来，
+  本 phase 的目标是把当前环境（{env_name}）下的所有 service instance 启动起来，
   达到真实环境就绪状态，供下一 phase (scenario-execute) 执行用户旅程。
 
-  ### 模块列表（来自 track.modules）
-
-  {modules}
+  当前环境的所有 instances 已在上方 `stage.environment.instances` 列出。
 
   ### 准备流程
 
-  对每个模块对应的 role，按以下顺序执行：
+  按 `stage.environment.instances` 中定义的 role 顺序，
+  对每个 role 的所有 instance 串行执行以下步骤：
 
-  1. 用 `invoke-hook --action start` 启动该 module 对应 role 的 instance
-     （role 与模块的映射规则：`backend` → `backend` role，`frontend` → `frontend` role，`agent` → `agent` role；
-      如果 environment 没有该 role 的实例定义，跳过该模块）
-
-  2. 等候 hook 内置的 `wait_for_completion`（start 脚本会等待端口就绪 + HTTP health probe）
-
+  1. 用 `invoke-hook --action start` 启动当前 role 的 instance
+  2. 等候 hook 内置的 `wait_for_completion`
   3. 调 `invoke-hook --action health_check` 二次验证
+  4. 记录该 instance 的启动结果
+
+  前一个 instance 完成后再启动下一个。
 
   ### invoke-hook 命令格式
 
@@ -37,16 +34,20 @@ prompt: |
     --action health_check --skill pg-build
   ```
 
+  ### ROLE / INSTANCE 来源
+
+  - ROLE：从上方 `stage.environment.hooks` 的顶层 key 选取（与 instances 的顶层 key 一一对应）
+  - INSTANCE：从 `stage.environment.instances.<ROLE>` 列表中选取 `name` 字段
+
   ### 失败判定
 
-  - 任一 role 的 start 或 health_check 退出码非 0 → record(scenario-prepare, "failed")
-  - summary 字段必须列出失败的 role 名 + log 路径
-  - **不允许部分通过**：所有声明的 module 对应 role 都必须就绪
-  - 任一失败 → workflow_failed，**不**进入 scenario-execute
+  - 任一 instance 的 start 或 health_check 退出码非 0 → record(scenario-prepare, "failed")
+  - **不允许部分通过**：所有 instance 都必须就绪
+  - 任一失败 → workflow_failed，不进入 scenario-execute
 
   ### 写盘要求
 
-  完成后用 `cat >` 写盘到 `2-build/{report_filename}`，含：
-  - 每个 module/role 的启动结果（PASS/FAIL）
-  - health_check 输出
-  - 失败 role 的日志路径（用于回溯）
+  完成后写盘到 `2-build/{report_filename}`，含：
+  - 每个 instance 的启动结果（PASS/FAIL）
+  - health_check 输出摘要
+  - 失败 instance 的日志路径

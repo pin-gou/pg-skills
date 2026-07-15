@@ -155,6 +155,12 @@ class TestEnvBlockInjection(unittest.TestCase):
         self.assertNotIn("stage.environment.instances", content)
         self.assertNotIn("运行时环境操作指令", content)
 
+    def test_scenario_prepare_injects_env_hooks(self):
+        content = render_dispatch("scenario-prepare", _ctx("scenario-prepare"))
+        self.assertIn("stage.environment.hooks", content)
+        self.assertIn("stage.environment.instances", content)
+        self.assertIn("运行时环境操作指令", content)
+
 
 class TestEnvBlockPosition(unittest.TestCase):
     """v2.2: 运行时环境操作指令紧跟 Stage 配置段（在 phase template 之前）。"""
