@@ -1,0 +1,107 @@
+# scenario-execute.yaml — sub=scenario-execute 完整提示词
+# v3.5: scenario track 专用 phase。
+# scenario-execute agent 读取 scenario.md（SSOT，**禁止重写**），按顺序执行每个 Scenario。
+# 每个 Scenario 必须含 Given/When/Then/And/Evidence 6 段，产出结构化 JSON 证据。
+
+prompt: |
+  ### 场景执行（scenario-execute）
+
+  本 phase 是 real-integration 的核心：从 `.pg/changes/{_change}/scenario.md` 读取每个 Scenario，
+  按顺序执行，产出结构化 JSON 证据。
+
+  ### SSOT：scenario.md
+
+  **禁止重写或修改 scenario.md**。scenario.md 由 pg-propose 阶段生成，是本 phase 的唯一输入。
+  如需修改场景，须通过 `pg-propose-refine` 流程回到 propose 阶段。
+
+  ### scenario.md 路径
+
+  `{scenario_md_path}`
+
+  ### Scenario 文件结构
+
+  ```yaml
+  scenarios:
+    - scenario_id: S-<unique-name>          # 必须全局唯一（如 S-create-vm-happy-path）
+      critical: true                        # true=禁止 SKIP；false=可记录 SKIPPED 后继续
+      description: 一句话描述验证目标
+      given:
+        - <前置条件 1>
+        - <前置条件 2>
+      when:
+        - name: <动作名>
+          method: <HTTP method | db query | ...>
+          url: <endpoint>                    # 完整 URL 或 SQL
+          body: {<payload>}                  # 可选
+          expect_status: <int>               # 期望响应码
+      then:
+        - status_code == <int>
+        - response.<field> matches <regex>
+      and:                                   # cleanup 步骤（无论成功失败都跑）
+        - name: <cleanup 名>
+          action: <HTTP DELETE | db DELETE | ...>
+      evidence:
+        - <curl 输出文件路径>
+        - <journalctl 片段路径>
+  ```
+
+  ### 执行流程
+
+  1. 读取 scenario.md，校验每个 Scenario 含 6 段（given / when / then / and / evidence / critical）
+     - 校验失败 → record(scenario-execute, "failed")（workflow_failed）
+     - 文件本身缺失 → record(scenario-execute, "failed")
+
+  2. 按 scenario_id 排序：**先 critical=true，后 critical=false**
+
+  3. 串行执行每个 Scenario：
+
+     - given 阶段：把环境调到 given 描述的状态（如调用 prepare-data API、设置 DB 行）
+     - when 阶段：执行动作，记录 request_id + 响应
+     - then 阶段：逐项断言；任一 FAIL → 该 Scenario 标记 fail
+     - and 阶段：无论成功失败都执行 cleanup（失败时也必须 cleanup，避免脏数据）
+
+  4. 关键规则：
+     - **critical=true Scenario FAIL** → 立即停止后续 Scenario（剩余全部 SKIPPED），record(scenario-execute, "escalate")
+     - **仅 critical=false Scenario FAIL** → 记录失败，继续后续 Scenario；全部跑完后视情况判定：
+       - 若存在 critical=true 全 PASS 且 failure 数 < 30% → record(scenario-execute, "completed")，summary 列出跳过/失败的非 critical Scenario
+       - 否则 record(scenario-execute, "escalate")
+
+  ### 结构化 JSON 证据
+
+  每个 Scenario 必须产出 JSON 块：
+
+  ```json
+  {{
+    "scenario_id": "S-xxx",
+    "critical": true,
+    "status": "pass|fail|skip",
+    "steps": [
+      {{"phase": "given", "result": "ok|skip"}},
+      {{"phase": "when", "result": "ok", "request_id": "<id>", "response_status": 200}},
+      {{"phase": "then", "result": "fail", "assertions": [{{"name": "status_code == 200", "actual": 500, "passed": false}}]}},
+      {{"phase": "and", "result": "ok", "cleanup_status": 204}}
+    ],
+    "request_ids": ["<id1>", "<id2>"],
+    "timestamps": {{"start": "ISO8601", "end": "ISO8601"}},
+    "cleanup_result": "ok"
+  }}
+  ```
+
+  ### 失败时 cleanup
+
+  当 Scenario 失败时，**必须**执行 `and` 表里的 cleanup，避免脏数据污染后续 Scenario。
+  cleanup 执行结果记录到 `cleanup_result` 字段。
+
+  ### 返回契约
+
+  按 prompt 模板 sub_agent_contract 块落盘 result.json。
+  - escalate 时 `tasks_updated` 必须含失败的 scenario_id 列表
+  - completed 时 `outputs` 必须含每个 Scenario 的 JSON 证据路径
+
+  ### 写盘要求
+
+  完成后用 `cat >` 写盘到 `2-build/{report_filename}`，含：
+  - 每个 Scenario 的 PASS/FAIL/SKIP 判定
+  - 结构化 JSON 证据（per Scenario block）
+  - cleanup 报告
+  - critical=true 失败列表（若 escalate）

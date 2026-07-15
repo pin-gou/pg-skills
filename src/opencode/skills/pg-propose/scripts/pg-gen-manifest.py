@@ -302,8 +302,14 @@ def build_manifest(change: str) -> dict:
 
         if track not in stage_tracks[stage]:
             raw_type = get_track_type(config, track)
-            track_cfg = tracks_cfg.get(track, {}) or {}
-            manifest_type = _resolve_manifest_track_type(raw_type, track_cfg)
+            track_cfg = config.get("tracks", {}).get(track, {})
+            # v3.5: scenario 类型保持为 "scenario"，不 fallback to standard/simple
+            if raw_type == "scenario":
+                manifest_type = "scenario"
+            elif raw_type == "track":
+                manifest_type = "standard"
+            else:
+                manifest_type = "simple"
             stage_tracks[stage][track] = {
                 "phases": {},
                 "all_noop": True,
@@ -323,7 +329,9 @@ def build_manifest(change: str) -> dict:
     for stage_name, tracks_dict in stage_tracks.items():
         manifest_tracks = []
         for track_id, track_info in tracks_dict.items():
-            if track_info["all_noop"]:
+            # v3.5: scenario track 即使 all_noop 也不跳过（常驻节点，必出现在 manifest 中）
+            is_scenario = (track_info["type"] == "scenario")
+            if track_info["all_noop"] and not is_scenario:
                 continue
 
             # v3: 计算 enabled / reason / on_conditions_eval / target_module
@@ -358,6 +366,17 @@ def build_manifest(change: str) -> dict:
                     elif isinstance(cmd, dict):
                         commands.append(cmd.get("cmd", ""))
                 entry["commands"] = commands
+            elif is_scenario:
+                # v3.5: scenario track phase_prompts
+                prompts = {}
+                scenario_sub_order = ("scenario-prepare", "scenario-execute")
+                for sub_name in scenario_sub_order:
+                    if sub_name in track_info["phases"]:
+                        prompts[sub_name] = {
+                            "tasks_md_section": track_info["phases"][sub_name]
+                        }
+                if prompts:
+                    entry["phase_prompts"] = prompts
             else:
                 # Standard / e2e / scenario track: include phase_prompts
                 # v3.x: tasks.md 实际生成的 sub 列表决定 phase_prompts

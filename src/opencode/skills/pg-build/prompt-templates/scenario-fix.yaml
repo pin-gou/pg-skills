@@ -1,0 +1,60 @@
+# scenario-fix.yaml — sub=scenario-fix 完整提示词
+# v3.5: scenario track 专用子 pipeline phase。
+# scenario-fix agent 修复 scenario-execute 失败的 Scenario。修复后由编排器自动 dispatch
+# scenario-execute 重跑。修复不需要 reproduce 测试场景——只需修代码，让单元测试通过。
+
+prompt: |
+  ### 场景修复（scenario-fix）
+
+  本 phase 是 scenario-execute escalate 触发的子 pipeline。
+  你的任务是定位失败根因、修改代码、让单元测试通过；**不要自己重跑 Scenario**——
+  修复完成后由编排器自动 dispatch scenario-execute 重跑。
+
+  ### 必读源报告（scenario-execute ESCALATE 派发）
+
+  - **源 scenario-execute 报告**: {verify_report_path}
+  - **失败 scenario_id 列表**: {failed_scenarios_inline}
+
+  请用 Read 工具逐字读取源报告。报告包含 scenario-execute agent 记录的
+  escalate 详情、每个失败 Scenario 的断言级结果、HTTP 响应/日志片段/stack trace 等完整上下文。
+
+  ### 修复范围
+
+  - fix_cycle: {fix_cycle}
+  - 只修复源 scenario-execute 报告中列出的失败 Scenario
+  - 不要引入超出修复范围的新功能
+
+  ### 模块路径约束
+
+  禁止编辑以下路径的文件：
+  - 不在 {module_roots} 路径下的文件
+  - scenario.md（SSOT，**禁止修改**；如需修改须走 pg-propose-refine）
+
+  ### 修复后必跑流程
+
+  1. 修改源码
+  2. 跑 {test_commands} 单元测试（必须通过）
+  3. 跑模块 lint（必须 0 警告）
+  4. 写修复报告到 `2-build/{fix_report_filename}`
+  5. 调 `pg-build-result` 落盘 result.json（status=completed 或 failed）
+
+  注意：不要自己重跑 scenario-execute。编排器会在收到 `scenario-fix, completed` 后自动
+  重新 dispatch scenario-execute，由它来判定 Scenario 是否真的通过。
+
+  ### 修复策略指引
+
+  修复时按以下顺序定位根因：
+
+  1. **业务逻辑错误**：对照 design.md / scenario.md 的 When/Then 描述，看是否漏处理某个分支
+  2. **API 契约错误**：检查 Controller 注解、DTO 字段、序列化顺序
+  3. **前后端契约错位**：检查前端 API 调用与后端响应字段命名/类型
+  4. **数据库/迁移问题**：检查 Flyway 脚本、Entity 字段映射
+  5. **环境/配置问题**：仅当 design.md 明确要求新配置时才改，否则不碰
+
+  ### 写盘要求
+
+  完成修复后，自行用 `cat >` 写盘到 `2-build/{fix_report_filename}`，含：
+  - 修复的 scenario_id 列表
+  - 修改的文件列表（含绝对路径 + 行号）
+  - 单元测试通过证据（命令输出最后 50 行）
+  - 修复策略说明（哪类根因 + 关键 diff）

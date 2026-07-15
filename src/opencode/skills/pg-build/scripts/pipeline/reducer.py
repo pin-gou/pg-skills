@@ -23,6 +23,9 @@ from pipeline.state import (
     SIMPLE_SUB,
     REVIEW_SUB,
     FIX_REVIEW_SUB,
+    SUB_SCENARIO_PREPARE,
+    SUB_SCENARIO_EXECUTE,
+    SUB_SCENARIO_FIX,
 )
 from pipeline.events import (
     FINAL_GATE_TRACK,
@@ -40,6 +43,8 @@ from pipeline.sub_pipeline import (
     create_fix_cycle,
     create_gate_fix_cycle,
     create_review_cycle,
+    create_scenario_fix_cycle,
+    SCENARIO_FIX_CYCLE,
     FIX_CYCLE_PHASES,
     GATE_FIX_CYCLE_PHASES,
     REVIEW_CYCLE_PHASES,
@@ -267,6 +272,12 @@ def reduce_state(
     # ─── fix-gate (子 pipeline 中的 fix-gate phase) ───
     if phase == "fix-gate":
         return _handle_fix_gate(state, record)
+
+    # ─── scenario track 专用 (v3.5) ───
+    # scenario-prepare / scenario-execute 是主 phase；
+    # scenario-fix 仅在子 pipeline 中走，但这里也作为兜底入口处理
+    if phase in (SUB_SCENARIO_PREPARE, SUB_SCENARIO_EXECUTE, SUB_SCENARIO_FIX):
+        return _handle_scenario(state, record)
 
     # ─── final-gate 优先于 gate ───
     # final-gate 的 phase 也是 "gate"，但 track 是 "final-gate"
@@ -771,6 +782,238 @@ def _handle_fix_gate(
 
 
 # ============================================================
+# 子 reducer：scenario（v3.5，scenario track 专用）
+# ============================================================
+#
+# 状态机：
+#
+#   scenario-prepare.completed  → dispatch scenario-execute
+#   scenario-prepare.failed     → workflow_failed（不进入 execute）
+#
+#   scenario-execute.completed  → scenario track 跑通（reuse PhaseState.fix_cycles
+#                                仅记录 execute 重跑次数；status=completed 即成功）
+#   scenario-execute.escalate  → 创建 scenario-fix 子 pipeline
+#                                （max_fix_retries 耗尽 → workflow_failed）
+#   scenario-execute.failed    → attempt++ 重试；超过 max_fail_retries → workflow_failed
+#
+#   scenario-fix.completed / failed  → 触发 scenario-execute 重跑（由 _sub_pipeline_advance）
+#
+
+
+def _handle_scenario(
+    state: PipelineState, record: PipelineRecord,
+) -> tuple[PipelineState, PipelineAction]:
+    """scenario track 的统一入口，按 phase 分派给子 handler。"""
+    if record.phase == SUB_SCENARIO_PREPARE:
+        return _handle_scenario_prepare(state, record)
+    if record.phase == SUB_SCENARIO_EXECUTE:
+        return _handle_scenario_execute(state, record)
+    if record.phase == SUB_SCENARIO_FIX:
+        return _handle_scenario_fix(state, record)
+    return _error_action(state, f"invalid scenario phase: {record.phase!r}")
+
+
+def _handle_scenario_prepare(
+    state: PipelineState, record: PipelineRecord,
+) -> tuple[PipelineState, PipelineAction]:
+    """scenario-prepare 处理：
+      - completed → dispatch scenario-execute
+      - failed    → workflow_failed（不进入 execute，prepare 失败时不能执行 Scenario）
+
+    prepare 阶段不允许内部重试（runner 的 prepare_env 自身的 max_fail_retries 已够用，
+    prepare agent 内部决定如何重试 invoke-hook）。这里只做最终判定。
+    """
+    track = record.track
+    if track not in state.tracks:
+        return _error_action(state, f"track not found: {track}")
+    t = state.tracks[track]
+
+    if record.status == STATUS_COMPLETED:
+        t = _update_phase(
+            t, SUB_SCENARIO_PREPARE, status="completed",
+            summary=record.summary, report_path=record.report_path,
+        )
+        new_state = state.replace(
+            tracks={**state.tracks, track: t},
+            current_track=track, current_phase=SUB_SCENARIO_EXECUTE,
+        )
+        return new_state, _dispatch_action(track, SUB_SCENARIO_EXECUTE)
+
+    elif record.status == STATUS_FAILED:
+        # prepare 失败 = workflow_failed
+        return _fail_action(
+            state, track, SUB_SCENARIO_PREPARE,
+            f"{track}:{SUB_SCENARIO_PREPARE} failed: {record.summary}",
+        )
+
+    return _error_action(state, f"invalid {SUB_SCENARIO_PREPARE} status: {record.status!r}")
+
+
+def _handle_scenario_execute(
+    state: PipelineState, record: PipelineRecord,
+) -> tuple[PipelineState, PipelineAction]:
+    """scenario-execute 处理：
+      - completed  → scenario track 完成（gate=all_pass 的语义由 stage 控制）
+      - escalate   → 触发 scenario-fix 子 pipeline（max_fix_retries 上限）
+      - failed     → 自身 attempt++ 重试
+
+    注意：与 verify 不同，scenario-execute 没有"verify 通关"语义，
+    execute.completed 即代表 scenario track 跑通（scenario 失败**不**走 gate 也不复用 accept_gap，
+    因为 scenario 真机联调失败的 accept gap 风险太大）。
+    """
+    track = record.track
+    if track not in state.tracks:
+        return _error_action(state, f"track not found: {track}")
+    t = state.tracks[track]
+
+    if record.status == STATUS_COMPLETED:
+        # execute 通过 → scenario track 跑通 → advance
+        exec_phase = t.phases.get(SUB_SCENARIO_EXECUTE, PhaseState())
+        exec_phase = exec_phase.replace(
+            status="completed",
+            cycles=(*exec_phase.cycles, {
+                "cycle": len(exec_phase.cycles) + 1,
+                "status": "completed",
+            }),
+        )
+        phases = dict(t.phases)
+        phases[SUB_SCENARIO_EXECUTE] = exec_phase
+        t = t.replace(phases=phases, status="completed")
+        new_state = state.replace(
+            tracks={**state.tracks, track: t},
+            current_track="", current_phase="",
+        )
+        return new_state, PipelineAction(kind="advance", track=track)
+
+    elif record.status == STATUS_ESCALATE:
+        # escalate 必填 tasks_updated（失败的 scenario_id 列表）
+        if not record.tasks_updated:
+            return _error_action(
+                state,
+                f"escalate requires tasks_updated with failed scenario IDs: "
+                f"{track}:{record.phase}",
+            )
+        exec_phase = t.phases.get(SUB_SCENARIO_EXECUTE, PhaseState())
+        scenario_fix_cycles = len(exec_phase.fix_cycles)
+        max_fix = t.max_fix_retries
+        if scenario_fix_cycles >= max_fix:
+            # 耗尽 → workflow_failed（不复用 accept_gap）
+            t = _update_phase(
+                t, SUB_SCENARIO_EXECUTE,
+                status="failed",
+                summary=(
+                    f"scenario-execute escalated {scenario_fix_cycles}/{max_fix} "
+                    f"times, fix exhausted"
+                ),
+                report_path=record.report_path,
+            )
+            new_state = state.replace(
+                tracks={**state.tracks, track: t},
+                current_track="", current_phase="",
+            )
+            return _fail_action(
+                state, track, SUB_SCENARIO_EXECUTE,
+                f"{track}:{SUB_SCENARIO_EXECUTE} fix cycles exhausted "
+                f"({scenario_fix_cycles}/{max_fix})",
+            )
+
+        # 创建 scenario-fix 子 pipeline
+        execute_report = exec_phase.report_path or record.report_path or ""
+        sp = create_scenario_fix_cycle(
+            track, scenario_fix_cycles + 1,
+            parent_report_path=execute_report,
+            escalation_reason=_resolve_escalation_reason(record),
+            failed_scenarios=list(record.tasks_updated),
+            created_at=_now_iso(),
+        )
+        exec_phase = exec_phase.replace(
+            fix_cycles=(*exec_phase.fix_cycles, {
+                "cycle": scenario_fix_cycles + 1,
+                "status": "pending",
+            }),
+        )
+        phases = dict(t.phases)
+        phases[SUB_SCENARIO_EXECUTE] = exec_phase
+        t = t.replace(phases=phases)
+        new_state = state.replace(
+            tracks={**state.tracks, track: t},
+            current_sub_pipeline=sp,
+            current_track=track, current_phase=sp.current_phase,
+        )
+        return new_state, _dispatch_action(track, sp.current_phase, cycle=sp.cycle)
+
+    elif record.status == STATUS_FAILED:
+        # execute 自身失败（非 escalate）→ 重试
+        old = t.phases.get(SUB_SCENARIO_EXECUTE, PhaseState())
+        attempt = (old.attempt or 0) + 1
+        max_retries = t.max_fail_retries
+        if attempt > max_retries:
+            return _fail_action(
+                state, track, SUB_SCENARIO_EXECUTE,
+                f"{track}:{SUB_SCENARIO_EXECUTE} failed after {max_retries} attempts",
+            )
+        t = _update_phase(
+            t, SUB_SCENARIO_EXECUTE, status="pending", attempt=attempt,
+            summary=record.summary,
+        )
+        new_state = state.replace(
+            tracks={**state.tracks, track: t},
+            current_track=track, current_phase=SUB_SCENARIO_EXECUTE,
+        )
+        return new_state, _dispatch_action(track, SUB_SCENARIO_EXECUTE, attempt=attempt)
+
+    return _error_action(state, f"invalid {SUB_SCENARIO_EXECUTE} status: {record.status!r}")
+
+
+def _handle_scenario_fix(
+    state: PipelineState, record: PipelineRecord,
+) -> tuple[PipelineState, PipelineAction]:
+    """scenario-fix 处理（scenario-fix 子 pipeline 当前 phase）：
+      - completed / failed → 通过 _sub_pipeline_advance 触发 scenario-execute 重跑
+                              （即使 fix 自身失败也允许重跑，让 verify 重新判定）
+
+    与 _handle_fix 区别：scenario-fix 没有 max_retries 概念（max_fix_retries 由
+    主 pipeline 的 scenario-execute 处理器限制），fix 失败直接回到 execute。
+    """
+    track = record.track
+    if track not in state.tracks:
+        return _error_action(state, f"track not found: {track}")
+    t = state.tracks[track]
+
+    if record.status == STATUS_COMPLETED:
+        exec_phase = t.phases.get(SUB_SCENARIO_EXECUTE, PhaseState())
+        fix_cycles = list(exec_phase.fix_cycles)
+        if fix_cycles:
+            last = dict(fix_cycles[-1])
+            last["status"] = "completed"
+            fix_cycles[-1] = last
+        exec_phase = exec_phase.replace(fix_cycles=tuple(fix_cycles))
+        phases = dict(t.phases)
+        phases[SUB_SCENARIO_EXECUTE] = exec_phase
+        t = t.replace(phases=phases)
+        new_state = state.replace(tracks={**state.tracks, track: t})
+        return _sub_pipeline_advance(new_state, sp=state.current_sub_pipeline)
+
+    elif record.status == STATUS_FAILED:
+        # fix 失败：不重试 fix 自身，直接回到 execute（让 execute 重新判定；
+        # 仍受主 pipeline 的 max_fix_retries 约束）
+        exec_phase = t.phases.get(SUB_SCENARIO_EXECUTE, PhaseState())
+        fix_cycles = list(exec_phase.fix_cycles)
+        if fix_cycles:
+            last = dict(fix_cycles[-1])
+            last["status"] = "failed"
+            fix_cycles[-1] = last
+        exec_phase = exec_phase.replace(fix_cycles=tuple(fix_cycles))
+        phases = dict(t.phases)
+        phases[SUB_SCENARIO_EXECUTE] = exec_phase
+        t = t.replace(phases=phases)
+        new_state = state.replace(tracks={**state.tracks, track: t})
+        return _sub_pipeline_advance(new_state, sp=state.current_sub_pipeline)
+
+    return _error_action(state, f"invalid {SUB_SCENARIO_FIX} status: {record.status!r}")
+
+
+# ============================================================
 # 子 reducer：gate
 # ============================================================
 
@@ -910,6 +1153,9 @@ def _handle_sub_pipeline_record(
     elif record.phase == "gate":
         # gate-fix 子 pipeline 中的 gate
         return _handle_sub_gate(state, record, sp)
+    elif record.phase == SUB_SCENARIO_FIX:
+        # scenario-fix 子 pipeline 中的 scenario-fix（由 _handle_scenario_fix 处理）
+        return _handle_scenario_fix(state, record)
     return _error_action(state, f"unexpected sub-pipeline phase: {record.phase}")
 
 
@@ -1170,6 +1416,15 @@ def _sub_pipeline_advance(
                 current_phase="verify",
             )
             return new_state, _dispatch_action(track, "verify")
+
+        elif parent_phase == SUB_SCENARIO_EXECUTE:
+            # v3.5: scenario-fix 子 pipeline 完成 → 触发 scenario-execute 重跑
+            new_state = state.replace(
+                current_sub_pipeline=None,
+                current_track=track,
+                current_phase=SUB_SCENARIO_EXECUTE,
+            )
+            return new_state, _dispatch_action(track, SUB_SCENARIO_EXECUTE)
 
         return state, PipelineAction(kind="advance", track=track)
 

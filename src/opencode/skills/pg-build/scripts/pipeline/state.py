@@ -21,6 +21,15 @@ SIMPLE_SUB = "simple"
 REVIEW_SUB = "review"
 FIX_REVIEW_SUB = "fix-review"
 
+# v3.5: scenario track（type=scenario）专用的 phase 与子 pipeline 常量
+# scenario track 不走 TDVG，走 prepare → execute → (fix → execute)* 循环
+SUB_SCENARIO_PREPARE = "scenario-prepare"
+SUB_SCENARIO_EXECUTE = "scenario-execute"
+SUB_SCENARIO_FIX = "scenario-fix"
+
+SCENARIO_PHASES: tuple[str, ...] = (SUB_SCENARIO_PREPARE, SUB_SCENARIO_EXECUTE)
+SCENARIO_FIX_CYCLE_PHASES: tuple[str, ...] = (SUB_SCENARIO_FIX,)
+
 
 @dataclass(frozen=True)
 class PhaseState:

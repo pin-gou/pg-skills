@@ -60,7 +60,6 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 ### Stage 配置
 
 - `stage.name` — 阶段名称（e.g. `dev-backend-and-agent`）
-- `stage.test_key` — 当前执行的关键测试类型（unit / integration / e2e）
 - `stage.gate` — 门控策略（all_pass / any_pass / no_gate）
 - `stage.environment.required` — bool；config 层声明该 stage 是否需要环境准备
 - `stage.environment.prepare.status` — runner 派遣前 prepare_env 执行状态（`ok` / `error` / `skipped`）

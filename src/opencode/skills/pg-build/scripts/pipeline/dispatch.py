@@ -31,6 +31,10 @@ PHASE_AGENTS: dict[str, str] = {
     "fix":      "pg-build/fix",
     "fix-gate": "pg-build/fix-gate",
     "simple":   "pg-build/simple",
+    # v3.5: scenario track 专用
+    "scenario-prepare": "pg-build/scenario-prepare",
+    "scenario-execute": "pg-build/scenario-execute",
+    "scenario-fix":     "pg-build/scenario-fix",
 }
 FINAL_GATE_AGENT = "pg-build/gate"
 
@@ -43,6 +47,10 @@ PHASE_ALLOWED_STATUSES: dict[str, str] = {
     "fix": "completed | failed",
     "fix-gate": "completed | failed",
     "gate": "pass | fail",
+    # v3.5: scenario track 专用
+    "scenario-prepare": "completed | failed",
+    "scenario-execute": "completed | escalate | failed",
+    "scenario-fix":     "completed | failed",
 }
 
 _SEQ_COUNTERS: dict[str, int] = {}
@@ -146,6 +154,24 @@ def extract_design_verification_criteria(change_root: str, track: str) -> str:
             result.append(line)
 
     return "".join(result).rstrip()
+
+
+def _read_scenario_md(change_root: str) -> str:
+    """v3.5 新增：读取 .pg/changes/<change>/scenario.md 全文。
+
+    scenario.md 是 pg-propose 阶段生成，scenario-execute agent 的唯一输入。
+    文件不存在时返回空字符串，scenario-execute agent 必须自己处理缺失场景。
+    """
+    if not change_root:
+        return ""
+    scenario_path = os.path.join(change_root, "scenario.md")
+    if not os.path.isfile(scenario_path):
+        return ""
+    try:
+        with open(scenario_path, encoding="utf-8") as f:
+            return f.read()
+    except Exception:
+        return ""
 
 
 def build_ctx(
@@ -271,7 +297,6 @@ def build_ctx(
         "max_fix_retries": t.max_fix_retries,
         # stage
         "stage_name": track.rsplit(".", 1)[0] if "." in track else "dev",
-        "test_key": "unit",
         "gate": "all_pass",
         "env_required": True,
         "env_name": lazy_env_name,
@@ -294,6 +319,9 @@ def build_ctx(
         "fix_cycle": cycle,
         "verify_report_path": "",
         "fix_report_filename": f"{track}-{phase}-fix-{cycle}.md",
+        # v3.5: scenario track 专用字段
+        "scenario_md_path": os.path.join(change_root, "scenario.md"),
+        "scenario_md_content": _read_scenario_md(change_root),
         # fix-gate
         "gate_report_path": _gate_report_path,
         "gate_cycles": cycle,

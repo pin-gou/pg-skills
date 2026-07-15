@@ -147,18 +147,13 @@ def get_pipeline_order(config, change=None):
 
 
 def get_track_type(config, item):
-    """Classify an order item as 'track' (TDVG sequence) or 'phase' (direct execution).
+    """Classify an order item as 'track' (TDVG sequence), 'phase' (direct execution),
+    or 'scenario' (prepare → execute → fix cycle).
 
-    'phase' is reserved for items whose commands the runner dispatches
-    without going through the TDVG sub-agent sequence. Two kinds:
-
-      1. Environment lifecycle hooks: prepare_env / clean_env (handled by
-         environments.<env>.prepare_env / clean_env scripts).
-      2. Simple tracks: tracks.<id>.type == "simple" — runner dispatches
-         the pg-build/simple sub-agent to execute tracks.<id>.commands.
-
-    Standard tracks always go through the TDVG sequence (test → dev →
-    verify → gate).
+    Return values:
+      - 'track': standard TDVG sequence (test → dev → review → verify → gate)
+      - 'phase': runner dispatches the pg-build/simple sub-agent to execute commands
+      - 'scenario' (v3.5): scenario-prepare → scenario-execute → (scenario-fix → scenario-execute)*
 
     The `item` argument may be either a bare track id (e.g. "openapi-gen")
     or a qualified item id (e.g. "dev.openapi-gen", as used by
@@ -171,8 +166,11 @@ def get_track_type(config, item):
     track_id = item if item in tracks else bare
     if track_id in tracks:
         track_cfg = tracks[track_id] or {}
-        if track_cfg.get("type") == "simple":
+        t = track_cfg.get("type", "standard")
+        if t == "simple":
             return "phase"
+        elif t == "scenario":
+            return "scenario"
         return "track"
     return "track"
 

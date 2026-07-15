@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import os
+import json
+import shutil
 import sys
 import tempfile
 import unittest
@@ -416,6 +418,256 @@ class TestIntegrationSimpleTrack(unittest.TestCase):
         r = self.orch.record("completed", summary="proto-gen commands done")
         self.assertIn("dispatch_file", r,
                       "simple track 的 record 应包含 dispatch_file")
+
+
+class TestIntegrationScenarioTrack(unittest.TestCase):
+    """v3.5 新增：scenario track 端到端（无服务 mock）。
+
+    不启实际 backend/frontend/agent（避免环境依赖）；
+    通过 mock result.json 落盘绕过 v2.4 强制落盘校验。
+    """
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp()
+        self.change_root = os.path.join(self.tmp, "test-change")
+        os.makedirs(os.path.join(self.change_root, "2-build"), exist_ok=True)
+        with open(os.path.join(self.change_root, "scenario.md"), "w") as f:
+            f.write("scenarios:\n  - scenario_id: S-mock\n    critical: true\n")
+        state = PipelineState(
+            change="test-change",
+            pipeline_order=("real-integration.scenario-test",),
+            track_types={"real-integration.scenario-test": "scenario"},
+            status="running",
+            tracks={
+                "real-integration.scenario-test": TrackState(
+                    track_id="real-integration.scenario-test",
+                    bare="scenario-test",
+                    modules=("backend", "frontend", "agent"),
+                    max_fix_retries=3,
+                    code_review_enabled=False,
+                    verify_enabled=False,
+                    gate_enabled=False,
+                ),
+            },
+        )
+        save_snapshot(self.tmp, state)
+        self.orch = Orchestrator("test-change")
+        self.orch.change_root = self.tmp
+        self.orch.state = state
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_mock_result(self) -> None:
+        """为当前 track/phase 写占位 result.json（绕过 v2.4 强制落盘校验）。"""
+        track = self.orch.state.current_track
+        phase = self.orch.state.current_phase
+        if not track or not phase:
+            return
+        from pipeline.orchestrator import _derive_result_path
+        path = _derive_result_path(self.orch.state, track, phase)
+        if path:
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            with open(path, "w") as f:
+                json.dump({"status": "placeholder"}, f)
+
+    def _next_dispatch(self) -> dict:
+        """next() 并立即创建 mock result.json。"""
+        action = self.orch.next()
+        erp = action.get("expected_result_path")
+        if erp:
+            os.makedirs(os.path.dirname(erp), exist_ok=True)
+            with open(erp, "w") as f:
+                json.dump({"status": "placeholder"}, f)
+        return action
+
+    def _record(self, status, **kwargs):
+        """Mock-friendly record：先写 result.json 占位，再走 record。"""
+        self._write_mock_result()
+        return self.orch.record(status, **kwargs)
+
+    def test_next_pending_dispatches_scenario_prepare(self):
+        action = self._next_dispatch()
+        self.assertEqual(action.get("action"), "dispatch")
+        self.assertEqual(action.get("sub"), "scenario-prepare")
+        self.assertEqual(action.get("item"), "real-integration.scenario-test")
+        self.assertEqual(action.get("agent"), "pg-build/scenario-prepare")
+        self.assertTrue(os.path.isfile(action["dispatch_file"]))
+        basename = os.path.basename(action["dispatch_file"])
+        self.assertIn("scenario-prepare-dispatch", basename)
+        self.assertIn("expected_result_path", action)
+        self.assertIn("scenario-prepare-result", action["expected_result_path"])
+
+    def test_prepare_completed_dispatches_scenario_execute(self):
+        self._next_dispatch()
+        r = self._record(
+            "completed",
+            summary="all roles ready",
+            report_path=self._touch("/tmp/prepare.md"),
+            outputs="/tmp/prepare.log",
+        )
+        self.assertEqual(r.get("action"), "dispatch")
+        self.assertEqual(r.get("sub"), "scenario-execute")
+        self.assertTrue(os.path.isfile(r["dispatch_file"]))
+        self.assertIn("scenario-execute-dispatch", os.path.basename(r["dispatch_file"]))
+
+    def test_execute_completed_track_done(self):
+        """scenario-execute.completed → reducer 返回 advance；state 应推进到 track.completed。"""
+        from pipeline.reducer import reduce_state
+        from pipeline.events import PipelineRecord, STATUS_COMPLETED
+        from pipeline.state import SUB_SCENARIO_PREPARE, SUB_SCENARIO_EXECUTE
+
+        # 跳过 orchestrator 的 final-gate retry：直接构造 state 后调 reducer
+        state = self.orch.state
+        # 模拟 prepare 已完成
+        track = state.tracks["real-integration.scenario-test"]
+        from pipeline.state import PhaseState
+        track = track.replace(
+            phases={
+                SUB_SCENARIO_PREPARE: PhaseState(status="completed"),
+                SUB_SCENARIO_EXECUTE: PhaseState(status="running", attempt=1),
+            },
+        )
+        state = state.replace(
+            tracks={**state.tracks, "real-integration.scenario-test": track},
+            current_phase=SUB_SCENARIO_EXECUTE,
+        )
+
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_EXECUTE,
+            status=STATUS_COMPLETED,
+            summary="all scenarios passed",
+            report_path=self._touch("/tmp/exec.md"),
+        )
+        new_state, action = reduce_state(state, record)
+        self.assertEqual(action.kind, "advance")
+        self.assertEqual(
+            new_state.tracks["real-integration.scenario-test"].status,
+            "completed",
+        )
+        self.assertEqual(
+            new_state.tracks["real-integration.scenario-test"]
+            .phases[SUB_SCENARIO_EXECUTE].status,
+            "completed",
+        )
+
+    def test_execute_escalate_dispatches_scenario_fix(self):
+        self._next_dispatch()
+        self._record("completed", summary="ready", report_path=self._touch("/tmp/p.md"))
+        self._next_dispatch()  # dispatch scenario-execute
+        r = self._record(
+            "escalate",
+            summary="S-mock failed",
+            tasks_updated=["S-mock"],
+            report_path=self._touch("/tmp/exec.md"),
+        )
+        self.assertEqual(r.get("action"), "dispatch")
+        self.assertEqual(r.get("sub"), "scenario-fix")
+        self.assertTrue(os.path.isfile(r["dispatch_file"]))
+        self.assertIn("scenario-fix-dispatch", os.path.basename(r["dispatch_file"]))
+        t = self.orch.state.tracks["real-integration.scenario-test"]
+        self.assertEqual(len(t.phases["scenario-execute"].fix_cycles), 1)
+
+    def test_fix_completed_returns_to_scenario_execute(self):
+        self._next_dispatch()
+        self._record("completed", summary="ready", report_path=self._touch("/tmp/p.md"))
+        self._next_dispatch()  # dispatch scenario-execute
+        self._record(
+            "escalate",
+            summary="S-mock failed",
+            tasks_updated=["S-mock"],
+            report_path=self._touch("/tmp/exec.md"),
+        )
+        sp = self.orch.state.current_sub_pipeline
+        self.assertIsNotNone(sp)
+        self.assertEqual(sp.kind, "scenario-fix-cycle")
+        self._next_dispatch()  # dispatch scenario-fix
+        r = self._record(
+            "completed",
+            summary="fixed",
+            tasks_updated=["S-mock"],
+            report_path=self._touch("/tmp/fix.md"),
+            outputs=self._touch("/tmp/fix-summary.md"),
+        )
+        self.assertEqual(r.get("action"), "dispatch")
+        self.assertEqual(r.get("sub"), "scenario-execute")
+        self.assertIsNone(self.orch.state.current_sub_pipeline)
+        t = self.orch.state.tracks["real-integration.scenario-test"]
+        fix_cycles = t.phases["scenario-execute"].fix_cycles
+        self.assertEqual(len(fix_cycles), 1)
+        self.assertEqual(fix_cycles[-1]["status"], "completed")
+
+    def test_execute_escalate_no_tasks_updated_error(self):
+        self._next_dispatch()
+        self._record("completed", summary="ready", report_path=self._touch("/tmp/p.md"))
+        self._next_dispatch()  # dispatch scenario-execute
+        r = self._record(
+            "escalate",
+            summary="some summary",
+            report_path=self._touch("/tmp/exec.md"),
+        )
+        # tasks_updated 缺省 → sub_agent_contract 或 reducer 校验失败（任一即可）
+        self.assertEqual(r.get("action"), "error")
+        reason = r.get("reason", "").lower()
+        self.assertTrue(
+            "tasks_updated" in reason or "tasks-updated" in reason,
+            f"expected tasks_updated in reason, got {r.get('reason')!r}",
+        )
+
+    def test_prepare_failed_workflow_failed(self):
+        self._next_dispatch()
+        r = self._record(
+            "failed",
+            summary="backend health_check timed out",
+            report_path=self._touch("/tmp/prepare.md"),
+        )
+        self.assertEqual(r.get("action"), "workflow_failed")
+        self.assertIn("scenario-prepare", r.get("reason", ""))
+        self.assertTrue(r.get("fatal"))
+
+    def test_execute_escalate_exhausted_workflow_failed(self):
+        """max_fix_retries=1：第 1 次 escalate → fix；第 2 次 escalate → workflow_failed。"""
+        state = self.orch.state.replace(
+            tracks={
+                **self.orch.state.tracks,
+                "real-integration.scenario-test": self.orch.state.tracks[
+                    "real-integration.scenario-test"
+                ].replace(max_fix_retries=1),
+            },
+        )
+        self.orch.state = state
+        self._next_dispatch()
+        self._record("completed", summary="ready", report_path=self._touch("/tmp/p.md"))
+        self._next_dispatch()  # dispatch execute
+        # 第一次 escalate + fix（允许的 1 次 fix cycle）
+        self._record(
+            "escalate", summary="S-mock failed",
+            tasks_updated=["S-mock"], report_path=self._touch("/tmp/exec1.md"),
+        )
+        self._next_dispatch()  # dispatch fix
+        self._record(
+            "completed", summary="fixed",
+            tasks_updated=["S-mock"], report_path=self._touch("/tmp/fix.md"),
+            outputs=self._touch("/tmp/fix.md"),
+        )
+        self._next_dispatch()  # dispatch execute (re-run)
+        # 第二次 escalate → max_fix_retries=1 已耗尽 → workflow_failed
+        r = self._record(
+            "escalate", summary="S-mock failed again",
+            tasks_updated=["S-mock"], report_path=self._touch("/tmp/exec2.md"),
+        )
+        self.assertEqual(r.get("action"), "workflow_failed")
+        self.assertIn("exhausted", r.get("reason", ""))
+        self.assertTrue(r.get("fatal"))
+
+    @staticmethod
+    def _touch(path: str) -> str:
+        """创建空文件（满足 validate_record_args 的 report_required）。"""
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "w") as f:
+            f.write("# mock\n")
+        return path
 
 
 if __name__ == "__main__":

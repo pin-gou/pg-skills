@@ -222,6 +222,63 @@ LLM **不直接写** execution-manifest.yaml，通过 CLI 工具基于 tasks.md 
 
 **产物依赖关系**：manifest 依赖 tasks.md（heading 格式 + 章节完整性），在 2e 完成后方可调用。
 
+### 2f. 条件生成 scenario.md（v3.5+）
+
+更新 TodoWrite 第 7.5 项。
+
+**触发条件**：仅当 `execution-manifest.yaml` 中包含 `type: scenario` 的 track 时执行。
+
+**步骤**：
+
+1. 读 `execution-manifest.yaml` 确认是否存在 scenario track（如 `real-integration` stage 中的 `scenario-test`）。
+
+2. 确认 design.md 中已包含 §Scenario 定义（每个 Scenario 含 `scenario_id` / `critical` / `given` / `when` / `then` / `evidence` 6 段；`and` cleanup 段可选）。
+
+3. 生成 `.pg/changes/CHANGE_NAME/scenario.md`，严格遵循以下 schema（YAML 格式）：
+
+```yaml
+scenarios:
+  - scenario_id: S-<unique-name>          # 全局唯一，命名风格 S-<动词>-<对象>-<结果>
+    critical: true                        # true=禁止 SKIP；false=可记录 SKIPPED 后继续
+    description: <一句话描述验证目标>
+    given:
+      - <前置条件 1>
+      - <前置条件 2>
+    when:
+      - name: <动作名>
+        method: <HTTP method>
+        url: <endpoint>
+        body: <payload>                    # 可选
+        expect_status: <int>
+    then:
+      - status_code == <int>
+      - response.<field> matches <regex>
+    and:                                   # cleanup，可选
+      - name: <cleanup 名>
+        action: <HTTP DELETE>
+    evidence:
+      - <curl 输出文件路径>
+```
+
+**Scenarios 编排规则**：
+- `critical: true` 的 Scenario 排在 `critical: false` 之前
+- 每个 Scenario 含 6 段（given / when / then / and / evidence / critical）
+- number of Scenarios = 1-5 个（超出后提示用户拆分）
+- 生成后必须在 `tasks.md` 的 `scenario-execute` 章节步骤组 1 中确认：
+  `- [ ] <N>.1 确认 .pg/changes/<change>/scenario.md 存在且每个 Scenario 含 6 段`
+
+4. 写盘命令：
+```bash
+cat > .pg/changes/CHANGE_NAME/scenario.md << 'EOF'
+...scenario.md content...
+EOF
+```
+
+5. 校验文件存在：
+```bash
+ls -la .pg/changes/CHANGE_NAME/scenario.md
+```
+
 ---
 
 ## 阶段三：自审（内联自 pg-propose-refine）
@@ -324,14 +381,63 @@ review-notes.md 必含段：
 
 ## 产物清单（硬约束）
 
-每个 change 在 `.pg/changes/<change>/` 下必须生成**且仅生成**以下 4 个产物文件：
+每个 change 在 `.pg/changes/<change>/` 下**至少生成**以下 5 个产物文件（前 4 个 + 条件性的 scenario.md）：
 
-| 产物 | 写入位置 | 何时生成 |
-|------|---------|---------|
-| `proposal.md` | `.pg/changes/<change>/proposal.md` | 阶段 2a |
-| `design.md` | `.pg/changes/<change>/design.md` | 阶段 2b |
-| `execution-manifest.yaml` | `.pg/changes/<change>/execution-manifest.yaml` | 阶段 2d（含 `stages[i].environment` 字段） |
-| `tasks.md` | `.pg/changes/<change>/tasks.md` | 阶段 2d |
+| 产物 | 写入位置 | 何时生成 | 必填 |
+|------|---------|---------|------|
+| `proposal.md` | `.pg/changes/<change>/proposal.md` | 阶段 2a | ✅ 必填 |
+| `design.md` | `.pg/changes/<change>/design.md` | 阶段 2b | ✅ 必填 |
+| `execution-manifest.yaml` | `.pg/changes/<change>/execution-manifest.yaml` | 阶段 2d（含 `stages[i].environment` 字段） | ✅ 必填 |
+| `tasks.md` | `.pg/changes/<change>/tasks.md` | 阶段 2d | ✅ 必填 |
+| `scenario.md` | `.pg/changes/<change>/scenario.md` | 阶段 2f（仅当 `execution-manifest.yaml` 含 `type: scenario` 的 track） | ⚠️ 条件必填 |
+
+### scenario.md 生成指引（v3.5+，仅当 scenario track 启用）
+
+**SSOT**：scenario.md 是 scenario-execute agent 的唯一输入，**禁止** scenario-execute agent 重写或修改。
+修改走 `pg-propose-refine` 流程回到 propose 阶段。
+
+**生成路径**：阶段 2d 在生成 `tasks.md` 后，**同时**写盘 `.pg/changes/<change>/scenario.md`。
+
+**schema**（YAML）：
+
+```yaml
+scenarios:
+  - scenario_id: S-<unique-name>          # 全局唯一，命名风格 S-<动词>-<对象>-<结果>
+    critical: true                        # true=禁止 SKIP；false=可记录 SKIPPED 后继续
+    description: <一句话描述验证目标>
+    given:
+      - <前置条件 1>
+      - <前置条件 2>
+    when:
+      - name: <动作名>
+        method: <HTTP method | db query>
+        url: <endpoint 或 SQL>
+        body: <payload>                    # 可选
+        expect_status: <int>               # 期望响应码
+    then:
+      - status_code == <int>
+      - response.<field> matches <regex>
+      - response.<field> == <literal>
+    and:                                   # cleanup，可选
+      - name: <cleanup 名>
+        action: <HTTP DELETE | db DELETE>
+    evidence:
+      - <curl 输出文件路径>
+      - <journalctl 片段路径>
+```
+
+**Scenario 编排规则**：
+
+1. **顺序写**：所有 `critical: true` Scenario 排在 `critical: false` 之前
+2. **每个 Scenario 含 6 段**（given / when / then / and / evidence / critical）
+3. **`and` cleanup 段必备**：每个 Scenario 都含 `and`，避免失败时脏数据污染
+4. **Scenario 数量**：1-5 个；超出后提示用户拆分（避免单次 Phase 不可控超时）
+
+**生成完成后必须做**：
+
+- `cat > .pg/changes/<change>/scenario.md` 写盘
+- 在 `tasks.md` 的 real-integration.scenario-test:scenario-execute 章节**步骤组 1** 加一行 checkbox：
+  `- [ ] <N>.1 确认 .pg/changes/<change>/scenario.md 存在且每个 Scenario 含 6 段`
 
 **严禁生成**以下文件（v1 遗留物，pg-build 不再读取）：
 

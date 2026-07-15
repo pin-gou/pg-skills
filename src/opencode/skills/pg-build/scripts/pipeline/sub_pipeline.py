@@ -14,11 +14,15 @@ from typing import Any
 FIX_CYCLE = "fix-cycle"       # verify escalate → fix → verify
 GATE_FIX_CYCLE = "gate-fix-cycle"  # gate fail → fix-gate → verify → gate
 REVIEW_CYCLE = "review-cycle"  # review escalate → fix-review → review
+# v3.5: scenario track 专用子 pipeline
+# scenario-execute escalate → scenario-fix → scenario-execute(重跑)
+SCENARIO_FIX_CYCLE = "scenario-fix-cycle"
 
 # 各子 pipeline 类型的 phase 序列
 FIX_CYCLE_PHASES: tuple[str, ...] = ("fix", "verify")
 GATE_FIX_CYCLE_PHASES: tuple[str, ...] = ("fix-gate", "verify", "gate")
 REVIEW_CYCLE_PHASES: tuple[str, ...] = ("fix-review", "review")
+SCENARIO_FIX_CYCLE_PHASES: tuple[str, ...] = ("scenario-fix",)
 
 
 @dataclass(frozen=True)
@@ -223,5 +227,41 @@ def create_review_cycle(
         parent_report_path=parent_report_path,
         escalation_reason=escalation_reason,
         failed_v_tasks=tuple(failed_v_tasks),
+        created_at=created_at,
+    )
+
+
+def create_scenario_fix_cycle(
+    track: str,
+    cycle: int,
+    *,
+    parent_report_path: str = "",
+    escalation_reason: str = "",
+    failed_scenarios: tuple[str, ...] | list[str] = (),
+    created_at: str = "",
+) -> SubPipeline:
+    """v3.5 新增：scenario-fix 子 pipeline（scenario-execute escalate 时调用）。
+
+    唯一区别于其他 fix 子 pipeline：
+      - parent_phase = "scenario-execute"（不是 verify/review/gate）
+      - phases = ("scenario-fix",) 单元素
+      - 子 pipeline 完成后由主 reducer 触发 scenario-execute 重跑
+
+    参数:
+      failed_scenarios: 失败的 scenario_id 列表，存入 failed_v_tasks 复用字段
+                        （reducer 读取时区分 parent_phase 即可）
+    """
+    return SubPipeline(
+        pipeline_id=SubPipeline.build_id(track, SCENARIO_FIX_CYCLE, cycle),
+        parent_track=track,
+        parent_phase="scenario-execute",
+        cycle=cycle,
+        kind=SCENARIO_FIX_CYCLE,
+        phases=SCENARIO_FIX_CYCLE_PHASES,
+        current_index=0,
+        status="running",
+        parent_report_path=parent_report_path,
+        escalation_reason=escalation_reason,
+        failed_v_tasks=tuple(failed_scenarios),
         created_at=created_at,
     )

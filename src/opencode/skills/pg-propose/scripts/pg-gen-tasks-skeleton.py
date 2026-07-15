@@ -62,11 +62,20 @@ from pg_pipeline_common import (
 # ============================================================
 
 STANDARD_SUBS = [
-    ("test",  lambda stage_name, test_key: f"{stage_name} 测试先行（{test_key}）"),
-    ("dev",   lambda stage_name, test_key: "实现开发"),
-    ("review", lambda stage_name, test_key: "静态代码审查"),
-    ("verify", lambda stage_name, test_key: f"{stage_name} 集成验证"),
-    ("gate",  lambda stage_name, test_key: f"{stage_name} 门控审查"),
+    ("test",  lambda stage_name: f"{stage_name} 测试先行"),
+    ("dev",   lambda stage_name: "实现开发"),
+    ("review", lambda stage_name: "静态代码审查"),
+    ("verify", lambda stage_name: f"{stage_name} 集成验证"),
+    ("gate",  lambda stage_name: f"{stage_name} 门控审查"),
+]
+
+# v3.5: scenario track 专用的 sub 列表
+# scenario-prepare / scenario-execute / scenario-fix（scenario-fix 仅在 escalate 时物理存在，
+# 但 skeleton 始终生成 3 个 heading，让 LLM 在阶段二填充 body 时按需标注）
+SCENARIO_SUBS = [
+    ("scenario-prepare", lambda stage_name: f"真机场景准备"),
+    ("scenario-execute", lambda stage_name: f"真机场景执行"),
+    ("scenario-fix",     lambda stage_name: f"真机场景修复（仅 execute escalate 时存在）"),
 ]
 
 
@@ -280,7 +289,9 @@ def build_sections(config: dict, affected_tracks: set,
     """Build the section list filtered by selected_stages and affected_tracks.
 
     - Only stages whose name is in selected_stages (or all if empty) are included.
-    - Within a stage, only tracks that are in affected_tracks produce headings.
+    - Within a stage, only tracks that are in affected_tracks produce headings,
+      except scenario tracks which always produce headings (常驻节点).
+    - Simple tracks in affected_tracks produce 1 heading; standard tracks produce 4
     - final-gate is always appended.
 
     v3.x 升级（code-review 阶段适配）：
@@ -305,15 +316,16 @@ def build_sections(config: dict, affected_tracks: set,
     N = 1
     for stage in stages:
         stage_name = stage["name"]
-        test_key = stage.get("test_key", "unit")
 
         for track_id in stage.get("tracks") or []:
-            # 2) Skip tracks not in affected_tracks
-            if track_id not in affected_tracks:
-                continue
-
+            # 2a) Skip tracks not in affected_tracks, except scenario tracks
+            #     (v3.5: scenario-test 是常驻节点，不受 affected_tracks 限制)
             track_type = get_track_type(config, track_id)
             is_simple = (track_type == "phase")
+            is_scenario = (track_type == "scenario")
+
+            if not is_scenario and track_id not in affected_tracks:
+                continue
 
             if is_simple:
                 label = f"{stage_name} {track_id}"
@@ -323,11 +335,27 @@ def build_sections(config: dict, affected_tracks: set,
                     "track": track_id,
                     "sub": None,
                     "is_simple": True,
+                    "is_scenario": False,
                     "is_affected": True,
                     "label": label,
                     "env": None,
                 })
                 N += 1
+            elif is_scenario:
+                track_cfg = tracks_cfg.get(track_id) or {}
+                for sub_name, label_fn in SCENARIO_SUBS:
+                    sections.append({
+                        "n": N,
+                        "stage": stage_name,
+                        "track": track_id,
+                        "sub": sub_name,
+                        "is_simple": False,
+                        "is_scenario": True,
+                        "is_affected": track_id in affected_tracks,
+                        "label": label_fn(stage_name),
+                        "env": None,
+                    })
+                    N += 1
             else:
                 # v3.4: 动态 2/3/4/5 sub 决定
                 #   按 review_enabled / verify_enabled / gate_enabled 三个开关过滤
@@ -353,7 +381,7 @@ def build_sections(config: dict, affected_tracks: set,
                         "sub": sub_name,
                         "is_simple": False,
                         "is_affected": True,
-                        "label": label_fn(stage_name, test_key),
+                        "label": label_fn(stage_name),
                         "env": None,
                     })
                     N += 1
@@ -484,6 +512,45 @@ def format_section_body(section: dict, change_name: str = "<change>") -> str:
                f"- [ ] {section['n']}.2 执行测试（runner 通过 modules 注入命令）\n" \
                f"- [ ] {section['n']}.3 启动服务（如需）\n" \
                f"- [ ] {section['n']}.4 验证 V-{section['track']}-N：来自 design.md（N 由 design.md 决定，非章节号）"
+    # v3.5: scenario track 专用 body 模板
+    if section["sub"] == "scenario-prepare":
+        n = section["n"]
+        return (
+            f"#### 步骤组 1：service start\n\n"
+            f"- [ ] {n}.1 scenario-prepare agent 按 track.modules 顺序 invoke-hook start 各 role instance\n"
+            f"- [ ] {n}.2 每个 role 启动后立刻 invoke-hook health_check 验证就绪\n"
+            f"- [ ] {n}.3 全部 health_check PASS → record(scenario-prepare, \"completed\")\n"
+            f"- [ ] {n}.4 任一 role 启动 / health_check FAIL → record(scenario-prepare, \"failed\") → workflow_failed"
+        )
+    if section["sub"] == "scenario-execute":
+        n = section["n"]
+        return (
+            f"#### 步骤组 1：scenario.md 读取\n\n"
+            f"- [ ] {n}.1 确认 `.pg/changes/{change_name}/scenario.md` 存在且每个 Scenario 含 6 段"
+            f"（scenario_id / critical / given / when / then / evidence；and 可选）\n"
+            f"- [ ] {n}.2 校验 scenario_id 全局唯一、critical 字段为 bool\n\n"
+            f"#### 步骤组 2：执行\n\n"
+            f"- [ ] {n}.3 按 scenario_id 排序：先 critical=true，后 critical=false\n"
+            f"- [ ] {n}.4 串行执行每个 Scenario 的 given → when → then → and（cleanup）\n"
+            f"- [ ] {n}.5 产出结构化 JSON 证据到 `2-build/<scenario_id>-evidence.json`\n"
+            f"- [ ] {n}.6 critical=true FAIL → 立即停止后续 Scenario，全部标记 SKIPPED "
+            f"→ record(scenario-execute, \"escalate\")\n"
+            f"- [ ] {n}.7 全部通过 / scenario-execute agent 写盘报告到 `2-build/<seq>-scenario-execute.md`"
+        )
+    if section["sub"] == "scenario-fix":
+        n = section["n"]
+        return (
+            f"#### 步骤组 1：诊断\n\n"
+            f"- [ ] {n}.1 读源 scenario-execute 报告 + design.md + proposal.md\n"
+            f"- [ ] {n}.2 定位失败根因（业务逻辑 / API 契约 / 前后端契约 / DB / 配置）\n\n"
+            f"#### 步骤组 2：修复\n\n"
+            f"- [ ] {n}.3 在 track.modules 路径下改代码\n"
+            f"- [ ] {n}.4 跑单元测试 + lint（必须通过）\n"
+            f"- [ ] {n}.5 写修复报告到 `2-build/<seq>-scenario-fix-<n>.md`\n\n"
+            f"#### 步骤组 3：循环\n\n"
+            f"- [ ] {n}.6 record(scenario-fix, \"completed\" / \"failed\") → 编排器自动 dispatch scenario-execute 重跑\n"
+            f"- [ ] {n}.7 max_fix_retries 耗尽 → workflow_failed（不进入 gate）"
+        )
     return "- 无"
 
 
@@ -661,6 +728,7 @@ def main():
                 "track": s["track"],
                 "sub": s["sub"],
                 "is_simple": s["is_simple"],
+                "is_scenario": s.get("is_scenario", False),
                 "is_affected": s["is_affected"],
                 "label": s["label"],
             }

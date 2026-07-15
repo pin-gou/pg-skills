@@ -25,6 +25,7 @@ from pipeline.events import (
     EVT_DISPATCH_ABANDONED,
     EVT_GIT_COMMIT,
     EVT_GAP_ACCEPTED,  # v2.1: fix/gate-fix 循环耗尽后接受的 gap
+    EVT_SCENARIO_CYCLE_STARTED,  # v3.5: scenario track
     STATUS_COMPLETED,  # v2.1: 单一来源替换字面量
     STATUS_PASS,
 )
@@ -625,6 +626,14 @@ class Orchestrator:
             verify = new_state.tracks.get(track, TrackState.create(track)).phases.get("verify", PhaseState())
             cycle = len(verify.fix_cycles)
             self.event_log.append(EVT_FIX_CYCLE_STARTED, {"track": track, "cycle": cycle, "source_report": report_path})
+
+        # v3.5: scenario-execute escalate 时写 EVT_SCENARIO_CYCLE_STARTED
+        if status == "escalate" and phase == "scenario-execute":
+            exec_phase = new_state.tracks.get(track, TrackState.create(track)).phases.get("scenario-execute", PhaseState())
+            cycle = len(exec_phase.fix_cycles)
+            self.event_log.append(EVT_SCENARIO_CYCLE_STARTED, {
+                "track": track, "cycle": cycle, "source_report": report_path,
+            })
 
         # v2.3: 移除 fix_skipped_verify 事件（fix 完成后总是 re_verify）
 

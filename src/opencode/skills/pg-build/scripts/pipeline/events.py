@@ -21,9 +21,15 @@ SUB_SIMPLE = "simple"
 SUB_REVIEW = "review"
 SUB_FIX_REVIEW = "fix-review"
 
+# v3.5: scenario track 专用 phase（type=scenario，不走 TDVG）
+SUB_SCENARIO_PREPARE = "scenario-prepare"
+SUB_SCENARIO_EXECUTE = "scenario-execute"
+SUB_SCENARIO_FIX = "scenario-fix"
+
 ALL_SUBS: tuple[str, ...] = (
     SUB_TEST, SUB_DEV, SUB_REVIEW, SUB_VERIFY, SUB_GATE,
     SUB_FIX, SUB_FIX_REVIEW, SUB_FIX_GATE, SUB_SIMPLE,
+    SUB_SCENARIO_PREPARE, SUB_SCENARIO_EXECUTE, SUB_SCENARIO_FIX,
 )
 
 
@@ -54,6 +60,10 @@ PHASE_STATUS_ALLOWED: dict[str, frozenset[str]] = {
     SUB_FIX_REVIEW: frozenset({STATUS_COMPLETED, STATUS_FAILED}),
     SUB_FIX_GATE:      frozenset({STATUS_COMPLETED, STATUS_FAILED}),
     SUB_GATE:          frozenset({STATUS_PASS, STATUS_FAIL}),
+    # v3.5: scenario track 专用 phase
+    SUB_SCENARIO_PREPARE: frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    SUB_SCENARIO_EXECUTE: frozenset({STATUS_COMPLETED, STATUS_ESCALATE, STATUS_FAILED}),
+    SUB_SCENARIO_FIX:     frozenset({STATUS_COMPLETED, STATUS_FAILED}),
     # final-gate 用 phase="gate" 但 track="final-gate"，由 caller 区分
 }
 
@@ -128,6 +138,9 @@ EVT_WORKFLOW_FAILED = "workflow_failed"
 EVT_DISPATCH_ABANDONED = "dispatch_abandoned"
 EVT_GIT_COMMIT = "git_commit"
 EVT_GAP_ACCEPTED = "gap_accepted"  # v2.1 新增：fix/gate-fix 循环耗尽后接受的 gap
+# v3.5: scenario track 专用
+EVT_SCENARIO_CYCLE_STARTED = "scenario_cycle_started"
+EVT_SCENARIO_TRACK_COMPLETED = "scenario_track_completed"
 
 ALL_EVENT_TYPES: tuple[str, ...] = (
     EVT_PIPELINE_STARTED, EVT_BOOTSTRAP_STEP_COMPLETED,
@@ -138,4 +151,5 @@ ALL_EVENT_TYPES: tuple[str, ...] = (
     EVT_SUB_PIPELINE_COMPLETED, EVT_TRACK_COMPLETED,
     EVT_PIPELINE_COMPLETED, EVT_WORKFLOW_FAILED, EVT_DISPATCH_ABANDONED, EVT_GIT_COMMIT,
     EVT_GAP_ACCEPTED,
+    EVT_SCENARIO_CYCLE_STARTED, EVT_SCENARIO_TRACK_COMPLETED,
 )

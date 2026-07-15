@@ -67,15 +67,15 @@ def resolve_module_roots(config: dict[str, Any], module_names: list[str]) -> str
 
 
 def resolve_test_commands(
-    config: dict[str, Any], module_names: list[str], test_key: str = "unit",
+    config: dict[str, Any], module_names: list[str],
 ) -> str:
-    """收集所有模块的 test.{test_key} 命令，用 && 拼接。"""
+    """收集所有模块的 test.unit 命令，用 && 拼接。"""
     modules = config.get("modules", {})
     commands: list[str] = []
     for name in module_names:
         mod = modules.get(name, {})
         test = mod.get("test", {})
-        val = test.get(test_key)
+        val = test.get("unit")
         if isinstance(val, str):
             commands.append(val)
         elif isinstance(val, dict):

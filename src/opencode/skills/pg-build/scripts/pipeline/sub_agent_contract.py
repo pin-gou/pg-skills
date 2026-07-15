@@ -82,6 +82,23 @@ PHASE_RULES: dict[str, dict[str, Any]] = {
         "outputs_required": False,
         "tasks_updated_required": False,
     },
+    # v3.5: scenario track 专用 phase rules
+    "scenario-prepare": {
+        "evidence_required": True,
+        "report_required": True,
+        "tasks_updated_required": False,
+    },
+    "scenario-execute": {
+        "evidence_required": True,
+        "report_required": True,
+        "tasks_updated_required": "escalate_only",  # escalate 时必填失败 scenario_id
+    },
+    "scenario-fix": {
+        "evidence_required": False,
+        "report_required": True,
+        "outputs_required": True,  # 修改的文件列表
+        "tasks_updated_required": True,  # 修复的 scenario_id
+    },
 }
 
 

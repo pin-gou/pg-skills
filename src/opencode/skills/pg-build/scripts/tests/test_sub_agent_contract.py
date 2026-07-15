@@ -177,6 +177,7 @@ class TestSubAgentContract(unittest.TestCase):
             "test", "dev", "verify", "gate",
             "fix", "fix-gate", "simple",
             "review", "fix-review",  # v2.6
+            "scenario-prepare", "scenario-execute", "scenario-fix",  # v3.5
         }
         self.assertEqual(set(PHASE_RULES.keys()), expected)
 

@@ -24,12 +24,14 @@ stages ── 一组阶段（dev-isolated → dev-mock-integration → real-inte
 
 ## Track 类型
 
-`config.tracks[*]` 区分两种类型，pg-propose 生成 tasks.md 时**必须**按类型分流（见 [./tasks-templates.md](./tasks-templates.md)「生成算法」段）。
+`config.tracks[*]` 区分四种类型，pg-propose 生成 tasks.md 时**必须**按类型分流（见 [./tasks-templates.md](./tasks-templates.md)「生成算法」段）。
 
 | 类型 | 判定字段 | runner 行为 | tasks.md 章节形态 |
 |------|---------|-------------|-----------------|
-| **standard** | `tracks.<id>.type` 不存在或 != `"simple"` | TDVG 四阶段（test → dev → verify → gate），由编排器派遣 sub-agent | 4 个子章节 |
+| **standard** | `tracks.<id>.type` 不存在或 != `simple` / `scenario` | TDVG 四阶段（test → dev → verify → gate），由编排器派遣 sub-agent | 4 个子章节 |
 | **simple** | `tracks.<id>.type == "simple"` | runner 派遣 `pg-build/simple` sub-agent 执行 `tracks.<id>.commands`，无 TDVG | **1 个章节**（派遣 pg-build/simple agent 执行 commands） |
+| **scenario**（v3.5） | `tracks.<id>.type == "scenario"` | scenario-prepare → scenario-execute → (scenario-fix → scenario-execute)* → 完成。需 `scenario.md` 作为 SSOT | 3 个子章节（scenario-prepare / scenario-execute / scenario-fix 仅在 escalate 时物理存在） |
+| **e2e** | `tracks.<id>.type == "e2e"` | （TBD：参考 scenario 实现；不属本节 SSOT） | 1 个章节 |
 
 **判定时机**：pg-propose 阶段二 2e 生成 tasks.md 之前，按 `config.tracks[track_id].type` 判定；与 `affected_tracks` 无关。
 
@@ -53,19 +55,17 @@ runner 执行 test 命令时按以下规则查找：
 
 ```
 (stage, track) → track.modules[*] → 每个 module:
-  1. test_key = stages[?].test_key（命中当前 stage）
-  2. test_cmd = modules[m].test[test_key]
-  3. lint_cmd = modules[m].lint
-  4. build_cmd = modules[m].build
+  1. test_cmd = modules[m].test.unit
+  2. lint_cmd = modules[m].lint
+  3. build_cmd = modules[m].build
 ```
 
 ### stages × tracks × modules 的真实样例（来自 config.yaml）
 
 | stage | tracks | test_key | environment.required | per-change 选择落地 |
 |---|---|---|---|---|
-| `dev-isolated` | backend, agent, frontend | unit | false | 无（runner 不启停服务） |
-| `dev-mock-integration` | backend, agent, frontend | integration | true | `execution-manifest.yaml: stages[i].environment` |
-| `real-integration` | real-integration | e2e | true | `execution-manifest.yaml: stages[i].environment` |
+| `dev`（v3.5 前为 `dev-isolated`） | backend, agent, frontend | unit | false | 无（runner 不启停服务） |
+| `real-integration`（v3.5） | scenario-test (type=scenario) | scenario | true | `execution-manifest.yaml: stages[i].environment` |
 
 ---
 
@@ -231,7 +231,7 @@ for stage in config.stages:
         for module_name in track.modules:
             cmd = config.modules[module_name]
             run(cmd.lint)
-            run(cmd.test[stage.test_key])
+            run(cmd.test.unit)
 
         # 启动服务（仅 verify 阶段需要）
         if stage.requires_deployment:

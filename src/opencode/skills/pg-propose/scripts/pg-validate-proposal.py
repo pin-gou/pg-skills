@@ -151,9 +151,10 @@ def _validate_track(track, prefix):
                        f"{prefix} type=e2e 必须包含 target_module"))
 
     track_type = track.get("type")
-    if track_type not in ("standard", "simple", "e2e", "scenario"):
+    VALID_TYPES = ("standard", "simple", "scenario")
+    if track_type not in VALID_TYPES:
         issues.append((f"{prefix}_invalid_type",
-                       f"{prefix} type 必须是 'standard' / 'simple' / 'e2e' / 'scenario', 实际: {track_type!r}"))
+                       f"{prefix} type 必须是 'standard', 'simple' 或 'scenario', 实际: {track_type!r}"))
     if track_type == "standard":
         if "phase_prompts" not in track:
             issues.append((f"{prefix}_missing_phase_prompts",
@@ -191,6 +192,28 @@ def _validate_track(track, prefix):
             issues.append((f"{prefix}_unexpected_commands",
                            f"{prefix} type=standard 不应包含 commands 字段"))
 
+    elif track_type == "scenario":
+        # v3.5: scenario track 校验规则
+        if "phase_prompts" not in track:
+            issues.append((f"{prefix}_missing_phase_prompts",
+                           f"{prefix} type=scenario 必须包含 phase_prompts"))
+        else:
+            pp = track["phase_prompts"]
+            if not isinstance(pp, dict):
+                issues.append((f"{prefix}_phase_prompts_not_object",
+                               f"{prefix} phase_prompts 必须是 object"))
+            else:
+                for required_sub in ("scenario-prepare", "scenario-execute"):
+                    if required_sub not in pp:
+                        issues.append((f"{prefix}_missing_sub_{required_sub}",
+                                       f"{prefix} phase_prompts 缺少 {required_sub}"))
+                    elif not isinstance(pp[required_sub], dict) or "tasks_md_section" not in pp[required_sub]:
+                        issues.append((f"{prefix}_invalid_sub_{required_sub}",
+                                       f"{prefix} phase_prompts.{required_sub} 缺少或无效 tasks_md_section"))
+        if "commands" in track:
+            issues.append((f"{prefix}_unexpected_commands",
+                           f"{prefix} type=scenario 不应包含 commands 字段"))
+
     if track_type == "simple":
         if "commands" not in track:
             issues.append((f"{prefix}_missing_commands",
@@ -214,9 +237,12 @@ def _validate_manifest_vs_tasks(manifest, tasks_sections):
         for track_idx, track in enumerate(stage.get("tracks", [])):
             if track.get("type") == "simple":
                 continue
-            # v3: 增加 e2e / scenario 子章节引用校验
-            # v3.5 兼容性：保留 verify（Phase 2 才会移除）
-            for sub_name in ("test", "dev", "review", "verify", "e2e", "scenario", "gate"):
+# v3.5: scenario track uses scenario-prepare/scenario-execute instead of test/dev
+            if track.get("type") == "scenario":
+                subs_to_check = ("scenario-prepare", "scenario-execute")
+            else:
+                subs_to_check = ("test", "dev", "review", "verify", "gate")
+            for sub_name in subs_to_check:
                 pp = track.get("phase_prompts", {})
                 if sub_name not in pp:
                     continue
@@ -273,6 +299,13 @@ def _validate_tracks_against_tasks(manifest, tasks_sections, config):
                 issues.append((
                     "manifest_track_type_mismatch",
                     f"track {track_id!r} 在 project.yaml 中是 standard 类型，"
+                    f"但 manifest 中标记为 {manifest_type!r}"
+                ))
+            # v3.5: scenario type validation
+            if expected_type == "scenario" and manifest_type != "scenario":
+                issues.append((
+                    "manifest_track_type_mismatch",
+                    f"track {track_id!r} 在 project.yaml 中是 scenario 类型，"
                     f"但 manifest 中标记为 {manifest_type!r}"
                 ))
 

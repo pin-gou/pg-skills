@@ -348,7 +348,6 @@
       "properties": {
         "name":                  { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
         "tracks":                { "type": "array", "minItems": 1, "items": { "type": "string" } },
-        "test_key":              { "type": "string", "default": "unit", "description": "runner 根据此 key 从 modules.<m>.test 中取测试命令注入 agent context. 标准化值: unit / integration / e2e." },
         "environment": {
           "type": "object",
           "additionalProperties": false,

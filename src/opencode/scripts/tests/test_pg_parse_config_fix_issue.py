@@ -96,7 +96,6 @@ tracks:
 stages:
   - name: dev-backend
     tracks: [backend]
-    test_key: unit
 
 fix_issue:
   max_iteration_count: 7
@@ -177,7 +176,7 @@ class FixIssueFilterTest(unittest.TestCase):
         self.assertIn("stages", filtered)
         self.assertEqual(filtered["modules"]["backend"]["root"], "<module-name>")
         self.assertEqual(filtered["tracks"]["backend"]["modules"], ["backend"])
-        self.assertEqual(filtered["stages"][0]["test_key"], "unit")
+        self.assertEqual(filtered["stages"][0]["name"], "dev-backend")
 
 
 class FixIssueDefaultsTest(unittest.TestCase):
@@ -194,7 +193,7 @@ environments:
 tracks:
   backend: {modules: [backend]}
 stages:
-  - {name: s, tracks: [backend], test_key: unit}
+  - {name: s, tracks: [backend]}
 """
         self.tmp = write_temp_config(minimal)
         self._patcher = patch.object(self.mod, "CONFIG_PATH", str(self.tmp))
