@@ -153,11 +153,11 @@ def _extract_affected_paths_from_proposal(change: str) -> list[str]:
     return out
 
 
-def _read_scenario_decision_from_path(eval_path: str) -> dict | None:
-    """v3.5: 从指定路径的 on-conditions-eval.md 读取 scenario_test_decision 段。
+def _read_scenario_decisions_from_path(eval_path: str) -> dict | None:
+    """v3.6: 从指定路径的 on-conditions-eval.md 读取 scenario_tracks_decision 段（多 track）。
 
     Returns:
-        dict with keys {enabled: bool, reason: str, mode: str, source: str}
+        dict of {track_id: {enabled: bool, mode: str, reason: str}}
         或 None (eval.md 不存在 / 段缺失)
     """
     if not os.path.isfile(eval_path):
@@ -168,49 +168,48 @@ def _read_scenario_decision_from_path(eval_path: str) -> dict | None:
     except Exception:
         return None
 
-    # 简单文本解析：找到 "## scenario_test_decision (v3.5)" 段
-    marker = "## scenario_test_decision (v3.5)"
+    marker = "## scenario_tracks_decision (v3.6)"
     if marker not in content:
         return None
     section = content.split(marker, 1)[1]
-    # 只取下一个 ## 之前的内容
     section = section.split("\n## ", 1)[0]
 
-    def _val(line: str) -> str:
-        parts = line.split("|")
-        # line: "| enabled | **True** |" → parts: ['', ' enabled ', ' **True** ', '']
-        # value is parts[2]
-        if len(parts) >= 3:
-            return parts[2].strip().strip("*")
-        return ""
-
-    decision: dict = {"enabled": False, "reason": "", "mode": "", "source": ""}
+    decisions: dict[str, dict] = {}
     for line in section.splitlines():
-        if line.startswith("| enabled"):
-            decision["enabled"] = (_val(line).lower() == "true")
-        elif line.startswith("| mode"):
-            decision["mode"] = _val(line)
-        elif line.startswith("| source"):
-            decision["source"] = _val(line)
-        elif line.startswith("| reason"):
-            decision["reason"] = _val(line)
-    return decision if decision["mode"] else None
+        line = line.strip()
+        # parse: "| track_id | **true** | explicit | reason |"
+        if not line.startswith("|") or "---" in line:
+            continue
+        parts = [p.strip().strip("*") for p in line.split("|")]
+        # parts[1]=track_id, parts[2]=enabled, parts[3]=mode, parts[4]=reason
+        if len(parts) < 5:
+            continue
+        tid = parts[1].strip()
+        if not tid or tid == "track_id":
+            continue
+        enabled = parts[2].strip().lower() == "true"
+        decisions[tid] = {
+            "enabled": enabled,
+            "mode": parts[3].strip(),
+            "reason": parts[4].strip(),
+        }
+    return decisions if decisions else None
 
 
-def _read_scenario_decision(change: str) -> dict | None:
-    """从 on-conditions-eval.md 读取 scenario_test_decision 段（SSOT）。
+def _read_scenario_decisions(change: str) -> dict | None:
+    """从 on-conditions-eval.md 读取 scenario_tracks_decision 段（SSOT，多 track）。
     change 可以是 change 名或绝对路径。
     """
     if os.path.isabs(change):
         eval_path = os.path.join(change, "1-propose-review", "on-conditions-eval.md")
     else:
         eval_path = os.path.join(CHANGES_DIR, change, "1-propose-review", "on-conditions-eval.md")
-    return _read_scenario_decision_from_path(eval_path)
+    return _read_scenario_decisions_from_path(eval_path)
 
 
-def _read_scenario_decision_absolute(change_root: str) -> dict | None:
+def _read_scenario_decisions_absolute(change_root: str) -> dict | None:
     """从指定 change 根目录绝对路径读取 SSOT (供测试用)。"""
-    return _read_scenario_decision(change_root)
+    return _read_scenario_decisions(change_root)
 
 
 def _build_track_enabled_decision(
@@ -332,8 +331,8 @@ def build_manifest(change: str) -> dict:
         except Exception:
             proposal_text = ""
 
-    # v3.5: 从 on-conditions-eval.md 读取 scenario_test_decision (SSOT)
-    scenario_decision = _read_scenario_decision(change)
+    # v3.6: 从 on-conditions-eval.md 读取 scenario_tracks_decision (SSOT, 多 track)
+    scenario_decisions = _read_scenario_decisions(change) or {}
 
     # 解析 LLM 在 stage 2c 决策的 affected_tracks（来自 tasks.md 实际生成的 track 列表）
     affected_tracks_set = set()
@@ -392,11 +391,11 @@ def build_manifest(change: str) -> dict:
     for stage_name, tracks_dict in stage_tracks.items():
         manifest_tracks = []
         for track_id, track_info in tracks_dict.items():
-            # v3.5: scenario track 按 decision SSOT 决定是否进入 manifest
+            # v3.6: scenario track 按 per-track SSOT decision 决定是否进入 manifest
             is_scenario = (track_info["type"] == "scenario")
             if is_scenario:
-                # scenario-test 禁用时根本不进 manifest（避免冗余）
-                if scenario_decision is not None and not scenario_decision["enabled"]:
+                track_decision = scenario_decisions.get(track_id, {})
+                if not track_decision.get("enabled", True):
                     continue
             elif track_info["all_noop"]:
                 continue
@@ -407,10 +406,11 @@ def build_manifest(change: str) -> dict:
             eval_dict = _evaluate_on_conditions(rules, affected_paths, proposal_text)
             in_affected = track_id in affected_tracks_set
 
-            # v3.5: scenario track 启用决策由 SSOT (on-conditions-eval.md scenario_test_decision) 决定
-            if is_scenario and scenario_decision is not None:
-                enabled = scenario_decision["enabled"]
-                reason = scenario_decision["reason"]
+            # v3.6: scenario track 启用决策由 SSOT (on-conditions-eval.md scenario_tracks_decision) 按 track 决定
+            if is_scenario and track_id in scenario_decisions:
+                td = scenario_decisions[track_id]
+                enabled = td["enabled"]
+                reason = td.get("reason", "scenario track SSOT")
             else:
                 enabled, reason = _build_track_enabled_decision(
                     track_id, track_cfg, eval_dict, in_affected,
@@ -440,7 +440,7 @@ def build_manifest(change: str) -> dict:
                         commands.append(cmd.get("cmd", ""))
                 entry["commands"] = commands
             elif is_scenario:
-                # v3.5: scenario track phase_prompts
+                # v3.6: scenario track phase_prompts + scenario_yaml
                 prompts = {}
                 scenario_sub_order = ("scenario-prepare", "scenario-execute")
                 for sub_name in scenario_sub_order:
@@ -450,6 +450,8 @@ def build_manifest(change: str) -> dict:
                         }
                 if prompts:
                     entry["phase_prompts"] = prompts
+                # v3.6: 每个 scenario track 关联独立的 scenario-<track>.yaml
+                entry["scenario_yaml"] = f"scenario-{track_id}.yaml"
             else:
                 # Standard / e2e / scenario track: include phase_prompts
                 # v3.x: tasks.md 实际生成的 sub 列表决定 phase_prompts

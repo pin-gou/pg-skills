@@ -26,6 +26,8 @@ Usage:
         --affected-tracks <track1,track2,...> \\
         --environment "<stage1>→<env1>,<stage2>→<env2>,..." \\
         [--selected-stages "<stage1>,<stage2>,..."] \\
+        [--scenario-decisions "track1=true,track2=auto"] \\
+        [--scenario-reason "<reason>"] \\
         [--output-tasks <path>] \\
         [--output-eval <path>]
 
@@ -69,7 +71,7 @@ STANDARD_SUBS = [
     ("gate",  lambda stage_name: f"{stage_name} 门控审查"),
 ]
 
-# v3.5: scenario track 专用的 sub 列表
+# v3.5: 每个 scenario-type track 通用的 sub 列表
 # scenario-prepare / scenario-execute（scenario-fix 是子 pipeline，不出现在 tasks.md heading 中）
 SCENARIO_SUBS = [
     ("scenario-prepare", lambda stage_name: f"真机场景准备"),
@@ -102,16 +104,16 @@ def parse_args():
                               "(e.g. 'dev'). Only stages in this list and their "
                               "affected tracks generate sections. "
                               "Empty = include all stages (backward compatible).")
-    # v3.5: scenario-test 启用决策
-    parser.add_argument("--scenario-test-enabled", default="auto",
-                         choices=["auto", "true", "false"],
-                         help="scenario-test track 启用决策 (auto=按 on_conditions 评估, "
-                              "true/false=LLM 显式决策). 默认 auto. 决策会写入 "
-                              "on-conditions-eval.md 的 scenario_test_decision 段, "
+    # v3.6: scenario-type track 启用决策
+    parser.add_argument("--scenario-decisions", default="",
+                         help="per-track scenario 启用决策: 'track1=true,track2=auto,...'. "
+                              "true=启用, false=禁用, auto=按常驻特性. "
+                              "空字符串 = 全部 auto. "
+                              "决策会写入 on-conditions-eval.md 的 scenario_tracks_decision 段, "
                               "供 pg-gen-manifest.py 和 pg-gen-scenario.py 读取.")
-    parser.add_argument("--scenario-test-reason", default="",
-                         help="scenario-test 启用/禁用决策依据 (LLM 填写, "
-                              "仅当 --scenario-test-enabled != auto 时生效).")
+    parser.add_argument("--scenario-reason", default="",
+                         help="scenario 启用/禁用决策依据 (LLM 填写, "
+                              "仅作用于显式启用的 scenario track).")
     return parser.parse_args()
 
 
@@ -308,12 +310,12 @@ def evaluate_on_conditions(rule: str, affected_paths: list[str],
 
 def build_sections(config: dict, affected_tracks: set,
                    selected_stages: set[str],
-                   scenario_test_enabled: str = "auto") -> list[dict]:
+                   scenario_decisions: dict | None = None) -> list[dict]:
     """Build the section list filtered by selected_stages and affected_tracks.
 
     - Only stages whose name is in selected_stages (or all if empty) are included.
     - Within a stage, only tracks that are in affected_tracks produce headings,
-      except scenario tracks (which follow scenario_test_enabled).
+      except scenario tracks (which follow per-track scenario_decisions).
     - Simple tracks in affected_tracks produce 1 heading; standard tracks produce 4
     - final-gate is always appended.
 
@@ -323,11 +325,10 @@ def build_sections(config: dict, affected_tracks: set,
         - enabled=false → 4 sub（test / dev / verify / gate）
       - 章节号 N 跨 change 不一致（已接受的硬冲突）
 
-    v3.5: scenario-test 启用决策
-      - "auto"  → 默认按 project.yaml 中 scenario track 的"常驻"特性
-                  （即使 affected_tracks 不含也生成）
-      - "true"  → LLM 明确决策启用
-      - "false" → LLM 明确决策禁用（不生成 scenario 章节）
+    v3.6: scenario-type track 启用决策
+      - scenario_decisions 为 dict[track_id, dict]，含 enabled / mode / reason
+      - None 或空 dict 时，所有 scenario track 按『常驻』特性默认生成
+      - per-track: enabled=False 时跳过该 track 的章节
     """
     sections = []
     all_stages = config.get("stages") or []
@@ -339,30 +340,22 @@ def build_sections(config: dict, affected_tracks: set,
     else:
         stages = list(all_stages)
 
-    # v3.5: scenario-test 启用决策解析
-    # auto: 由 is_scenario 决定（保持向后兼容）
-    # true/false: 强制决定（不依赖 is_scenario）
-    if scenario_test_enabled == "false":
-        scenario_decision = False
-    elif scenario_test_enabled == "true":
-        scenario_decision = True
-    else:  # auto
-        scenario_decision = None  # 由 per-track is_scenario 决定
-
     N = 1
     for stage in stages:
         stage_name = stage["name"]
 
         for track_id in stage.get("tracks") or []:
             # 2a) Skip tracks not in affected_tracks, except scenario tracks
-            #     (v3.5: scenario-test 是常驻节点，不受 affected_tracks 限制)
+            #     (scenario 是常驻节点，不受 affected_tracks 限制)
             track_type = get_track_type(config, track_id)
             is_simple = (track_type == "phase")
             is_scenario = (track_type == "scenario")
 
-            # v3.5: 显式禁用场景时不生成 scenario 章节
-            if is_scenario and scenario_decision is False:
-                continue
+            # v3.6: 按 per-track scenario_decisions 判断是否生成章节
+            if is_scenario:
+                track_decision = (scenario_decisions or {}).get(track_id, {})
+                if track_decision.get("enabled") is False:
+                    continue
 
             if not is_scenario and track_id not in affected_tracks:
                 continue
@@ -558,10 +551,10 @@ def format_section_body(section: dict, change_name: str = "<change>") -> str:
 
 
 def _format_scenario_body(section: dict, change_name: str) -> str:
-    """v3.5: 生成 scenario track 章节的 skeleton body。
+    """v3.6: 生成 scenario track 章节的 skeleton body。
 
     与 standard track 不同，scenario 章节即使 `is_affected=False` 也产出完整模板，
-    因为 scenario-test 是常驻节点，LLM 应始终填充。
+    因为 scenario 是常驻节点，LLM 应始终填充。
     """
     n = section["n"]
     sub = section["sub"]
@@ -655,54 +648,62 @@ def build_tasks_md(sections: list[dict], env_map: dict[str, str],
 # on-conditions-eval.md (review stage helper)
 # ============================================================
 
-def _compute_scenario_decision(
-    config: dict, scenario_test_enabled_arg: str, reason: str,
+def _compute_scenario_decisions(
+    config: dict, scenario_decisions_arg: str, reason: str,
 ) -> dict:
-    """v3.5: 解析 scenario-test 启用决策.
+    """v3.6: 解析 scenario 启用决策，按 track 返回.
 
     Args:
         config: project.yaml 解析后的 dict
-        scenario_test_enabled_arg: CLI 取值 (auto/true/false)
-        reason: LLM 决策依据（仅当 != auto 时）
+        scenario_decisions_arg: CLI 取值, 格式 "track1=true,track2=auto,..."
+        reason: LLM 决策依据（仅作用于显式启用的 track）
 
     Returns:
-        dict with keys:
-          - enabled: bool (final decision)
-          - mode: 'auto' | 'explicit'
-          - reason: str
-          - source: 决策来源描述
+        dict of {track_id: {enabled: bool, mode: str, reason: str, source: str}}
     """
-    # 检查 project.yaml 中是否定义了 scenario track
-    has_scenario = any(
-        t.get("type") == "scenario"
-        for t in (config.get("tracks") or {}).values()
-    )
+    # 解析 CLI 入参为 dict
+    explicit: dict[str, str] = {}
+    for part in scenario_decisions_arg.split(","):
+        part = part.strip()
+        if not part:
+            continue
+        if "=" in part:
+            tid, val = part.split("=", 1)
+            explicit[tid.strip()] = val.strip()
 
-    if scenario_test_enabled_arg == "auto":
-        return {
-            "enabled": has_scenario,
-            "mode": "auto",
-            "reason": (
-                "project.yaml 含 type=scenario track，按『常驻』特性默认生成"
-                if has_scenario
-                else "project.yaml 无 type=scenario track"
-            ),
-            "source": "project.yaml",
-        }
-
-    enabled = (scenario_test_enabled_arg == "true")
-    return {
-        "enabled": enabled,
-        "mode": "explicit",
-        "reason": reason or "（LLM 未填写依据）",
-        "source": "LLM 阶段二 2c 决策",
+    # 发现 project.yaml 中所有 type=scenario 的 track
+    tracks_cfg = config.get("tracks") or {}
+    scenario_tracks = {
+        tid: tc for tid, tc in tracks_cfg.items()
+        if tc.get("type") == "scenario"
     }
+
+    decisions: dict[str, dict] = {}
+    for tid in scenario_tracks:
+        raw = explicit.get(tid, "auto")
+        if raw == "auto":
+            decisions[tid] = {
+                "enabled": True,
+                "mode": "auto",
+                "reason": "常驻 scenario track，按『常驻』特性默认生成",
+                "source": "project.yaml",
+            }
+        else:
+            enabled = (raw == "true")
+            decisions[tid] = {
+                "enabled": enabled,
+                "mode": "explicit",
+                "reason": reason or ("LLM 决策启用" if enabled else "LLM 决策禁用"),
+                "source": "LLM 阶段二 2c 决策",
+            }
+
+    return decisions
 
 
 def build_on_conditions_eval_md(config: dict, affected_paths: list[str],
                                   proposal_text: str,
                                   affected_tracks: set[str] = set(),
-                                  scenario_decision: dict | None = None) -> str:
+                                  scenario_decisions: dict | None = None) -> str:
     """Generate on-conditions-eval.md content (for stage 3 review)."""
     lines = [
         "# on_conditions 评估记录",
@@ -718,9 +719,9 @@ def build_on_conditions_eval_md(config: dict, affected_paths: list[str],
         "",
     ]
 
-    # v3.5: 注入 scenario_test_decision 段（SSOT，三个生成脚本的契约）
-    if scenario_decision is not None:
-        lines.extend(_format_scenario_decision_md(scenario_decision))
+    # v3.6: 注入 scenario_tracks_decision 段（SSOT，多 track 的契约）
+    if scenario_decisions is not None:
+        lines.extend(_format_scenario_decisions_md(scenario_decisions))
         lines.append("")
 
     lines.append("## stage 级")
@@ -769,28 +770,28 @@ def build_on_conditions_eval_md(config: dict, affected_paths: list[str],
     lines.append("")
     lines.append("1. 对每行「最终决策」勾选 `[x]`（同意机械评估）或 `[~]` + 写「依据」（覆盖机械评估）")
     lines.append("2. 复核完成后，把本文件表格内容**合并到** `.pg/changes/<change>/1-propose-review/review-notes.md` 的「on_conditions 评估记录」段")
-    lines.append("3. scenario_test_decision 段的 `enabled` 字段是三个生成产物（tasks.md / manifest / scenario.yaml）的 SSOT，禁止手工修改")
+    lines.append("3. scenario_tracks_decision 段是三个生成产物（tasks.md / execution-manifest.yaml / scenario.yaml）的 SSOT，禁止手工修改")
     lines.append("4. 合并后本文件可保留作为审计副本")
 
     return "\n".join(lines) + "\n"
 
 
-def _format_scenario_decision_md(decision: dict) -> list[str]:
-    """Format scenario_test_decision 段为 markdown 行。"""
-    return [
-        "## scenario_test_decision (v3.5)",
+def _format_scenario_decisions_md(decisions: dict) -> list[str]:
+    """Format scenario_tracks_decision 段为 markdown 行 (per-track 格式)."""
+    lines = [
+        "## scenario_tracks_decision (v3.6)",
         "",
         "**SSOT**：`pg-gen-manifest.py` 和 `pg-gen-scenario.py` 都读此段决定是否生成对应产物。",
-        "修改本段会立即让三个产物（tasks.md / execution-manifest.yaml / scenario.yaml）不一致。",
-        "如需变更，**重跑** `pg-gen-tasks-skeleton.py --scenario-test-enabled {true\\|false}` + `pg-gen-manifest.py` + `pg-gen-scenario.py`，禁止手工编辑。",
+        "修改本段会立即让三个产物（tasks.md / execution-manifest.yaml / scenario-<track>.yaml）不一致。",
+        "如需变更，**重跑** `pg-gen-tasks-skeleton.py --scenario-decisions ...` + `pg-gen-manifest.py` + `pg-gen-scenario.py`，禁止手工编辑。",
         "",
-        "| 字段 | 值 |",
-        "|------|---|",
-        f"| enabled | **{decision['enabled']}** |",
-        f"| mode | {decision['mode']} |",
-        f"| source | {decision['source']} |",
-        f"| reason | {decision['reason']} |",
+        "| track_id | enabled | mode | reason |",
+        "|---|---|---|---|",
     ]
+    for tid, d in decisions.items():
+        enabled_str = "**true**" if d["enabled"] else "**false**"
+        lines.append(f"| {tid} | {enabled_str} | {d['mode']} | {d['reason']} |")
+    return lines
 
 
 # ============================================================
@@ -818,9 +819,14 @@ def main():
     proposal_text = read_proposal_text(args.proposal_md)
     affected_paths = extract_globs_from_proposal(proposal_text)
 
+    # v3.6: 先计算 scenario 决策，供 build_sections 和 eval 共享
+    scenario_decisions_info = _compute_scenario_decisions(
+        config, args.scenario_decisions, args.scenario_reason,
+    )
+
     sections = build_sections(
         config, affected_tracks, selected_stages,
-        scenario_test_enabled=args.scenario_test_enabled,
+        scenario_decisions=scenario_decisions_info,
     )
 
     output_tasks = args.output_tasks or os.path.join(
@@ -834,14 +840,10 @@ def main():
         sections, env_map, config, affected_paths, proposal_text,
         change_name=args.change, affected_tracks=affected_tracks,
     )
-    # v3.5: 注入 scenario_test_decision 段到 eval_content
-    scenario_decision_info = _compute_scenario_decision(
-        config, args.scenario_test_enabled, args.scenario_test_reason,
-    )
     eval_content = build_on_conditions_eval_md(
         config, affected_paths, proposal_text,
         affected_tracks=affected_tracks,
-        scenario_decision=scenario_decision_info,
+        scenario_decisions=scenario_decisions_info,
     )
 
     os.makedirs(os.path.dirname(output_tasks), exist_ok=True)
@@ -855,8 +857,7 @@ def main():
         "tasks_md_written": output_tasks,
         "on_conditions_eval_written": output_eval,
         "section_count": len(sections),
-        "scenario_test_enabled": scenario_decision_info["enabled"],
-        "scenario_test_decision": scenario_decision_info,
+        "scenario_tracks": scenario_decisions_info,
         "sections": [
             {
                 "n": s["n"],

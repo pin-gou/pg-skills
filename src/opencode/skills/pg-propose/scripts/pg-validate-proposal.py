@@ -313,16 +313,16 @@ def _validate_tracks_against_tasks(manifest, tasks_sections, config):
 
 
 def _validate_three_product_consistency(manifest, change_or_path) -> list[tuple[str, str]]:
-    """v3.5: tasks.md / manifest / scenario.yaml 三产物与 SSOT 一致性校验。
+    """v3.6: tasks.md / manifest / scenario-<track>.yaml 三产物与 SSOT 一致性校验。
 
     Args:
         manifest: 已解析的 manifest dict
         change_or_path: change 名 (从 CHANGES_DIR 拼) 或 change 根目录绝对路径
 
-    校验规则:
-      - manifest 含 type=scenario track (enabled=true) → scenario.yaml 必须存在
-      - manifest 含 type=scenario track (enabled=false) → scenario.yaml 必须不存在
-      - manifest 不含 type=scenario track → scenario.yaml 必须不存在
+    校验规则 (per track):
+      - manifest 含 type=scenario track (enabled=true) → scenario-<track>.yaml 必须存在
+      - manifest 含 type=scenario track (enabled=false) → scenario-<track>.yaml 必须不存在
+      - manifest 不含 type=scenario track → 任何 scenario-*.yaml 必须不存在
 
     Returns: list of (code, msg)
     """
@@ -331,35 +331,45 @@ def _validate_three_product_consistency(manifest, change_or_path) -> list[tuple[
         change_root = change_or_path
     else:
         change_root = os.path.join(CHANGES_DIR, change_or_path)
-    scenario_yaml_path = os.path.join(change_root, "scenario.yaml")
-    scenario_yaml_exists = os.path.isfile(scenario_yaml_path)
+
+    # 收集所有已存在的 scenario-<track>.yaml 文件
+    import glob as glob_mod
+    existing_scenario_files = {
+        os.path.basename(f)
+        for f in glob_mod.glob(os.path.join(change_root, "scenario-*.yaml"))
+    }
 
     for stage_idx, stage in enumerate(manifest.get("stages", [])):
         for track_idx, track in enumerate(stage.get("tracks", [])):
             if track.get("type") != "scenario":
                 continue
+            track_id = track.get("id", f"<track-{track_idx}>")
+            expected_file = f"scenario-{track_id}.yaml"
             track_enabled = track.get("enabled", False)
-            if track_enabled and not scenario_yaml_exists:
+
+            if track_enabled and expected_file not in existing_scenario_files:
                 code = "scenario_yaml_missing"
-                msg = (f"stages[{stage_idx}].tracks[{track_idx}] 是 enabled=true 的 scenario track, "
-                       f"但 scenario.yaml 不存在: {scenario_yaml_path}")
+                msg = (f"stages[{stage_idx}].tracks[{track_idx}] 是 enabled=true 的 scenario track "
+                       f"({track_id}), 但 {expected_file} 不存在: {os.path.join(change_root, expected_file)}")
                 issues.append((code, msg))
-            if not track_enabled and scenario_yaml_exists:
+            if not track_enabled and expected_file in existing_scenario_files:
                 code = "scenario_yaml_should_not_exist"
-                msg = (f"stages[{stage_idx}].tracks[{track_idx}] 是 enabled=false 的 scenario track, "
-                       f"但 scenario.yaml 存在 (会变成冗余产物): {scenario_yaml_path}")
+                msg = (f"stages[{stage_idx}].tracks[{track_idx}] 是 enabled=false 的 scenario track "
+                       f"({track_id}), 但 {expected_file} 存在 (会变成冗余产物)")
                 issues.append((code, msg))
 
-    # 反向: scenario.yaml 存在但 manifest 无 scenario track
-    if scenario_yaml_exists:
-        has_scenario_in_manifest = any(
-            track.get("type") == "scenario"
-            for stage in manifest.get("stages", [])
-            for track in stage.get("tracks", [])
-        )
-        if not has_scenario_in_manifest:
+    # 反向: 存在 scenario-*.yaml 但 manifest 无对应 scenario track
+    expected_from_manifest = {
+        f"scenario-{track['id']}.yaml"
+        for stage in manifest.get("stages", [])
+        for track in stage.get("tracks", [])
+        if track.get("type") == "scenario"
+    }
+    for fname in existing_scenario_files:
+        if fname not in expected_from_manifest:
             code = "scenario_yaml_orphan"
-            msg = (f"scenario.yaml 存在但 manifest 不含 type=scenario track: {scenario_yaml_path}")
+            msg = (f"{fname} 存在但 manifest 不含对应的 type=scenario track: "
+                   f"{os.path.join(change_root, fname)}")
             issues.append((code, msg))
 
     return issues

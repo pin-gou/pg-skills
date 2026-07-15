@@ -77,8 +77,8 @@ class _ProjectMixin:
             "--proposal-md", self.proposal_path,
             "--affected-tracks", "backend",
             "--environment", "dev→dev-local",
-            "--scenario-test-enabled", "false",
-            "--scenario-test-enabled", "false",
+            "--scenario-decisions", "scenario-test=false",
+            "--scenario-decisions", "scenario-test=false",
         ])
         if r1.returncode != 0:
             return r1, {}
@@ -161,8 +161,8 @@ class TestManifestByToggle(_ProjectMixin, unittest.TestCase):
             "--proposal-md", self.proposal_path,
             "--affected-tracks", "backend",
             "--environment", "dev→dev-local",
-            "--scenario-test-enabled", "false",
-            "--scenario-test-enabled", "false",
+            "--scenario-decisions", "scenario-test=false",
+            "--scenario-decisions", "scenario-test=false",
         ])
         self.assertEqual(r1.returncode, 0, msg=r1.stderr)
         r2 = _run_script("pg-gen-manifest.py", [self.change])
@@ -187,8 +187,8 @@ class TestManifestByToggle(_ProjectMixin, unittest.TestCase):
             "--proposal-md", self.proposal_path,
             "--affected-tracks", "backend",
             "--environment", "dev→dev-local",
-            "--scenario-test-enabled", "false",
-            "--scenario-test-enabled", "false",
+            "--scenario-decisions", "scenario-test=false",
+            "--scenario-decisions", "scenario-test=false",
         ])
         self.assertEqual(r1.returncode, 0, msg=r1.stderr)
         r2 = _run_script("pg-gen-manifest.py", [self.change])
@@ -219,7 +219,7 @@ class TestValidatorAcceptsSubset(_ProjectMixin, unittest.TestCase):
             "--proposal-md", self.proposal_path,
             "--affected-tracks", "backend",
             "--environment", "dev→dev-local",
-            "--scenario-test-enabled", "false",
+            "--scenario-decisions", "scenario-test=false",
         ])
         if r1.returncode != 0:
             return r1.returncode, r1.stdout, r1.stderr
@@ -283,7 +283,7 @@ class TestValidatorRequiresQualityGate(_ProjectMixin, unittest.TestCase):
             "--proposal-md", self.proposal_path,
             "--affected-tracks", "backend",
             "--environment", "dev→dev-local",
-            "--scenario-test-enabled", "false",
+            "--scenario-decisions", "scenario-test=false",
         ])
         if r1.returncode != 0:
             return r1.returncode, r1.stdout, r1.stderr

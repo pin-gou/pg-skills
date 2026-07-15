@@ -311,7 +311,7 @@ class TestValidatorCodeView(unittest.TestCase):
             "--proposal-md", self.proposal_path,
             "--affected-tracks", "backend,frontend",
             "--environment", "dev→dev-local",
-            "--scenario-test-enabled", "false",
+            "--scenario-decisions", "scenario-test=false",
         ])
         _run_script("pg-gen-manifest.py", [self.change])
         r = _run_script("pg-validate-proposal.py", ["manifest", self.change])
@@ -325,7 +325,7 @@ class TestValidatorCodeView(unittest.TestCase):
             "--proposal-md", self.proposal_path,
             "--affected-tracks", "backend,frontend",
             "--environment", "dev→dev-local",
-            "--scenario-test-enabled", "false",
+            "--scenario-decisions", "scenario-test=false",
         ])
         _run_script("pg-gen-manifest.py", [self.change])
         r = _run_script("pg-validate-proposal.py", ["manifest", self.change])

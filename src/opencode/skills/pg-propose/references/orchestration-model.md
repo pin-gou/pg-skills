@@ -65,7 +65,7 @@ runner 执行 test 命令时按以下规则查找：
 | stage | tracks | test_key | environment.required | per-change 选择落地 |
 |---|---|---|---|---|
 | `dev`（v3.5 前为 `dev-isolated`） | backend, agent, frontend | unit | false | 无（runner 不启停服务） |
-| `real-integration`（v3.5） | scenario-test (type=scenario) | scenario | true | `execution-manifest.yaml: stages[i].environment` |
+| `real-integration`（v3.5） | {track-id} (type=scenario) | scenario | true | `execution-manifest.yaml: stages[i].environment` |
 
 ---
 

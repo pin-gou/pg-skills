@@ -57,15 +57,15 @@ metadata:
 2.  [待开始] 加载项目上下文（AGENTS.md → context-summary.yaml）
 3.  [待开始] 生成 proposal.md
 4.  [待开始] 生成 design.md
-5.  [待开始] 判定 affected_tracks & **scenario-test 启用决策**（核心：影响后续三个产物一致性）
+5.  [待开始] 判定 affected_tracks & **scenario track(s) 启用决策**（核心：影响后续三个产物一致性）
 6.  [待开始] 调用 pg-gen-tasks-skeleton.py 生成 tasks.md 骨架 + on-conditions-eval.md
-         （必传 --scenario-test-enabled {true|false} + --scenario-test-reason）
+         （必传 --scenario-decisions "track1=true,track2=auto,..." + --scenario-reason）
 7.  [待开始] LLM 填充 tasks.md body
 8.  [待开始] 调用 pg-gen-manifest.py 生成 execution-manifest.yaml
 9.  [待开始] （条件）调用 pg-gen-scenario.py 生成 scenario.yaml
 10. [待开始] 调用 pg-validate-proposal.py 三产物一致性校验
 11. [待开始] 自审 6 类问题，写入 review-notes.md
-12. [待开始] 决策复核 manifest（基于 on-conditions-eval.md 的 scenario_test_decision 段）
+12. [待开始] 决策复核 manifest（基于 on-conditions-eval.md 的 scenario_tracks_decision 段）
 13. [待开始] 最终确认产物
 ```
 
@@ -134,7 +134,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
 
 **模板 + V-* 编号规则**见 [references/design-templates.md](./references/design-templates.md)。更新 TodoWrite 第 4 项。
 
-### 2c. 判定变更类型 & affected_tracks & scenario-test 启用决策
+### 2c. 判定变更类型 & affected_tracks & scenario track(s) 启用决策
 
 **affected_tracks 推导算法**见 [references/orchestration-model.md](./references/orchestration-model.md)「affected_tracks 推导」段。
 
@@ -142,14 +142,15 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
 
 1. 列举各组件改动（backend / agent / frontend / agent-proto / openapi-gen）
 2. 生成 affected_tracks（如 `[backend, frontend]`）
-3. **判定 scenario-test 启用决策**（v3.5 新增，影响三个产物一致性）：
+3. **判定 scenario track(s) 启用决策**（v3.6 新增，支持多个 type=scenario 的 track，影响三个产物一致性）：
    - 启用决策基于以下问题：
      - 本次变更是否需要跨多个 role / service 协作验证？（如 frontend + backend + agent）
      - 是否引入新 API 端点需要端到端冒烟？
      - 改动是否涉及"跨模块联调场景"（不是单模块单测试可覆盖的）？
-   - **启用 (`true`)**：上述任一为是 → 后续 tasks.md / manifest / scenario.yaml 都会包含 scenario 阶段
-   - **禁用 (`false`)**：纯单模块改动（如纯文档、纯 SQL 迁移、纯单 API 增删）→ 三个产物都不含 scenario
-4. 把 `affected_tracks` 和 `scenario-test 决策 + 依据`写入 design.md 末尾的"变更类型判定"留痕小节
+   - **启用 (`true`)**：上述任一为是 → 后续 tasks.md / manifest / scenario.yaml 都会包含该 scenario track 的章节
+   - **禁用 (`false`)**：纯单模块改动（如纯文档、纯 SQL 迁移、纯单 API 增删）→ 三个产物都不含该 scenario track 的章节
+   - `--scenario-decisions` 支持 per-track 决策：`"scenario-e2e=true,scenario-perf=false"`。空字符串 / 未指定时所有 scenario track 默认启用（常驻节点）
+4. 把 `affected_tracks` 和 `scenario track(s) 决策 + 依据`写入 design.md 末尾的"变更类型判定"留痕小节
 
 更新 TodoWrite 第 5 项。
 
@@ -181,8 +182,8 @@ python3 .opencode/skills/pg-propose/scripts/pg-gen-tasks-skeleton.py \
   --affected-tracks "<track1>,<track2>,..." \
   --environment "<stage1>→<env1>,<stage2>→<env2>,..." \
   --selected-stages "<stage1>,<stage2>,..." \
-  --scenario-test-enabled {true|false} \
-  --scenario-test-reason "<决策依据，1-2 句>"
+  --scenario-decisions "track1=true,track2=auto" \
+  --scenario-reason "<决策依据，1-2 句>"
 ```
 
 参数来源：
@@ -194,14 +195,14 @@ python3 .opencode/skills/pg-propose/scripts/pg-gen-tasks-skeleton.py \
 | `--affected-tracks` | 阶段 2c 判定结果 |
 | `--environment` | LLM 按 `config.stages[i].environment.selection_rules` 选择 |
 | `--selected-stages` | LLM 根据 on_conditions 推导 |
-| `--scenario-test-enabled` | **必填**：阶段 2c 的 scenario-test 启用决策（true / false） |
-| `--scenario-test-reason` | **必填**：决策依据（1-2 句，写入 eval.md） |
+| `--scenario-decisions` | **必填**：per-track scenario 启用决策，`"track1=true,track2=auto"`（空=全部 auto） |
+| `--scenario-reason` | **必填**：决策依据（1-2 句，写入 eval.md） |
 
 脚本输出：
 
-- `.pg/changes/<change>/tasks.md`：完整骨架（scenario-test disabled 时不含 scenario 章节）
-- `.pg/changes/<change>/1-propose-review/on-conditions-eval.md`：`on_conditions` 评估记录 + **scenario_test_decision 段（SSOT）**
-- stdout JSON：sections 数组（章节清单 + 元数据 + `scenario_test_enabled` 字段）
+- `.pg/changes/<change>/tasks.md`：完整骨架（所有 scenario track disabled 时不含 scenario 章节）
+- `.pg/changes/<change>/1-propose-review/on-conditions-eval.md`：`on_conditions` 评估记录 + **scenario_tracks_decision 段（SSOT，per-track）**
+- stdout JSON：sections 数组（章节清单 + 元数据 + `scenario_tracks` 字段）
 
 LLM 读取 sections JSON 后，按 `references/tasks-templates.md`「各子章节模板」段填充 body。
 
@@ -233,22 +234,22 @@ LLM **不直接写** execution-manifest.yaml，通过 CLI 工具基于 tasks.md 
    - `manifest_track_no_phases` → 补充 standard track 缺少的 phase 章节
    - `manifest_track_type_mismatch` → 确认 project.yaml 中 track type 正确
    - `manifest_environment_invalid` → 确认环境名在 project.yaml environments 中
-   - `scenario_yaml_missing` → 跑 pg-gen-scenario.py 生成（scenario-test 启用时）
-   - `scenario_yaml_should_not_exist` → 删除 scenario.yaml（scenario-test 禁用时）
-   - `scenario_yaml_orphan` → 删除 scenario.yaml 或重新跑 2d-2e
+   - `scenario_yaml_missing` → 跑 pg-gen-scenario.py 生成（scenario track 启用时）
+   - `scenario_yaml_should_not_exist` → 删除 scenario-<track>.yaml（scenario track 禁用时）
+   - `scenario_yaml_orphan` → 删除 scenario-<track>.yaml 或重新跑 2d-2e
    - 修正后回到步骤 1
 4. 第 3 轮仍失败 → 将残留问题记录到 review-notes.md 的「阻塞」段
 5. 成功 → 产物 `.pg/changes/CHANGE_NAME/execution-manifest.yaml` 自动生成
 
 **产物依赖关系**：
 - manifest 依赖 tasks.md（heading 格式 + 章节完整性），在 2e 完成后方可调用
-- manifest 的 `scenario-test.enabled` 由 `on-conditions-eval.md` 的 `scenario_test_decision` 段决定（SSOT，禁用时不进入 manifest）
+- manifest 的 `scenario-<track>.enabled` 由 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段决定（SSOT，禁用时不进入 manifest）
 
 ### 2f. 条件生成 scenario.yaml
 
 更新 TodoWrite 第 9 项。
 
-**触发条件**：仅当 `on-conditions-eval.md` 中 `scenario_test_decision.enabled = true` 时执行。
+**触发条件**：仅当 `on-conditions-eval.md` 中 `scenario_tracks_decision` 段有至少一个 track 的 `enabled = true` 时执行。
 
 **步骤**：
 
@@ -257,9 +258,9 @@ LLM **不直接写** execution-manifest.yaml，通过 CLI 工具基于 tasks.md 
    python3 .opencode/skills/pg-propose/scripts/pg-gen-scenario.py CHANGE_NAME
    ```
    脚本自动：
-   - 读 `on-conditions-eval.md` 的 `scenario_test_decision` 段（SSOT）
-   - enabled=true：写 `.pg/changes/CHANGE_NAME/scenario.yaml` skeleton（LLM 必填 Scenario 内容）
-   - enabled=false：no-op（不写文件）
+- 读 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段（SSOT）
+    - 遍历每个 enabled=true 的 track，写 `scenario-<track-id>.yaml` skeleton（LLM 必填 Scenario 内容）
+    - 无 enabled track → no-op（不写文件）
 2. LLM 填充 scenario.yaml：将 skeleton 中的 S-example 替换为真实 Scenario
 3. 校验：
    ```bash
@@ -278,7 +279,7 @@ LLM **不直接写** execution-manifest.yaml，通过 CLI 工具基于 tasks.md 
 python3 .opencode/skills/pg-propose/scripts/pg-validate-proposal.py manifest CHANGE_NAME
 ```
 
-校验三产物（tasks.md / manifest / scenario.yaml）与 `on-conditions-eval.md` 的 `scenario_test_decision` SSOT 一致。
+校验三产物（tasks.md / manifest / scenario-<track>.yaml）与 `on-conditions-eval.md` 的 `scenario_tracks_decision` SSOT 一致。
 
 ---
 
@@ -310,7 +311,7 @@ pg-gen-manifest.py 已在 manifest.tracks[].enabled / reason / on_conditions_eva
 review-notes.md 必含段：
 
 - 5 项通用决策表（error_response_strategy / auth_scope / data_migration_strategy / transaction_boundary / frontend_interaction_style）
-- on_conditions 评估记录段（从 `on-conditions-eval.md` 合并；含 `scenario_test_decision` 段）
+- on_conditions 评估记录段（从 `on-conditions-eval.md` 合并；含 `scenario_tracks_decision` 段）
 - **manifest 决策复核段**（v3 新增，从 `execution-manifest.yaml` 的 tracks[].enabled / reason / on_conditions_eval 同步）
 - 6 类自审发现的问题清单（按 阻塞 / 重要 / 建议 三档）
 - 一致性检查结果（✅/⚠️/❌）
@@ -324,6 +325,7 @@ review-notes.md 必含段：
 - `reason: str` — 决策理由（on_conditions 命中项 + LLM 决策依据）
 - `on_conditions_eval: {matched_rules, unmatched_rules, path_hit_count, semantic_hit_count}` — 机械评估结果
 - `target_module: str`（e2e track 必填）— 限定修复模块
+- `scenario_yaml: str`（scenario track 必填）— 指向 `scenario-<track-id>.yaml`
 
 阶段三 LLM 复核时，需要把以下表格同步写入 review-notes.md：
 
@@ -332,24 +334,24 @@ review-notes.md 必含段：
 | backend-e2e | on_conditions 全部未命中 | false | LLM 未列入 affected_tracks | ✅ | [ ] |
 | frontend-e2e | on_conditions 命中 2 条 | true | 命中 + LLM 决策启用 | ✅ | [ ] |
 | agent-e2e | on_conditions 命中 1 条 | true | 命中 + LLM 决策启用 | ✅ | [ ] |
-| scenario-test | （来自 `scenario_test_decision` SSOT） | true / false | LLM 阶段二 2c 决策 + 依据 | ✅ | [ ] |
+| scenario-<track> | （来自 `scenario_tracks_decision` SSOT） | true / false | LLM 阶段二 2c 决策 + 依据 | ✅ | [ ] |
 
 **复核动作**：
 
 1. 对每行"最终"勾选 `[x]`（同意 manifest 决策）或 `[~]` + 写依据（覆盖）
 2. 不一致项（如 on_conditions 未命中但 enabled=true）必须在 review-notes.md 标注"建议禁用"或"建议人工介入"
 3. e2e track 必须确认 target_module 填写正确
-4. **scenario-test 行的 manifest.enabled 必须与 `on-conditions-eval.md` 的 `scenario_test_decision.enabled` 完全一致**（SSOT）
+4. **scenario track 行的 manifest.enabled 必须与 `on-conditions-eval.md` 的 `scenario_tracks_decision` 对应 track 的 enabled 完全一致**（SSOT）
 5. manifest 缺 enabled 字段的旧 change 走 pg-propose-refine 重新生成
 
-### scenario-test 行一致性约束
+### scenario track 一致性约束
 
-scenario-test 是常驻 track，但 LLM 仍可在阶段二 2c 决策 `enabled = false`（纯单模块改动）。**但三个产物（tasks.md / manifest / scenario.yaml）必须一致**：
+scenario track 是常驻 track，但 LLM 仍可在阶段二 2c 决策为某个 track 设置 `enabled = false`（纯单模块改动）。**但三个产物（tasks.md / manifest / scenario-<track>.yaml）必须一致**：
 
-| scenario_test_decision.enabled | tasks.md scenario 章节 | manifest scenario track | scenario.yaml |
-|--------------------------------|------------------------|------------------------|---------------|
-| `true` | ✅ 存在 | ✅ 存在 + `enabled=true` | ✅ 存在 |
-| `false` | ❌ 不存在 | ❌ 不存在 | ❌ 不存在 |
+| `scenario_tracks_decision` | tasks.md scenario 章节 | manifest scenario track | scenario-<track>.yaml |
+|---------------------------|------------------------|------------------------|----------------------|
+| track-A: `enabled=true` | ✅ 存在 | ✅ 存在 + `enabled=true` + `scenario_yaml` 字段 | ✅ `scenario-track-A.yaml` 存在 |
+| track-B: `enabled=false` | ❌ 不存在 | ❌ 不存在 | ❌ 不存在 |
 
 违反时 `pg-validate-proposal.py` 会报 `scenario_yaml_missing` / `scenario_yaml_should_not_exist` / `scenario_yaml_orphan` 错误，必须修复。
 
@@ -359,8 +361,8 @@ scenario-test 是常驻 track，但 LLM 仍可在阶段二 2c 决策 `enabled = 
 - **禁止**自动修改 proposal/design/tasks 主体内容
 - **禁止**手工修改 `execution-manifest.yaml` 的 `enabled` / `reason` / `on_conditions_eval` 字段
   - 如需变更，**必须重跑** `pg-gen-tasks-skeleton.py` + `pg-gen-manifest.py` + `pg-gen-scenario.yaml`，让 SSOT 自动同步
-- **禁止**在 scenario-test 启用时手工编辑 `tasks.md` 删除 scenario 章节
-  - 必须改 `--scenario-test-enabled false` 重跑 2d
+- **禁止**在 scenario track 启用时手工编辑 `tasks.md` 删除 scenario 章节
+   - 必须改 `--scenario-decisions "track=false"` 重跑 2d
 - **唯一允许的产物修改**：纯格式问题（markdown 标题层级错乱、代码块语言标记缺失、明显笔误），且修改后必须在 review-notes.md 中留痕记录"格式修正: X→Y"
 - 自审完成后更新 TodoWrite 第 11 项为完成
 
@@ -372,17 +374,18 @@ scenario-test 是常驻 track，但 LLM 仍可在阶段二 2c 决策 `enabled = 
 
 产物生成完成且单文档评审（review-notes.md）已写入后，更新 TodoWrite 全部标记为完成。直接向用户展示产物摘要：
 
-- 变更名称、产物位置、已创建文件（5 个产物）：
+- 变更名称、产物位置、已创建文件（5+ 个产物）：
   - `.pg/changes/<change>/proposal.md`（必填）
   - `.pg/changes/<change>/design.md`（必填）
   - `.pg/changes/<change>/tasks.md`（必填）
   - `.pg/changes/<change>/execution-manifest.yaml`（必填）
-  - `.pg/changes/<change>/scenario.yaml`（**仅当** scenario-test 启用时存在）
+  - `.pg/changes/<change>/scenario-<track>.yaml`（**每个启用**的 scenario track 一个）
   - `.pg/changes/<change>/1-propose-review/on-conditions-eval.md`（必填）
   - `.pg/changes/<change>/1-propose-review/review-notes.md`（必填）
-- 报告 `scenario_test_decision` 状态（从 on-conditions-eval.md 读取）：
-  - `enabled = true`：tasks.md / manifest / scenario.yaml 三产物均含 scenario
-  - `enabled = false`：上述三产物均不含 scenario（避免冗余）
+- 报告 `scenario_tracks_decision` 状态（从 on-conditions-eval.md 读取）：
+  - 每个 scenario track 的 `enabled` 状态：`{track_id}: {enabled/disabled}`
+  - enabled track → tasks.md / manifest / scenario-<track>.yaml 三产物均含对应章节
+  - disabled track → 上述三产物均不含该 track（避免冗余）
 - review-notes.md 内容摘要：
   - 通用决策：`5 项已预填推荐值`
   - 问题清单：`阻塞 X / 重要 Y / 建议 Z`（每条以 checkbox `[ ]` 起始）
@@ -392,7 +395,7 @@ scenario-test 是常驻 track，但 LLM 仍可在阶段二 2c 决策 `enabled = 
 - 如希望调整决策项，直接编辑 `.pg/changes/<change-name>/1-propose-review/review-notes.md`：
   - 通用决策：修改表格的"当前"列
   - 问题清单：把 `[ ]` 改为 `[x]`（已修复）或 `[~]` + 加 `> SKIP：理由`（豁免）
-  - **scenario-test 决策**：修改 `on-conditions-eval.md` 的 `scenario_test_decision` 段（不建议，需重跑三个生成脚本）
+  - **scenario track(s) 决策**：修改 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段（不建议，需重跑三个生成脚本）
 - 编辑后调用 `/2.1-pg-propose-refine {change-name}` 应用决策
 - 下一步可执行 `/3-pg-build {change-name}` 开始实现
 - 如希望修复 review-notes.md 中的"阻塞/重要"问题后再 build，回复"修复 review-notes 中的问题"，由本会话继续处理
@@ -409,32 +412,32 @@ scenario-test 是常驻 track，但 LLM 仍可在阶段二 2c 决策 `enabled = 
 
 ## 产物清单（硬约束）
 
-每个 change 在 `.pg/changes/<change>/` 下生成 5-6 个产物文件（前 4 个 + 1 评审 + 1 条件性 scenario.yaml）：
+每个 change 在 `.pg/changes/<change>/` 下生成 5+ 个产物文件（前 4 个 + 1 评审 + N 个条件性 scenario-<track>.yaml，N=启用 scenario track 数）：
 
 | 产物 | 写入位置 | 何时生成 | 必填 |
 |------|---------|---------|------|
 | `proposal.md` | `.pg/changes/<change>/proposal.md` | 阶段 2a | ✅ 必填 |
 | `design.md` | `.pg/changes/<change>/design.md` | 阶段 2b | ✅ 必填 |
-| `tasks.md` | `.pg/changes/<change>/tasks.md` | 阶段 2d（pg-gen-tasks-skeleton.py 生成，含 scenario 章节当且仅当 scenario-test 启用） | ✅ 必填 |
-| `execution-manifest.yaml` | `.pg/changes/<change>/execution-manifest.yaml` | 阶段 2e（pg-gen-manifest.py 生成，含 scenario track 当且仅当 scenario-test 启用） | ✅ 必填 |
-| `on-conditions-eval.md` | `.pg/changes/<change>/1-propose-review/on-conditions-eval.md` | 阶段 2d（pg-gen-tasks-skeleton.py 生成，含 `scenario_test_decision` SSOT 段） | ✅ 必填 |
+| `tasks.md` | `.pg/changes/<change>/tasks.md` | 阶段 2d（pg-gen-tasks-skeleton.py 生成，含 scenario 章节当且仅当至少一个 scenario track 启用） | ✅ 必填 |
+| `execution-manifest.yaml` | `.pg/changes/<change>/execution-manifest.yaml` | 阶段 2e（pg-gen-manifest.py 生成，含 scenario track 当且仅当对应 track 启用） | ✅ 必填 |
+| `on-conditions-eval.md` | `.pg/changes/<change>/1-propose-review/on-conditions-eval.md` | 阶段 2d（pg-gen-tasks-skeleton.py 生成，含 `scenario_tracks_decision` SSOT 段） | ✅ 必填 |
 | `review-notes.md` | `.pg/changes/<change>/1-propose-review/review-notes.md` | 阶段 3（LLM 自审） | ✅ 必填 |
-| `scenario.yaml` | `.pg/changes/<change>/scenario.yaml` | 阶段 2f（pg-gen-scenario.py 生成，**仅当** scenario-test 启用） | ⚠️ 条件必填 |
+| `scenario-<track>.yaml` | `.pg/changes/<change>/scenario-<track>.yaml` | 阶段 2f（pg-gen-scenario.py 生成，**每个启用**的 scenario track 一个文件） | ⚠️ 条件必填 |
 
-### 三产物一致性约束（v3.5）
+### 三产物一致性约束（v3.6）
 
-`tasks.md` / `execution-manifest.yaml` / `scenario.yaml` 三个产物严格一致，无冗余无回退：
+`tasks.md` / `execution-manifest.yaml` / `scenario-<track>.yaml` 三个产物严格一致，无冗余无回退：
 
-- `on-conditions-eval.md` 的 `scenario_test_decision.enabled` 字段是 SSOT
+- `on-conditions-eval.md` 的 `scenario_tracks_decision` 段是 SSOT（per-track）
 - `pg-gen-tasks-skeleton.py` / `pg-gen-manifest.py` / `pg-gen-scenario.py` 三个脚本都从 SSOT 派生
 - `pg-validate-proposal.py` 校验三产物与 SSOT 一致
 
-### scenario.yaml 生成指引（v3.5+，仅当 scenario track 启用）
+### scenario.yaml 生成指引（v3.6+，仅当 scenario track 启用）
 
-**SSOT**：scenario.yaml 是 scenario-execute agent 的唯一输入，**禁止** scenario-execute agent 重写或修改。
+**SSOT**：scenario-<track>.yaml 是 scenario-execute agent 的唯一输入，**禁止** scenario-execute agent 重写或修改。
 修改走 `pg-propose-refine` 流程回到 propose 阶段。
 
-**生成路径**：阶段 2f 调用 `pg-gen-scenario.py` 自动写盘 `.pg/changes/<change>/scenario.yaml` skeleton（LLM 必填 Scenario 内容）。
+**生成路径**：阶段 2f 调用 `pg-gen-scenario.py` 自动写盘 `.pg/changes/<change>/scenario-<track>.yaml` skeleton（LLM 必填 Scenario 内容）。每个启用的 scenario track 生成一个独立文件。
 
 **schema**（YAML）：
 
