@@ -180,7 +180,21 @@ class Orchestrator:
 
         # 检查是否已 terminal
         if self.state.status == "completed":
-            return {"action": "done", "status": "completed"}
+            archive_result = self._auto_archive()
+            affected = [
+                t.bare
+                for tid in self.state.pipeline_order
+                if tid != FINAL_GATE_TRACK
+                for t in [self.state.tracks.get(tid)]
+                if t and t.status == "completed"
+            ]
+            return {
+                "action": "done",
+                "status": "completed",
+                "next_action": "verify_and_merge",
+                "affected_tracks": affected,
+                "archive": archive_result,
+            }
         if self.state.status == "failed":
             return {
                 "action": "workflow_failed", "fatal": True,
