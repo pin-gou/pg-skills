@@ -126,6 +126,7 @@ scenarios:
 | `_meta` | 自由字段，pg-build 会忽略，可保留也可删除 |
 | 顺序 | 所有 `critical: true` 排在 `critical: false` 之前 |
 | 数量 | 1-5 个；超出后提示用户拆分 |
+| `evidence` 字段 | 写 `2-build/<report_seq>-<scenario_id>-evidence.json` 等**带占位符**的相对路径。LLM 只需把 `<scenario_id>` 替换为真实 id；`<report_seq>` 由 pg-build 编排器在 dispatch 时注入。scenario-execute agent 写盘时会按 `{report_seq}` 前缀拼接出最终绝对路径，避免多次派遣（首次 execute / fix 后重跑 execute）覆盖同 scenario 的历史 evidence |
 
 ---
 

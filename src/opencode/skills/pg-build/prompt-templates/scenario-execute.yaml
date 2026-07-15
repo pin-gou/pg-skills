@@ -105,3 +105,13 @@ prompt: |
   - 结构化 JSON 证据（per Scenario block）
   - cleanup 报告
   - critical=true 失败列表（若 escalate）
+
+  ### 证据文件命名
+
+  每个 Scenario 必须产出结构化 JSON，存到 `2-build/{report_seq}-{scenario_id}-evidence.json`：
+
+  - `{report_seq}` 与本 phase 主报告 `{report_filename}` 共享同一 seq（来自 dispatch_file 注入）
+  - `{scenario_id}` 来自 scenario.yaml 中 `scenarios[i].scenario_id` 字段
+  - scenario.yaml 的 `evidence` 字段只声明 scenario_id（如 `S-xxx-evidence.json`），**不**含 seq；agent 写盘时自动在前面拼 `{report_seq}-` 形成最终路径
+  - **必须**加 seq 前缀，否则多次派遣（首次 execute / fix 后重跑 execute）会覆盖同 scenario 的历史 evidence
+  - 最终在 result.json 的 `evidence_paths` / `outputs` 中填实际落盘的绝对路径（含 `{report_seq}-` 前缀）

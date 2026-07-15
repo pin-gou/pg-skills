@@ -145,6 +145,18 @@ class TestIsPlaceholderString(unittest.TestCase):
         self.assertFalse(_scenario._is_placeholder_string("创建 bucket 成功"))
         self.assertFalse(_scenario._is_placeholder_string("response.id matches '[a-f0-9]{32}'"))
 
+    def test_report_seq_runtime_placeholder_not_detected(self):
+        """v3.8: <report_seq> 是运行时注入占位符，不该被 LLM 替换也不该被检测为占位符.
+        scenario.yaml evidence 字段写 `2-build/<report_seq>-<scenario_id>-evidence.json`，
+        LLM 填充后保留 <report_seq>，由 pg-build 编排器在 dispatch 时替换.
+        """
+        # 仅含 <report_seq> → 不该被检测为占位符
+        self.assertFalse(_scenario._is_placeholder_string("2-build/<report_seq>-S-foo-evidence.json"))
+        # 含 <scenario_id> + <report_seq> → 仍含 LLM 必填占位符，需报告
+        self.assertTrue(_scenario._is_placeholder_string("2-build/<report_seq>-<scenario_id>-evidence.json"))
+        # 含 <report_seq> + 其他占位符（如 <动作名>）→ 仍需报告
+        self.assertTrue(_scenario._is_placeholder_string("<report_seq>-<动作名>-foo"))
+
 
 class TestCheckScenarioFile(unittest.TestCase):
     """check_scenario_file 测试 — 文件级别封装."""

@@ -131,7 +131,12 @@ scenarios:
 
 ## 证据产出
 
-每个 Scenario 必须产出结构化 JSON，存到 `2-build/<scenario_id>-evidence.json`：
+每个 Scenario 必须产出结构化 JSON，存到 `2-build/{report_seq}-{scenario_id}-evidence.json`：
+
+- `{report_seq}` 来自 dispatch_file（与主报告 `2-build/{report_seq}-{item}-scenario-execute.md` 共享同一 seq）
+- `{scenario_id}` 来自 scenario.yaml 中 `scenarios[i].scenario_id` 字段
+- **必须**在 scenario_id 前加 `{report_seq}-` 前缀，避免多次派遣（首次 execute / fix 后重跑 execute）覆盖同 scenario 的历史 evidence
+- scenario.yaml 的 `evidence` 字段只声明 scenario_id（如 `S-xxx-evidence.json`），agent 写盘时自动补 `{report_seq}-` 前缀形成最终路径
 
 ```json
 {
@@ -176,7 +181,7 @@ curl -s -X POST "${BACKEND_URL}${scenario_url}" \
 ## 写盘要求
 
 完成后用 `cat > 2-build/{report_seq}-{item}-scenario-execute.md <<'EOF' ... EOF` 写报告，含：
-- 每个 Scenario 的 PASS/FAIL/SKIP + JSON 证据路径
+- 每个 Scenario 的 PASS/FAIL/SKIP + JSON 证据路径（写盘时填 `2-build/{report_seq}-{scenario_id}-evidence.json`，与证据文件实际位置一致）
 - 结构化 JSON 块（每个 Scenario 一段）
 - critical=true 失败列表（如有）
 - cleanup 报告（如有 cleanup 失败）

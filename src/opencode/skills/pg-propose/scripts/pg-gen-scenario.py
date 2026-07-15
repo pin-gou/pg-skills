@@ -112,7 +112,7 @@ def _build_skeleton_yaml(change: str, track_id: str) -> dict:
                     {"name": "<cleanup>", "action": "HTTP DELETE /api/.../.../..."},
                 ],
                 "evidence": [
-                    "2-build/<scenario_id>-evidence.json",
+                    "2-build/<report_seq>-<scenario_id>-evidence.json",
                 ],
             },
         ],
@@ -155,14 +155,31 @@ def _iter_string_values(node):
             yield from _iter_string_values(item)
 
 
+# v3.8: 运行时注入占位符 — evidence 字段中 LLM 替换 <scenario_id> 后，
+# <report_seq> 由 pg-build 编排器在 dispatch 时注入，LLM 不应替换也不该被检测为占位符。
+_RUNTIME_PLACEHOLDER_RE = None
+
+
+def _runtime_placeholder_pattern() -> "_re.Pattern[str]":
+    """延迟编译运行时占位符正则."""
+    global _RUNTIME_PLACEHOLDER_RE
+    import re as _re
+    if _RUNTIME_PLACEHOLDER_RE is None:
+        _RUNTIME_PLACEHOLDER_RE = _re.compile(r"<report_seq>")
+    return _RUNTIME_PLACEHOLDER_RE
+
+
 def _is_placeholder_string(value: str) -> bool:
     """检测字符串是否仍含 v3.7 skeleton 的占位符模式.
 
     识别模式:
-      - "<...>" (尖括号占位符)
+      - "<...>" (尖括号占位符，含 <scenario_id> / <前置条件> 等)
       - "/.../" 路径中含三连点（如 /api/<scope>.../v3/...）
       - 以 "S-<" 起头的未替换 scenario_id
       - "（LLM 必填）" 注释占位符
+
+    例外: <report_seq> 是运行时注入占位符（pg-build 编排器在 dispatch 时
+    注入真实 seq），LLM 不应替换也不该被检测为占位符。
     """
     if not isinstance(value, str) or not value:
         return False
@@ -173,7 +190,9 @@ def _is_placeholder_string(value: str) -> bool:
         _re.compile(r"^S-<"),  # S-<unique-name>
         _re.compile(r"LLM\s*必填"),
     ]
-    return any(p.search(value) for p in placeholders)
+    # 先剥除运行时占位符，再检测是否仍含 LLM 占位符
+    stripped = _runtime_placeholder_pattern().sub("", value)
+    return any(p.search(stripped) for p in placeholders)
 
 
 def check_scenario_placeholders(scenario_doc: dict) -> list[tuple[str, str]]:
