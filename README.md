@@ -99,7 +99,7 @@ git commit -m "feat: 接入 pg-skills $(cat .pg/skills/VERSION)"
 
 ```
 pg-skills/
-├── VERSION                       # semver （当前: 0.8.1）
+├── VERSION                       # semver （当前: 0.8.2）
 ├── CHANGELOG.md
 ├── README.md                     # 本文件
 ├── src/
@@ -191,7 +191,8 @@ pg-skills/
 | **0.6.x** | pg-build 事件溯源引擎 + pg-agent workflow + health check |
 | **0.7.x** | pg-build v2 取代 v1 + 路径简化 + execution-manifest.yaml SSOT + pg-regression A/B/C 修复边界 |
 | **0.8.0** | pg-build v2.6 review 阶段 + code-review profile 引擎（5 profile）+ pg-propose tasks.md 骨架脚本外化 + pg-fix-issue v3.2 重构 + code_view→code_review 重命名 + 品构品牌命名 |
-| **0.8.1** | verify/gate 按 track 关闭 + review_level 全量移除 + design.md 缺陷协议 + P0 硬约束 + review rule docs 注入 —— **当前** |
+| **0.8.1** | verify/gate 按 track 关闭 + review_level 全量移除 + design.md 缺陷协议 + P0 硬约束 + review rule docs 注入 |
+| **0.8.2** | Scenario Track 机制（scenario-prepare/execute/fix）+ manifest v3（on_conditions 机械评估 + enabled 严格派发 + e2e/scenario 类型）+ pg-propose v3.7（流程精简 + placeholder 校验 + 全推荐自动 refine）+ workflow_failed 自动 reset —— **当前** |
 | **1.0.x** | 生产就绪，在 2+ 外部项目 dogfood（未达） |
 
 ### 升级命令
@@ -201,7 +202,7 @@ pg-skills/
 pg upgrade
 
 # 升级到指定版本
-pg upgrade v0.8.1
+pg upgrade v0.8.2
 
 # 查看远程可用版本
 pg upgrade --list

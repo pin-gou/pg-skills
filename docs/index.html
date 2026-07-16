@@ -112,6 +112,7 @@ body {
   font-size: 20px; font-weight: 600; margin: 32px 0 12px;
   padding-bottom: 6px; border-bottom: 2px solid var(--primary-light);
 }
+}
 .section h3 {
   font-size: 16px; font-weight: 600; margin: 24px 0 8px;
   color: var(--secondary);
@@ -122,6 +123,12 @@ body {
 .section li { margin: 4px 0; }
 
 /* Cards */
+.subsection-card {
+  background: var(--card-bg); border: 1px solid var(--border);
+  border-radius: 10px; padding: 4px 20px 16px; margin: 20px 0;
+  box-shadow: var(--shadow);
+}
+.subsection-card h2 { margin-top: 16px; }
 .card {
   background: var(--card-bg); border: 1px solid var(--border);
   border-radius: 10px; padding: 20px; margin: 16px 0;
@@ -248,7 +255,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 <button id="theme-toggle">🌙 暗色</button><span class="muted-hint">💡 侧栏点击会同步 URL，可分享章节链接</span>
 
 <nav id="sidebar">
-  <h2>📘 品构 pg-skills</h2>
+  <h2>📘 品构 pg-skills v0.8.2</h2>
   <p style="padding:0 16px;margin:-6px 0 8px;font-size:12px;color:var(--muted);font-style:italic">让 AI 写出可托付的代码</p>
 
   <span class="section-group">基础概念</span>
@@ -267,8 +274,16 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <a href="#sec4-define">4.2 定界</a>
   <a href="#sec4-propose">4.3 提案</a>
   <a href="#sec4-build">4.4 构建</a>
-  <a href="#sec4-4-5" class="sub">4.4.5 simple track</a>
-  <a href="#sec4-4-6" class="sub">4.4.6 gate-score</a>
+  <a href="#sec4-4-1" class="sub">4.4.1 概述</a>
+  <a href="#sec4-4-2" class="sub">4.4.2 track 类型一览</a>
+  <a href="#sec4-4-3" class="sub">4.4.3 standard track</a>
+  <a href="#sec4-4-4" class="sub">4.4.4 simple track</a>
+  <a href="#sec4-4-5" class="sub">4.4.5 scenario track</a>
+  <a href="#sec4-4-6" class="sub">4.4.6 产物与目录</a>
+  <a href="#sec4-4-7" class="sub">4.4.7 中断恢复</a>
+  <a href="#sec4-4-8" class="sub">4.4.8 环境准备</a>
+  <a href="#sec4-4-9" class="sub">4.4.9 manifest 速查</a>
+  <a href="#sec4-4-10" class="sub">4.4.10 gate-score</a>
   <a href="#sec5">5. Bug 修复</a>
   <a href="#sec6">6. 回归测试</a>
   <a href="#sec7">7. 动手实操</a>
@@ -746,9 +761,10 @@ stages:
   <ul style="margin:8px 0 0; padding-left:20px">
     <li><code>modules</code>：本 track 关联的 module id 列表（runner 用此定位 build/lint/test 命令）</li>
     <li><code>max_fix_retries</code>：verify→fix 子 pipeline 的总次数上限（默认 5）</li>
-    <li><code>type</code>：<code>standard</code>（默认，TDRVG 四阶段 + 可选 review）/<code>simple</code>（commands 列表直跑，自动跳过 review）</li>
+    <li><code>type</code>：<code>standard</code>（默认，TDRVG 四阶段 + 可选 review）/ <code>simple</code>（commands 列表直跑，自动跳过 review）/ <code>scenario</code>（真实集成场景测试，独立 scenario-prepare/execute/fix 三阶段，不参与 gate）</li>
     <li><code>code_review_enabled</code>：是否派发 <code>pg-build/review</code> agent。propose 阶段由 <code>pg-gen-tasks-skeleton.py</code> 按 manifest 的 <code>phases.review</code> 是否存在决定 tasks.md 含 4 还是 5 sub（不含 review 即 silent skip）；simple track 自动跳过 review</li>
     <li><code>code_review_profiles</code>：⚠ <strong>已废弃（0.8.0 不再读）</strong>。历史文档会看到这个字段；保留仅作兼容说明，runner 当前仅依赖 <code>.pg/code-review.yaml</code> 全局 + module language 自动派发。</li>
+    <li><code>type: scenario</code>（v0.8.2）：独立三阶段（prepare/execute/fix），不参与 gate assessment。</li>
   </ul>
 </div>
 </div>
@@ -1159,148 +1175,128 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <div id="sec4-propose" class="section">
 <h1>4.3 提案 —— `/2-pg-propose`</h1>
 
-<p style="color:var(--muted); font-style:italic">"边界有了，现在出图纸。图纸分四份人类可读文档 + 两份机器配置文件，每份给不同的对象看。"</p>
+<p style="color:var(--muted); font-style:italic">"边界有了，现在出图纸。图纸分五组，每组的接收方不同——有的给 runner 读，有的给 LLM 读，有的只给人读。"</p>
 
-<h2>四份文档 + 一份 SSOT</h2>
+<h2>输入 → 产出</h2>
+
+<p><strong>输入</strong>：定界产物（边界清单 + scope summary）+ <code>.pg/project.yaml</code>（tracks / stages / environments 定义）</p>
+<p><strong>产出</strong>：6-7 个文件，按对后续 <code>pg-build</code> 的影响分五组：</p>
+
 <table>
-  <tr><th>类别</th><th>文件</th><th>读者</th><th>职责</th></tr>
-  <tr><td rowspan="4">人类可读</td><td><code>proposal.md</code></td><td>产品 / 架构师</td><td>做什么、为什么、不做哪些</td></tr>
-  <tr><td><code>design.md</code></td><td>开发者</td><td>怎么做、架构决策、V-* 验证标准</td></tr>
-  <tr><td><code>tasks.md</code></td><td>Pipeline Runner + 开发者</td><td>stages × tracks 任务矩阵（含可选 review sub）</td></tr>
-  <tr><td><code>1-propose-review/review-notes.md</code></td><td>人机评审</td><td>5 项通用决策 + 6 类自审项 + on_conditions 复核 + checkbox 追踪</td></tr>
-  <tr><td>机器 SSOT</td><td><code>execution-manifest.yaml</code></td><td>Pipeline Runner</td><td>按 tasks.md 结构化生成的 pipeline 编排清单（含 <code>stages[i].environment</code> 字段、<code>tracks[i].phase_prompts</code> 字典）</td></tr>
+  <tr><th>分组</th><th>文件</th><th>对 pg-build 的影响</th><th>适用 track 类型</th></tr>
+  <tr>
+    <td><strong>① 驱动编排</strong></td>
+    <td><code>execution-manifest.yaml</code></td>
+    <td>Runner 直接消费，决定 stage 顺序、track 列表、每个 track 的 phase_prompts（含 review/verify/gate 开关）、environment 选择。<br><strong>缺失 → <code>workflow_failed</code> 终止</strong>。</td>
+    <td>全部</td>
+  </tr>
+  <tr>
+    <td><strong>② 任务蓝图</strong></td>
+    <td><code>tasks.md</code></td>
+    <td>sub-agent 的任务描述来源 + 断点恢复依据（checkbox √/× 标记完成状态）。<br><strong>缺失 → 无法恢复中断</strong>。</td>
+    <td>全部</td>
+  </tr>
+  <tr>
+    <td><strong>③ 场景定义</strong></td>
+    <td><code>scenario-&lt;track&gt;.yaml</code>（每个启用的 scenario track 各一个）</td>
+    <td>scenario-prepare/execute 的 Gherkin 场景定义，含 Given/When/Then/And 步骤与 evidence 规格。<br><strong>缺失 → scenario track 无法执行</strong>。</td>
+    <td>仅 <code>scenario</code></td>
+  </tr>
+  <tr>
+    <td><strong>④ 指导实现</strong></td>
+    <td><code>proposal.md</code> + <code>design.md</code></td>
+    <td>LLM 在 build 阶段据此写代码（proposal 定范围，design 定接口与 V-* 验证标准）。<br><strong>不影响 runner 执行，但影响代码质量</strong>。</td>
+    <td>全部</td>
+  </tr>
+  <tr>
+    <td><strong>⑤ 评审记录</strong></td>
+    <td><code>review-notes.md</code> + <code>on-conditions-eval.md</code></td>
+    <td><strong>对 pg-build 无直接影响</strong>。仅用于 propose 阶段的评审闭环与自动 refine 决策。</td>
+    <td>全部</td>
+  </tr>
+</table>
+
+<h2>三种 track 类型的 propose 差异</h2>
+
+<p>propose 阶段对 <code>project.yaml</code> 中声明的每种 track 类型，生成不同结构的 tasks.md 章节和额外产物：</p>
+
+<table>
+  <tr><th>track 类型</th><th>tasks.md 章节数</th><th>额外产物</th><th>build 阶段行为</th></tr>
+  <tr>
+    <td><code>standard</code>（默认）</td>
+    <td>3-5 个 sub-heading：test / dev / [review] / verify / gate（review 由 <code>code_review_enabled</code> 控制，verify/gate 分别由 <code>verify_enabled</code> / <code>gate_enabled</code> 控制）</td>
+    <td>—</td>
+    <td>走 TDRVG 五阶段编排，每个 sub 派遣独立 sub-agent；失败时触发 fix / fix-review / fix-gate 子 pipeline</td>
+  </tr>
+  <tr>
+    <td><code>simple</code></td>
+    <td>1 个 heading（<code>commands</code> 列表直跑）</td>
+    <td>—</td>
+    <td>无 sub-agent，按顺序执行命令，exit 0 = pass；review/verify/gate 自动关闭</td>
+  </tr>
+  <tr>
+    <td><code>scenario</code></td>
+    <td>2 个 sub-heading：scenario-prepare / scenario-execute</td>
+    <td><code>scenario-&lt;track&gt;.yaml</code>（骨架文件，含 placeholder，LLM 填充后供 build 使用）</td>
+    <td>走独立三阶段：prepare（启动实例）→ execute（执行 Gherkin 场景）→ [fix → execute]*；不参与 gate 评估</td>
+  </tr>
 </table>
 
 <div class="tip-card card">
-  <p style="margin:0"><strong>v0.7 变更点</strong>：v1 的 <code>environment.yaml</code> 已弃用，per-change 的环境选择写入 <code>execution-manifest.yaml.stages[i].environment</code>。manifest 是 5 类产物的<strong>唯一机器事实来源</strong>，由 <code>pg-gen-manifest.py</code> 基于 tasks.md 结构化生成，<strong>LLM 不直接写</strong>。</p>
+  <p style="margin:0"><strong>章节号 N 是动态的</strong>：tasks.md 的每个章节编号 N 仅在当次生成时稳定（同一份 tasks.md 内），但跨 change 不一致。下游消费方必须基于 sections JSON 的 N 值填，<strong>禁止硬编码</strong>。例：dev stage 的 backend track 在 change A 是 <code>2-4</code>，在 change B 可能变成 <code>3-5</code>。</p>
 </div>
 
-<h2>核心机制：tasks.md 的 stages × tracks  展开</h2>
+<h2>environment 选择</h2>
 
-<p>pg-propose 通过 <code>pg-gen-tasks-skeleton.py</code> 机械生成 tasks.md 的章节标题骨架，LLM 只负责填充 body 内容。整体分两步过滤：</p>
-
-<h3>Step 1：on_conditions 判定（仅入选中的 stage）</h3>
-<p>检查本 change 的 <code>affected_paths</code> 是否命中该 stage 的 <code>on_conditions</code> 规则：</p>
-<ul>
-  <li><span class="tag tag-red">未命中</span> → 该 stage <strong>整体跳过</strong>，tasks.md 中<strong>不生成任何章节</strong>，也不占章节号 N</li>
-  <li><span class="tag tag-green">命中</span> → 进入 Step 2</li>
-</ul>
-
-<h3>Step 2：affected_tracks × sub 判定（含可选 review sub）</h3>
-<p>对 stage.tracks 列表中的每个 track：</p>
-<ul>
-  <li><strong>simple track</strong> → 1 个 heading（<code>cmd</code>，按顺序直跑）</li>
-  <li><strong>standard track</strong> + <code>code_review_enabled=false</code> → 4 个 heading：<code>T→D→V→G</code></li>
-  <li><strong>standard track</strong> + <code>code_review_enabled=true</code> → 5 个 heading：<code>T→D→<span style="color:var(--secondary);font-weight:600">R</span>→V→G</code>（review 插在 dev 与 verify 之间，由 <code>pg-build/review</code> agent 执行静态审查）</li>
-  <li>不在 <code>affected_tracks</code> 中 → 生成占位章节 <code>- 无</code></li>
-</ul>
-
-<div class="info-card card">
-  <p style="margin:0"><strong>章节号 N 是动态的</strong>：脚本 <code>pg-gen-tasks-skeleton.py</code> 给每个章节分配的 N <strong>仅在当次生成时稳定</strong>（同一份 tasks.md 内），但跨 change 不一致（同一 track 在不同 change 的 N 可能不同）。下游消费方必须基于 sections JSON 的 N 值填，<strong>禁止硬编码</strong>。例：dev stage 的 backend track 章节号在 change A 是 <code>2-4</code>，在 change B 可能因为多走了 prepare-env-scripts stage 变成 <code>3-5</code>。</p>
-</div>
-
-<div class="svg-container">
-<svg viewBox="0 0 720 380" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arr-r2" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
-  </defs>
-
-  <text x="20" y="22" font-size="13" font-weight="700" fill="var(--text)">举例：只改前端代码（code_review_enabled=true）</text>
-
-  <!-- project.yaml stages -->
-  <rect x="20" y="40" width="220" height="260" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
-  <text x="130" y="60" font-size="12" font-weight="600" fill="var(--text)" text-anchor="middle">project.yaml stages</text>
-
-  <rect x="32" y="75" width="196" height="44" rx="4" fill="#fef2f2" stroke="#ef4444" stroke-width="1"/>
-  <text x="44" y="93" font-size="11" font-weight="600" fill="#b91c1c">prepare-env-scripts</text>
-  <text x="44" y="109" font-size="10" fill="#64748b">on_conditions: 命中 .pg/hooks</text>
-
-  <rect x="32" y="128" width="196" height="44" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
-  <text x="44" y="146" font-size="11" font-weight="600" fill="#065f46">dev</text>
-  <text x="44" y="162" font-size="10" fill="#64748b">tracks: [backend, agent, frontend]</text>
-
-  <rect x="32" y="181" width="196" height="44" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
-  <text x="44" y="199" font-size="11" font-weight="600" fill="#64748b">dev-mock-integration</text>
-  <text x="44" y="215" font-size="10" fill="#64748b">注释中，未启用</text>
-
-  <rect x="32" y="234" width="196" height="44" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
-  <text x="44" y="252" font-size="11" font-weight="600" fill="#64748b">real-integration</text>
-  <text x="44" y="268" font-size="10" fill="#64748b">注释中，未启用</text>
-
-  <!-- arrow -->
-  <line x1="240" y1="160" x2="290" y2="160" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r2)"/>
-
-  <!-- tasks.md output -->
-  <rect x="290" y="40" width="410" height="300" rx="6" fill="#fffbeb" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="495" y="60" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">tasks.md（生成结果）</text>
-
-  <!-- Skipped stage note -->
-  <rect x="302" y="75" width="386" height="30" rx="4" fill="#fee2e2" stroke="#ef4444" stroke-width="1" stroke-dasharray="3,2"/>
-  <text x="310" y="94" font-size="10" fill="#b91c1c">✗ prepare-env-scripts：on_conditions 不命中 → 整体跳过，无章节</text>
-
-  <!-- dev stage expanded -->
-  <text x="302" y="130" font-size="11" font-weight="600" fill="var(--text)">## dev stage</text>
-
-  <rect x="302" y="138" width="386" height="28" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
-  <text x="310" y="156" font-size="10" fill="#64748b">### backend track → - 无（不在 affected_tracks）</text>
-
-  <rect x="302" y="172" width="386" height="28" rx="4" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
-  <text x="310" y="190" font-size="10" fill="#64748b">### agent track → - 无（不在 affected_tracks）</text>
-
-  <rect x="302" y="206" width="386" height="115" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
-  <text x="310" y="224" font-size="11" font-weight="600" fill="#065f46">### frontend track（在 affected_tracks，code_review_enabled=true）</text>
-  <text x="320" y="241" font-size="10" font-family="monospace" fill="#065f46">  - [ ] test: ...</text>
-  <text x="320" y="256" font-size="10" font-family="monospace" fill="#065f46">  - [ ] dev: ...</text>
-  <text x="320" y="271" font-size="10" font-family="monospace" fill="#7c3aed">  - [ ] review: ...   ← TDRVG 多出来的 R sub</text>
-  <text x="320" y="286" font-size="10" font-family="monospace" fill="#065f46">  - [ ] verify: ...</text>
-  <text x="320" y="301" font-size="10" font-family="monospace" fill="#065f46">  - [ ] gate: ...</text>
-
-  <text x="20" y="365" font-size="10" fill="#64748b">未启用的 stage 不出现在 tasks.md 中；启用的 stage 中未涉及的 track 只占位不展开任务；code_review_enabled=false → silent skip review sub</text>
-</svg>
-</div>
-
-<h2>environment 选择：写入 execution-manifest.yaml</h2>
-
-<p>对于 <code>environment.required: true</code> 的 stage，pg-propose 会读取该 stage 的 <code>selection_rules</code>，根据本 change 的 <code>affected_tracks</code> 选定 environment 并写入 <code>execution-manifest.yaml</code> 的 <code>stages[i].environment</code> 字段（v0.7 起取代旧 <code>environment.yaml</code>）：</p>
-
-<pre>
-<span style="color:#94a3b8"># .pg/changes/&lt;change&gt;/execution-manifest.yaml（节选）</span>
-stages:
-  - name: dev
-    environment:
-      name: dev-local          <span style="color:#94a3b8"># runner 直接从此字段读取，不再读 environment.yaml</span>
-      required: true
-    tracks: [backend, agent, frontend, proto-gen]
-</pre>
+<p>对于需要环境的 stage（<code>environment.required: true</code>），propose 阶段根据本 change 的 <code>affected_tracks</code> 选定一个 environment 并写入 <code>execution-manifest.yaml</code>：</p>
 
 <table>
   <tr><th>场景</th><th>选择</th><th>依据</th></tr>
   <tr><td>只改 backend + frontend</td><td><code>dev-local</code></td><td>单机能跑，无需跨主机</td></tr>
   <tr><td>改 agent 且需要双 agent 通信</td><td><code>dev-3tier</code></td><td>跨主机拓扑，验证 libvirt 连接</td></tr>
-  <tr><td>默认</td><td><code>dev-local</code></td><td>评审阶段可升级到 dev-3tier</td></tr>
+  <tr><td>默认</td><td><code>dev-local</code></td><td>评审阶段可升级</td></tr>
 </table>
 
 <div class="danger-card card">
   <h4 style="margin:0 0 8px">⚠ environment 选错代价很大</h4>
-  <ul style="margin:0;padding-left:20px">
-    <li>runner 在错误的 host 上启服务 → 启动失败</li>
-    <li>用错的 hook 脚本 → 端口冲突或环境变量缺失</li>
-    <li>跨机通信走错网段 → 联调失败</li>
-  </ul>
-  <p><code>execution-manifest.yaml.stages[i].environment</code> <strong>缺失 → workflow_failed 硬性终止</strong>。这是来自 manifest 的硬约束：runner 不知道该用哪个环境，宁可终止也不猜。v1 遗留的 <code>environment.yaml</code> pg-build v2 <strong>不再读取</strong>。</p>
+  <p style="margin:0">选错 environment 的后果在 build 阶段才会暴露：runner 在错误的 host 上启服务 → 启动失败；端口冲突或环境变量缺失 → 联调失败。<code>execution-manifest.yaml.stages[i].environment</code> <strong>缺失 → workflow_failed 硬性终止</strong>。</p>
 </div>
 
-<h2>评审闭环：review-notes.md + /2.1-pg-propose-refine</h2>
+<h2>评审闭环</h2>
 
-<ol>
-  <li>pg-propose 自审生成 <code>review-notes.md</code>（6 类审查项 + checkbox）</li>
-  <li>人工评审，把发现的问题在 review-notes 中标 <code>[x]</code> 或 <code>[~]</code></li>
-  <li>执行 <code>/2.1-pg-propose-refine</code>，AI 按 scope 精准修改 proposal / design / tasks</li>
-  <li>通常需要 1-2 轮 refine 迭代，直到 review-notes 全部 <code>[x]</code></li>
-</ol>
+<p>propose 阶段产出 <code>review-notes.md</code> 后，根据评审结论走两条路径之一：</p>
+
+<div class="svg-container">
+<svg viewBox="0 0 720 120" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arr-rc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+
+  <rect x="20" y="20" width="200" height="50" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="120" y="45" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">review-notes.md 自动产出</text>
+  <text x="120" y="62" font-size="10" fill="#1d4ed8" text-anchor="middle">含 5 项通用决策 + 6 类自审项</text>
+
+  <line x1="220" y1="45" x2="260" y2="20" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-rc)"/>
+  <line x1="220" y1="45" x2="260" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-rc)"/>
+
+  <rect x="265" y="5" width="200" height="50" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
+  <text x="365" y="30" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">路径 A：全推荐自动应用</text>
+  <text x="365" y="47" font-size="10" fill="#065f46" text-anchor="middle">通用决策全推荐 + 无用户意图 → 直接进 build</text>
+
+  <rect x="265" y="55" width="200" height="50" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="365" y="80" font-size="12" font-weight="700" fill="#92400e" text-anchor="middle">路径 B：人工 refine</text>
+  <text x="365" y="97" font-size="10" fill="#92400e" text-anchor="middle">用户修改 review-notes → /2.1-pg-propose-refine → build</text>
+
+  <line x1="465" y1="30" x2="515" y2="30" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-rc)"/>
+  <line x1="465" y1="80" x2="515" y2="80" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-rc)"/>
+
+  <rect x="520" y="15" width="180" height="80" rx="8" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3"/>
+  <text x="610" y="40" font-size="12" font-weight="700" fill="#475569" text-anchor="middle">进入 /3-pg-build</text>
+  <text x="610" y="60" font-size="10" fill="#64748b" text-anchor="middle">产物已冻结</text>
+  <text x="610" y="75" font-size="10" fill="#64748b" text-anchor="middle">runner 开始执行</text>
+</svg>
+</div>
 
 <div class="info-card card">
-<p style="margin:0"><strong>人工 review 的硬规则</strong>：API 契约变更、DB schema 变更、跨模块能力演进，必须经人工 review 后才能进入 build 阶段。</p>
+  <p style="margin:0"><strong>人工 review 的硬规则</strong>：API 契约变更、DB schema 变更、跨模块能力演进，必须经人工 review 后才能进入 build 阶段。</p>
 </div>
 </div>
 
@@ -1311,245 +1307,128 @@ stages:
 
 <p style="color:var(--muted); font-style:italic">"图纸审完了，Runner 开始施工。<strong>人只做一件事</strong>：执行命令等结果。"</p>
 
-<h2>全景鸟瞰图：多 stage × 多 track 一次看完</h2>
+<h2 id="sec4-4-1">4.4.1 概述</h2>
 
-<div class="svg-container">
-<svg viewBox="0 0 880 460" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="ov-arr" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#475569"/></marker>
-    <marker id="ov-arr-env" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#c2410c"/></marker>
-  </defs>
+<p><code>/3-pg-build</code> 是品构的<strong>施工阶段</strong>。它读取 propose 阶段产出的蓝图，按 <code>execution-manifest.yaml</code> 定义的 stage/track 顺序，逐一派遣 sub-agent 实现代码、运行测试、执行审查、打分门控。</p>
 
-  <text x="20" y="22" font-size="13" font-weight="700" fill="var(--text)">整体编排形状：从 bootstrap 到 final-gate / archive</text>
+<p><strong>输入</strong>：<code>execution-manifest.yaml</code>（stage/track 编排）+ <code>tasks.md</code>（任务描述 + checkbox 进度）+ <code>.pg/project.yaml</code>（模块命令与环境配置）</p>
+<p><strong>输出</strong>：代码 + 测试 + <code>pipeline.events</code>（append-only JSONL 事件溯源）+ 各 phase 报告（review / verify / gate 评分等）</p>
 
-  <!-- ============ 顶部主循环 ============ -->
-  <rect x="20" y="38" width="840" height="56" rx="8" fill="#f1f5f9" stroke="#94a3b8" stroke-width="1"/>
-  <text x="40" y="58" font-size="11" font-weight="700" fill="#475569">① 编排器主循环（每轮一次 next / record）</text>
+<h3>核心循环：4 步一轮</h3>
 
-  <rect x="50" y="66" width="92" height="22" rx="4" fill="#dbeafe" stroke="#2563eb" stroke-width="1"/>
-  <text x="96" y="81" font-size="10" font-weight="600" fill="#1d4ed8" text-anchor="middle">LLM → runner</text>
-
-  <line x1="142" y1="77" x2="172" y2="77" stroke="#475569" stroke-width="1.2" marker-end="url(#ov-arr)"/>
-
-  <rect x="178" y="66" width="92" height="22" rx="4" fill="#fef3c7" stroke="#d97706" stroke-width="1"/>
-  <text x="224" y="81" font-size="10" font-weight="600" fill="#92400e" text-anchor="middle">runner 返回 action</text>
-
-  <line x1="270" y1="77" x2="300" y2="77" stroke="#475569" stroke-width="1.2" marker-end="url(#ov-arr)"/>
-
-  <rect x="306" y="66" width="92" height="22" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
-  <text x="352" y="81" font-size="10" font-weight="600" fill="#065f46" text-anchor="middle">派送 sub-agent</text>
-
-  <line x1="398" y1="77" x2="428" y2="77" stroke="#475569" stroke-width="1.2" marker-end="url(#ov-arr)"/>
-
-  <rect x="434" y="66" width="92" height="22" rx="4" fill="#ede9fe" stroke="#7c3aed" stroke-width="1"/>
-  <text x="480" y="81" font-size="10" font-weight="600" fill="#6d28d9" text-anchor="middle">runner record</text>
-
-  <line x1="526" y1="77" x2="556" y2="77" stroke="#475569" stroke-width="1.2" marker-end="url(#ov-arr)"/>
-
-  <rect x="562" y="66" width="84" height="22" rx="4" fill="#e2e8f0" stroke="#475569" stroke-width="1"/>
-  <text x="604" y="81" font-size="10" font-weight="600" fill="#475569" text-anchor="middle">重新 next …</text>
-
-  <text x="700" y="81" font-size="9" fill="#64748b" font-style="italic">→ 重复直到 runner 返回 done / workflow_failed</text>
-
-  <!-- bootstrap 入口 -->
-  <text x="40" y="111" font-size="10" fill="#64748b">bootstrap：读取 execution-manifest.yaml，固化 pipeline_order、stage_env_map、stage_prepared、track.phases</text>
-
-  <!-- ============ 主舞台：2 stages × 3 tracks ============ -->
-  <text x="20" y="138" font-size="11" font-weight="700" fill="#475569">② 主 pipeline：stage 顺序推进 · 每个 stage 内 track 顺序推进 · 每个 track 内部 TDRVG</text>
-
-  <!-- Stage 1 容器 -->
-  <rect x="20" y="148" width="280" height="180" rx="10" fill="#fafafa" stroke="#94a3b8" stroke-width="1"/>
-  <rect x="20" y="148" width="280" height="22" rx="10" fill="#e2e8f0"/>
-  <text x="40" y="164" font-size="11" font-weight="700" fill="#1e293b">Stage A · dev  （env: dev-local）</text>
-  <text x="240" y="164" font-size="9" fill="#64748b">test_key: unit</text>
-
-  <!-- Stage 1 tracks -->
-  <rect x="32" y="180" width="256" height="32" rx="4" fill="#e0e7ff" stroke="#6366f1" stroke-width="1"/>
-  <text x="44" y="200" font-size="11" font-weight="700" fill="#3730a3">backend track</text>
-  <text x="220" y="200" font-size="9" fill="#64748b">standard</text>
-
-  <rect x="32" y="218" width="256" height="32" rx="4" fill="#e0e7ff" stroke="#6366f1" stroke-width="1"/>
-  <text x="44" y="238" font-size="11" font-weight="700" fill="#3730a3">agent track</text>
-  <text x="220" y="238" font-size="9" fill="#64748b">standard · review</text>
-
-  <rect x="32" y="256" width="256" height="32" rx="4" fill="#fce7f3" stroke="#a21caf" stroke-width="1"/>
-  <text x="44" y="276" font-size="11" font-weight="700" fill="#86198f">proto-gen track</text>
-  <text x="220" y="276" font-size="9" fill="#64748b">simple（直跑）</text>
-
-  <!-- Stage A 内的简单 track 子流程标识 -->
-  <text x="44" y="304" font-size="9" fill="#64748b">↓ simple: cmd → cmd → cmd  ·  无 sub-agent，exit 0 = pass</text>
-
-  <!-- Stage 边界线 -->
-  <line x1="312" y1="220" x2="350" y2="220" stroke="#c2410c" stroke-width="2" marker-end="url(#ov-arr-env)"/>
-  <rect x="316" y="200" width="34" height="14" rx="3" fill="#fff7ed" stroke="#c2410c" stroke-width="1"/>
-  <text x="333" y="210" font-size="8" font-weight="600" fill="#9a3412" text-anchor="middle">clean A</text>
-
-  <line x1="350" y1="240" x2="388" y2="240" stroke="#c2410c" stroke-width="2" marker-end="url(#ov-arr-env)"/>
-  <rect x="356" y="252" width="34" height="14" rx="3" fill="#fff7ed" stroke="#c2410c" stroke-width="1"/>
-  <text x="373" y="262" font-size="8" font-weight="600" fill="#9a3412" text-anchor="middle">prepare B</text>
-
-  <text x="362" y="288" font-size="8" fill="#9a3412" text-anchor="middle">stage 切换：</text>
-  <text x="362" y="298" font-size="8" fill="#9a3412" text-anchor="middle">runner 自动调用</text>
-
-  <!-- Stage 2 容器 -->
-  <rect x="388" y="148" width="280" height="180" rx="10" fill="#fafafa" stroke="#94a3b8" stroke-width="1"/>
-  <rect x="388" y="148" width="280" height="22" rx="10" fill="#e2e8f0"/>
-  <text x="408" y="164" font-size="11" font-weight="700" fill="#1e293b">Stage B · real-integration  （env: dev-3tier）</text>
-  <text x="612" y="164" font-size="9" fill="#64748b">test_key: integration</text>
-
-  <!-- Stage 2 tracks -->
-  <rect x="400" y="180" width="256" height="32" rx="4" fill="#e0e7ff" stroke="#6366f1" stroke-width="1"/>
-  <text x="412" y="200" font-size="11" font-weight="700" fill="#3730a3">backend track</text>
-  <text x="588" y="200" font-size="9" fill="#64748b">standard</text>
-
-  <rect x="400" y="218" width="256" height="32" rx="4" fill="#e0e7ff" stroke="#6366f1" stroke-width="1"/>
-  <text x="412" y="238" font-size="11" font-weight="700" fill="#3730a3">agent track</text>
-  <text x="588" y="238" font-size="9" fill="#64748b">standard · review</text>
-
-  <text x="412" y="276" font-size="10" fill="#64748b" font-style="italic">（backend 在这里触发 verify escalate）</text>
-
-  <!-- ============ Fix 子流水线泡泡（在 backend track 上）============ -->
-  <rect x="472" y="304" width="160" height="56" rx="6" fill="#fff7ed" stroke="#c2410c" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <text x="552" y="318" font-size="10" font-weight="700" fill="#9a3412" text-anchor="middle">FIX_CYCLE 子 pipeline</text>
-  <rect x="480" y="326" width="40" height="22" rx="3" fill="#fed7aa" stroke="#9a3412" stroke-width="1"/>
-  <text x="500" y="341" font-size="10" font-weight="700" fill="#9a3412" text-anchor="middle">fix</text>
-  <line x1="522" y1="337" x2="552" y2="337" stroke="#9a3412" stroke-width="1.2" marker-end="url(#ov-arr-env)"/>
-  <rect x="558" y="326" width="40" height="22" rx="3" fill="#fed7aa" stroke="#9a3412" stroke-width="1"/>
-  <text x="578" y="341" font-size="10" font-weight="700" fill="#9a3412" text-anchor="middle">verify</text>
-  <line x1="600" y1="337" x2="630" y2="337" stroke="#9a3412" stroke-width="1.2" marker-end="url(#ov-arr-env)"/>
-
-  <text x="552" y="365" font-size="9" fill="#9a3412" text-anchor="middle">verify.escalate → 递归嵌套跑，</text>
-  <text x="552" y="377" font-size="9" fill="#9a3412" text-anchor="middle">最多 max_fix_retries 次</text>
-
-  <!-- 从 backend-track 指向 sub-pipeline 的虚线指示 -->
-  <path d="M 528 212 Q 540 260 552 304" stroke="#9a3412" stroke-width="1.2" fill="none" stroke-dasharray="3,2" marker-end="url(#ov-arr-env)"/>
-  <text x="498" y="246" font-size="8" fill="#9a3412" text-anchor="middle">escalate</text>
-
-  <!-- ============ ③ 终态：final-gate + archive ============ -->
-  <text x="20" y="396" font-size="11" font-weight="700" fill="#475569">③ 终态：所有 track 完成 → final-gate（pg-build/gate，单次）→ pass → archive</text>
-
-  <!-- stage B → final-gate -->
-  <line x1="668" y1="220" x2="700" y2="220" stroke="#475569" stroke-width="1.2" marker-end="url(#ov-arr)"/>
-
-  <rect x="700" y="148" width="160" height="180" rx="10" fill="#fefce8" stroke="#a16207" stroke-width="1.5"/>
-  <rect x="700" y="148" width="160" height="22" rx="10" fill="#facc15"/>
-  <text x="780" y="164" font-size="11" font-weight="700" fill="#713f12" text-anchor="middle">final-gate</text>
-
-  <rect x="712" y="184" width="136" height="36" rx="4" fill="#fef3c7" stroke="#a16207" stroke-width="1"/>
-  <text x="780" y="206" font-size="10" font-weight="700" fill="#713f12" text-anchor="middle">pg-build/gate</text>
-
-  <text x="780" y="232" font-size="9" fill="#713f12" text-anchor="middle">5 维加权评分</text>
-  <text x="780" y="244" font-size="9" fill="#713f12" text-anchor="middle">gate_score ≥ 80</text>
-
-  <line x1="780" y1="226" x2="780" y2="260" stroke="#713f12" stroke-width="1.2" marker-end="url(#ov-arr)"/>
-
-  <rect x="712" y="264" width="136" height="36" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
-  <text x="780" y="286" font-size="10" font-weight="700" fill="#065f46" text-anchor="middle">→ pass</text>
-
-  <line x1="780" y1="302" x2="780" y2="316" stroke="#475569" stroke-width="1.2" marker-end="url(#ov-arr)"/>
-
-  <rect x="700" y="320" width="160" height="22" rx="4" fill="#e0f2fe" stroke="#0369a1" stroke-width="1"/>
-  <text x="780" y="335" font-size="10" font-weight="600" fill="#0c4a6e" text-anchor="middle">changes/archive/&lt;date&gt;-&lt;change&gt;/</text>
-
-  <!-- ============ 右侧说明栏 ============ -->
-  <rect x="20" y="402" width="840" height="50" rx="6" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1"/>
-  <text x="32" y="418" font-size="10" font-weight="700" fill="#1e293b">怎么读这张图</text>
-  <text x="32" y="433" font-size="9" fill="#475569">· 主线：① 主循环驱动 dispatch ② 横向推进 stages（顺序），每个 stage 内纵向推进 tracks（顺序）  · 阶段切换由红色 env_switch 介入（clean→prepare）</text>
-  <text x="32" y="445" font-size="9" fill="#475569">· 每个 track 内部走 TDRVG（test→dev→review→verify→gate）；standard 失败时跑虚线泡泡内的子 pipeline（fix-cycle / gate-fix-cycle / review-cycle），simple track 跳过 sub-agent</text>
-  <text x="32" y="457" font-size="9" fill="#475569">· ③ 终态：所有 stage × track 完成 → final-gate 单次评分 → pass 自动 archive；本节后续按主题（驱动循环 / manifest / TDRVG / env 钩子 / 中断恢复 / 产物 / simple / gate-score）逐个展开</text>
-</svg>
-</div>
-
-<div class="info-card card">
-  <p style="margin:0"><strong>整图三段叙事</strong>：① 顶部是编排器每轮执行的 4 步主循环（next → action → 派 sub-agent → record），是整张图的<strong>节奏</strong>；② 中部是 stage 横排、track 纵列的主 pipeline，<strong>场地</strong>，每个 track 内部走 TDRVG，失败时由虚线泡泡接住（fix / gate-fix / review 子 pipeline）；③ 右上是 final-gate + archive 终点。下面的每个小节就是这三段的<strong>局部放大版</strong>。</p>
-</div>
-
-<h2>驱动流程：调用-派送-记录 循环</h2>
+<p>LLM 编排器每轮执行 4 步，重复直到所有 track 完成或失败：</p>
 
 <div class="svg-container">
 <svg viewBox="0 0 760 110" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <marker id="arr-r3" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
+    <marker id="arr-loop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
   </defs>
-
-  <rect x="10" y="20" width="220" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
-  <text x="120" y="40" font-size="12" font-weight="600" fill="#1d4ed8" text-anchor="middle">LLM 调用 runner</text>
-  <text x="120" y="56" font-size="10" fill="#1d4ed8" text-anchor="middle">python3 .../pg-pipeline-runner.py next &lt;change&gt;</text>
-  <text x="120" y="68" font-size="9" fill="#64748b" text-anchor="middle">（位于 pg-build/scripts/）</text>
-
-  <line x1="230" y1="45" x2="260" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
-
-  <rect x="265" y="20" width="160" height="50" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="345" y="44" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">Runner 返回</text>
-  <text x="345" y="60" font-size="10" fill="#92400e" text-anchor="middle">action: dispatch / phase_result /</text>
-  <text x="345" y="73" font-size="10" fill="#92400e" text-anchor="middle">done / workflow_failed</text>
-
-  <line x1="425" y1="45" x2="455" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
-
-  <rect x="460" y="20" width="140" height="50" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
-  <text x="530" y="44" font-size="12" font-weight="600" fill="#065f46" text-anchor="middle">派送 sub-agent</text>
-  <text x="530" y="60" font-size="10" fill="#065f46" text-anchor="middle">Task tool 调 agent</text>
-
-  <line x1="600" y1="45" x2="630" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r3)"/>
-
-  <rect x="635" y="20" width="120" height="50" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
-  <text x="695" y="44" font-size="12" font-weight="600" fill="#6d28d9" text-anchor="middle">Runner 记录</text>
-  <text x="695" y="60" font-size="10" fill="#6d28d9" text-anchor="middle">record &lt;change&gt;</text>
-
+  <rect x="10" y="20" width="150" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="85" y="44" font-size="12" font-weight="600" fill="#1d4ed8" text-anchor="middle">① 调用 runner</text>
+  <text x="85" y="60" font-size="10" fill="#1d4ed8" text-anchor="middle">next → 返回 action</text>
+  <line x1="160" y1="45" x2="180" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-loop)"/>
+  <rect x="185" y="20" width="150" height="50" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+  <text x="260" y="44" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">② 派送 sub-agent</text>
+  <text x="260" y="60" font-size="10" fill="#92400e" text-anchor="middle">Task tool 执行</text>
+  <line x1="335" y1="45" x2="355" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-loop)"/>
+  <rect x="360" y="20" width="150" height="50" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
+  <text x="435" y="44" font-size="12" font-weight="600" fill="#065f46" text-anchor="middle">③ record 结果</text>
+  <text x="435" y="60" font-size="10" fill="#065f46" text-anchor="middle">写 pipeline.events</text>
+  <line x1="510" y1="45" x2="530" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-loop)"/>
+  <rect x="535" y="20" width="150" height="50" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
+  <text x="610" y="44" font-size="12" font-weight="600" fill="#6d28d9" text-anchor="middle">④ 重新 next</text>
+  <text x="610" y="60" font-size="10" fill="#6d28d9" text-anchor="middle">→ done / workflow_failed</text>
   <text x="380" y="100" font-size="11" fill="#64748b" text-anchor="middle">重复直到 runner 返回 done 或 workflow_failed</text>
 </svg>
 </div>
 
 <div class="tip-card card">
-  <p style="margin:0"><strong>对应鸟瞰图的位置</strong>：这 4 个节点就是<strong>鸟瞰图顶部条带</strong>①的展开版——main loop 的每轮 4 拍。区别在于：本图加了 runner 输出的 action 取值（dispatch / phase_result / done / workflow_failed），告知编排器下一拍该派谁、该记录什么、该继续还是终止。</p>
+  <p style="margin:0"><strong>Runner 自动管的事</strong>：切 feature branch、init commit、每 sub 阶段自动 commit、报告编号 <code>{track}-{N}-{kind}.md</code>、final-gate pass 后自动归档到 <code>changes/archive/</code>。你只需执行 <code>/3-pg-build</code> 等结果。</p>
 </div>
 
-<h3>Runner 自动管的事（你不用操心）</h3>
-<ul>
-  <li>切到 <code>feat/pg/&lt;change&gt;</code> feature branch</li>
-  <li>启动时 init commit（<code>chore(&lt;change&gt;): bootstrap pg-build</code>）</li>
-  <li>每个 sub 阶段 record commit（<code>chore(&lt;change&gt;): auto-record &lt;item&gt;:&lt;sub&gt; &lt;status&gt;</code>）</li>
-  <li>报告顺序编号 <code>{track.id}-{N}-{kind}.md</code></li>
-  <li>final-gate pass 后自动归档到 <code>changes/archive/</code></li>
-</ul>
+<div class="subsection-card">
+  
 
-<h2>execution-manifest.yaml —— runner 的执行蓝图</h2>
+<h2 id="sec4-4-2">4.4.2 track 类型一览</h2>
 
-<p>在 runner 启动编排前，<code>tasks.md</code>（人类可读 markdown）需要先被<strong>结构化</strong>成 <code>execution-manifest.yaml</code>，这是 runner <strong>直接消费</strong>的机器可读形态：</p>
+<p>pg-build 支持 <strong>4 种 track 类型</strong>，由 <code>project.yaml</code> 的 <code>tracks.&lt;id&gt;.type</code> 字段区分：</p>
 
 <table>
-  <tr><th>字段</th><th>含义</th><th>示例</th></tr>
-  <tr><td><code>stages</code></td><td>stage 列表（顺序）</td><td><code>[prepare-env-scripts, dev, real-integration]</code></td></tr>
-  <tr><td><code>stages[].name</code></td><td>stage 名（与 <code>project.yaml.stages</code> 对齐）</td><td><code>dev</code></td></tr>
-  <tr><td><code>stages[].tracks</code></td><td>本 stage 包含的 track 列表（顺序执行）</td><td><code>[backend, agent, openapi-gen, frontend]</code></td></tr>
-  <tr><td><code>stages[].environment.name</code></td><td>本 stage 选用的 environment 名</td><td><code>dev-local</code> / <code>dev-3tier</code></td></tr>
-  <tr><td><code>stages[].test_key</code></td><td>本 stage 跑哪个 test_key</td><td><code>unit</code> / <code>integration</code> / <code>e2e</code></td></tr>
-  <tr><td><code>tracks[].id</code></td><td>track 名</td><td><code>backend</code></td></tr>
-  <tr><td><code>tracks[].modules</code></td><td>本 track 涉及的 modules（用于定位 build/lint/test 命令）</td><td><code>[backend, agent-proto]</code></td></tr>
-  <tr><td><code>tracks[].type</code></td><td>track 类型</td><td><code>standard</code>（默认 TDRVG 4-5 sub）/ <code>simple</code>（commands 列表直跑，自动跳过 review）</td></tr>
-  <tr><td><code>tracks[].code_review_enabled</code></td><td>是否派发 review sub-agent；propose 决定 tasks.md 含 review sub；missing 时 silent skip。<strong>SSOT 已下沉</strong>到 <code>execution-manifest.yaml.phases.review</code> 是否存在；0.8.0 起 manifest schema 不再含 <code>code_review_profiles</code> / <code>code_review_profile</code> 字段。</td><td><code>true</code> / <code>false</code></td></tr>
-  <tr><td><code>tracks[].phase_prompts</code></td><td>对应 4-5 sub 的 prompt 模板（test/dev/verify/gate；含 review 时多 review）</td><td>由 <code>pg-gen-manifest.py</code> 派生</td></tr>
+  <tr><th>类型</th><th>编排模型</th><th>sub-agent</th><th>gate 评估</th><th>适用场景</th></tr>
+  <tr>
+    <td><code>standard</code>（默认）</td>
+    <td>TDRVG 五阶段或 3-5 sub</td>
+    <td>test / dev / review / verify / gate + fix / fix-review / fix-gate</td>
+    <td>5 维加权评分 ≥80</td>
+    <td>跨模块功能开发、需设计评审</td>
+  </tr>
+  <tr>
+    <td><code>simple</code></td>
+    <td>commands 列表直跑</td>
+    <td>无（exit 0 = pass）</td>
+    <td>不参与</td>
+    <td>代码生成、文件同步、模板替换</td>
+  </tr>
+  <tr>
+    <td><code>scenario</code></td>
+    <td>scenario-prepare → scenario-execute → [scenario-fix → scenario-execute]*</td>
+    <td>scenario-prepare / scenario-execute / scenario-fix</td>
+    <td>豁免</td>
+    <td>真实集成场景测试（Gherkin 风格用户旅程）</td>
+  </tr>
 </table>
 
-<div class="info-card card">
-  <p style="margin:0"><strong>为什么需要 manifest？</strong><code>tasks.md</code> 是带 checkbox 的人类文档（LLM 友好），但 runner 是程序（机器友好）。manifest 把 <code>tasks.md</code> 的 stages × tracks 二维结构<strong>扁平化</strong>成确定性数据结构：每个 stage 的 environment、test_key、track 顺序都<strong>冻结</strong>到 manifest，避免 runner 在执行时再次解析 markdown 带来的不确定性。manifest 是 <strong>disposable</strong>（可重新生成），但作为执行期唯一事实来源必须存在。</p>
+<div class="tip-card card">
+  <p style="margin:0">下表逐一展开每种类型的详细机制。gate-score 是所有含 gate 阶段 track 的通用评分机制，在最后单独说明。</p>
 </div>
 
-<p>manifest 由 pg-propose 在生成 tasks.md 后<strong>自动产出</strong>（LLM <strong>不直接写</strong>，通过 CLI 工具基于 tasks.md 生成）。runner 启动时一次性读取，决定：</p>
-<ul>
-  <li>要执行哪些 stage、顺序如何</li>
-  <li>每个 stage 切到哪个 environment（<strong>优先</strong>于 <code>project.yaml.stages[*].environment.name</code>）</li>
-  <li>每个 stage 跑哪个 test_key</li>
-  <li>每个 track 派遣哪个 sub-agent（test / dev / verify / gate / fix / fix-gate / simple）</li>
-</ul>
+</div>
 
-<h2>TDRVG 阶段：每个 track 内部循环（pg-build v2.6）</h2>
+<div class="subsection-card">
+<h2 id="sec4-4-3">4.4.3 TDRVG 阶段（standard track）</h2>
 
-<p>每个 standard track 内部按顺序执行 4 或 5 个 sub——多了 <strong>review</strong>（静态代码审查，dev 与 verify 之间）：</p>
+<p>每个 standard track 默认执行完整的 <strong>5 个阶段</strong>：<code>test</code> → <code>dev</code> → <code>review</code> → <code>verify</code> → <code>gate</code>。其中 review / verify / gate 可在 <code>.pg/project.yaml</code> 的 <code>tracks.&lt;id&gt;</code> 中按需关闭（关闭后 reducer 自动 silent-skip，该阶段标记为 completed 但不执行）：</p>
+
+<table>
+  <tr><th>字段</th><th>默认值</th><th>关闭后影响</th></tr>
+  <tr>
+    <td><code>code_review_enabled</code></td>
+    <td><code>true</code></td>
+    <td>跳过 review 阶段（静态代码审查，pg-build/review agent 不发派遣）</td>
+  </tr>
+  <tr>
+    <td><code>verify_enabled</code></td>
+    <td><code>true</code></td>
+    <td>跳过 verify 阶段（运行时验证，V-* 项不执行，fix 循环不触发）</td>
+  </tr>
+  <tr>
+    <td><code>gate_enabled</code></td>
+    <td><code>true</code></td>
+    <td>跳过 gate 阶段（5 维评分不执行，fix-gate 循环不触发）</td>
+  </tr>
+</table>
+
+<div class="tip-card card">
+  <p style="margin:0"><strong>约束</strong>：verify 和 gate 至少开启其一（<code>pg-validate-proposal.py</code> 强制校验）。test 和 dev 永不禁用。simple / scenario 类型的 track 自动关闭全部三个质量门。</p>
+</div>
+
+<p>关闭后的 phase 沿用 silent-skip 机制：reducer 通用 <code>_phase_enabled()</code> 判断（<code>reducer.py:1458-1473</code>），detect 的 <code>next_pending</code> 同步跳过（<code>detect.py:147-152</code>），状态记录为 completed 但不执行任何 sub-agent 派遣。</p>
+
+<p>配置示例：</p>
+<pre>
+tracks:
+  backend:
+    modules: [backend]
+    max_fix_retries: 5
+    code_review_enabled: false    <span style="color:#94a3b8"># 关闭 review 阶段（不派 pg-build/review agent）</span>
+    verify_enabled: true           <span style="color:#94a3b8"># 保留 verify</span>
+    gate_enabled: true             <span style="color:#94a3b8"># 保留 gate</span>
+</pre>
 
 <ul style="margin-bottom:12px">
-  <li><strong>4 sub（默认）</strong>：<code>test</code> → <code>dev</code> → <code>verify</code> → <code>gate</code>（track 未开启 review 时）</li>
-  <li><strong>5 sub（review 开启）</strong>：<code>test</code> → <code>dev</code> → <strong><code>review</code></strong> → <code>verify</code> → <code>gate</code>（<code>code_review_enabled=true</code> 时）</li>
+  <li><strong>5 sub（全开，默认）</strong>：<code>test</code> → <code>dev</code> → <code>review</code> → <code>verify</code> → <code>gate</code></li>
+  <li><strong>4 sub（关闭 review）</strong>：<code>test</code> → <code>dev</code> → <code>verify</code> → <code>gate</code>（<code>code_review_enabled: false</code>）</li>
+  <li><strong>3 sub（仅开 verify）</strong>：<code>test</code> → <code>dev</code> → <code>verify</code>（<code>code_review_enabled: false, gate_enabled: false</code>，至少 verify 或 gate 保留其一）</li>
 </ul>
 
 <div class="svg-container">
@@ -1599,101 +1478,10 @@ stages:
   </ul>
 </div>
 
-<h2>环境准备与清理</h2>
-
-<p>当 stage 的 <code>environment.required: true</code> 时，runner 在进入该 stage 前<strong>自动执行</strong> <code>prepare_env</code>，完成后自动 <code>clean_env</code>。<strong>对应鸟瞰图中部</strong>的橙色 env 边界线（在 Stage A ↔ Stage B 之间）：从 A 离开时跑 clean_env，进 B 时跑 prepare_env，整条线由 runner 检测 stage 切换自动插入，无需 LLM 参与。</p>
-
-<div class="svg-container">
-<svg viewBox="0 0 700 130" xmlns="http://www.w3.org/2000/svg">
-  <defs><marker id="arr-r5" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
-
-  <rect x="20" y="20" width="120" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
-  <text x="80" y="44" font-size="12" font-weight="600" fill="#1d4ed8" text-anchor="middle">runner next</text>
-  <text x="80" y="60" font-size="10" fill="#1d4ed8" text-anchor="middle">进入新 stage</text>
-
-  <line x1="140" y1="45" x2="170" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r5)"/>
-
-  <rect x="175" y="20" width="140" height="50" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="245" y="44" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">prepare_env</text>
-  <text x="245" y="60" font-size="10" fill="#92400e" text-anchor="middle">自动调用 hook</text>
-
-  <line x1="315" y1="45" x2="345" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r5)"/>
-
-  <rect x="350" y="20" width="140" height="50" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
-  <text x="420" y="44" font-size="12" font-weight="600" fill="#065f46" text-anchor="middle">phase_result</text>
-  <text x="420" y="60" font-size="10" fill="#065f46" text-anchor="middle">LLM 接收结果</text>
-
-  <line x1="490" y1="45" x2="520" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r5)"/>
-
-  <rect x="525" y="20" width="140" height="50" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
-  <text x="595" y="44" font-size="12" font-weight="600" fill="#6d28d9" text-anchor="middle">stage 内执行</text>
-  <text x="595" y="60" font-size="10" fill="#6d28d9" text-anchor="middle">TDRVG 循环（含可选 R）</text>
-
-  <text x="20" y="105" font-size="11" fill="#64748b">phase_result 成功 → LLM 调 runner record completed 推进；phase_result 失败且 terminate==true → 流程终止</text>
-  <text x="20" y="120" font-size="11" fill="#64748b">stage 完成后或 pipeline 终止时 → runner 自动 clean_env</text>
-</svg>
 </div>
 
-<p><strong>使用哪个环境？</strong>由 <code>execution-manifest.yaml.stages[i].environment</code> 字段决定（pg-propose 阶段已选定）。runner 通过 <code>pg-invoke-hook.py invoke-hook --action prepare_env</code> 触发，不传 --role / --instance（env-level 操作）。</p>
-
-<div class="tip-card card">
-<p style="margin:0"><strong>幂等性</strong>：prepare_env 是幂等的——多次执行不会产生副作用。hook 脚本内已做"已就绪则跳过"的判断。</p>
-</div>
-
-<h2>流程中断怎么恢复</h2>
-
-<table>
-  <tr><th>中断场景</th><th>恢复方式</th></tr>
-  <tr>
-    <td>会话中断（网络/超时）</td>
-    <td>重新 <code>pg-pipeline-runner.py next</code>，runner 从断点恢复，不丢失进度</td>
-  </tr>
-  <tr>
-    <td>Sub-agent 返回 result.json 缺失</td>
-    <td>编排器<strong>自动重试一次</strong>（v2.4 保护流程），仍缺失 → <code>fatal result_json_missing_after_retry</code>；或改用 v2.5 的 <code>--result-json &lt;path&gt;</code> 显式传路径，7 字段自动从文件加载</td>
-  </tr>
-  <tr>
-    <td>Sub-agent 返回空</td>
-    <td><code>pg-pipeline-runner.py record failed</code> 触发重试（verify→fix 循环最多 <code>max_fix_retries</code> 次，默认 5）</td>
-  </tr>
-  <tr>
-    <td><strong><code>workflow_failed</code>（铁律）</strong></td>
-    <td><strong>人工介入</strong>：修复根因 → 重新 <code>pg-pipeline-runner.py next</code> → runner 读取 <code>2-build/pipeline.events</code> 重放 + 扫描 tasks.md checkbox，<strong>从第一个含未完成任务 <code>[ ]</code> 的章节恢复</strong></td>
-  </tr>
-  <tr>
-    <td><strong>回归比对</strong></td>
-    <td><code>pg-pipeline-runner.py replay &lt;change&gt;</code> 基于 event log 重放并比对结果，用于排查不一致</td>
-  </tr>
-</table>
-
-<div class="danger-card card">
-  <h4 style="margin:0 0 8px">⚠ workflow_failed 恢复的关键点</h4>
-  <p style="margin:0">不是<strong>从头开始</strong>！runner 从 <code>pipeline.events</code> 重放事件流，并扫描 tasks.md checkbox，定位到<strong>第一个未勾选 <code>[ ]</code> 的章节</strong>作为恢复起点。已完成的 <code>[x]</code> 章节全部跳过。这就是为什么 propose 阶段每个子任务都必须有 checkbox —— 它是 build 阶段断点恢复的依据。</p>
-</div>
-
-<h2>副产物目录结构</h2>
-<pre>
-.pg/changes/&lt;change&gt;/
-├── proposal.md                       ← pg-propose 产物（不动）
-├── design.md                         ← pg-propose 产物（不动）
-├── tasks.md                          ← pg-propose 产物（runner 持续更新 checkbox）
-├── execution-manifest.yaml           ← pg-propose 产物（runner 直接消费的机器可读编排清单，含 stages[i].environment）
-├── 1-propose-review/
-│   ├── on-conditions-eval.md         ← on_conditions 评估复核（pg-gen-tasks-skeleton.py 生成，pg-propose 填充）
-│   └── review-notes.md               ← 评审历史（归档保留，build 不读）
-└── 2-build/                          ← pg-build 过程产物
-    ├── context-chain.md
-    ├── pipeline.events               ← append-only JSONL（唯一持久化入口）
-    ├── known-issues.md
-    ├── final-gate-assessment.md
-    └── {track}-{N}-{kind}.md         ← 报告：review / fix-review / verify / verify-fix / gate / gate-fix
-</pre>
-
-<div class="tip-card card">
-  <p style="margin:0"><strong>v0.7 变更</strong>：移除 <code>environment.yaml</code>（per-stage environment 已并入 <code>execution-manifest.yaml.stages[i].environment</code>）。<strong>v0.7/v0.8 变更</strong>：新增 review / fix-review 报告（pg-build v2.6 code-review phase），与 verify / fix 报告并列；新增 <code>on-conditions-eval.md</code>（pg-propose 阶段用于复核 stage/track 过滤评估）。</p>
-</div>
-
-<h2 id="sec4-4-5">4.4.5 simple track —— 跳过 sub-agent 的轻量编排</h2>
+<div class="subsection-card">
+<h2 id="sec4-4-4">4.4.4 simple track —— 跳过 sub-agent 的轻量编排</h2>
 
 <p>并非所有 track 都需要完整 TDRVG 四 / 五阶段。对于纯代码生成、文档同步、模板替换这类<strong>无设计决策</strong>的小活，可以用 <code>simple</code> 类型的 track：</p>
 
@@ -1776,7 +1564,134 @@ tracks:
   <p style="margin:0"><strong>选择原则</strong>：如果 track 不需要"设计决策 → 代码 → 验证 → 门控"四步走、且失败信号可直接从命令 exit code 读出，就用 <code>simple</code>。否则用 <code>standard</code>。simple track 无 review 阶段（不在 language 自动派发范围内），适合纯机械脚本。</p>
 </div>
 
-<h2 id="sec4-4-6">4.4.6 gate-score —— 5 维加权评分</h2>
+</div>
+
+<div class="subsection-card">
+<h2 id="sec4-4-5">4.4.5 scenario track —— 真实集成场景测试（v0.8.2）</h2>
+
+<p><code>type: scenario</code> 是 v0.8.2 新增的 track 类型，用于<strong>真实集成场景测试</strong>——启动服务实例，执行 Gherkin 风格的用户旅程场景，跑通过为止。scenario track 绕过标准 TDRVG 五阶段（test/dev/review/verify/gate），走独立的<strong>三阶段生命周期</strong>：</p>
+
+<div class="svg-container">
+<svg viewBox="0 0 720 160" xmlns="http://www.w3.org/2000/svg">
+  <defs><marker id="arr-sc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
+
+  <rect x="20" y="20" width="180" height="50" rx="8" fill="#f59e0b"/>
+  <text x="110" y="45" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">scenario-prepare</text>
+  <text x="110" y="62" font-size="10" fill="#fff" text-anchor="middle">启动实例 + 健康检查</text>
+
+  <line x1="200" y1="45" x2="230" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-sc)"/>
+
+  <rect x="235" y="20" width="180" height="50" rx="8" fill="#2563eb"/>
+  <text x="325" y="45" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">scenario-execute</text>
+  <text x="325" y="62" font-size="10" fill="#fff" text-anchor="middle">执行 Gherkin 场景</text>
+
+  <line x1="415" y1="45" x2="445" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-sc)"/>
+
+  <rect x="450" y="20" width="180" height="50" rx="8" fill="#ef4444"/>
+  <text x="540" y="45" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">scenario-fix（escalate 时）</text>
+  <text x="540" y="62" font-size="10" fill="#fff" text-anchor="middle">诊断根因 → 修代码 → 重跑</text>
+
+  <path d="M 540 70 L 540 95 L 325 95 L 325 70" stroke="#94a3b8" stroke-width="1.5" fill="none" stroke-dasharray="4,3" marker-end="url(#arr-sc)"/>
+
+  <text x="540" y="115" font-size="10" fill="#ef4444" text-anchor="middle">fix 完成后回到 execute 重新执行</text>
+  <text x="540" y="130" font-size="10" fill="#ef4444" text-anchor="middle">最多 max_fix_retries 次</text>
+
+  <rect x="20" y="125" width="610" height="30" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2"/>
+  <text x="325" y="145" font-size="10" fill="#92400e" text-anchor="middle">prepare 失败 → workflow_failed | execute 完成 → 本 track 结束 | fix 耗尽 → workflow_failed（无 accept_gap）</text>
+</svg>
+</div>
+
+<table>
+  <tr><th>对比项</th><th>standard track</th><th>scenario track</th></tr>
+  <tr><td>阶段</td><td>test → dev → review → verify → gate</td><td>scenario-prepare → scenario-execute → [scenario-fix → scenario-execute]*</td></tr>
+  <tr><td>fix 循环</td><td>fix → verify 子 pipeline</td><td>scenario-fix 子 pipeline（单阶段）</td></tr>
+  <tr><td>gate 评估</td><td>5 维加权评分 ≥80</td><td><strong>豁免</strong>——不参与 gate</td></tr>
+  <tr><td>失败容忍</td><td>accept_gap 允许</td><td><strong>零容忍</strong>——critical 失败即 escalate</td></tr>
+  <tr><td>环境</td><td>标准构建/测试环境</td><td>真实服务实例（目标 environment）</td></tr>
+  <tr><td>输出</td><td>构建产物、测试报告</td><td>结构化 JSON evidence，HTTP 请求/响应日志</td></tr>
+</table>
+
+<div class="info-card card">
+  <p style="margin:0"><strong>配置示例</strong>：在 <code>.pg/project.yaml</code> 的 <code>tracks</code> 段中声明 <code>type: scenario</code>，并确保 propose 阶段生成 <code>scenario-&lt;track&gt;.yaml</code> 骨架文件（由新脚本 <code>pg-gen-scenario.py</code> 生成）。LLM 必须填充骨架中的 placeholder 后才能进入 build。</p>
+</div>
+
+</div>
+
+<div class="subsection-card">
+<h2 id="sec4-4-6">4.4.6 产物与目录结构</h2>
+
+<p>pg-build 在 <code>.pg/changes/&lt;change&gt;/2-build/</code> 下产出以下过程产物：</p>
+
+<pre>
+.pg/changes/&lt;change&gt;/
+├── proposal.md, design.md, tasks.md   ← pg-propose 产物（不动）
+├── execution-manifest.yaml            ← runner 直接消费的编排清单
+├── 1-propose-review/                  ← 评审归档（build 不读）
+└── 2-build/                           ← pg-build 过程产物
+    ├── pipeline.events                ← append-only JSONL（唯一持久化入口）
+    ├── final-gate-assessment.md       ← 跨 track 门控汇总
+    ├── context-chain.md, known-issues.md
+    └── {track}-{N}-{kind}.md          ← 各 phase 报告（review / verify / gate 等）
+</pre>
+
+<p><strong>pipeline.events</strong> 是 append-only JSONL 文件，记录每次 record 调用的完整事件。它是 pipeline 的<strong>唯一持久化入口</strong>——断点恢复、replay 比对都依赖它。</p>
+
+<p><strong>tasks.md checkbox</strong> 在 build 阶段被 runner 持续更新：每个 sub 完成后，对应的 <code>[ ]</code> 变为 <code>[x]</code>。这是断点恢复时定位恢复起点的依据。</p>
+
+</div>
+
+<div class="subsection-card">
+<h2 id="sec4-4-7">4.4.7 流程中断与恢复</h2>
+
+<table>
+  <tr><th>中断场景</th><th>恢复方式</th></tr>
+  <tr>
+    <td>会话中断（网络/超时）</td>
+    <td>重新执行 <code>/3-pg-build</code>，runner 从断点恢复</td>
+  </tr>
+  <tr>
+    <td>Sub-agent 返回异常</td>
+    <td>编排器自动重试一次；仍失败 → 触发 fix 子 pipeline 或 <code>workflow_failed</code></td>
+  </tr>
+  <tr>
+    <td><strong><code>workflow_failed</code></strong></td>
+    <td>修复根因 → 重新执行 → runner 读取 <code>pipeline.events</code> 重放 + 扫描 tasks.md checkbox，<strong>从第一个 <code>[ ]</code> 章节恢复</strong>，不从头开始</td>
+  </tr>
+</table>
+
+<div class="danger-card card">
+  <p style="margin:0"><strong>关键</strong>：恢复不是从头开始。runner 扫描 tasks.md 的 checkbox，找到第一个未完成的 <code>[ ]</code> 章节作为起点。已完成的 <code>[x]</code> 全部跳过。</p>
+</div>
+
+</div>
+
+<div class="subsection-card">
+<h2 id="sec4-4-8">4.4.8 环境准备与清理</h2>
+
+<p>当 stage 需要环境（<code>environment.required: true</code>），runner 在进入该 stage 前自动执行 <code>prepare_env</code>，离开后自动 <code>clean_env</code>。环境切换由 runner 检测 stage 切换自动插入，无需 LLM 参与。</p>
+
+<p>使用哪个环境？由 <code>execution-manifest.yaml.stages[i].environment</code> 决定（propose 阶段已选定）。幂等：多次执行不会产生副作用。</p>
+
+</div>
+
+<div class="subsection-card">
+<h2 id="sec4-4-9">4.4.9 execution-manifest.yaml 字段速查</h2>
+
+<table>
+  <tr><th>字段</th><th>含义</th></tr>
+  <tr><td><code>stages</code></td><td>stage 列表（顺序执行），每个 stage 含 name / tracks / environment / test_key</td></tr>
+  <tr><td><code>stages[].environment.name</code></td><td>本 stage 选用的 environment 名</td></tr>
+  <tr><td><code>tracks[].id</code></td><td>track 名</td></tr>
+  <tr><td><code>tracks[].type</code></td><td>standard / simple / scenario</td></tr>
+  <tr><td><code>tracks[].enabled</code></td><td>是否启用（由 <code>on_conditions</code> 机械评估派生）</td></tr>
+  <tr><td><code>tracks[].code_review_enabled</code></td><td>是否派发 review sub-agent</td></tr>
+  <tr><td><code>tracks[].phase_prompts</code></td><td>各 sub 阶段的 prompt 模板映射</td></tr>
+</table>
+
+</div>
+
+<div class="subsection-card">
+<h2 id="sec4-4-10">4.4.10 gate-score —— 5 维加权评分</h2>
 
 <p>每个 track 在进入 <code>gate</code> 阶段时，由 <code>pg-build/gate</code> sub-agent 按 5 个维度打分，<strong>总分 ≥ 80 才视为 gate 通过</strong>。相比传统的 bool 通过/失败，gate-score 能区分"差一点点"和"差很多"：</p>
 
@@ -1852,6 +1767,9 @@ tracks:
   <p style="margin:0">gate-score 不是为了让 AI "凑分数"。<strong>权重和阈值在 pg-skills 上游统一定义</strong>，项目内不可随意调。如发现某维度评分与人类判断长期偏离，应反馈到上游调整 prompt 模板，而非本地 hack。</p>
 </div>
 
+</div>
+
+<div class="subsection-card">
 <h2>4.5 流程差异速查表</h2>
 
 <table>
@@ -1862,6 +1780,7 @@ tracks:
   <tr><td>人工参与</td><td>提案 review</td><td>无</td><td>确认复现方案</td><td>无</td></tr>
   <tr><td>适用场景</td><td>正经开发、跨模块、涉 DB</td><td>小改动、单模块、≤8 tasks</td><td>Bug 修复</td><td>回归测试</td></tr>
 </table>
+</div>
 </div>
 
 <!-- ============================================================ -->
@@ -2143,7 +2062,7 @@ regression:
 pg upgrade
 
 <span style="color:#94a3b8"># 升级到指定版</span>
-pg upgrade v0.6.0
+pg upgrade v0.8.2
 
 <span style="color:#94a3b8"># 查看远程可用版本</span>
 pg upgrade --list
@@ -2191,9 +2110,9 @@ pg doctor
 </div>
 
 <div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle"><strong>从 0.7.x 升 0.8.0 后，旧 change 还能 build 吗？</strong></div>
+  <div class="collapse-toggle"><strong>从 0.7.x 升 0.8.x 后，旧 change 还能 build 吗？</strong></div>
   <div class="collapse-body">
-    <p>可以。0.8.0 向后兼容 0.7.x 的 <code>execution-manifest.yaml</code> 形态；但<strong>含 review 子阶段的 tasks.md</strong>需要用 <code>pg-gen-tasks-skeleton.py --selected-stages</code> 重新生成一次，章节号 N 会重排（下游消费方必须读 sections JSON 的 N 值，不要硬编码）。具体迁移步骤见 <code>pg upgrade</code> 升级日志。</p>
+    <p>可以。0.8.x 向后兼容 0.7.x 的 <code>execution-manifest.yaml</code> 形态；但<strong>含 review 子阶段的 tasks.md</strong>需要用 <code>pg-gen-tasks-skeleton.py --selected-stages</code> 重新生成一次，章节号 N 会重排（下游消费方必须读 sections JSON 的 N 值，不要硬编码）。0.8.2 新增 manifest v3（<code>enabled</code> 必填字段），旧 manifest 升级后需补充该字段。具体迁移步骤见 <code>pg upgrade</code> 升级日志。</p>
   </div>
 </div>
 
@@ -2289,16 +2208,22 @@ navLinks.forEach(link => {
   link.addEventListener('click', (e) => {
     e.preventDefault();
     const id = link.getAttribute('href').slice(1);
+    const target = document.getElementById(id);
+    if (!target) return;
+    const parentSection = target.closest('.section');
     sections.forEach(s => s.classList.remove('active'));
-    document.getElementById(id).classList.add('active');
+    if (parentSection) parentSection.classList.add('active');
+    target.classList.add('active');
     navLinks.forEach(l => l.classList.remove('active'));
     link.classList.add('active');
     history.replaceState(null, '', '#' + id);
-    window.scrollTo({ top: 0, behavior: 'smooth' });
+    const y = target.getBoundingClientRect().top + window.scrollY - 80;
+    window.scrollTo({ top: y, behavior: 'smooth' });
   });
 });
 
 // Observe scroll to update sidebar
+const observeTargets = document.querySelectorAll('.section, [id^="sec4-4"]');
 const observer = new IntersectionObserver((entries) => {
   entries.forEach(entry => {
     if (entry.isIntersecting) {
@@ -2312,7 +2237,7 @@ const observer = new IntersectionObserver((entries) => {
     }
   });
 }, { threshold: 0.3 });
-sections.forEach(s => observer.observe(s));
+observeTargets.forEach(s => observer.observe(s));
 
 // Collapsible QA
 function toggleQA(card) {

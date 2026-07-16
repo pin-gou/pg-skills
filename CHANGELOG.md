@@ -9,6 +9,50 @@
 
 <!-- 下一版本在此累积 -->
 
+## [0.8.2] - 2026-07-16
+
+### 新增
+
+- **Scenario Track 机制（v3.5/v3.6，破坏性）**：新增 `type: scenario` 的 pipeline track 类型，用于真实集成场景测试。scenario track 走独立的 `scenario-prepare → scenario-execute → [scenario-fix → scenario-execute]*` 三阶段生命周期，绕过标准 TDVG 五阶段（test/dev/review/verify/gate）。新增三个 sub-agent：
+  - **scenario-prepare**：启动目标环境的所有 service instance，运行健康检查，确保全部 PASS 后进入 execute
+  - **scenario-execute**：读取 `scenario.yaml` 中的 Gherkin 风格场景定义，按 Given/When/Then/And 逐条执行 HTTP API 调用，产出结构化 JSON evidence，区分 critical/non-critical 失败
+  - **scenario-fix**：读取 execute 失败报告，诊断根因（业务逻辑/API 契约/前后端不匹配/DB/配置），修改源码，通过单元测试+lint 后写 fix report
+  - scenario track 不参与 gate assessment（零容忍，critical 失败直接 escalate 进 fix 循环），`max_fix_retries` 耗尽后 `workflow_failed`（无 `accept_gap` 选项）
+  - 新增 `SCENARIO_FIX_CYCLE` sub-pipeline 类型（`sub_pipeline.py`），事件枚举 `EVT_SCENARIO_CYCLE_STARTED` / `EVT_SCENARIO_TRACK_COMPLETED`（`events.py`）
+  - 新增 3 个 prompt 模板（`scenario-prepare.yaml` / `scenario-execute.yaml` / `scenario-fix.yaml`）+ 3 个 agent 文档
+  - 新增测试文件：`test_scenario_track.py`（735 行）、`test_integration.py`（252 行）、`test_orchestrator_gate_precheck.py`（205 行）
+- **manifest v3（破坏性）**：`execution-manifest.yaml` 升级到 schema `2026-06-30`（v3），新增 `enabled` 必填布尔字段（pg-build 唯一派遣依据）、`reason` 字段（解释启用/禁用原因）、`on_conditions_eval` 对象（记录机械评估结果）。新增 `type: e2e`（端到端测试+修复循环，需要 `target_module`）和 `type: scenario` 类型。`pg-gen-manifest.py` 的 `_evaluate_on_conditions` 实现双维度机械评估（glob path 匹配 + keyword 语义匹配），`_build_track_enabled_decision` 按命中结果严格派发。`manifest.schema.json` 同步更新
+- **pg-gen-scenario.py（v3.6）**：新脚本，按 track 生成 `scenario-<track>.yaml` 骨架文件（含 sentinel placeholder），读取 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段作为 SSOT 决定启用哪些 scenario track。导出 `check_scenario_placeholders()` / `check_scenario_file()` 供下游校验
+- **pg-propose v3.7 流程优化**：
+  - **流程精简**：阶段 2e/2f 的独立部分校验调用全部删除，统一收敛到阶段 2g 的 `pg-validate-proposal.py manifest` 单一校验点，错误码和错误信息统一
+  - **占位符校验**：`pg-validate-proposal.py` 动态导入 `pg-gen-scenario.py`，在 `_validate_three_product_consistency` 中递归检查 `scenario-<track>.yaml` 的每个字段是否仍有未替换的 placeholder（`<...>`、`/.../`、`S-<unique-name>`、`（LLM 必填）`），`<report_seq>` 运行时占位符豁免。新增错误码 `scenario_placeholder_unfilled`
+  - **全推荐自动 refine**：`pg-auto-refine-check.py` 检测 review-notes.md 是否满足三条件（通用决策全推荐、issue 无用户意图、无用户编辑标记），满足时自动应用全推荐方案（阶段 4a），跳过 `/2.1-pg-propose-refine` 人工流程
+  - `references/scenario-format.md` 新增文件（placeholder 校验协议文档）
+  - 新增测试文件：`test_v37_optimizations.py`（423 行）、`test_three_product_consistency.py`（363 行）、`test_manifest_v3.py`（288 行）
+- **pg-build workflow_failed 自动 reset**：`pg-build` 在 `workflow_failed` 状态下再次执行时，自动 reset pipeline 状态，无需用户手动干预即可重新开始
+- **pg-build 多 scenario.yaml 适配**：orchestrator / dispatch / reducer 等模块适配多个 `scenario.yaml` 文件同时存在的场景
+- **pg-propose 多 scenario.yaml 适配**：`pg-gen-manifest.py` / `pg-gen-tasks-skeleton.py` 等模块适配多 scenario 文件
+- **pg-propose auto-record scenario tests**：`c04c37e` 在 pipeline events 中自动记录 scenario 测试的执行结果
+- **scenario-execute evidence 去重**：evidence 文件名增加 `report_seq` 前缀，避免多次派遣覆盖
+
+### 变更
+
+- **pg-build seq 优化**：pipeline 序列号（seq）生成逻辑优化，提升并行派遣的可靠性
+- **scenario.prepare 提示词优化**：按正确顺序启动所有 instance 的提示词组装逻辑
+- **pg-propose 流程优化**：`a8ff254` 多处流程细节优化
+- **`stages` 中 `test_key` 死字段移除**：`test_key` 字段已不再使用，从 manifest 及相关逻辑中清理
+
+### 修复
+
+- **pg-build 执行完成后跳过 archive 的问题**：修复 pipeline 成功完成后未自动触发 archive 的 bug
+- **pg-build 其他 BUG 修复**：`23b2d26` 修复多项 pg-build 运行中的边缘 case 问题
+
+### 备注
+
+- 影响面：60 个文件变更（+8758 / -196 LOC）。核心新增：scenario track 机制（3 个 agent + 3 个 prompt 模板 + 1 个 sub-pipeline 类型 + 735 行测试）、manifest v3（`enabled`/`on_conditions_eval`/e2e+scenario 类型）、pg-propose v3.7（流程精简 + placeholder 校验 + 自动 refine）
+- 破坏性：manifest v3 要求 `enabled` 字段必填，旧 manifest 升级后需补充该字段；`scenario` 类型 track 不参与 gate assessment，gate 相关配置对 scenario track 无效
+- 96 commits，60 文件变更（+8758 / -196 LOC）。新增 11 个测试文件：`test_scenario_track.py`、`test_integration.py`、`test_orchestrator_gate_precheck.py`、`test_bootstrap.py`、`test_bootstrap_v3.py`、`test_config.py`、`test_orchestrator.py`、`test_manifest_v3.py`、`test_v37_optimizations.py`、`test_three_product_consistency.py`、`test_scenario_track.py`
+
 ## [0.8.1] - 2026-07-14
 
 ### 新增
