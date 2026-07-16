@@ -1,4 +1,13 @@
-# pg-fix-issue-v2
+---
+name: pg-fix-issue
+description: 修订 BUG
+license: MIT
+compatibility: 需要 `.pg/project.yaml` 统一配置文件。
+metadata:
+  author: pg
+---
+
+# pg-fix-issue
 
 > **v2 独立设计，与 v3.0/v3.1 不兼容**。解决 v1 SKILL 的核心问题：
 > - SKILL 太长被截断 → 主入口 ~400 行 + 按需 include 子文档
@@ -145,7 +154,7 @@ iteration 完成后:
 ## 3. 文档结构
 
 ```
-.opencode/skills/pg-fix-issue-v2/
+.opencode/skills/pg-fix-issue/
 ├── SKILL.md                      # 本文件
 ├── shared.md                     # 共享协议（executor / invoke-hook）
 ├── phases/
@@ -212,7 +221,7 @@ fix_issue:
 ```
 用户描述问题
     ↓
-[skill: pg-fix-issue-v2]
+[skill: pg-fix-issue]
     ↓
 Phase 0 → 1 → 2 → 3 → 4 → 5 → 5b → 5c+d → 最终结论
 ```
