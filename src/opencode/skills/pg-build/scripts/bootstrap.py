@@ -239,6 +239,85 @@ def maybe_bootstrap_init_commit(change: str, init_committed: bool) -> dict[str, 
 # ============================================================
 
 
+def cli_auto_reset(change: str) -> dict[str, Any]:
+    """检测 pipeline 是否处于 terminal failed 状态，自动清除 event_log + snapshot。
+
+    触发条件（满足任一即 reset）：
+      1. `2-build/pipeline.events` 的最后非空行为 `workflow_failed` 事件
+      2. `2-build/pipeline.snapshot.json` 顶层 `status == "failed"`
+
+    只清除 `pipeline.events` 与 `pipeline.snapshot.json` 两个文件，
+    **保留** `2-build/` 下所有其他工件（dispatch files / result.json / report /
+    scenario.yaml / logs / 等）。git 状态完全不变，feature branch 上的提交不被触碰。
+
+    返回：
+      {"reset": True,  "reason": "...", "removed": ["events", "snapshot"]}
+      或
+      {"reset": False, "reason": "no terminal failed state"}
+
+    不修改任何 git 状态；不在 event log 中追加新事件（避免 reducer 重放时再次回到
+    terminal 状态）。调用方（如 cli_bootstrap）应在本函数返回 reset=True 后立即
+    走标准的 bootstrap → pipeline_started 流程。
+    """
+    build_dir = os.path.join(CHANGES_DIR, change, APPLY_DIR)
+    events_path = os.path.join(build_dir, "pipeline.events")
+    snapshot_path = os.path.join(build_dir, "pipeline.snapshot.json")
+
+    removed: list[str] = []
+    trigger_reason = ""
+
+    # 条件 1：event log 最后一行是 workflow_failed
+    if os.path.isfile(events_path):
+        last_type = None
+        try:
+            with open(events_path, "r", encoding="utf-8", errors="replace") as fh:
+                # 从文件末尾往前读若干行（每行 JSON，UTF-8 多字节字符可能
+                # 跨块边界 — 用 errors="replace" 容错；最后 5 个非空行足够判定）
+                fh.seek(0, os.SEEK_END)
+                file_size = fh.tell()
+                # 直接读全文即可（event log 通常 < 几十 KB）；为简化逻辑，
+                # 取完整内容后取最后 5 个非空行
+                fh.seek(0)
+                content = fh.read()
+                tail_lines = [l.strip() for l in content.splitlines() if l.strip()][-5:]
+                for line in tail_lines:
+                    try:
+                        evt = json.loads(line)
+                        last_type = evt.get("type")
+                    except json.JSONDecodeError:
+                        continue
+        except OSError:
+            last_type = None
+
+        if last_type == "workflow_failed":
+            trigger_reason = "event_log_last_workflow_failed"
+
+    # 条件 2：snapshot.status == "failed"（PipelineState.status 在 snapshot 顶层）
+    if not trigger_reason and os.path.isfile(snapshot_path):
+        try:
+            with open(snapshot_path, "r", encoding="utf-8") as fh:
+                snap = json.load(fh)
+            # snapshot 顶层 status 字段（state.status 是 reducer 重放状态，
+            # 用于在加载时的辅助检查；持久化字段以顶层为准）
+            if snap.get("status") == "failed":
+                trigger_reason = "snapshot_status_failed"
+        except (json.JSONDecodeError, KeyError, TypeError, OSError):
+            pass
+
+    if not trigger_reason:
+        return {"reset": False, "reason": "no terminal failed state detected"}
+
+    # 执行 reset：只删 events + snapshot
+    if os.path.isfile(events_path):
+        os.remove(events_path)
+        removed.append("pipeline.events")
+    if os.path.isfile(snapshot_path):
+        os.remove(snapshot_path)
+        removed.append("pipeline.snapshot.json")
+
+    return {"reset": True, "reason": trigger_reason, "removed": removed}
+
+
 def _build_env_hook_plan(
     change: str,
     phase_name: str,
@@ -704,6 +783,20 @@ def cli_bootstrap(change: str) -> dict[str, Any]:
     except Exception as e:
         result.setdefault("warnings", []).append(
             f"default_branch assertion failed: {e}"
+        )
+
+    try:
+        # ── auto_reset：检测上次 pipeline 是否在 workflow_failed terminal 状态，
+        #    是则清除 event log + snapshot（保留 2-build/ 下所有其他工件），
+        #    让本次 bootstrap 能从干净状态重新开始。
+        #    用户场景：scenario.yaml 等 SSOT 文件修改后重跑，避免 workflow_failed
+        #    在 event log 里"卡死"pipeline。
+        auto_reset_result = cli_auto_reset(change)
+        if auto_reset_result.get("reset"):
+            result["auto_reset"] = auto_reset_result
+    except Exception as e:
+        result.setdefault("warnings", []).append(
+            f"auto_reset failed (non-fatal): {e}"
         )
 
     try:

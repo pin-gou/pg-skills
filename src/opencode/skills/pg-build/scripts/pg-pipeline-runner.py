@@ -3,6 +3,7 @@
 
 用法：
   python3 pg-pipeline-runner.py bootstrap <change>
+  python3 pg-pipeline-runner.py reset <change>            # 手动清除 terminal failed 状态（自动场景见 bootstrap）
   python3 pg-pipeline-runner.py next <change>
   python3 pg-pipeline-runner.py record <change> --status <status> [--report <path>] [--summary <文本>] [--outputs <p1,p2>] [--issues <i1,i2>] [--evidence <e>] [--tasks-updated <t1,t2,...|--tasks-updated t1 --tasks-updated t2>]
   python3 pg-pipeline-runner.py progress <change>
@@ -29,7 +30,7 @@ from pipeline.events import STATUSES_ALL
 import bootstrap as _bootstrap
 
 
-VALID_COMMANDS = {"next", "record", "progress", "replay", "verify-replay", "bootstrap", "env-action", "env-action-result"}
+VALID_COMMANDS = {"next", "record", "progress", "replay", "verify-replay", "bootstrap", "env-action", "env-action-result", "reset"}
 VALID_STATUSES = STATUSES_ALL
 
 
@@ -54,6 +55,14 @@ def main() -> None:
     # ── bootstrap 命令（独立命令，不依赖 Orchestrator）──
     if command == "bootstrap":
         result = _bootstrap.cli_bootstrap(change)
+        print(json.dumps(result, ensure_ascii=False, indent=2))
+        return
+
+    # ── reset 命令（独立命令，manual 入口，与 bootstrap 自动 reset 走同一函数）──
+    # 默认场景：bootstrap 会自动检测 workflow_failed 并 reset，无需手动调用。
+    # 本命令仅供编排器 / 排查场景需要显式 reset 时使用。
+    if command == "reset":
+        result = _bootstrap.cli_auto_reset(change)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 

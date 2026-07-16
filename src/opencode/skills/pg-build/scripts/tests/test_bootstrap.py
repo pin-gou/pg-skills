@@ -353,6 +353,124 @@ class TestCliBootstrap(unittest.TestCase):
         self.assertIn("pipeline_config", result)
         self.assertIsNone(result["env_hook_plan"])
 
+    def test_cli_auto_reset_no_state(self):
+        """无 2-build/ 状态文件 → reset=False。"""
+        build_dir = os.path.join(self.change_root, "2-build")
+        os.makedirs(build_dir, exist_ok=True)
+        result = bootstrap.cli_auto_reset("test-change")
+        self.assertFalse(result["reset"])
+        self.assertIn("reason", result)
+
+    def test_cli_auto_reset_no_terminal_state(self):
+        """events/snapshot 存在但非 terminal → reset=False。"""
+        build_dir = os.path.join(self.change_root, "2-build")
+        os.makedirs(build_dir, exist_ok=True)
+        events_path = os.path.join(build_dir, "pipeline.events")
+        snapshot_path = os.path.join(build_dir, "pipeline.snapshot.json")
+        # events 末尾是 pipeline_started（运行中）
+        with open(events_path, "w") as fh:
+            fh.write('{"ts":"2026-07-16T10:00:00+08:00","type":"pipeline_started","data":{"change":"test-change"}}\n')
+        # snapshot status=running（运行中）
+        with open(snapshot_path, "w") as fh:
+            json.dump({"status": "running", "change": "test-change"}, fh)
+        result = bootstrap.cli_auto_reset("test-change")
+        self.assertFalse(result["reset"])
+        # 状态文件应原样保留
+        self.assertTrue(os.path.isfile(events_path))
+        self.assertTrue(os.path.isfile(snapshot_path))
+
+    def test_cli_auto_reset_workflow_failed_in_events(self):
+        """events 末尾是 workflow_failed → reset=True，删 events+snapshot。"""
+        build_dir = os.path.join(self.change_root, "2-build")
+        os.makedirs(build_dir, exist_ok=True)
+        events_path = os.path.join(build_dir, "pipeline.events")
+        snapshot_path = os.path.join(build_dir, "pipeline.snapshot.json")
+        with open(events_path, "w") as fh:
+            fh.write('{"ts":"2026-07-16T10:00:00+08:00","type":"pipeline_started","data":{}}\n')
+            fh.write('{"ts":"2026-07-16T10:01:00+08:00","type":"workflow_failed","data":{"reason":"test"}}\n')
+        with open(snapshot_path, "w") as fh:
+            json.dump({"status": "failed", "change": "test-change"}, fh)
+
+        # 还要存一个"工件"文件验证它不被删
+        artifact_path = os.path.join(build_dir, "001-test-dispatch.md")
+        with open(artifact_path, "w") as fh:
+            fh.write("# dispatch\n")
+
+        result = bootstrap.cli_auto_reset("test-change")
+        self.assertTrue(result["reset"])
+        self.assertEqual(result["reason"], "event_log_last_workflow_failed")
+        self.assertIn("pipeline.events", result["removed"])
+        self.assertIn("pipeline.snapshot.json", result["removed"])
+        # state 文件被删
+        self.assertFalse(os.path.isfile(events_path))
+        self.assertFalse(os.path.isfile(snapshot_path))
+        # 工件保留
+        self.assertTrue(os.path.isfile(artifact_path))
+
+    def test_cli_auto_reset_snapshot_status_failed(self):
+        """snapshot.status=failed（events 末尾不是 workflow_failed）→ reset=True。"""
+        build_dir = os.path.join(self.change_root, "2-build")
+        os.makedirs(build_dir, exist_ok=True)
+        events_path = os.path.join(build_dir, "pipeline.events")
+        snapshot_path = os.path.join(build_dir, "pipeline.snapshot.json")
+        # events 末尾是正常事件（orphan state）
+        with open(events_path, "w") as fh:
+            fh.write('{"ts":"2026-07-16T10:00:00+08:00","type":"pipeline_started","data":{}}\n')
+        # snapshot 状态为 failed
+        with open(snapshot_path, "w") as fh:
+            json.dump({"status": "failed", "change": "test-change"}, fh)
+
+        result = bootstrap.cli_auto_reset("test-change")
+        self.assertTrue(result["reset"])
+        self.assertEqual(result["reason"], "snapshot_status_failed")
+        self.assertFalse(os.path.isfile(events_path))
+        self.assertFalse(os.path.isfile(snapshot_path))
+
+    def test_cli_auto_reset_completed_state_preserved(self):
+        """pipeline.status=completed → reset=False（已完成的 pipeline 不应被 reset）。"""
+        build_dir = os.path.join(self.change_root, "2-build")
+        os.makedirs(build_dir, exist_ok=True)
+        events_path = os.path.join(build_dir, "pipeline.events")
+        snapshot_path = os.path.join(build_dir, "pipeline.snapshot.json")
+        with open(events_path, "w") as fh:
+            fh.write('{"ts":"2026-07-16T10:00:00+08:00","type":"pipeline_completed","data":{}}\n')
+        with open(snapshot_path, "w") as fh:
+            json.dump({"status": "completed", "change": "test-change"}, fh)
+
+        result = bootstrap.cli_auto_reset("test-change")
+        self.assertFalse(result["reset"])
+        # 状态文件应原样保留（不能误删已完成的 pipeline）
+        self.assertTrue(os.path.isfile(events_path))
+        self.assertTrue(os.path.isfile(snapshot_path))
+
+    def test_cli_bootstrap_calls_auto_reset(self):
+        """cli_bootstrap 在 2-build/ 有 workflow_failed 时应触发 reset 并写入 result['auto_reset']。"""
+        build_dir = os.path.join(self.change_root, "2-build")
+        os.makedirs(build_dir, exist_ok=True)
+        events_path = os.path.join(build_dir, "pipeline.events")
+        snapshot_path = os.path.join(build_dir, "pipeline.snapshot.json")
+        with open(events_path, "w") as fh:
+            fh.write('{"ts":"2026-07-16T10:00:00+08:00","type":"workflow_failed","data":{"reason":"x"}}\n')
+        with open(snapshot_path, "w") as fh:
+            json.dump({"status": "failed"}, fh)
+
+        # 重写 project.yaml 以让 bootstrap 走到 env_hook_plan 阶段
+        project_yaml = os.path.join(self.tmp, ".pg", "project.yaml")
+        os.makedirs(os.path.dirname(project_yaml), exist_ok=True)
+        with open(project_yaml, "w", encoding="utf-8") as f:
+            f.write("environments: {}\nstages: []\n")
+        manifest_path = os.path.join(self.change_root, "execution-manifest.yaml")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            f.write("stages: []\n")
+
+        result = bootstrap.cli_bootstrap("test-change")
+        # bootstrap result 应包含 auto_reset 字段且 reset=True
+        self.assertIn("auto_reset", result, "cli_bootstrap 应在 result 中暴露 auto_reset 结果")
+        self.assertTrue(result["auto_reset"]["reset"])
+        # state 文件应被删
+        self.assertFalse(os.path.isfile(events_path))
+        self.assertFalse(os.path.isfile(snapshot_path))
+
     def test_cli_bootstrap_does_not_execute_env_hook(self):
         """v2.1.1 关键回归测试: cli_bootstrap 不得同步执行 env hook。"""
         project_yaml = os.path.join(self.tmp, ".pg", "project.yaml")
