@@ -97,6 +97,55 @@
 
 ---
 
+## 推荐动作规范（v4.1 新增）
+
+> **目的**：防止 refine 阶段误改业务代码（详见 [pg-propose-refine SKILL.md](../pg-propose-refine/SKILL.md) 的 Scope Boundary Contract 章节）。
+
+### "目标"字段约束
+
+| 类型 | 示例 | 是否允许 |
+|------|------|---------|
+| 产物文件名 | `proposal.md` / `design.md` / `tasks.md` / `review-notes.md` | ✅ |
+| 产物内的章节定位 | `tasks.md` 第 11.1 章节 / `design.md` V-backend-3 验证项 / `review-notes.md` 第 1 条 | ✅ |
+| 业务代码文件路径 | `.pg/hooks/env-dev-local-clean.sh` / `webvirt-backend/.../InstanceService.java` | ❌ 禁止 |
+| 配置文件路径 | `application.yml` / `.env` / `vite.config.ts` | ❌ 禁止 |
+
+### "推荐动作"字段约束
+
+✅ **正确**：
+
+```markdown
+- 目标：`tasks.md` 第 11.1 章节
+- 推荐动作：在 `dev.agent:test` 中补充 mock Exec.Command 的 vxlan-unicast 测试用例
+```
+
+✅ **正确**（需要改业务代码时，必须翻译为产物内的实施任务）：
+
+```markdown
+- 目标：`tasks.md` 第 2.1 章节
+- 推荐动作：细化 step [3/3] 为 3.1/3.2/3.3 子步骤，新增 3.3 iptables MASQUERADE 删除逻辑（具体代码改动由 pg-build 阶段执行）
+```
+
+❌ **错误**（会导致 refine 越界）：
+
+```markdown
+- 目标：`.pg/hooks/env-dev-local-clean.sh`
+- 推荐动作：在 step [3/3] 新增子步骤 3.3
+```
+
+### 翻译规则
+
+如果 `recommended_action` 字面指向业务代码，LLM **必须**改写为以下两种之一：
+
+1. **指向 `tasks.md` 的实施任务**：把 "改 X 文件" 翻译为 "在 `tasks.md` 第 N 章 [stage].[track]:dev 加一条子任务，描述改 X 文件的步骤"
+2. **指向 `design.md` 的验证项**：把 "X 应具备 Y 能力" 翻译为 "在 `design.md` V-{track}-N 加一条验证项，描述如何验证 Y 能力"
+
+### 机械检查
+
+`pg-auto-refine-check.py <change>` 会在主入口解析 `review-notes.md` 中所有 "目标" 字段，**绝对路径必须在 `.pg/changes/<change>/` 之下**。越界 → exit code 3，提示修正后重跑。
+
+---
+
 ## 编辑决策符号表
 
 | 符号 | 含义 | 后续动作 |

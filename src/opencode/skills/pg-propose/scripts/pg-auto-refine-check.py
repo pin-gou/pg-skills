@@ -5,6 +5,7 @@
   1. 所有 common_decisions (5 项) 的 `current == recommended`
   2. 所有 issue_decisions 的 `current` 都是默认值（阻塞 = FIX, 重要 = FIX, 建议 = SKIP）
   3. 用户未编辑过 review-notes.md（mtime 早于所有产物文件）
+  4. (v4.1) 所有 issue_decision 的 target_file 都在 .pg/changes/<change>/ 之下
 
 输出 JSON:
   {
@@ -13,13 +14,15 @@
     "common_decisions_status": "all_recommended" | "diverged: <列表>",
     "issue_decisions_status": "all_default" | "non_default: <列表>",
     "user_edited": bool,
-    "blocking_issues_count": int
+    "blocking_issues_count": int,
+    "scope_violations": [...]  // (v4.1 新增)
   }
 
 Exit code:
   0 = should_auto_apply = true
   1 = should_auto_apply = false (有分歧，等待用户调用 /2.1-pg-propose-refine)
   2 = error (review-notes.md 不存在，调用 /3-pg-propose 生成)
+  3 = error (scope violation，参见 v4.1 Scope Boundary Contract)
 """
 import json
 import os
@@ -130,11 +133,73 @@ def detect_review_modified(review_path: str, product_paths: list[str]) -> bool:
     return False
 
 
+# v4.1 Scope Boundary check
+# 校验 review-notes.md 中所有 issue_decision 的 "目标" 字段是否在变更目录内
+# 越界 → exit code 3
+_PRODUCT_FILES = frozenset({"proposal.md", "design.md", "tasks.md", "review-notes.md",
+                            "proposal/design/tasks/review-notes.md"})
+_TARGET_PATTERN = re.compile(r"-\s*目标[:：]\s*`?([^`\n]+)`?", re.MULTILINE)
+_PRODUCT_REF_INLINE = re.compile(
+    r"`(proposal|design|tasks|review-notes)\.md`(?:[^\n]*第\s*\d|章节|验证项|条目)",
+    re.MULTILINE,
+)
+
+
+def _resolve_target_to_abs(target: str, change_root: str, repo_root: str) -> str:
+    """把 review-notes 中的"目标"字符串解析为绝对路径。
+
+    规则：
+      - 以 `/` 开头 → 原样视为绝对路径
+      - 含路径分隔符（含隐性 `./`、`../`） → 相对 repo_root 解析
+      - 仅 basename 形式（且不在 _PRODUCT_FILES 白名单）→ 视为相对 repo_root
+      - 落在 _PRODUCT_FILES 白名单 → 视为相对 change_root/1-propose-review/ + 产物根
+    """
+    target = target.strip()
+    abs_change_root = os.path.abspath(change_root)
+    if target.startswith("/"):
+        return os.path.abspath(target)
+    if not target:
+        return abs_change_root
+    # 含路径分隔符 → 相对 repo_root
+    if "/" in target or "\\" in target or target.startswith(("./", "../")):
+        return os.path.abspath(os.path.join(repo_root, target))
+    # 纯 basename + 在产物白名单 → 相对 change_root
+    if target in _PRODUCT_FILES:
+        return os.path.join(abs_change_root, target)
+    # 其它纯 basename（如 service.go, package.json）→ 相对 repo_root
+    return os.path.abspath(os.path.join(repo_root, target))
+
+
+def _check_decision_target_scope(content: str, change_root: str) -> list[str]:
+    """扫描 review-notes.md 中所有"- 目标：..."字段，返回越界路径列表。
+
+    Returns:
+        越界的 target 字符串列表（空列表 = 全部合规）。
+    """
+    repo_root = os.environ.get("PG_PROJECT_ROOT", os.getcwd())
+    abs_change_root = os.path.abspath(change_root) + os.sep
+    violations: list[str] = []
+
+    for match in _TARGET_PATTERN.finditer(content):
+        target = match.group(1).strip()
+        if not target:
+            continue
+        # 形如 "tasks.md 第 X 章" / "design.md V-X-N" 内联引用 → 合规
+        if _PRODUCT_REF_INLINE.search(f"`{target}`" + match.string[match.end():match.end()+30]):
+            continue
+        abs_path = _resolve_target_to_abs(target, change_root, repo_root)
+        if not abs_path.startswith(abs_change_root):
+            violations.append(f"{target} → {abs_path}")
+
+    return violations
+
+
 def check_should_auto_apply(change: str) -> dict:
     """检测当前 review-notes.md 是否符合自动应用条件."""
     review_path = os.path.join(
         CHANGES_DIR, change, "1-propose-review", "review-notes.md"
     )
+    change_root = os.path.join(CHANGES_DIR, change)
     if not os.path.isfile(review_path):
         return {
             "should_auto_apply": False,
@@ -144,6 +209,20 @@ def check_should_auto_apply(change: str) -> dict:
 
     with open(review_path, encoding="utf-8") as f:
         content = f.read()
+
+    # v4.1: scope boundary check（最优先，违规直接阻断）
+    scope_violations = _check_decision_target_scope(content, change_root)
+    if scope_violations:
+        return {
+            "should_auto_apply": False,
+            "error": "scope violation: 以下目标超出 .pg/changes/<change>/ 范围",
+            "scope_violations": scope_violations,
+            "exit_code": 3,
+            "reason": (
+                "scope violation: " + "; ".join(scope_violations) +
+                " (refine 阶段禁止触碰业务代码，必须翻译为对 proposal.md/design.md/tasks.md 内的修改)"
+            ),
+        }
 
     common, issue_lines = _parse_decision_table(content)
 
@@ -191,6 +270,7 @@ def check_should_auto_apply(change: str) -> dict:
         "issue_decisions_status": issue_status,
         "user_edited": user_edited,
         "blocking_issues_unfixed": len([s for s in has_unfixed if "阻塞" not in s]),
+        "scope_violations": [],  # v4.1: 全合规时为空列表
         "reason": (
             "符合自动应用条件"
             if should else
@@ -207,6 +287,9 @@ def main():
     change = sys.argv[1]
     result = check_should_auto_apply(change)
     print(json.dumps(result, ensure_ascii=False, indent=2))
+    exit_code = result.get("exit_code")
+    if exit_code == 3:
+        sys.exit(3)  # scope violation
     if result.get("error"):
         sys.exit(2)
     sys.exit(0 if result["should_auto_apply"] else 1)

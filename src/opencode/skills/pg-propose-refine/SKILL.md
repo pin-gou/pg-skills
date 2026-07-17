@@ -24,6 +24,41 @@ metadata:
 
 ---
 
+## ⚠️ Scope Boundary Contract (v4.1)
+
+本 SKILL 的修改 scope **严格限定**为变更目录内的四个产物文件：
+
+```
+.pg/changes/<change-name>/
+├── proposal.md                          ← ✅ 可改
+├── design.md                            ← ✅ 可改
+├── tasks.md                             ← ✅ 可改
+├── execution-manifest.yaml              ← ❌ 不改（脚本重生）
+├── scenario-<track>.yaml                ← ❌ 不改（脚本重生）
+└── 1-propose-review/
+    ├── review-notes.md                  ← ✅ 可改（标记状态）
+    └── on-conditions-eval.md            ← ❌ 不改（脚本重生）
+```
+
+**禁止行为**：
+
+- ❌ 修改任何业务代码（backend / agent / frontend / 第三方库）
+- ❌ 修改环境脚本（`.pg/hooks/` 下的 `*.sh`）
+- ❌ 修改配置文件（`application.yml`、`.env` 等）
+- ❌ 修改 SQL schema（必须由 backend 模块 Flyway 在 build 阶段执行）
+
+**正确处理方式**：
+
+当 `recommended_action` 指向业务代码时，LLM 应翻译为：
+
+- "在 `tasks.md` 的 `[stage].[track]:dev` 章节添加实施任务（含文件路径）"
+- "在 `design.md` 的 Verification Criteria 添加新 V-* 验证项"
+- 让 `pg-build` 阶段执行实际代码改动
+
+**机械保障**：`pg-auto-refine-check.py <change>` 会在主入口校验 `review-notes.md` 中所有"目标"字段，越界直接报错退出（exit code 3）。
+
+---
+
 ## 工作流程
 
 ### 第一步：环境与产物加载
@@ -171,11 +206,28 @@ fix-{severity}-{sequence}-{slug}
   > - 取消某项决策（不应用）"
 - 用户确认后才进入第五步
 
+### 第五步 0：Scope Boundary Check（v4.1 前置硬约束）
+
+执行 `pg-auto-refine-check.py <change>` 增量检查 scope 边界（已经在入口处自动被调用）：
+
+```
+python3 .pg/skills/src/opencode/skills/pg-propose/scripts/pg-auto-refine-check.py <change-name>
+```
+
+- 若返回 `scope_violations: []` → 进入第五步应用 FIX
+- 若返回 `scope_violations` 非空（exit code 3） → **报错退出**，提示：
+  > "scope violation: 以下目标超出 .pg/changes/<change>/ 范围：...
+  > refine 阶段禁止触碰业务代码，必须翻译为对 proposal.md/design.md/tasks.md 内的修改"
+
+**修复步骤**：
+1. 回到 `review-notes.md`
+2. 把越界 `目标` 字段改为产物文件内章节（如 `tasks.md` 第 N.M 章节）
+3. 把 `推荐动作` 中指向业务代码的描述翻译为产物内任务
+4. 重跑 `pg-auto-refine-check.py` 直到 `scope_violations` 为空
+
 ### 第五步：应用决策到产物
 
 按 scope 分类执行修改。决策分两类来源：
-
-#### 5.1 common_decisions 映射规则（机械执行）
 
 | 决策项 | 选项 | 产物修改动作 |
 |--------|------|-------------|
@@ -194,18 +246,33 @@ fix-{severity}-{sequence}-{slug}
 
 | 选项 | 产物修改动作 |
 |------|-------------|
-| `FIX` | 按 `recommended_action` 修改对应文件（修复动作由 LLM 自由推导） |
+| `FIX` | **scope 限定**：仅修改 `proposal.md` / `design.md` / `tasks.md` / `review-notes.md` 四个产物文件内的对应章节，**禁止触碰任何业务代码**（*.java / *.go / *.ts / *.sh / *.proto / *.sql / *.yaml 等）。LLM 应将 `recommended_action` 翻译为 "在 X 产物的 Y 章节新增/修改 Z 内容"，而不是字面照搬到目标代码。 |
 | `SKIP` | review-notes.md 对应条目后追加 `> **SKIP**：{理由}` 注释，不修改任何产物文件 |
 
 **FIX 应用规则**：
 
-1. 读取 `target_file` + `recommended_action`
-2. LLM 自由推导修复方案（不再依赖机械映射）：
-   - "插入 3.4.1" → 在指定位置插入新子任务
+> **🛑 硬约束（Hard Constraint, v4.1 引入）**
+>
+> refine 阶段的 FIX 动作**仅允许**修改以下四个文件：
+> 1. `.pg/changes/<change>/proposal.md`
+> 2. `.pg/changes/<change>/design.md`
+> 3. `.pg/changes/<change>/tasks.md`
+> 4. `.pg/changes/<change>/1-propose-review/review-notes.md`
+>
+> **禁止**：直接编辑任何业务代码、环境脚本、配置文件、SQL schema。代码改动必须等到 `pg-build` 阶段的 `[stage].[track]:dev` 子阶段执行。
+>
+> **机械检查**：执行本步之前必须先运行 `pg-auto-refine-check.py <change>`，若返回 `scope_violations` 非空则**报错退出**，禁止继续应用 FIX。
+
+1. **scope check**（前置）：校验 `target_file` 是否在 scope 内（绝对路径必须在 `.pg/changes/<change>/` 之下）
+   - 不在 scope → **报错退出**，提示修正 review-notes.md 后重跑
+2. 读取 `target_file`（限定在 scope 内） + `recommended_action`
+3. LLM 翻译 `recommended_action` 为产物修改动作：
+   - "在 tasks.md [stage].[track]:dev 加一条子任务" → 在指定位置插入新子任务
    - "扩展 rg 扫描范围" → 修改 task 命令字符串
-   - "加注释段" → 在指定章节追加段落
-3. 保持风格一致（复用产物中已有的格式、命名、Markdown 风格）
-4. 修复后立即在 review-notes.md 标记：把 `[ ]` 改为 `[x]`，在条目下加 `- 修复：{摘要}` 与 `- 修复时间：{timestamp}`
+   - "在 design.md V-xxx-N 加验证" → 在 V-Criteria 表格新增一行
+   - **禁止**把 recommended_action 字面照搬到目标代码文件（如果原文指向业务代码，先翻译为产物内的实施任务）
+4. 保持风格一致（复用产物中已有的格式、命名、Markdown 风格）
+5. 修复后立即在 review-notes.md 标记：把 `[ ]` 改为 `[x]`，在条目下加 `- 修复：{摘要}` 与 `- 修复时间：{timestamp}`
 
 **SKIP 应用规则**：
 
