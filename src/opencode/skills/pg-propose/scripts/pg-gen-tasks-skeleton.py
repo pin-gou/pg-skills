@@ -570,8 +570,8 @@ def _format_scenario_body(section: dict, change_name: str) -> str:
 
     if sub == "scenario-execute":
         return (
-            f"#### 步骤组 1：scenario.yaml 读取\n\n"
-            f"- [ ] {n}.1 确认 `.pg/changes/{change_name}/scenario.yaml` 存在且每个 Scenario 含 6 段"
+            f"#### 步骤组 1：scenario-{section['track']}.yaml 读取\n\n"
+            f"- [ ] {n}.1 确认 `.pg/changes/{change_name}/scenario-{section['track']}.yaml` 存在且每个 Scenario 含 6 段"
             f"（scenario_id / critical / given / when / then / evidence；and 可选）\n"
             f"- [ ] {n}.2 校验 scenario_id 全局唯一、critical 字段为 bool\n\n"
             f"#### 步骤组 2：执行\n\n"
@@ -772,7 +772,7 @@ def build_on_conditions_eval_md(config: dict, affected_paths: list[str],
     lines.append("")
     lines.append("1. 对每行「最终决策」勾选 `[x]`（同意机械评估）或 `[~]` + 写「依据」（覆盖机械评估）")
     lines.append("2. 复核完成后，把本文件表格内容**合并到** `.pg/changes/<change>/1-propose-review/review-notes.md` 的「on_conditions 评估记录」段")
-    lines.append("3. scenario_tracks_decision 段是三个生成产物（tasks.md / execution-manifest.yaml / scenario.yaml）的 SSOT，禁止手工修改")
+    lines.append("3. scenario_tracks_decision 段是三个生成产物（tasks.md / execution-manifest.yaml / scenario-<track>.yaml）的 SSOT，禁止手工修改")
     lines.append("4. 合并后本文件可保留作为审计副本")
 
     return "\n".join(lines) + "\n"

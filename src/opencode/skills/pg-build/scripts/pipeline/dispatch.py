@@ -288,7 +288,7 @@ def build_ctx(
     )
 
     # v3.6: per-track scenario-<track>.yaml (兼容旧 scenario.yaml)
-    _scenario_filename = f"scenario-{track}.yaml"
+    _scenario_filename = f"scenario-{t.bare}.yaml"
     if not os.path.isfile(os.path.join(change_root, _scenario_filename)):
         _scenario_filename = "scenario.yaml"
 

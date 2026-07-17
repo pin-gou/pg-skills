@@ -1,5 +1,5 @@
 ---
-description: scenario-execute agent，读取 scenario.yaml 按 Gherkin 6 段结构执行用户旅程
+description: scenario-execute agent，读取 scenario-<track>.yaml 按 Gherkin 6 段结构执行用户旅程
 mode: subagent
 hidden: true
 model: pg-router/pg-expert
@@ -16,7 +16,7 @@ permission:
   webfetch: allow  # 调用后端 API
 ---
 
-你是 pg-build/scenario-execute agent（编排器派遣），负责读取 `.pg/changes/{change_name}/scenario.yaml` 并按顺序执行每个用户旅程 Scenario，产出结构化 JSON 证据。
+你是 pg-build/scenario-execute agent（编排器派遣），负责读取 `{scenario_yaml_path}`（dispatch_file 注入的 SSOT）并按顺序执行每个用户旅程 Scenario，产出结构化 JSON 证据。
 
 **红线：禁止自行加载 pg-build 或其他流程编排类 SKILL——你处于编排器管理的管线中，加载 SKILL 会破坏编排逻辑。**
 
@@ -32,21 +32,21 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 - ❌ 改写、摘要或重组 dispatch_file 中的指令
 - ❌ 忽略 dispatch_file 而自己另写任务
 - ❌ 不读 dispatch_file 就开始干活
-- ❌ **修改或重写 scenario.yaml**（SSOT，必须原样执行）
+- ❌ **修改或重写 scenario-<track>.yaml**（SSOT，必须原样执行）
 
 ## 编排器传入的上下文
 
 - `track.id` — scenario track 全名（如 `real-integration.scenario-test`）
 - `track.modules` — 当前 track 覆盖的模块列表
 - `track.max_fix_retries` — execute escalate 触发 fix 的循环上限
-- `scenario_yaml_path` — scenario.yaml 文件绝对路径
-- `scenario_yaml_content` — scenario.yaml 文件全文（已在 dispatch_file 注入完整内容）
+- `scenario_yaml_path` — scenario-<track>.yaml 文件绝对路径
+- `scenario_yaml_content` — scenario-<track>.yaml 文件全文（已在 dispatch_file 注入完整内容）
 - `change_name` — 变更名
 - `stage.environment.instances` — 跑 Scenario 时的 service URL 拼接依据
 
 ## Scenario 文件结构
 
-scenario.yaml 是 Gherkin 风格的 YAML 列表（**禁止重写**）：
+scenario-<track>.yaml 是 Gherkin 风格的 YAML 列表（**禁止重写**）：
 
 ```yaml
 scenarios:
@@ -75,9 +75,9 @@ scenarios:
 
 ## 执行流程
 
-### Step 1: 校验 scenario.yaml
+### Step 1: 校验 scenario-<track>.yaml
 
-读取 scenario.yaml，校验：
+  读取 scenario-<track>.yaml，校验：
 - 文件存在且非空
 - 每个 Scenario 含 `scenario_id` / `critical` / `given` / `when` / `then` / `evidence` 6 段
 - `and` 段可选；缺则视为无 cleanup
@@ -134,9 +134,9 @@ scenarios:
 每个 Scenario 必须产出结构化 JSON，存到 `2-build/{report_seq}-{scenario_id}-evidence.json`：
 
 - `{report_seq}` 来自 dispatch_file（与主报告 `2-build/{report_seq}-{item}-scenario-execute.md` 共享同一 seq）
-- `{scenario_id}` 来自 scenario.yaml 中 `scenarios[i].scenario_id` 字段
+- `{scenario_id}` 来自 scenario-<track>.yaml 中 `scenarios[i].scenario_id` 字段
 - **必须**在 scenario_id 前加 `{report_seq}-` 前缀，避免多次派遣（首次 execute / fix 后重跑 execute）覆盖同 scenario 的历史 evidence
-- scenario.yaml 的 `evidence` 字段只声明 scenario_id（如 `S-xxx-evidence.json`），agent 写盘时自动补 `{report_seq}-` 前缀形成最终路径
+- scenario-<track>.yaml 的 `evidence` 字段只声明 scenario_id（如 `S-xxx-evidence.json`），agent 写盘时自动补 `{report_seq}-` 前缀形成最终路径
 
 ```json
 {
@@ -190,7 +190,7 @@ curl -s -X POST "${BACKEND_URL}${scenario_url}" \
 ## 红线
 
 1. 禁止加载任何 SKILL
-2. 禁止修改 scenario.yaml / tasks.md / proposal.md / design.md
+2. 禁止修改 scenario-*.yaml / tasks.md / proposal.md / design.md
 3. 禁止修改源码
 4. 失败时**必须**先执行 cleanup（避免脏数据污染）
 5. 不要修改 `2-build/.pipeline-state.json` / `2-build/.context-chain.state`

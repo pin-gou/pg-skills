@@ -159,6 +159,52 @@ def assert_default_branch(
     return (current == expected, current, expected)
 
 
+def assert_default_branch_has_change(change: str) -> dict[str, Any]:
+    """检查 default_branch 上是否存在 change 目录（pg-propose 产物）。
+
+    防止 operator 失误：在非 default_branch 上跑了 pg-propose 并提交了产物，
+    然后切到 default_branch 启动 pg-build → 产物丢失。
+
+    检查顺序：
+      1. ls-tree default_branch → 发现 change 目录 → ok
+      2. feat/pg/<change> 分支 → resume 场景 → skip
+      3. default_branch + 工作树文件存在 → 放行（auto_commit_on_init 会补提交）
+      4. 工作树文件存在 → 放行（测试/开发场景兜底）
+      5. 以上均不满足 → fail
+    """
+    project_config = load_project_config(PROJECT_ROOT)
+    default_branch = (project_config.get("git") or {}).get("default_branch", "master")
+
+    r = _git("ls-tree", "--name-only", default_branch, f".pg/changes/{change}/")
+    if r.stdout.strip():
+        return {"ok": True}
+
+    current = _git("rev-parse", "--abbrev-ref", "HEAD").stdout.strip()
+
+    # feat/pg/<change> 分支：resume 场景，跳过检查
+    if current == f"feat/pg/{change}":
+        return {"ok": True}
+
+    change_dir = os.path.join(CHANGES_DIR, change)
+
+    # 当前在 default_branch 上且 change 目录存在于工作树：放行
+    if current == default_branch and os.path.isdir(change_dir):
+        return {"ok": True}
+
+    # 工作树存在 change 目录：测试/开发兜底（非 git 控制的 fixture）
+    if os.path.isdir(change_dir):
+        return {"ok": True}
+
+    return {
+        "ok": False,
+        "reason": (
+            f"default_branch ({default_branch}) 上未找到 change 目录 "
+            f".pg/changes/{change}/。请先在 {default_branch} 上执行 "
+            f"pg-propose 后再启动 pg-build。"
+        ),
+    }
+
+
 def ensure_feature_branch(change: str) -> dict[str, Any]:
     """创建 feat/pg/{change} 分支（如果不在该分支上）。"""
     expected = f"feat/pg/{change}"
@@ -803,6 +849,16 @@ def cli_bootstrap(change: str) -> dict[str, Any]:
         moved = migrate_legacy_state_files(change)
     except Exception as e:
         result["error"] = f"migrate failed: {e}"
+
+    try:
+        change_check = assert_default_branch_has_change(change)
+        if not change_check.get("ok"):
+            result["ok"] = False
+            result["error"] = change_check["reason"]
+            return result
+    except Exception as e:
+        result["error"] = f"default_branch change check failed: {e}"
+        return result
 
     try:
         branch_result = ensure_feature_branch(change)

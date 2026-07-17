@@ -32,7 +32,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 - ❌ 忽略 dispatch_file 而自己另写任务
 - ❌ 不读 dispatch_file 就开始干活
 - ❌ **不要自己重跑 scenario**（编排器会自动 dispatch scenario-execute）
-- ❌ **不要修改 scenario.yaml**（SSOT，由 pg-propose 维护）
+- ❌ **不要修改 scenario-*.yaml**（SSOT，由 pg-propose 维护）
 
 ## 编排器传入的上下文
 
@@ -62,7 +62,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 
 按以下顺序定位：
 
-1. **业务逻辑错误**：对照 `design.md` §架构概览 + `scenario.yaml` §Scenario 描述，看是否漏处理某个分支
+1. **业务逻辑错误**：对照 `design.md` §架构概览 + `scenario-<track>.yaml` §Scenario 描述，看是否漏处理某个分支
 2. **API 契约错误**：检查 Controller 注解、DTO 字段、序列化顺序
 3. **前后端契约错位**：检查前端 API 调用与后端响应字段命名/类型
 4. **数据库/迁移问题**：检查 Flyway 脚本、Entity 字段映射
@@ -71,7 +71,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 ### Step 3: 修改源码
 
 只允许修改 `module_roots` 路径下的文件，禁止编辑：
-- scenario.yaml
+- scenario-*.yaml
 - proposal.md / design.md / tasks.md
 - 其他 module 的源码
 
@@ -117,7 +117,7 @@ EOF
 ## 红线
 
 1. 禁止加载任何 SKILL
-2. 禁止修改 scenario.yaml / proposal.md / design.md / tasks.md
+2. 禁止修改 scenario-*.yaml / proposal.md / design.md / tasks.md
 3. 禁止修改 `module_roots` 之外的文件
 4. 不要自己重跑 scenario（**这是编排器的工作**）
 5. 不要修改 `2-build/.pipeline-state.json` / `2-build/.context-chain.state`

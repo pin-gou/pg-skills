@@ -118,7 +118,7 @@ def _build_skeleton_yaml(change: str, track_id: str) -> dict:
         ],
         "_meta": {
             "_comment": (
-                "scenario.yaml 由 pg-gen-scenario.py 生成的 skeleton, "
+                "scenario-<track>.yaml 由 pg-gen-scenario.py 生成的 skeleton, "
                 "LLM 必填。scenario_id / given / when / then / and / evidence "
                 "是必填段, critical / description 必填, _meta 段最终会被 pg-build "
                 "scenario-execute agent 忽略。"

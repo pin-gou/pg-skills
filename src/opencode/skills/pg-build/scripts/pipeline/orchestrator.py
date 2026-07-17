@@ -291,6 +291,26 @@ class Orchestrator:
                 "expected_branch": expected_branch,
             }
 
+        # ── 步骤 1b: default_branch 上存在 change 目录检查 ──
+        # 防止 operator 在非 default_branch 上跑 pg-propose 后切分支启动 pg-build。
+        change_check = bootstrap.assert_default_branch_has_change(self.change)
+        if not change_check.get("ok"):
+            reason = change_check["reason"]
+            self.event_log.append(EVT_WORKFLOW_FAILED, {
+                "reason": reason,
+                "source": "default_branch_change_missing",
+            })
+            self.state = self.state.replace(
+                status="failed",
+                failed_reason=reason,
+            )
+            save_snapshot(self.change_root, self.state)
+            return {
+                "action": "workflow_failed",
+                "fatal": True,
+                "reason": reason,
+            }
+
         # ── 步骤 2: git init 兜底（修复 1b）──
         # 幂等：ensure_feature_branch 在已存在分支上返回 already_on；
         # auto_commit_on_init 在干净工作区返回 committed=False。
