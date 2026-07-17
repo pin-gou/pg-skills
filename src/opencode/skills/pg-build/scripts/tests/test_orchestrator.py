@@ -134,6 +134,12 @@ class TestFirstNextBranchAssertion(unittest.TestCase):
         self.change_root = os.path.join(self.tmp, ".pg", "changes", self.change)
         os.makedirs(self.change_root, exist_ok=True)
         _write_minimal_manifest(self.change_root)
+        # 提交 setup 产物，确保 default_branch 守卫的 dirty check 通过
+        subprocess.run(["git", "add", "-A"], cwd=self.tmp, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "test-setup", "-q"],
+            cwd=self.tmp, check=True,
+        )
 
     def tearDown(self):
         if self.old_root:
@@ -231,6 +237,12 @@ class TestFirstNextGitInit(unittest.TestCase):
         os.makedirs(self.change_root, exist_ok=True)
         _write_minimal_manifest(self.change_root)
         _checkout_branch(self.tmp, "master")
+        # 提交 setup 产物，确保 default_branch 守卫的 dirty check 通过
+        subprocess.run(["git", "add", "-A"], cwd=self.tmp, check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "test-setup", "-q"],
+            cwd=self.tmp, check=True,
+        )
 
     def tearDown(self):
         if self.old_root:

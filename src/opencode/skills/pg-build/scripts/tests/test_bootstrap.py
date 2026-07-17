@@ -269,47 +269,57 @@ class TestAssertDefaultBranch(unittest.TestCase):
             )
 
     def test_matches_default_branch(self):
-        """当前在 master, default_branch=master → matched=True"""
+        """当前在 master, default_branch=master → ok=True"""
         self._checkout("master")
         config = {"git": {"default_branch": "master"}}
-        matched, current, expected = bootstrap.assert_default_branch(self.tmp, config)
-        self.assertTrue(matched)
-        self.assertEqual(current, "master")
-        self.assertEqual(expected, "master")
+        result = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["current_branch"], "master")
+        self.assertEqual(result["expected_branch"], "master")
 
     def test_mismatched_branch_returns_false(self):
-        """当前在 vxlan, default_branch=master → matched=False"""
+        """当前在 vxlan, default_branch=master → ok=False"""
         self._checkout("vxlan")
         config = {"git": {"default_branch": "master"}}
-        matched, current, expected = bootstrap.assert_default_branch(self.tmp, config)
-        self.assertFalse(matched)
-        self.assertEqual(current, "vxlan")
-        self.assertEqual(expected, "master")
+        result = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertFalse(result["ok"])
+        self.assertEqual(result["current_branch"], "vxlan")
+        self.assertEqual(result["expected_branch"], "master")
 
     def test_uses_master_when_config_missing(self):
         """project.yaml 无 git 段 → expected 默认 master"""
         self._checkout("master")
         config = {}  # 无 git 段
-        matched, current, expected = bootstrap.assert_default_branch(self.tmp, config)
-        self.assertTrue(matched)
-        self.assertEqual(expected, "master")
+        result = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["expected_branch"], "master")
 
     def test_uses_master_when_git_section_empty(self):
         """git: {} 无 default_branch → expected 默认 master"""
         self._checkout("master")
         config = {"git": {}}
-        matched, current, expected = bootstrap.assert_default_branch(self.tmp, config)
-        self.assertTrue(matched)
-        self.assertEqual(expected, "master")
+        result = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["expected_branch"], "master")
 
     def test_non_master_default_branch(self):
-        """default_branch=main, 当前在 main → matched=True"""
+        """default_branch=main, 当前在 main → ok=True"""
         self._checkout("main")
         config = {"git": {"default_branch": "main"}}
-        matched, current, expected = bootstrap.assert_default_branch(self.tmp, config)
-        self.assertTrue(matched)
-        self.assertEqual(current, "main")
-        self.assertEqual(expected, "main")
+        result = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["current_branch"], "main")
+        self.assertEqual(result["expected_branch"], "main")
+
+    def test_detects_dirty_working_tree(self):
+        """在 default_branch 上有未提交变更 → ok=False, dirty=True"""
+        self._checkout("master")
+        config = {"git": {"default_branch": "master"}}
+        (Path(self.tmp) / "dirty.txt").write_text("uncommitted")
+        result = bootstrap.assert_default_branch(self.tmp, config)
+        self.assertFalse(result["ok"])
+        self.assertTrue(result["dirty"])
+        self.assertIsNotNone(result["error"])
 
     def test_does_not_exit_or_throw(self):
         """assert_default_branch 不得抛异常或 sys.exit（由 caller 决定协议）"""
@@ -317,7 +327,8 @@ class TestAssertDefaultBranch(unittest.TestCase):
         config = {"git": {"default_branch": "master"}}
         # 不应抛任何异常
         result = bootstrap.assert_default_branch(self.tmp, config)
-        self.assertEqual(len(result), 3)
+        self.assertIn("ok", result)
+        self.assertIn("error", result)
 
 
 class TestCliBootstrap(unittest.TestCase):

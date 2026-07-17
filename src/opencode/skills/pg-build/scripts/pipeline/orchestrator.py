@@ -259,23 +259,17 @@ class Orchestrator:
         # 当前本地分支既不是 default_branch 也不是 feat/pg/<change> 时，
         # 通过 workflow_failed 协议终止流程，写入 EVT_WORKFLOW_FAILED。
         project_config = load_project_config(bootstrap.PROJECT_ROOT)
-        matched, current_branch, expected_branch = bootstrap.assert_default_branch(
+        dbr = bootstrap.assert_default_branch(
             bootstrap.PROJECT_ROOT, project_config
         )
         feat_branch = f"feat/pg/{self.change}"
-        if not matched and current_branch != feat_branch:
-            reason = (
-                f"当前本地分支 {current_branch!r} 既不是 default_branch "
-                f"({expected_branch!r})，也不是 feat/pg 分支 ({feat_branch!r})。"
-                f"pg-build 要求从 default_branch 或既有 feat/pg 分支启动。"
-                f"请先 `git checkout {expected_branch}` 再启动 pg-build。"
-                f"或者修改 .pg/project.yaml 的 git.default_branch 配置。"
-            )
+        if not dbr["ok"] and dbr["current_branch"] != feat_branch:
+            reason = dbr["error"]
             self.event_log.append(EVT_WORKFLOW_FAILED, {
                 "reason": reason,
                 "source": "default_branch_assertion",
-                "current_branch": current_branch,
-                "expected_branch": expected_branch,
+                "current_branch": dbr["current_branch"],
+                "expected_branch": dbr["expected_branch"],
             })
             self.state = self.state.replace(
                 status="failed",
@@ -287,8 +281,8 @@ class Orchestrator:
                 "fatal": True,
                 "reason": reason,
                 "error_category": "branch_mismatch",
-                "current_branch": current_branch,
-                "expected_branch": expected_branch,
+                "current_branch": dbr["current_branch"],
+                "expected_branch": dbr["expected_branch"],
             }
 
         # ── 步骤 1b: default_branch 上存在 change 目录检查 ──

@@ -127,26 +127,35 @@ def _git(*args: str, capture: bool = True) -> subprocess.CompletedProcess:
 def assert_default_branch(
     project_root: str,
     config: dict[str, Any],
-) -> tuple[bool, str, str]:
+) -> dict[str, Any]:
     """检查当前本地分支是否符合 pg-build 启动要求（feat 分支判断由 caller 决定）。
 
     pg-build 要求从以下任一分支启动：
       - project.yaml.git.default_branch（默认 master）
       - feat/pg/<change>（已启动过此 change 的 resume 场景，由 caller 决定）
 
+    当在 default_branch 上时，额外检查：
+      - 工作区干净（无未提交变更）
+      - 不落后远程（behind=0）
+
     Args:
         project_root: 项目根目录（用于 _git cwd）
         config: project.yaml 解析后的 dict
 
     Returns:
-        (matched, current_branch, expected_branch)
-          - matched=True  → 当前是 default_branch，或无法检测分支（如非 git 仓库）
-          - matched=False → 当前是其他分支（detached HEAD 也算不匹配）
+        dict:
+          - ok: bool          — 整体是否通过（branch 匹配 + 干净 + 不落后）
+          - current_branch: str
+          - expected_branch: str
+          - dirty: bool       — 有未提交变更
+          - behind_remote: bool — 落后远程
+          - ahead_remote: bool  — 领先远程（不阻断，仅记录）
+          - has_remote: bool  — 是否配置了 upstream
+          - error: str | None — 不通过时的中文原因
 
     Note:
-        不检查 origin/master / origin/HEAD，仅检查本地分支。
         不调用 sys.exit，由 caller 决定走 workflow_failed 协议还是 result.ok=false。
-        当 git 命令本身失败（无 git repo、git 不可用等），返回 matched=True 以
+        当 git 命令本身失败（无 git repo、git 不可用等），返回 ok=True 以
         避免在非生产环境（测试 / 临时目录）中错误阻断。这是宽松策略：
         真实 git 仓库里分支才会被检查。
     """
@@ -154,9 +163,70 @@ def assert_default_branch(
     result = _git("rev-parse", "--abbrev-ref", "HEAD")
     if result.returncode != 0:
         # 非 git 仓库 / git 不可用 → 不阻断（caller 假定 PG 上下文正常）
-        return (True, "", expected)
+        return {
+            "ok": True,
+            "current_branch": "",
+            "expected_branch": expected,
+            "dirty": False,
+            "behind_remote": False,
+            "ahead_remote": False,
+            "has_remote": False,
+            "error": None,
+        }
     current = result.stdout.strip()
-    return (current == expected, current, expected)
+    branch_matched = (current == expected)
+    error_parts = []
+    dirty = False
+    behind_remote = False
+    ahead_remote = False
+    has_remote = False
+
+    if branch_matched:
+        # 检查 1: 工作区是否干净
+        status = _git("status", "--porcelain")
+        if status.stdout.strip():
+            dirty = True
+            error_parts.append(
+                f"当前分支 {current!r} 有未提交的变更，请先 commit 或 stash"
+            )
+
+        # 检查 2: 是否落后远程（behind > 0 才阻断；ahead 仅记录）
+        upstream = _git("rev-parse", "--abbrev-ref", "@{u}")
+        if upstream.returncode == 0:
+            has_remote = True
+            counts = _git("rev-list", "--left-right", "--count", "HEAD...@{u}")
+            if counts.returncode == 0:
+                behind, ahead = counts.stdout.strip().split()
+                behind = int(behind)
+                ahead = int(ahead)
+                if behind > 0:
+                    behind_remote = True
+                    error_parts.append(
+                        f"当前分支 {current!r} 落后远程 {behind} 个 commit，"
+                        f"请先 git pull"
+                    )
+                if ahead > 0:
+                    ahead_remote = True
+
+    ok = branch_matched and not error_parts
+    error = "；".join(error_parts) if error_parts else None
+    if not branch_matched:
+        error = (
+            f"当前分支 {current!r} 不是 default_branch ({expected!r})。"
+            f"请先 `git checkout {expected!r}` 再启动 pg-build，"
+            f"或者修改 .pg/project.yaml 的 git.default_branch 配置。"
+        )
+
+    return {
+        "ok": ok,
+        "current_branch": current,
+        "expected_branch": expected,
+        "dirty": dirty,
+        "behind_remote": behind_remote,
+        "ahead_remote": ahead_remote,
+        "has_remote": has_remote,
+        "error": error,
+    }
 
 
 def assert_default_branch_has_change(change: str) -> dict[str, Any]:
@@ -813,18 +883,11 @@ def cli_bootstrap(change: str) -> dict[str, Any]:
     # 不一致时通过 result.ok=false 终止流程（编排器应展示错误并停止调用 next）。
     try:
         project_config = load_project_config(PROJECT_ROOT)
-        matched, current_branch, expected_branch = assert_default_branch(
-            PROJECT_ROOT, project_config
-        )
+        dbr = assert_default_branch(PROJECT_ROOT, project_config)
         feat_branch = f"feat/pg/{change}"
-        if not matched and current_branch != feat_branch:
+        if not dbr["ok"] and dbr["current_branch"] != feat_branch:
             result["ok"] = False
-            result["error"] = (
-                f"当前本地分支 {current_branch!r} 既不是 {expected_branch!r}，"
-                f"也不是 {feat_branch!r}。"
-                f"请先 `git checkout {expected_branch}` 再启动 pg-build。"
-                f"或者修改 .pg/project.yaml 的 git.default_branch 配置。"
-            )
+            result["error"] = dbr["error"]
             return result
     except Exception as e:
         result.setdefault("warnings", []).append(
