@@ -38,9 +38,13 @@ if (!change_name) {
 ## 执行步骤
 
 1. 使用 Skill tool 加载 `pg-build` skill
-2. 调用 runner 编排 pipeline：`python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py next {change_name}`
-3. 按 next 返回的 action 派送 sub-agent 并 record 结果（派送时只传 dispatch_file 路径，不得读取其内容）
-4. 循环至 pipeline 完成
+2. 执行 bootstrap 初始化：
+   `python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py bootstrap {change_name}`
+   - `ok: false` → 直接输出 error 给用户，终止流程（**禁止**自动修复）
+   - `env_hook_plan` 非 null → bash 执行 plan.command，然后 `env-action-result` 记录 → 再次 bootstrap
+   - `env_hook_plan=null` → 进入步骤 3
+3. 进入主循环：`python3 ... next {change_name}` → 按 action 派送 sub-agent / record 结果 / 循环
+4. 循环至 pipeline 完成（`action: done` → 触发 pg-verify-and-merge）
 
 **示例**:
 ```

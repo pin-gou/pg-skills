@@ -75,7 +75,10 @@ $RUNNER env-action-result <change> --phase prepare_env|clean_env --stage <stage>
 
 ```
 循环:
-  0. $RUNNER bootstrap <change>  → 若返回 env_hook_plan，bash 执行后调 env-action-result（phase 填 prepare_env/clean_env）
+  0. $RUNNER bootstrap <change>  → 检查 response:
+       • ok: false         → workflow_failed（fatal=true）。**禁止自动修复**（如 git checkout），展示 error 给用户。
+       • ok: true + env_hook_plan=null → 进入 step 1
+       • ok: true + env_hook_plan ≠ null → bash 执行 plan.command，然后 env-action-result（phase 填 prepare_env/clean_env）→ 调 bootstrap 再次检查 env_hook_plan
   1. $RUNNER next <change>       → 检查 action 字段
   2. switch(action):
        "env_switch"        → env-action → bash exec → env-action-result → 回 next
@@ -85,6 +88,19 @@ $RUNNER env-action-result <change> --phase prepare_env|clean_env --stage <stage>
        "done"              → 触发 verify-and-merge
        "workflow_failed"   → 终止
 ```
+
+### 人工介入场景
+
+编排器（LLM agent）**必须**在以下场景终止 pipeline 并交由人工处理（不可自动修复）：
+
+| 场景 | bootstrap 返回 | 编排器动作 |
+|------|---------------|-----------|
+| 分支不匹配 | `ok: false, error: "当前本地分支..."` | 输出 error，**禁止** `git checkout` 或任何自动修复 |
+| change 目录不存在 | `ok: false, error: "change 目录...不存在"` | 输出 error，提醒运行 pg-propose |
+| project.yaml 配置错误 | `ok: false, error: "配置错误..."` | 输出 error |
+| env hook 执行失败 | `env-action-result` 返回 `success: false` | 输出 error 与 log_path，提示人工修复环境 |
+
+**不自动修复原则**：任何 `ok: false` 或 `workflow_failed`（fatal=true）都不应触发编排器的自动修复行为——包括但不限于 git checkout、git branch 创建、文件修改、配置修改。编排器只输出错误信息给用户，由用户决定下一步操作。
 
 ### Dispatch 协议
 
