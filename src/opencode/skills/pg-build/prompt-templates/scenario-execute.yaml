@@ -1,5 +1,10 @@
 # scenario-execute.yaml — sub=scenario-execute 完整提示词
-# v3.8: per-track scenario-<track>.yaml 路径由 dispatch_file 注入 {scenario_yaml_path}。
+# v3.9: 支持 type=api|browser 两种 when 步骤类型。
+#   - type=api (默认): 使用 curl 等 HTTP 工具执行 API 请求
+#   - type=browser: 加载 pg-browser-testing-with-devtools SKILL，使用 Chrome DevTools MCP 工具
+#   执行浏览器交互（navigate / click / fill / wait / screenshot / assert / evaluate 等）。
+#   向后兼容：旧 scenario-<track>.yaml 不含 type 字段时默认 type=api。
+# per-track scenario-<track>.yaml 路径由 dispatch_file 注入 {scenario_yaml_path}。
 # scenario-execute agent 读取 scenario-<track>.yaml（SSOT，**禁止重写**），按顺序执行每个 Scenario。
 # 每个 Scenario 必须含 Given/When/Then/And/Evidence 6 段，产出结构化 JSON 证据。
 
@@ -28,25 +33,97 @@ prompt: |
         - <前置条件 1>
         - <前置条件 2>
       when:
+        # API 类型（type=api 或省略时默认）
         - name: <动作名>
+          type: api                         # 可选，默认 api
           method: <HTTP method | db query | ...>
           url: <endpoint>                    # 完整 URL 或 SQL
           body: {<payload>}                  # 可选
           expect_status: <int>               # 期望响应码
+        # 浏览器类型（type=browser）
+        - name: <动作名>
+          type: browser
+          action: <navigate | click | fill | wait | screenshot | assert | evaluate | assert_console | assert_network | press_key>
+          url: <页面URL>                     # action=navigate 时必填
+          selector: <CSS选择器>              # action=click/fill/wait/assert 时必填
+          value: <输入值>                    # action=fill 时必填
+          key: <按键>                        # action=press_key 时必填（如 "Enter"、"Control+A"）
+          expression: <JS表达式>             # action=evaluate 或 assert 时必填
+          condition: <断言条件>              # action=assert_console/assert_network 时必填
+          timeout: 5000                      # 可选，等待超时（毫秒）
       then:
+        # API 类型断言
         - status_code == <int>
         - response.<field> matches <regex>
+        # 浏览器类型断言
+        - dom: <selector> exists             # 元素在 DOM 中存在
+        - dom: <selector> text == <value>    # 元素文本内容匹配
+        - console: no errors                 # 控制台无错误
+        - console: no warnings               # 控制台无警告
+        - network: <urlPattern> status == <int>  # 网络请求状态码
+        - screenshot: <path>                 # 截图对比（可选，记录证据用）
       and:                                   # cleanup 步骤（无论成功失败都跑）
         - name: <cleanup 名>
           action: <HTTP DELETE | db DELETE | ...>
       evidence:
         - <curl 输出文件路径>
-        - <journalctl 片段路径>
+        - <screenshot 文件路径>
+        - <console 日志路径>
   ```
+
+  ### 执行策略：按 type 分派
+
+  `when` 数组中的每个步骤按 `type` 字段（默认 `api`）分派执行方式：
+
+  | type | 执行方式 | 工具 |
+  |------|---------|------|
+  | `api` | 使用 curl 等 HTTP 工具发送请求 | 系统 curl 命令 |
+  | `browser` | 加载 `pg-browser-testing-with-devtools` SKILL，使用 Chrome DevTools MCP 工具执行浏览器交互 | Chrome DevTools MCP |
+
+  #### type=api 步骤
+
+  使用 `curl` 发送 HTTP 请求，检查 `expect_status` 并与后续 `then` 断言配合。
+
+  #### type=browser 步骤
+
+  在执行 browser 步骤前，**先加载 `pg-browser-testing-with-devtools` SKILL**：
+
+  ```markdown
+  <skill name="pg-browser-testing-with-devtools">
+  ```
+
+  然后使用 Chrome DevTools MCP 工具执行以下 action：
+
+  | action | 工具 | 必填字段 | 说明 |
+  |--------|------|---------|------|
+  | `navigate` | `navigate_page` | `url` | 导航到页面 |
+  | `click` | `click` | `selector` (uid) | 点击元素（先用 `take_snapshot` 拿到 uid） |
+  | `fill` | `fill` | `selector`, `value` | 填写输入框（先用 `take_snapshot` 拿到 uid） |
+  | `wait` | `wait_for` | `text` 或 `selector` | 等待元素/文本出现 |
+  | `screenshot` | `take_screenshot` | — | 截取当前页面截图 |
+  | `assert` | `evaluate_script` 或 `take_snapshot` | `expression` 或 `selector` | 断言 DOM 或 JS 表达式 |
+  | `evaluate` | `evaluate_script` | `expression` | 执行 JS 表达式 |
+  | `assert_console` | `list_console_messages` | `condition` | 断言控制台状态 |
+  | `assert_network` | `list_network_requests` | `condition` | 断言网络请求状态 |
+  | `press_key` | `press_key` | `key` | 按键/组合键 |
+
+  **执行流程**：
+  1. 对每个 browser step，先 `take_snapshot` 获取当前页面 DOM 树
+  2. 从 snapshot 中定位目标元素的 `uid`
+  3. 调用对应 Chrome DevTools 工具执行操作
+  4. 记录操作结果（截图、控制台日志、网络请求等）
+
+  ### 浏览器 Token 处理
+
+  当 browser Scenario 需要登录态时，按以下优先级获取 token：
+
+  1. **given 阶段已有 API 调用**：如果 given 阶段包含登录 API 调用，从响应中提取 token，通过 `navigate_page` 的 `initScript` 参数在导航前注入
+  2. **直接使用已登录页面**：如果环境已包含登录态，直接导航到目标页面
+  3. **通过 browser 步骤登录**：使用 `navigate` → `fill` → `click` 的 browser 步骤组合完成登录，不依赖 API token
 
   ### 执行流程
 
-  1. 读取 scenario-<track>.yaml，校验每个 Scenario 含 6 段（given / when / then / and / evidence / critical）
+  1. 读取 scenario-<track>.yaml，校验每个 Scenario 含必要字段
      - 校验失败 → record(scenario-execute, "failed")（workflow_failed）
      - 文件本身缺失 → record(scenario-execute, "failed")
 
@@ -55,7 +132,9 @@ prompt: |
   3. 串行执行每个 Scenario：
 
      - given 阶段：把环境调到 given 描述的状态（如调用 prepare-data API、设置 DB 行）
-     - when 阶段：执行动作，记录 request_id + 响应
+     - when 阶段：按 `type` 分派执行每个步骤，记录执行结果
+       - type=api: 记录 request_id + 响应
+       - type=browser: 记录截图、控制台日志、网络请求
      - then 阶段：逐项断言；任一 FAIL → 该 Scenario 标记 fail
      - and 阶段：无论成功失败都执行 cleanup（失败时也必须 cleanup，避免脏数据）
 
@@ -74,13 +153,16 @@ prompt: |
     "scenario_id": "S-xxx",
     "critical": true,
     "status": "pass|fail|skip",
+    "type": "api|browser|mixed",
     "steps": [
       {{"phase": "given", "result": "ok|skip"}},
-      {{"phase": "when", "result": "ok", "request_id": "<id>", "response_status": 200}},
+      {{"phase": "when", "result": "ok", "step_type": "api", "request_id": "<id>", "response_status": 200}},
+      {{"phase": "when", "result": "ok", "step_type": "browser", "action": "navigate", "url": "/login"}},
       {{"phase": "then", "result": "fail", "assertions": [{{"name": "status_code == 200", "actual": 500, "passed": false}}]}},
       {{"phase": "and", "result": "ok", "cleanup_status": 204}}
     ],
     "request_ids": ["<id1>", "<id2>"],
+    "screenshot_paths": ["<path1>", "<path2>"],
     "timestamps": {{"start": "ISO8601", "end": "ISO8601"}},
     "cleanup_result": "ok"
   }}
@@ -102,6 +184,7 @@ prompt: |
   完成后用 `cat >` 写盘到 `2-build/{report_filename}`，含：
   - 每个 Scenario 的 PASS/FAIL/SKIP 判定
   - 结构化 JSON 证据（per Scenario block）
+  - browser 场景的截图路径列表
   - cleanup 报告
   - critical=true 失败列表（若 escalate）
 
@@ -114,3 +197,4 @@ prompt: |
   - scenario-<track>.yaml 的 `evidence` 字段只声明 scenario_id（如 `S-xxx-evidence.json`），**不**含 seq；agent 写盘时自动在前面拼 `{report_seq}-` 形成最终路径
   - **必须**加 seq 前缀，否则多次派遣（首次 execute / fix 后重跑 execute）会覆盖同 scenario 的历史 evidence
   - 最终在 result.json 的 `evidence_paths` / `outputs` 中填实际落盘的绝对路径（含 `{report_seq}-` 前缀）
+  - browser 场景的截图建议存到 `2-build/{report_seq}-{scenario_id}-screenshot.png`

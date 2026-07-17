@@ -577,12 +577,16 @@ def _format_scenario_body(section: dict, change_name: str) -> str:
             f"#### 步骤组 2：执行\n\n"
             f"- [ ] {n}.3 按 scenario_id 排序：先 critical=true，后 critical=false\n"
             f"- [ ] {n}.4 串行执行每个 Scenario 的 given → when → then → and（cleanup）\n"
-            f"- [ ] {n}.5 产出结构化 JSON 证据到 `2-build/<report_seq>-<scenario_id>-evidence.json`"
+            f"- [ ] {n}.5 按 when[].type 分派执行方式：\n"
+            f"  - type=api（默认）：使用 curl 等 HTTP 工具执行 API 请求\n"
+            f"  - type=browser：加载 `pg-browser-testing-with-devtools` SKILL，使用 Chrome DevTools MCP 工具执行浏览器交互\n"
+            f"- [ ] {n}.6 产出结构化 JSON 证据到 `2-build/<report_seq>-<scenario_id>-evidence.json`"
             f"（<report_seq> 与本 phase 主报告共享同一 seq，由 dispatch_file 注入；加 seq 前缀避免"
             f"多次 execute 派遣覆盖同 scenario 的历史 evidence）\n"
-            f"- [ ] {n}.6 critical=true FAIL → 立即停止后续 Scenario，全部标记 SKIPPED "
+            f"- [ ] {n}.7 browser 场景截图存到 `2-build/<report_seq>-<scenario_id>-screenshot.png`\n"
+            f"- [ ] {n}.8 critical=true FAIL → 立即停止后续 Scenario，全部标记 SKIPPED "
             f"→ record(scenario-execute, \"escalate\")\n"
-            f"- [ ] {n}.7 全部通过 / scenario-execute agent 写盘报告到 `2-build/<seq>-scenario-execute.md`"
+            f"- [ ] {n}.9 全部通过 / scenario-execute agent 写盘报告到 `2-build/<seq>-scenario-execute.md`"
         )
 
     if sub == "scenario-fix":

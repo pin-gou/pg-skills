@@ -85,6 +85,11 @@ def _build_skeleton_yaml(change: str, track_id: str) -> dict:
 
     v3.7: 占位符可由 check_scenario_placeholders 检测（每个字段含一个
     明显的占位符字符串，LLM 编辑后不能残留）。
+
+    v3.9: 生成两个 skeleton scenario：一个 type=api（向后兼容），
+    一个 type=browser（浏览器交互场景，使用 Chrome DevTools MCP 工具）。
+    LLM 按实际需求保留并填充：若不需要 browser 场景可删除第二个 scenario；
+    若不需要 API 场景可删除第一个并调整第二个的 type。
     """
     return {
         "scenarios": [
@@ -99,6 +104,7 @@ def _build_skeleton_yaml(change: str, track_id: str) -> dict:
                 "when": [
                     {
                         "name": "<动作名>",
+                        "type": "api",
                         "method": "GET",
                         "url": "/api/.../...",
                         "expect_status": 200,
@@ -115,6 +121,49 @@ def _build_skeleton_yaml(change: str, track_id: str) -> dict:
                     "2-build/<report_seq>-<scenario_id>-evidence.json",
                 ],
             },
+            {
+                "scenario_id": "S-<unique-name>-browser",
+                "critical": False,
+                "description": "一句话描述此 Browser Scenario 验证目标（LLM 必填）",
+                "given": [
+                    "<前置条件 1>",
+                ],
+                "when": [
+                    {
+                        "name": "导航到页面",
+                        "type": "browser",
+                        "action": "navigate",
+                        "url": "/path/to/page",
+                    },
+                    {
+                        "name": "点击按钮",
+                        "type": "browser",
+                        "action": "click",
+                        "selector": "<CSS选择器>",
+                    },
+                    {
+                        "name": "填写输入框",
+                        "type": "browser",
+                        "action": "fill",
+                        "selector": "<CSS选择器>",
+                        "value": "<输入值>",
+                    },
+                    {
+                        "name": "截图验证",
+                        "type": "browser",
+                        "action": "screenshot",
+                    },
+                ],
+                "then": [
+                    "dom: <selector> exists",
+                    "console: no errors",
+                ],
+                "and": [],
+                "evidence": [
+                    "2-build/<report_seq>-<scenario_id>-evidence.json",
+                    "2-build/<report_seq>-<scenario_id>-screenshot.png",
+                ],
+            },
         ],
         "_meta": {
             "_comment": (
@@ -122,10 +171,12 @@ def _build_skeleton_yaml(change: str, track_id: str) -> dict:
                 "LLM 必填。scenario_id / given / when / then / and / evidence "
                 "是必填段, critical / description 必填, _meta 段最终会被 pg-build "
                 "scenario-execute agent 忽略。"
+                "v3.9: when[].type 可选, 默认 api; type=browser 时需填写 browser action 字段。"
+                "若不需要 browser 场景可删除第二个 scenario。"
             ),
             "change": change,
             "track_id": track_id,
-            "schema_version": "v3.6",
+            "schema_version": "v3.9",
         },
     }
 
@@ -234,8 +285,8 @@ def check_scenario_placeholders(scenario_doc: dict) -> list[tuple[str, str]]:
                 "scenario_placeholder_unfilled",
                 f"scenarios[{idx}].description 仍含占位符或为空: {desc!r}"
             ))
-        # given/then/and/evidence: any placeholder in any item
-        for field in ("given", "and", "evidence"):
+        # given/then/evidence: any placeholder in any item
+        for field in ("given", "evidence"):
             items = sc.get(field) or []
             if not isinstance(items, list) or not items:
                 issues.append((
@@ -249,7 +300,28 @@ def check_scenario_placeholders(scenario_doc: dict) -> list[tuple[str, str]]:
                         "scenario_placeholder_unfilled",
                         f"scenarios[{idx}].{field}[{j}] 仍含占位符或为空: {item!r}"
                     ))
-        # when: list of dicts with method/url/expect_status
+        # and: cleanup is optional (e.g., browser-only 场景如登录页测试无 cleanup 需求)
+        # v3.9: 放宽 and 的强制要求——若所有 when step 都是 type=browser 则 and 可为空数组
+        whens_for_and_check = sc.get("when") or []
+        all_browser_steps = all(
+            isinstance(w, dict) and w.get("type", "api") == "browser"
+            for w in whens_for_and_check
+        ) if whens_for_and_check else False
+        and_items = sc.get("and") or []
+        if not isinstance(and_items, list):
+            issues.append((
+                "scenario_placeholder_unfilled",
+                f"scenarios[{idx}].and 必须是数组"
+            ))
+        elif and_items and not all_browser_steps:
+            # API scenarios or mixed: 检查每个 cleanup 项的占位符
+            for j, item in enumerate(and_items):
+                if _is_placeholder_string(str(item)) or not str(item).strip():
+                    issues.append((
+                        "scenario_placeholder_unfilled",
+                        f"scenarios[{idx}].and[{j}] 仍含占位符或为空: {item!r}"
+                    ))
+        # when: list of dicts with method/url/expect_status (type=api) or action/selector/value (type=browser)
         whens = sc.get("when") or []
         if not isinstance(whens, list) or not whens:
             issues.append((
@@ -260,12 +332,53 @@ def check_scenario_placeholders(scenario_doc: dict) -> list[tuple[str, str]]:
             for j, w in enumerate(whens):
                 if not isinstance(w, dict):
                     continue
-                url = w.get("url", "")
-                if _is_placeholder_string(url) or not url:
-                    issues.append((
-                        "scenario_placeholder_unfilled",
-                        f"scenarios[{idx}].when[{j}].url 仍含占位符或为空: {url!r}"
-                    ))
+                step_type = w.get("type", "api")
+                if step_type == "browser":
+                    # browser step: check action/selector/value placeholders
+                    action = w.get("action", "")
+                    if _is_placeholder_string(action) or not action:
+                        issues.append((
+                            "scenario_placeholder_unfilled",
+                            f"scenarios[{idx}].when[{j}].action 仍含占位符或为空: {action!r}"
+                        ))
+                    selector = w.get("selector", "")
+                    if selector and _is_placeholder_string(selector):
+                        issues.append((
+                            "scenario_placeholder_unfilled",
+                            f"scenarios[{idx}].when[{j}].selector 仍含占位符: {selector!r}"
+                        ))
+                    value = w.get("value", "")
+                    if value and _is_placeholder_string(value):
+                        issues.append((
+                            "scenario_placeholder_unfilled",
+                            f"scenarios[{idx}].when[{j}].value 仍含占位符: {value!r}"
+                        ))
+                    key = w.get("key", "")
+                    if key and _is_placeholder_string(key):
+                        issues.append((
+                            "scenario_placeholder_unfilled",
+                            f"scenarios[{idx}].when[{j}].key 仍含占位符: {key!r}"
+                        ))
+                    expression = w.get("expression", "")
+                    if expression and _is_placeholder_string(expression):
+                        issues.append((
+                            "scenario_placeholder_unfilled",
+                            f"scenarios[{idx}].when[{j}].expression 仍含占位符: {expression!r}"
+                        ))
+                    condition = w.get("condition", "")
+                    if condition and _is_placeholder_string(condition):
+                        issues.append((
+                            "scenario_placeholder_unfilled",
+                            f"scenarios[{idx}].when[{j}].condition 仍含占位符: {condition!r}"
+                        ))
+                else:
+                    # api step: check url placeholder
+                    url = w.get("url", "")
+                    if _is_placeholder_string(url) or not url:
+                        issues.append((
+                            "scenario_placeholder_unfilled",
+                            f"scenarios[{idx}].when[{j}].url 仍含占位符或为空: {url!r}"
+                        ))
         # then: list of strings
         thens = sc.get("then") or []
         if not isinstance(thens, list) or not thens:
