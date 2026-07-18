@@ -19,6 +19,8 @@ v3.7: 新增 `check_scenario_placeholders()` / `check_scenario_file()` 工具函
 供 `pg-validate-proposal.py` 调用以校验 LLM 是否已替换所有占位符。
 """
 
+from __future__ import annotations
+
 import json
 import os
 import sys

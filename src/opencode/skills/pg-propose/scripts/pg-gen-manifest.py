@@ -11,6 +11,8 @@ to use as prompt source for each sub-phase.
 This is a pure-function CLI: zero side effects beyond writing the manifest file.
 """
 
+from __future__ import annotations
+
 import os
 import re
 import sys

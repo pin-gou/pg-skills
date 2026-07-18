@@ -34,6 +34,8 @@ Usage:
 Exit code: 0 on success, 1 on usage/config errors.
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import os

@@ -10,6 +10,8 @@
 - 质量门强制：至少 verify 或 gate 之一存在（review 单独不算）
 """
 
+from __future__ import annotations
+
 import json
 import os
 import shutil

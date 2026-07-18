@@ -1,5 +1,7 @@
 """Test _collect_missing_gate_assessments (v2.7: trust snapshot.report_path)."""
 
+from __future__ import annotations
+
 import os
 import tempfile
 import unittest

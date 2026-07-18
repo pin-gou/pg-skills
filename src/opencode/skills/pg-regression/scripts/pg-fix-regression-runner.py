@@ -12,6 +12,8 @@ pg-fix-regression-runner.py — OS 层串行循环，修复生产代码 regressi
 - Git 操作 (branch/push) 由 runner 直接执行，LLM 不参与调度
 """
 
+from __future__ import annotations
+
 import argparse
 import hashlib
 import json
@@ -113,7 +115,7 @@ def _detect_owner_repo():
         if cleaned.startswith(prefix):
             cleaned = cleaned[len(prefix):]
             break
-    cleaned = cleaned.removesuffix(".git")
+    cleaned = cleaned[:-4] if cleaned.endswith(".git") else cleaned
     return cleaned
 
 
