@@ -435,6 +435,225 @@ def _validate_environment(manifest, config):
     return issues
 
 
+# ============================================================
+# v3.x: design-api 子命令 — 校验 design.md 的 API 端点是否含完整 Request/Response Body
+# ============================================================
+
+import re as _re
+
+
+def _extract_api_endpoints(design_text):
+    """从 design.md 提取 `## API 设计` 章节下的所有 endpoint 标题（含子段 body）。
+
+    主端点的特征：标题以 HTTP method 开头（如 "### POST /api/..."），
+    或标题不含 " - Request/Response Body" 后缀。
+
+    返回 [(level, title, body), ...]：
+    - level: 标题级别（3 = ###）
+    - title: 端点标题（如 "POST /api/...")
+    - body: 该端点下到下个主端点为止的所有内容（含子段）
+    """
+    api_section_match = _re.search(
+        r"^## API 设计\s*\n(.*?)(?=^## |\Z)",
+        design_text, _re.MULTILINE | _re.DOTALL,
+    )
+    if not api_section_match:
+        return []
+
+    api_section = api_section_match.group(1)
+    h3_pattern = _re.compile(r"^(### .+)$", _re.MULTILINE)
+    matches = list(h3_pattern.finditer(api_section))
+
+    # 第一遍：识别哪些是子段标题
+    subsegment_indices = set()
+    for i, m in enumerate(matches):
+        title = m.group(1).lstrip("# ").strip()
+        if _is_subsegment_title(title):
+            subsegment_indices.add(i)
+
+    # 第二遍：主端点 = 非子段索引；body 范围到下个主端点
+    endpoints = []
+    main_indices = [i for i in range(len(matches)) if i not in subsegment_indices]
+    for k, i in enumerate(main_indices):
+        m = matches[i]
+        title = m.group(1).lstrip("# ").strip()
+        start = m.end()
+        if k + 1 < len(main_indices):
+            end = matches[main_indices[k + 1]].start()
+        else:
+            end = len(api_section)
+        body = api_section[start:end]
+        endpoints.append((3, title, body))
+
+    return endpoints
+
+
+def _is_subsegment_title(title):
+    """检查标题是否是 endpoint 的子段（如 "### POST /api/foo - Request Body"）。
+
+    子段以 " - Request Body"、" - Response Body"、" - Response Body (200)" 等后缀结尾，
+    应跳过独立校验（这些段由对应父端点的子检查项覆盖）。
+    """
+    subsegment_suffixes = (
+        " - Request Body",
+        " - Response Body",
+        " - Response",
+        " - Request",
+    )
+    if any(title.endswith(s) for s in subsegment_suffixes):
+        return True
+    # 也匹配 "- Response Body (200)"、"- Response Body (4xx)" 这类带括号后缀
+    if _re.search(r"-\s+(Request|Response)(\s+Body)?\s*\(.*\)$", title):
+        return True
+    return False
+
+
+def _endpoint_mentions_http(title, body):
+    """检查 endpoint 标题或 body 是否标识 HTTP 端点。
+
+    接受三种格式：
+      1. 标题本身含 HTTP method：`### POST /api/foo/bar`（推荐格式）
+      2. body 内含 `**METHOD /path**` 内联 code：
+         ```
+         ### 创建 Project
+         **POST /api/project.../v3/tenants/{tenantId}/projects**
+         ```
+      3. body 内含 `` `METHOD /path` `` 反引号 code：
+         ```
+         ### 创建 Project
+         **`POST /api/...`**
+         ```
+    """
+    http_methods = ("GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS")
+    # 1. 标题含 method
+    for m in http_methods:
+        if _re.search(rf"\b{m}\b\s+/", title):
+            return True
+    # 2. body 含 **METHOD /path**（粗体）
+    for m in http_methods:
+        if _re.search(rf"\*\*{m}\s+/", body):
+            return True
+    # 3. body 含 `METHOD /path`（反引号 inline code）
+    for m in http_methods:
+        if _re.search(rf"`{m}\s+/", body):
+            return True
+    return False
+
+
+def _body_has_section(body, section_keyword):
+    """检查 endpoint body 是否含指定段落（如 'Request Body', 'Response Body'）。
+
+    接受以下格式：
+      ### POST /api/foo - Request Body
+      **Request Body**: ...
+      Request Body: ...
+    """
+    patterns = [
+        rf"###\s+.*-\s+{section_keyword}",
+        rf"\*\*{section_keyword}\*\*\s*[:：]",
+        rf"^{section_keyword}\s*[:：]",
+    ]
+    return any(_re.search(p, body, _re.MULTILINE | _re.IGNORECASE) for p in patterns)
+
+
+def _body_has_json_example(body):
+    """检查 endpoint body 是否含至少一个 JSON 代码块。"""
+    return bool(_re.search(r"```(?:json)?\s*\n", body))
+
+
+def _resolve_change_root(change):
+    """解析 change 根目录路径，fallback 到 archive 子目录。
+
+    优先：`<CHANGES_DIR>/<change>`
+    fallback：`<CHANGES_DIR>/archive/*-<change>` （取最新一个，按字典序）
+    """
+    direct = os.path.join(CHANGES_DIR, change)
+    if os.path.isfile(os.path.join(direct, "design.md")):
+        return direct
+
+    # fallback: archive 下 glob 匹配（archive 内目录格式 `<date>-<change>`）
+    import glob as _glob
+    candidates = _glob.glob(os.path.join(CHANGES_DIR, "archive", f"*-{change}"))
+    if candidates:
+        # 取最新的（按目录名字典序）
+        candidates.sort(reverse=True)
+        if os.path.isfile(os.path.join(candidates[0], "design.md")):
+            return candidates[0]
+
+    return direct  # 仍返回 direct 让上层 ERROR 信息一致
+
+
+def cmd_design_api(change):
+    """Validate design.md API endpoint coverage (Request + Response Body).
+
+    v3.x 新增：每个 API 端点必须含完整 Request Body 与 Response Body JSON 示例。
+    缺 Response Body → exit 1（on-conditions 阶段会要求 refine）。
+    """
+    change_root = _resolve_change_root(change)
+    design_path = os.path.join(change_root, "design.md")
+
+    if not os.path.isfile(design_path):
+        print(f"ERROR: design.md 不存在: {design_path}", file=sys.stderr)
+        sys.exit(1)
+
+    with open(design_path, encoding="utf-8") as f:
+        design_text = f.read()
+
+    endpoints = _extract_api_endpoints(design_text)
+
+    if not endpoints:
+        # 无 API 设计章节（可能纯前端 / 纯内部重构）→ 跳过
+        print("OK: design.md 无 API 设计章节，跳过 API Contract 校验")
+        sys.exit(0)
+
+    issues = []
+    endpoint_count = 0
+    for level, title, body in endpoints:
+        # 跳过 endpoint 的子段标题（"- Request Body" / "- Response Body"）
+        if _is_subsegment_title(title):
+            continue
+        if not _endpoint_mentions_http(title, body):
+            # 非 HTTP 端点（如 "### 数据模型" 标题在 API 设计章节下）→ 跳过
+            continue
+
+        endpoint_count += 1
+
+        # 1. 必填 Request Body
+        if not _body_has_section(body, "Request Body"):
+            issues.append(
+                f"endpoint '{title}' 缺 Request Body 段（必填）"
+            )
+
+        # 2. 必填 Response Body
+        if not _body_has_section(body, "Response Body"):
+            issues.append(
+                f"endpoint '{title}' 缺 Response Body 段（必填）"
+            )
+
+        # 3. 必填 JSON 示例（Request 或 Response 至少一处）
+        if not _body_has_json_example(body):
+            issues.append(
+                f"endpoint '{title}' 缺 JSON 代码块（请求/响应示例）"
+            )
+
+    print(f"\n设计 API 覆盖率校验:")
+    print(f"  HTTP 端点总数: {endpoint_count}")
+    print(f"  问题数: {len(issues)}")
+
+    if issues:
+        print(f"\nFAILED: {len(issues)} issue(s) found:", file=sys.stderr)
+        for i, msg in enumerate(issues, 1):
+            print(f"  {i}. {msg}", file=sys.stderr)
+        print(
+            "\n修复指引: 参考 `.pg/skills/src/opencode/skills/pg-propose/references/design-templates.md` "
+            "的 `## API 设计` 章节模板。",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+
+    print("OK: all endpoints have Request/Response Body coverage")
+
+
 def cmd_manifest(change):
     """Validate execution-manifest.yaml consistency."""
     manifest_path = os.path.join(CHANGES_DIR, change, "execution-manifest.yaml")
@@ -520,7 +739,10 @@ def cmd_manifest(change):
 
 def main():
     if len(sys.argv) < 3:
-        print("Usage: python3 pg-validate-proposal.py manifest <change>", file=sys.stderr)
+        print(
+            "Usage: python3 pg-validate-proposal.py {manifest|design-api} <change>",
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     subcmd = sys.argv[1]
@@ -528,9 +750,11 @@ def main():
 
     if subcmd == "manifest":
         cmd_manifest(change)
+    elif subcmd == "design-api":
+        cmd_design_api(change)
     else:
         print(f"未知子命令: {subcmd}", file=sys.stderr)
-        print("支持: manifest", file=sys.stderr)
+        print("支持: manifest, design-api", file=sys.stderr)
         sys.exit(1)
 
 

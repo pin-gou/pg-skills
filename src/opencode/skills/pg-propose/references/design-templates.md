@@ -14,7 +14,42 @@
 {涉及的后端模块、前端组件、数据流}
 
 ## API 设计（如有）
-{接口路径、请求/响应格式、状态码}
+
+> **强制要求**：每个 API 端点**必须**包含完整 Request Body 与 Response Body JSON 示例。
+> 缺 Response Body 会在 on-conditions 阶段被 `pg-validate-proposal.py design-api` 阻断。
+
+每个端点按以下模板撰写：
+
+```markdown
+### {HTTP Method} {URL 路径}
+
+### {HTTP Method} {URL 路径} - Request Body
+\`\`\`json
+{完整请求体示例}
+\`\`\`
+
+### {HTTP Method} {URL 路径} - Response Body (200/201)
+\`\`\`json
+{完整成功响应体示例，含所有字段}
+\`\`\`
+
+### {HTTP Method} {URL 路径} - Response Body (4xx 失败)
+\`\`\`json
+{完整失败响应体示例，含 code/message/data 结构}
+\`\`\`
+
+| 状态码 | 触发条件 | 错误码 |
+|--------|----------|--------|
+| 200/201 | {成功条件} | 0 |
+| 4xx | {失败条件} | {业务错误码} |
+```
+
+**禁止**：
+- 仅写状态码表而不附 Response Body JSON
+- 用 `{...}` 占位符代替实际字段
+- 仅描述"成功时返回对象 X"而无 JSON 示例
+
+**设计 rationale**：scenario 阶段会读取 design.md 的 Response Body 作为断言参考；缺 Response Body 会导致 scenario 阶段才发现 contract 缺口，浪费 build 周期。
 
 ## 数据模型（如有）
 {新增或修改的数据库表、字段}
