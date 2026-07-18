@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <rect width="800" height="1066" fill="#f8fafc"/>
+  <text x="60" y="100" font-size="20" font-weight="700" fill="#7c3aed" letter-spacing="2">支柱二</text>
+  <text x="60" y="170" font-size="44" font-weight="800" fill="#0f172a">Hook 协议层</text>
+  <text x="60" y="220" font-size="28" font-weight="600" fill="#475569">一行命令，启停任何后台服务</text>
+
+  <g transform="translate(40 290)">
+    <rect width="720" height="220" rx="16" fill="#1e293b"/>
+    <text x="30" y="42" font-size="14" fill="#64748b" font-family="ui-monospace, monospace">$ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \</text>
+    <text x="30" y="78" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">    --caller pg-agent \</text>
+    <text x="30" y="114" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">    --session 2026-07-18-fix-bug-42 \</text>
+    <text x="30" y="150" font-size="14" fill="#fbbf24" font-family="ui-monospace, monospace">    --env dev-local --role backend \</text>
+    <text x="30" y="186" font-size="14" fill="#fbbf24" font-family="ui-monospace, monospace">    --action start --instance backend-1</text>
+  </g>
+
+  <text x="60" y="565" font-size="20" font-weight="700" fill="#0f172a">同一行命令，换 --env 就换环境：</text>
+
+  <g transform="translate(60 595)">
+    <circle cx="20" cy="20" r="20" fill="#7c3aed"/>
+    <text x="20" y="28" text-anchor="middle" font-size="22" font-weight="700" fill="#fff">1</text>
+    <text x="60" y="20" font-size="20" font-weight="600" fill="#0f172a">--env dev-local：本地，detached setsid + health check</text>
+    <text x="60" y="48" font-size="16" fill="#64748b">pg_start_bg · 写 PID · 端口轮询</text>
+  </g>
+  <g transform="translate(60 665)">
+    <circle cx="20" cy="20" r="20" fill="#7c3aed"/>
+    <text x="20" y="28" text-anchor="middle" font-size="22" font-weight="700" fill="#fff">2</text>
+    <text x="60" y="20" font-size="20" font-weight="600" fill="#0f172a">--env staging：同命令，远端 SSH hook 自动转发</text>
+    <text x="60" y="48" font-size="16" fill="#64748b">同 spec 不同 transport，agent 无感</text>
+  </g>
+  <g transform="translate(60 735)">
+    <circle cx="20" cy="20" r="20" fill="#7c3aed"/>
+    <text x="20" y="28" text-anchor="middle" font-size="22" font-weight="700" fill="#fff">3</text>
+    <text x="60" y="20" font-size="20" font-weight="600" fill="#0f172a">--env prod：systemctl / k8s 走专用 hook</text>
+    <text x="60" y="48" font-size="16" fill="#64748b">不套 pg_start_bg，走 systemd / cgroup</text>
+  </g>
+  <g transform="translate(60 805)">
+    <circle cx="20" cy="20" r="20" fill="#7c3aed"/>
+    <text x="20" y="28" text-anchor="middle" font-size="22" font-weight="700" fill="#fff">4</text>
+    <text x="60" y="20" font-size="20" font-weight="600" fill="#0f172a">按 SSOT 注入 12 个 PG_* env vars</text>
+    <text x="60" y="48" font-size="16" fill="#64748b">PG_SESSION · PG_ENV · PG_ROLE · PG_INSTANCE …</text>
+  </g>
+  <g transform="translate(60 875)">
+    <circle cx="20" cy="20" r="20" fill="#7c3aed"/>
+    <text x="20" y="28" text-anchor="middle" font-size="22" font-weight="700" fill="#fff">5</text>
+    <text x="60" y="20" font-size="20" font-weight="600" fill="#0f172a">日志按 env / role / session 分目录</text>
+    <text x="60" y="48" font-size="16" fill="#64748b">跨环境排障一眼定位</text>
+  </g>
+
+  <text x="40" y="1040" font-size="16" fill="#94a3b8">06 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#94a3b8">同协议 · 跨环境 · agent 零感知</text>
+</svg>

@@ -1,0 +1,44 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <rect width="800" height="1066" fill="#0f172a"/>
+  <text x="60" y="100" font-size="20" font-weight="700" fill="#fbbf24" letter-spacing="2">5 步接入</text>
+  <text x="60" y="170" font-size="44" font-weight="800" fill="#f8fafc">5 条命令</text>
+  <text x="60" y="220" font-size="44" font-weight="800" fill="#fbbf24">5 分钟</text>
+  <text x="60" y="270" font-size="22" fill="#94a3b8">把 pg-skills 接入你的项目</text>
+
+  <g transform="translate(60 320)">
+    <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#60a5fa"/>
+    <text x="30" y="40" font-size="16" font-weight="700" fill="#60a5fa">STEP 1 · 同步</text>
+    <text x="30" y="75" font-size="16" fill="#f8fafc" font-family="ui-monospace, monospace">git subtree add --prefix=.pg/skills pg-skills master</text>
+  </g>
+
+  <g transform="translate(60 440)">
+    <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#a78bfa"/>
+    <text x="30" y="40" font-size="16" font-weight="700" fill="#a78bfa">STEP 2 · 初始化</text>
+    <text x="30" y="75" font-size="16" fill="#f8fafc" font-family="ui-monospace, monospace">python3 .pg/skills/src/runtime/bin/pg init</text>
+  </g>
+
+  <g transform="translate(60 560)">
+    <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#fbbf24"/>
+    <text x="30" y="40" font-size="16" font-weight="700" fill="#fbbf24">STEP 3 · 重启 opencode</text>
+    <text x="30" y="75" font-size="16" fill="#f8fafc">加载 8 个 slash command + 11 个 SKILL</text>
+  </g>
+
+  <g transform="translate(60 680)">
+    <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#10b981"/>
+    <text x="30" y="40" font-size="16" font-weight="700" fill="#10b981">STEP 4 · 扫描</text>
+    <text x="30" y="75" font-size="16" fill="#f8fafc">提示词：加载并执行 pg-init-project skill</text>
+  </g>
+
+  <g transform="translate(60 800)">
+    <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#ef4444"/>
+    <text x="30" y="40" font-size="16" font-weight="700" fill="#ef4444">STEP 5 · 校验</text>
+    <text x="30" y="75" font-size="16" fill="#f8fafc" font-family="ui-monospace, monospace">python3 .pg/skills/src/runtime/bin/pg doctor</text>
+  </g>
+
+  <text x="60" y="960" font-size="18" fill="#94a3b8">之后的工作流：</text>
+  <text x="60" y="995" text-anchor="start" font-size="22" font-weight="700" fill="#fbbf24">/1-define → /2-propose → /3-build → verify-and-merge</text>
+
+  <text x="40" y="1040" font-size="16" fill="#64748b">07 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#64748b">语言无关 · 项目无关 · 跨环境复用</text>
+</svg>

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <rect width="800" height="1066" fill="#0f172a"/>
+  <text x="60" y="100" font-size="20" font-weight="700" fill="#10b981" letter-spacing="2">杀手锏</text>
+  <text x="60" y="170" font-size="44" font-weight="800" fill="#f8fafc">为什么 SSOT + Hook</text>
+  <text x="60" y="220" font-size="44" font-weight="800" fill="#10b981">天然适合分布式 + 多环境？</text>
+
+  <text x="60" y="290" font-size="18" fill="#94a3b8">没有 project.yaml，AI 只能猜；</text>
+  <text x="60" y="318" font-size="18" fill="#94a3b8">猜错一次，整个 dev / staging / prod 就乱了。</text>
+
+  <g transform="translate(60 380)">
+    <rect width="680" height="500" rx="20" fill="#1e293b" stroke="#10b981" stroke-width="2"/>
+    <text x="340" y="50" text-anchor="middle" font-size="20" font-weight="700" fill="#10b981">project.yaml · env × role × instance 矩阵</text>
+    <line x1="80" y1="70" x2="600" y2="70" stroke="#334155"/>
+
+    <text x="80" y="110" font-size="14" fill="#64748b" font-family="ui-monospace, monospace">environments:</text>
+    <text x="100" y="135" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">dev-local:</text>
+    <text x="120" y="160" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">roles.backend.instances.backend-1</text>
+    <text x="120" y="185" font-size="14" fill="#fbbf24" font-family="ui-monospace, monospace">→ local setsid + health check</text>
+
+    <text x="100" y="225" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">staging:</text>
+    <text x="120" y="250" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">roles.backend.instances.backend-1</text>
+    <text x="120" y="275" font-size="14" fill="#fbbf24" font-family="ui-monospace, monospace">→ SSH remote hook</text>
+
+    <text x="100" y="315" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">prod:</text>
+    <text x="120" y="340" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">roles.backend.instances.backend-1</text>
+    <text x="120" y="365" font-size="14" fill="#fbbf24" font-family="ui-monospace, monospace">→ systemd / k8s · 不走 pg_start_bg</text>
+
+    <line x1="80" y1="395" x2="600" y2="395" stroke="#334155"/>
+    <text x="340" y="430" text-anchor="middle" font-size="16" fill="#cbd5e1">同一条 agent 命令 · 同一个 skill</text>
+    <text x="340" y="460" text-anchor="middle" font-size="16" fill="#10b981" font-weight="700">按 --env 自动路由到不同 transport</text>
+  </g>
+
+  <g transform="translate(60 910)">
+    <text x="0" y="0" font-size="20" font-weight="700" fill="#fbbf24">效果</text>
+    <text x="60" y="0" font-size="18" fill="#f8fafc">新成员 / 新环境 / 新集群接入成本</text>
+    <text x="460" y="0" font-size="22" font-weight="800" fill="#10b981">→ 接近 0</text>
+    <text x="0" y="40" font-size="16" fill="#94a3b8">AI Coding 不再因环境差异产生幻觉</text>
+  </g>
+
+  <text x="40" y="1040" font-size="16" fill="#64748b">09 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#64748b">一次定义 · 全环境复用 · 分布式天然适配</text>
+</svg>

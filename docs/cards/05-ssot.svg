@@ -1,0 +1,55 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <rect width="800" height="1066" fill="#0f172a"/>
+  <text x="60" y="100" font-size="20" font-weight="700" fill="#60a5fa" letter-spacing="2">支柱一</text>
+  <text x="60" y="170" font-size="44" font-weight="800" fill="#f8fafc">SSOT</text>
+  <text x="60" y="220" font-size="28" font-weight="600" fill="#cbd5e1">日常只改一个文件就够了</text>
+
+  <g transform="translate(40 290)">
+    <rect width="720" height="320" rx="16" fill="#1e293b" stroke="#60a5fa" stroke-width="2"/>
+    <text x="30" y="40" font-size="16" font-weight="700" fill="#60a5fa">.pg/project.yaml</text>
+    <line x1="30" y1="55" x2="690" y2="55" stroke="#334155"/>
+
+    <text x="30" y="90" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">project:</text>
+    <text x="50" y="115" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">  name: my-app</text>
+    <text x="50" y="140" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">  language: go</text>
+
+    <text x="30" y="180" font-size="14" fill="#fbbf24" font-family="ui-monospace, monospace">environments:</text>
+    <text x="50" y="205" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">  dev-local.backend.instances.backend-1</text>
+    <text x="50" y="230" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">  staging.backend.instances.backend-1</text>
+
+    <text x="30" y="270" font-size="14" fill="#fbbf24" font-family="ui-monospace, monospace">modules:</text>
+    <text x="50" y="295" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">  backend.{build, lint, test}</text>
+  </g>
+
+  <g transform="translate(60 650)">
+    <text x="0" y="0" font-size="22" font-weight="700" fill="#fbbf24">日常会改的就三样：</text>
+  </g>
+
+  <g transform="translate(60 690)">
+    <circle cx="20" cy="20" r="20" fill="#60a5fa"/>
+    <text x="20" y="28" text-anchor="middle" font-size="22" font-weight="700" fill="#fff">1</text>
+    <text x="60" y="20" font-size="20" font-weight="600" fill="#f8fafc">加一个环境 / 改 transport</text>
+    <text x="60" y="48" font-size="16" fill="#94a3b8">environments · env · roles · r · instances · i</text>
+  </g>
+  <g transform="translate(60 770)">
+    <circle cx="20" cy="20" r="20" fill="#60a5fa"/>
+    <text x="20" y="28" text-anchor="middle" font-size="22" font-weight="700" fill="#fff">2</text>
+    <text x="60" y="20" font-size="20" font-weight="600" fill="#f8fafc">改 build / lint / test 命令</text>
+    <text x="60" y="48" font-size="16" fill="#94a3b8">modules · m · build / lint / test</text>
+  </g>
+  <g transform="translate(60 850)">
+    <circle cx="20" cy="20" r="20" fill="#60a5fa"/>
+    <text x="20" y="28" text-anchor="middle" font-size="22" font-weight="700" fill="#fff">3</text>
+    <text x="60" y="20" font-size="20" font-weight="600" fill="#f8fafc">改项目元信息（name / language）</text>
+    <text x="60" y="48" font-size="16" fill="#94a3b8">project · name · language</text>
+  </g>
+
+  <g transform="translate(60 940)">
+    <rect width="680" height="60" rx="12" fill="#1e3a5f" stroke="#334155"/>
+    <text x="340" y="38" text-anchor="middle" font-size="16" fill="#cbd5e1">改完重启 agent · 其他都不需要动</text>
+  </g>
+
+  <text x="40" y="1040" font-size="16" fill="#64748b">05 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#64748b">日常只动一个文件 · 其余自动跟着走</text>
+</svg>

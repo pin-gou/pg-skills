@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <defs>
+    <linearGradient id="bg8" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#1e3a5f"/>
+      <stop offset="1" stop-color="#0f172a"/>
+    </linearGradient>
+  </defs>
+  <rect width="800" height="1066" fill="url(#bg8)"/>
+
+  <g transform="translate(400 220)">
+    <text x="0" y="0" text-anchor="middle" font-size="22" letter-spacing="8" fill="#94a3b8">PIN GOU</text>
+    <text x="0" y="80" text-anchor="middle" font-size="80" font-weight="800" fill="#f8fafc">品构</text>
+  </g>
+
+  <g transform="translate(400 380)">
+    <rect x="-200" y="-30" width="400" height="60" rx="30" fill="#2563eb"/>
+    <text x="0" y="10" text-anchor="middle" font-size="28" font-weight="700" fill="#fff">让 AI 写出可托付的代码</text>
+  </g>
+
+  <g transform="translate(400 510)">
+    <text x="0" y="0" text-anchor="middle" font-size="20" fill="#fbbf24">仓库</text>
+    <text x="0" y="40" text-anchor="middle" font-size="24" font-weight="700" fill="#f8fafc">github.com/pin-gou/pg-skills</text>
+    <text x="0" y="80" text-anchor="middle" font-size="18" fill="#94a3b8">当前版本 v0.8.2</text>
+  </g>
+
+  <g transform="translate(400 700)">
+    <rect x="-280" y="-50" width="560" height="120" rx="16" fill="#1e293b" stroke="#60a5fa" stroke-width="2"/>
+    <text x="0" y="-10" text-anchor="middle" font-size="18" fill="#60a5fa">一句话接入</text>
+    <text x="0" y="22" text-anchor="middle" font-size="20" font-weight="600" fill="#f8fafc">git subtree add</text>
+    <text x="0" y="52" text-anchor="middle" font-size="20" font-weight="600" fill="#f8fafc">→ pg init</text>
+  </g>
+
+  <g transform="translate(400 870)">
+    <text x="0" y="0" text-anchor="middle" font-size="18" fill="#cbd5e1">欢迎来聊 · 欢迎挑刺 · 更欢迎贡献</text>
+    <text x="0" y="40" text-anchor="middle" font-size="14" fill="#64748b" letter-spacing="2">© 品构 pg-skills</text>
+  </g>
+
+  <text x="40" y="1040" font-size="16" fill="#64748b">12 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#64748b">自包含 · 端到端 · 一套走完</text>
+</svg>

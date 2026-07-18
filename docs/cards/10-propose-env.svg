@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <rect width="800" height="1066" fill="#f8fafc"/>
+  <text x="60" y="100" font-size="20" font-weight="700" fill="#2563eb" letter-spacing="2">第一步</text>
+  <text x="60" y="170" font-size="44" font-weight="800" fill="#0f172a">pg-propose</text>
+  <text x="60" y="220" font-size="32" font-weight="700" fill="#2563eb">为每个 stage 选环境</text>
+  <text x="60" y="265" font-size="18" fill="#475569">不同任务走不同环境，LLM 按 selection_rules 选，写入 manifest</text>
+
+  <g transform="translate(40 310)">
+    <rect width="720" height="280" rx="16" fill="#1e293b"/>
+    <text x="30" y="40" font-size="14" fill="#64748b" font-family="ui-monospace, monospace">$ /2-pg-propose \</text>
+    <text x="30" y="76" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">    --environment "test→dev-local, \</text>
+    <text x="30" y="112" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">                    build→dev-local, \</text>
+    <text x="30" y="148" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">                    verify→staging, \</text>
+    <text x="30" y="184" font-size="14" fill="#fbbf24" font-family="ui-monospace, monospace">                    gate→prod"</text>
+    <line x1="30" y1="220" x2="690" y2="220" stroke="#334155"/>
+    <text x="30" y="250" font-size="14" fill="#10b981" font-family="ui-monospace, monospace">→ execution-manifest.yaml (SSOT)</text>
+  </g>
+
+  <text x="60" y="640" font-size="20" font-weight="700" fill="#0f172a">selection_rules 决定怎么选：</text>
+
+  <g transform="translate(60 670)">
+    <rect width="680" height="100" rx="16" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+    <text x="30" y="40" font-size="18" font-weight="600" fill="#0f172a">按 stage 类型（test / build / verify / gate）</text>
+    <text x="30" y="70" font-size="14" fill="#64748b" font-family="ui-monospace, monospace">test→dev-local, gate→prod · 项目级默认</text>
+  </g>
+
+  <g transform="translate(60 790)">
+    <rect width="680" height="100" rx="16" fill="#fff" stroke="#7c3aed" stroke-width="2"/>
+    <text x="30" y="40" font-size="18" font-weight="600" fill="#0f172a">按 on_conditions 动态推断</text>
+    <text x="30" y="70" font-size="14" fill="#64748b" font-family="ui-monospace, monospace">涉及 schema 改动 → verify 自动升 staging</text>
+  </g>
+
+  <g transform="translate(60 910)">
+    <rect width="680" height="100" rx="16" fill="#fff" stroke="#10b981" stroke-width="2"/>
+    <text x="30" y="40" font-size="18" font-weight="600" fill="#0f172a">校验：环境名必须出现在 project.yaml</text>
+    <text x="30" y="70" font-size="14" fill="#64748b" font-family="ui-monospace, monospace">manifest_environment_invalid → 阻塞 · 阻止下游漂移</text>
+  </g>
+
+  <text x="40" y="1040" font-size="16" fill="#94a3b8">10 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#94a3b8">环境选择 · 写进 manifest · SSOT</text>
+</svg>

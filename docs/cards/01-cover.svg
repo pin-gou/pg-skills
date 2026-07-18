@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', 'Segoe UI', sans-serif">
+  <defs>
+    <linearGradient id="bg1" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0f172a"/>
+      <stop offset="1" stop-color="#1e3a5f"/>
+    </linearGradient>
+    <radialGradient id="halo" cx="50%" cy="35%" r="50%">
+      <stop offset="0" stop-color="#60a5fa" stop-opacity="0.45"/>
+      <stop offset="1" stop-color="#60a5fa" stop-opacity="0"/>
+    </radialGradient>
+  </defs>
+  <rect width="800" height="1066" fill="url(#bg1)"/>
+  <rect width="800" height="1066" fill="url(#halo)"/>
+  <g opacity="0.18" stroke="#60a5fa" stroke-width="1" fill="none">
+    <circle cx="400" cy="400" r="220"/>
+    <circle cx="400" cy="400" r="160"/>
+    <circle cx="400" cy="400" r="100"/>
+    <line x1="180" y1="400" x2="620" y2="400"/>
+    <line x1="400" y1="180" x2="400" y2="620"/>
+  </g>
+  <g fill="#f8fafc">
+    <text x="400" y="280" text-anchor="middle" font-size="22" letter-spacing="8" fill="#94a3b8">PIN GOU</text>
+    <text x="400" y="440" text-anchor="middle" font-size="120" font-weight="800" letter-spacing="12">品构</text>
+    <text x="400" y="500" text-anchor="middle" font-size="32" fill="#cbd5e1" letter-spacing="6">品 质 × 构 造</text>
+  </g>
+  <rect x="120" y="600" width="560" height="2" fill="#60a5fa" opacity="0.6"/>
+  <g fill="#e2e8f0">
+    <text x="400" y="680" text-anchor="middle" font-size="44" font-weight="700">让 AI 写出</text>
+    <text x="400" y="740" text-anchor="middle" font-size="44" font-weight="700" fill="#fbbf24">可托付的代码</text>
+  </g>
+  <text x="400" y="820" text-anchor="middle" font-size="20" fill="#94a3b8">pg-skills · v0.8.2 · AI 编码治理能力层</text>
+  <g transform="translate(400 950)">
+    <rect x="-90" y="-26" width="180" height="52" rx="26" fill="#2563eb"/>
+    <text x="0" y="6" text-anchor="middle" font-size="20" font-weight="600" fill="#fff">滑动看完整介绍 →</text>
+  </g>
+  <text x="40" y="1040" font-size="16" fill="#64748b">01 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#64748b">github.com/pin-gou/pg-skills</text>
+</svg>

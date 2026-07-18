@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <rect width="800" height="1066" fill="#f8fafc"/>
+  <text x="60" y="100" font-size="20" font-weight="700" fill="#2563eb" letter-spacing="2">三大支柱</text>
+  <text x="60" y="170" font-size="44" font-weight="800" fill="#0f172a">pg-skills 不写 prompt，</text>
+  <text x="60" y="225" font-size="44" font-weight="800" fill="#0f172a">只管模型之外</text>
+  <text x="60" y="280" font-size="44" font-weight="800" fill="#2563eb">的那一层治理。</text>
+
+  <g transform="translate(60 300)">
+    <rect width="680" height="160" rx="20" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+    <rect x="0" y="0" width="6" height="160" rx="3" fill="#2563eb"/>
+    <text x="30" y="45" font-size="18" font-weight="700" fill="#2563eb">① SSOT 单一事实来源</text>
+    <text x="30" y="85" font-size="26" font-weight="800" fill="#0f172a">配置和规范只在一处定义</text>
+    <text x="30" y="125" font-size="16" fill="#475569">project.yaml · error-categories · hook-env-vars</text>
+  </g>
+
+  <g transform="translate(60 480)">
+    <rect width="680" height="160" rx="20" fill="#fff" stroke="#7c3aed" stroke-width="2"/>
+    <rect x="0" y="0" width="6" height="160" rx="3" fill="#7c3aed"/>
+    <text x="30" y="45" font-size="18" font-weight="700" fill="#7c3aed">② Hook 协议层</text>
+    <text x="30" y="85" font-size="26" font-weight="800" fill="#0f172a">启停 / 互动环境，一行命令通吃</text>
+    <text x="30" y="125" font-size="16" fill="#475569">pg-invoke-hook.py · 本地 · CI · 远端集群</text>
+  </g>
+
+  <g transform="translate(60 660)">
+    <rect width="680" height="160" rx="20" fill="#fff" stroke="#f59e0b" stroke-width="2"/>
+    <rect x="0" y="0" width="6" height="160" rx="3" fill="#f59e0b"/>
+    <text x="30" y="45" font-size="18" font-weight="700" fill="#f59e0b">③ 事件溯源 pipeline 引擎</text>
+    <text x="30" y="85" font-size="26" font-weight="800" fill="#0f172a">Event Sourcing + Reducer · 杜绝 LLM 自由发挥</text>
+    <text x="30" y="125" font-size="16" fill="#475569">pg-build · 每步是事件 · 下一步由纯函数算出</text>
+  </g>
+
+  <g transform="translate(60 840)">
+    <rect width="680" height="160" rx="20" fill="#fff" stroke="#10b981" stroke-width="2"/>
+    <rect x="0" y="0" width="6" height="160" rx="3" fill="#10b981"/>
+    <text x="30" y="45" font-size="18" font-weight="700" fill="#10b981">④ 自包含工作流</text>
+    <text x="30" y="85" font-size="26" font-weight="800" fill="#0f172a">spec 生成 → TDD → 真实环境 E2E 一条龙</text>
+    <text x="30" y="125" font-size="16" fill="#475569">不需要外部 spec / TDD / E2E 框架拼装</text>
+  </g>
+
+  <text x="40" y="1040" font-size="16" fill="#94a3b8">04 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#94a3b8">四条主轴 · 自包含 · 端到端</text>
+</svg>

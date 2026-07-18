@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <rect width="800" height="1066" fill="#f8fafc"/>
+  <text x="60" y="100" font-size="20" font-weight="700" fill="#ef4444" letter-spacing="2">问题</text>
+  <text x="60" y="170" font-size="48" font-weight="800" fill="#0f172a">AI 写代码</text>
+  <text x="60" y="230" font-size="48" font-weight="800" fill="#0f172a">不是写不快，</text>
+  <text x="60" y="290" font-size="48" font-weight="800" fill="#ef4444">是管不住。</text>
+  <text x="60" y="350" font-size="22" fill="#475569">—— 模型越强，流程没跟上，产出越危险。</text>
+
+  <g transform="translate(60 430)">
+    <rect width="680" height="120" rx="16" fill="#fff" stroke="#fecaca" stroke-width="2"/>
+    <rect width="6" height="120" rx="3" fill="#ef4444"/>
+    <text x="30" y="45" font-size="22" font-weight="700" fill="#0f172a">① 同一个项目，五个 agent 五种答案</text>
+    <text x="30" y="85" font-size="18" fill="#64748b">有的读 package.json，有的猜 mvn spring-boot:run</text>
+  </g>
+
+  <g transform="translate(60 570)">
+    <rect width="680" height="120" rx="16" fill="#fff" stroke="#fecaca" stroke-width="2"/>
+    <rect width="6" height="120" rx="3" fill="#ef4444"/>
+    <text x="30" y="45" font-size="22" font-weight="700" fill="#0f172a">② 改一行配置，AI 翻了八处</text>
+    <text x="30" y="85" font-size="18" fill="#64748b">它不知道哪份 YAML 才是 source of truth</text>
+  </g>
+
+  <g transform="translate(60 710)">
+    <rect width="680" height="120" rx="16" fill="#fff" stroke="#fecaca" stroke-width="2"/>
+    <rect width="6" height="120" rx="3" fill="#ef4444"/>
+    <text x="30" y="45" font-size="22" font-weight="700" fill="#0f172a">③ 后台服务起来一半卡死</text>
+    <text x="30" y="85" font-size="18" fill="#64748b">AI 说「已启动」，日志空空、端口不通</text>
+  </g>
+
+  <g transform="translate(60 850)">
+    <rect width="680" height="120" rx="16" fill="#fff" stroke="#fecaca" stroke-width="2"/>
+    <rect width="6" height="120" rx="3" fill="#ef4444"/>
+    <text x="30" y="45" font-size="22" font-weight="700" fill="#0f172a">④ 多环境 / 多团队，根本拉不齐</text>
+    <text x="30" y="85" font-size="18" fill="#64748b">dev-local、staging、prod 三个环境，三套启动方式</text>
+  </g>
+
+  <text x="40" y="1040" font-size="16" fill="#94a3b8">02 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#94a3b8">这些不是模型问题，是流程治理问题</text>
+</svg>

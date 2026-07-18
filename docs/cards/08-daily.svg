@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <rect width="800" height="1066" fill="#f8fafc"/>
+  <text x="60" y="100" font-size="20" font-weight="700" fill="#2563eb" letter-spacing="2">日常体感</text>
+  <text x="60" y="170" font-size="44" font-weight="800" fill="#0f172a">一个 change</text>
+  <text x="60" y="225" font-size="44" font-weight="800" fill="#2563eb">从定义到验收</text>
+
+  <g transform="translate(60 310)">
+    <rect width="680" height="110" rx="16" fill="#fff" stroke="#2563eb" stroke-width="2"/>
+    <rect width="6" height="110" rx="3" fill="#2563eb"/>
+    <text x="30" y="42" font-size="18" font-weight="700" fill="#2563eb">1 · /1-pg-define</text>
+    <text x="30" y="72" font-size="20" font-weight="600" fill="#0f172a">跟 AI 对齐边界</text>
+    <text x="30" y="98" font-size="14" fill="#64748b">约 20 分钟 · 人在场</text>
+  </g>
+
+  <g transform="translate(60 440)">
+    <rect width="680" height="110" rx="16" fill="#fff" stroke="#7c3aed" stroke-width="2"/>
+    <rect width="6" height="110" rx="3" fill="#7c3aed"/>
+    <text x="30" y="42" font-size="18" font-weight="700" fill="#7c3aed">2 · /2-pg-propose</text>
+    <text x="30" y="72" font-size="18" font-weight="600" fill="#0f172a">自动生成 proposal / design / tasks</text>
+    <text x="30" y="98" font-size="14" fill="#64748b">+ execution-manifest · + scenario</text>
+  </g>
+
+  <g transform="translate(60 570)">
+    <rect width="680" height="140" rx="16" fill="#fff" stroke="#f59e0b" stroke-width="2"/>
+    <rect width="6" height="140" rx="3" fill="#f59e0b"/>
+    <text x="30" y="42" font-size="18" font-weight="700" fill="#f59e0b">3 · /3-pg-build</text>
+    <text x="30" y="72" font-size="20" font-weight="600" fill="#0f172a">1-8 小时 · 无人工干预</text>
+    <text x="30" y="100" font-size="14" fill="#64748b">自动 prep 环境 · TDD 红 · code review · gate</text>
+    <text x="30" y="122" font-size="14" fill="#64748b">真实场景验证 · 事件溯源引擎</text>
+  </g>
+
+  <g transform="translate(60 730)">
+    <rect width="680" height="110" rx="16" fill="#fff" stroke="#10b981" stroke-width="2"/>
+    <rect width="6" height="110" rx="3" fill="#10b981"/>
+    <text x="30" y="42" font-size="18" font-weight="700" fill="#10b981">4 · 你验收</text>
+    <text x="30" y="72" font-size="20" font-weight="600" fill="#0f172a">约 80% 一次就过</text>
+    <text x="30" y="98" font-size="14" fill="#64748b">剩下 20% · vibecoding 微调即可</text>
+  </g>
+
+  <g transform="translate(60 870)">
+    <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#334155"/>
+    <text x="340" y="38" text-anchor="middle" font-size="16" font-weight="700" fill="#fbbf24">长期回路</text>
+    <text x="340" y="68" text-anchor="middle" font-size="14" fill="#cbd5e1">/4-pg-regression · /5-pg-fix-issue · 自动 PR</text>
+  </g>
+
+  <text x="40" y="1040" font-size="16" fill="#94a3b8">08 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#94a3b8">人要做的就两件：定义边界 · 验收结果</text>
+</svg>

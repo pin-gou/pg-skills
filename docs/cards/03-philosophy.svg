@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <rect width="800" height="1066" fill="#0f172a"/>
+  <text x="60" y="100" font-size="20" font-weight="700" fill="#60a5fa" letter-spacing="2">解药</text>
+  <text x="60" y="180" font-size="52" font-weight="800" fill="#f8fafc">可托付的代码，</text>
+  <text x="60" y="240" font-size="52" font-weight="800" fill="#f8fafc">靠结构本身托付，</text>
+  <text x="60" y="300" font-size="52" font-weight="800" fill="#fbbf24">而不是靠人盯。</text>
+
+  <g transform="translate(60 410)">
+    <rect width="340" height="280" rx="20" fill="#1e293b" stroke="#60a5fa" stroke-width="2"/>
+    <text x="170" y="80" text-anchor="middle" font-size="80" font-weight="800" fill="#60a5fa">品</text>
+    <text x="170" y="160" text-anchor="middle" font-size="22" fill="#cbd5e1" letter-spacing="4">品 质</text>
+    <text x="170" y="220" text-anchor="middle" font-size="16" fill="#94a3b8">由结构来保障</text>
+    <text x="170" y="248" text-anchor="middle" font-size="16" fill="#94a3b8">配置化的构造提升品质下限</text>
+  </g>
+
+  <g transform="translate(400 410)">
+    <text x="0" y="150" font-size="60" fill="#fbbf24">×</text>
+  </g>
+
+  <g transform="translate(400 410)">
+    <rect width="340" height="280" rx="20" fill="#1e293b" stroke="#a78bfa" stroke-width="2"/>
+    <text x="170" y="80" text-anchor="middle" font-size="80" font-weight="800" fill="#a78bfa">构</text>
+    <text x="170" y="160" text-anchor="middle" font-size="22" fill="#cbd5e1" letter-spacing="4">构 造</text>
+    <text x="170" y="220" text-anchor="middle" font-size="16" fill="#94a3b8">由工程决定</text>
+    <text x="170" y="248" text-anchor="middle" font-size="16" fill="#94a3b8">pg-skills 只管这一层</text>
+  </g>
+
+  <g transform="translate(60 760)">
+    <rect width="680" height="200" rx="20" fill="#1e293b" stroke="#334155"/>
+    <text x="340" y="60" text-anchor="middle" font-size="24" font-weight="700" fill="#f8fafc">品构 = 品质 × 构造</text>
+    <line x1="100" y1="90" x2="580" y2="90" stroke="#334155" stroke-width="1"/>
+    <text x="340" y="130" text-anchor="middle" font-size="18" fill="#cbd5e1">模型负责写出能跑的代码</text>
+    <text x="340" y="160" text-anchor="middle" font-size="18" fill="#cbd5e1">品构负责让代码跨环境、跨团队、跨地域都能跑对</text>
+    <text x="340" y="190" text-anchor="middle" font-size="18" font-weight="700" fill="#fbbf24">可被 checkpoint · 可被回放 · 可被追责</text>
+  </g>
+
+  <text x="40" y="1040" font-size="16" fill="#64748b">03 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#64748b">pg-skills · 给 AI 编码装上工程纪律</text>
+</svg>

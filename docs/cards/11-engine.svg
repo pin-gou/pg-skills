@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 800 1066" width="800" height="1066" font-family="-apple-system, BlinkMacSystemFont, 'PingFang SC', 'Noto Sans SC', sans-serif">
+  <rect width="800" height="1066" fill="#0f172a"/>
+  <text x="60" y="100" font-size="20" font-weight="700" fill="#f59e0b" letter-spacing="2">第三步</text>
+  <text x="60" y="170" font-size="44" font-weight="800" fill="#f8fafc">pg-build</text>
+  <text x="60" y="220" font-size="28" font-weight="700" fill="#f59e0b">事件溯源 · TDD 红 · Scenario E2E</text>
+  <text x="60" y="260" font-size="18" fill="#94a3b8">LLM 只执行子任务，不决定下一步是什么</text>
+
+  <g transform="translate(60 310)">
+    <rect width="680" height="280" rx="16" fill="#1e293b" stroke="#f59e0b" stroke-width="2"/>
+    <text x="30" y="40" font-size="16" font-weight="700" fill="#f59e0b">Event Sourcing + Reducer</text>
+    <line x1="30" y1="55" x2="690" y2="55" stroke="#334155"/>
+
+    <text x="30" y="92" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">事件 1: dispatch test-dev  → reducer(state, e1) → state'</text>
+    <text x="30" y="124" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">事件 2: record completed  → reducer(state', e2) → state''</text>
+    <text x="30" y="156" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">事件 3: dispatch dev       → reducer → state'''</text>
+    <text x="30" y="188" font-size="14" fill="#cbd5e1" font-family="ui-monospace, monospace">事件 4: record completed  → reducer → ...</text>
+
+    <line x1="30" y1="210" x2="690" y2="210" stroke="#334155"/>
+    <text x="30" y="240" font-size="14" fill="#fbbf24" font-family="ui-monospace, monospace">状态 = 事件从头回放 · 进度可重放</text>
+    <text x="30" y="265" font-size="14" fill="#fbbf24" font-family="ui-monospace, monospace">下一步 = reducer(state, last_event) · 纯函数</text>
+  </g>
+
+  <g transform="translate(60 620)">
+    <text x="0" y="0" font-size="20" font-weight="700" fill="#fbbf24">跑在引擎之上的两条强制链</text>
+  </g>
+
+  <g transform="translate(60 660)">
+    <rect width="320" height="180" rx="16" fill="#1e293b" stroke="#ef4444" stroke-width="2"/>
+    <text x="20" y="40" font-size="18" font-weight="700" fill="#ef4444">TDD 红 phase</text>
+    <text x="20" y="80" font-size="16" fill="#f8fafc">先写失败的测试</text>
+    <text x="20" y="105" font-size="16" fill="#f8fafc">确认测试真的失败</text>
+    <text x="20" y="130" font-size="16" fill="#f8fafc">才允许进 dev</text>
+    <text x="20" y="160" font-size="14" fill="#94a3b8">prompt + dispatch_file 双重锁</text>
+  </g>
+
+  <g transform="translate(420 660)">
+    <rect width="320" height="180" rx="16" fill="#1e293b" stroke="#10b981" stroke-width="2"/>
+    <text x="20" y="40" font-size="18" font-weight="700" fill="#10b981">Scenario E2E</text>
+    <text x="20" y="80" font-size="16" fill="#f8fafc">服务真起在 dev/staging</text>
+    <text x="20" y="105" font-size="16" fill="#f8fafc">不靠 mock / fixture</text>
+    <text x="20" y="130" font-size="16" fill="#f8fafc">失败 → scenario-fix 子 pipeline</text>
+    <text x="20" y="160" font-size="14" fill="#94a3b8">跨 backend / frontend / agent</text>
+  </g>
+
+  <g transform="translate(60 870)">
+    <rect width="680" height="100" rx="16" fill="#1e3a5f" stroke="#60a5fa" stroke-width="2"/>
+    <text x="340" y="40" text-anchor="middle" font-size="18" font-weight="700" fill="#fbbf24">LLM 的自由度被卡在「执行子任务」这一层</text>
+    <text x="340" y="72" text-anchor="middle" font-size="16" fill="#cbd5e1">跳过 review · 改测试结果 · 临时换环境 · 都不可能</text>
+  </g>
+
+  <text x="40" y="1040" font-size="16" fill="#64748b">11 / 12</text>
+  <text x="760" y="1040" text-anchor="end" font-size="16" fill="#64748b">不是 prompt 写得好 · 是引擎卡死了</text>
+</svg>
