@@ -98,7 +98,38 @@ $RUNNER env-action-result <change> --phase prepare_env|clean_env --stage <stage>
 | 分支不匹配 | `ok: false, error: "当前本地分支..."` | 输出 error，**禁止** `git checkout` 或任何自动修复 |
 | change 目录不存在 | `ok: false, error: "change 目录...不存在"` | 输出 error，提醒运行 pg-propose |
 | project.yaml 配置错误 | `ok: false, error: "配置错误..."` | 输出 error |
-| env hook 执行失败 | `env-action-result` 返回 `success: false` | 输出 error 与 log_path，提示人工修复环境 |
+| env hook 执行失败（`severity: fatal`） | `env-action-result` 返回 `success: false` + `severity: fatal` | 输出 error 与 log_path，提示人工修复环境，**终止 pipeline** |
+| env hook 执行失败（`severity: recoverable`） | `env-action-result` 返回 `success: false` + `severity: recoverable` | 输出 WARN 与 log_path，**继续 next()**（hook 自身保证后续 idempotent） |
+| env hook 执行失败（`severity` 缺失） | `env-action-result` 返回 `success: false` 无 severity 字段 | **视作 fatal**，保守处理 → 输出 error 与 log_path，终止 pipeline |
+
+### env hook severity 三态协议
+
+`env-action-result` 的 `success=false` 不再单一处理，按 `severity` 字段分流：
+
+| `severity` | state 影响 | 编排器动作 | 实现位置 |
+|-----------|-----------|-----------|---------|
+| `fatal` | `stage_prepared` 不变，`current_stage` 不变 | 终止，输出 error | `bootstrap.py:1075-1078` (default) |
+| `recoverable` | `stage_prepared` 不变，`current_stage` 不变 | 输出 WARN，继续 next() | 待扩展 |
+| 缺失 | 视作 fatal | 终止 | `bootstrap.py:1075-1078`（无 severity 时默认 fatal） |
+
+**CLI 协议扩展**：
+
+```bash
+# v3.x 推荐：env-action-result 增加 --severity 参数
+python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py \
+    env-action-result <change> \
+    --phase prepare_env|clean_env \
+    --stage <stage> --env <env> \
+    --success true|false \
+    [--severity fatal|recoverable]  # 缺省 = fatal
+    [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]
+```
+
+**reducer 实现位置**：`scripts/bootstrap.py:1020-1105` (`cli_env_action_result`)。
+
+**测试覆盖**：`scripts/tests/test_bootstrap.py::test_cli_env_action_result_failed_does_not_update_state`（验证失败时 state 不被破坏）。
+
+**为何 severity 默认 fatal**：env hook 失败通常意味着环境异常，保守处理更安全；recoverable 是显式声明的"已知可恢复失败"，应由 hook 自身在 result.json 的 `severity` 字段中标注。
 
 **不自动修复原则**：任何 `ok: false` 或 `workflow_failed`（fatal=true）都不应触发编排器的自动修复行为——包括但不限于 git checkout、git branch 创建、文件修改、配置修改。编排器只输出错误信息给用户，由用户决定下一步操作。
 
@@ -437,8 +468,31 @@ review_score: <0-100>, p0_failures: [R-1, R-3]
 | review_score 范围 | disposition | 下一步 |
 |--------------|-------------|--------|
 | ≥ pass_threshold | `completed` | → verify |
-| escalate_threshold ≤ score < pass | `escalate` | → fix-review 循环 |
-| < escalate_threshold | `failed` | → workflow_failed |
+| escalate_threshold ≤ score < pass | `escalate` | → fix-review 循环（独立计数 `review_fix_cycles`） |
+| < escalate_threshold | `failed` | → reducer 自动重试 review phase（同 dispatch_file，`attempt++`，`attempt ≤ max_fail_retries`），耗尽 → `workflow_failed` |
+
+### review failed 重试协议
+
+`status=failed` 触发 reducer 自动重试，与 verify/test/dev failed 复用同一 `attempt` 计数器（来自 `PhaseState.attempt`）：
+
+| Attempt | reducer 行为 | next 返回 |
+|---------|------------|-----------|
+| 1 → 2 | `attempt++`，dispatch 同 phase（`dispatch_file` 不变，`cycle` 不变） | `dispatch` 同一 phase，`attempt: 2` |
+| 2 → 3 | 同上 | 同上 |
+| `attempt > max_fail_retries` | `workflow_failed` | `workflow_failed` |
+
+**与 fix-review 循环的区别**：
+
+| 维度 | review failed 重试 | review escalate 修复 |
+|------|---------------------|----------------------|
+| 触发 | `status=failed`（score < escalate_threshold） | `status=escalate`（score ≥ escalate_threshold） |
+| 计数字段 | `PhaseState.attempt`（与 verify/test/dev 共享） | `review_fix_cycles`（独立计数） |
+| 子 agent | 同 dispatch_file 重派 | `pg-build/fix-review` agent |
+| 终止 | `attempt > max_fail_retries` → `workflow_failed` | `review_fix_cycles >= max_review_fix_retries` → force verify |
+
+**reducer 实现位置**：`scripts/pipeline/reducer.py:591-601` (`_handle_review` 的 `STATUS_FAILED` 分支)。
+
+**测试覆盖**：`scripts/tests/test_reducer.py::test_review_failed_retries` + `test_review_failed_retries_within_limit`。
 
 ### fix-review 循环
 
