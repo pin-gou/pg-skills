@@ -73,9 +73,41 @@
         "default_branch": { "type": "string", "minLength": 1, "description": "主分支名 (master / main)" }
       }
     },
-    "rules":      { "type": "object", "additionalProperties": true },
-    "proposal_rules":   { "type": "array", "items": { "type": "object" } },
-    "build_rules": { "type": "array", "items": { "type": "object" } },
+    "propose": {
+      "type": "object",
+      "properties": {
+        "guidelines": { "type": "object", "additionalProperties": true },
+        "injections": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": { "type": "object" }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "build": {
+      "type": "object",
+      "properties": {
+        "injections": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "position": { "type": "string", "enum": ["prepend", "append"] },
+                "template": { "type": "string" }
+              },
+              "required": ["position", "template"],
+              "additionalProperties": false
+            }
+          }
+        }
+      },
+      "additionalProperties": false
+    },
     "fix_issue": { "$ref": "#/definitions/fix_issue" },
     "regression": { "$ref": "#/definitions/regression" }
   },

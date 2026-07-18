@@ -62,11 +62,10 @@ CONFIG_PATH = _resolve_config_path()
 # fix_issue 段仅 pg-fix-issue 工作流可见, 描述主 agent 整体修复迭代 (与 tracks.max_fix_retries 区分).
 WORKFLOW_KEYS = {
     "pg-build": ["modules", "environments", "tracks", "stages",
-                         "git", "build_rules"],
+                          "git", "build"],
     "pg-verify-and-merge": ["modules", "tracks", "stages",
-                             "git", "flyway", "verify_merge"],
-"pg-propose": ["modules", "tracks", "stages", "rules",
-                     "proposal_rules"],
+                              "git", "flyway", "verify_merge"],
+    "pg-propose": ["modules", "tracks", "stages", "propose"],
     # pg-fix-issue v3.0: resolved_actions removed — service 启停统一由
     # pg-invoke-hook.py invoke-hook 渲染, parser 不再预渲染.
     # v3.2: 渲染从 pg-pipeline-runner.py invoke-hook 抽到 runtime 层独立 CLI

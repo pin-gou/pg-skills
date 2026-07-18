@@ -88,9 +88,9 @@ const groups = [
   },
   {
     id: 'ext', label: '扩展', sections: [
-      { id: 'rules', label: 'rules', icon: '📐' },
-      { id: 'build_rules', label: 'build_rules', icon: '🔨' },
-      { id: 'proposal_rules', label: 'proposal_rules', icon: '📋' },
+      { id: 'propose.guidelines', label: 'propose.guidelines', icon: '📐' },
+      { id: 'propose.injections', label: 'propose.injections', icon: '📋' },
+      { id: 'build.injections', label: 'build.injections', icon: '🔨' },
     ],
   },
 ]
@@ -121,9 +121,9 @@ const resolvedSection = computed(() => {
     case 'stages': return StagesSection
     case 'fix_issue': return FixIssueSection
     case 'regression': return RegressionSection
-    case 'rules': return RulesSection
-    case 'build_rules': return RuleListSection
-    case 'proposal_rules': return RuleListSection
+    case 'propose.guidelines': return RulesSection
+    case 'propose.injections': return RulesSection
+    case 'build.injections': return RulesSection
     case 'verify_merge': return VerifyMergeSection
     case 'flyway': return FlywaySection
     case 'git': return GitSection

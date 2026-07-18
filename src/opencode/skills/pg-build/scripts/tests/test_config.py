@@ -314,50 +314,37 @@ class TestResolveHooksOrder(unittest.TestCase):
 class TestResolveBuildRules(unittest.TestCase):
     def test_matches_target(self):
         config = {
-            "build_rules": [
-                {
-                    "id": "checklist",
-                    "type": "inject-prompt",
-                    "target_agent": "pg-build/dev",
-                    "position": "prepend",
-                    "template": "[CHECKLIST]\n- item 1",
+            "build": {
+                "injections": {
+                    "dev": [
+                        {"position": "prepend", "template": "[CHECKLIST]\n- item 1"},
+                    ],
+                    "verify": [
+                        {"position": "prepend", "template": "[VERIFY]\n- step 1"},
+                    ],
                 },
-                {
-                    "id": "verify_step",
-                    "type": "inject-prompt",
-                    "target_agent": "pg-build/verify",
-                    "position": "prepend",
-                    "template": "[VERIFY]\n- step 1",
-                },
-                {
-                    "id": "other_type",
-                    "type": "other",
-                    "target_agent": "pg-build/dev",
-                    "template": "should be ignored",
-                },
-            ],
+            },
         }
-        prepend, append = resolve_build_rules(config, "pg-build/dev")
+        prepend, append = resolve_build_rules(config, "dev")
         self.assertIn("[CHECKLIST]", prepend)
         self.assertEqual(append, "")
 
     def test_no_match(self):
-        prepend, append = resolve_build_rules({}, "pg-build/dev")
+        prepend, append = resolve_build_rules({}, "dev")
         self.assertEqual(prepend, "")
         self.assertEqual(append, "")
 
     def test_append_default(self):
         config = {
-            "build_rules": [
-                {
-                    "id": "r1",
-                    "type": "inject-prompt",
-                    "target_agent": "pg-build/verify",
-                    "template": "[APPEND]\n- item",
+            "build": {
+                "injections": {
+                    "verify": [
+                        {"template": "[APPEND]\n- item"},
+                    ],
                 },
-            ],
+            },
         }
-        prepend, append = resolve_build_rules(config, "pg-build/verify")
+        prepend, append = resolve_build_rules(config, "verify")
         self.assertEqual(prepend, "")
         self.assertIn("[APPEND]", append)
 

@@ -1,6 +1,6 @@
 # Proposal Templates
 
-本文档定义 `proposal.md` 的默认模板与 `proposal_rules` 的注入机制。
+本文档定义 `proposal.md` 的默认模板与 `propose.injections.proposal` 的注入机制。
 
 ---
 
@@ -36,12 +36,12 @@
 ```
 
 > **注意**：上面的 `## 风险和注意事项` 段是默认模板的最后一个二级标题。
-> `proposal_rules` 可通过 `after_section` 字段在此标题之后插入自定义章节，
+> `propose.injections.proposal` 可通过 `after_section` 字段在此标题之后插入自定义章节，
 > 也可不指定 `after_section` 而直接追加到模板尾部。
 
 ---
 
-## proposal_rules 注入机制
+## propose.injections.proposal 注入机制
 
 ### 字段约定
 
@@ -58,7 +58,7 @@
 proposal_template = "<上文的默认模板>"
 proposal_text = proposal_template
 
-for rule in config.get("proposal_rules", []):
+for rule in config.get("propose", {}).get("injections", {}).get("proposal", []):
     if rule.get("after_section"):
         # 把 rule.template 插到 proposal_text 中 "## {after_section}" 标题之后
         proposal_text = insert_after_heading(
@@ -74,8 +74,10 @@ for rule in config.get("proposal_rules", []):
 `.pg/project.yaml` 当前注册一条 capability 评估规则：
 
 ```yaml
-proposal_rules:
-  - id: capability_assessment
+propose:
+  injections:
+    proposal:
+      - id: capability_assessment
     after_section: 风险和注意事项
     template: |
       ## Capability 影响评估
@@ -103,7 +105,7 @@ proposal_rules:
 
 ## 约束
 
-- `proposal_rules` 只影响 `proposal.md` 模板；`design.md` / `tasks.md` 的扩展留待后续 change
+- `propose.injections.proposal` 只影响 `proposal.md` 模板；`design.md` / `tasks.md` 的扩展留待后续 change
 - 规则冲突（多条 rule 同 `after_section`）时按 config.yaml 出现顺序插入
 - `template` 文本原样插入，不做任何转义
 - 使用中文撰写 proposal

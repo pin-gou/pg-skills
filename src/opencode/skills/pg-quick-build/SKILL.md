@@ -37,7 +37,7 @@ pg-propose 的轻量版。**主 agent** 做定界（Phase 0）+ 单次派遣 wor
 | `environments` 第一个 key + 完整定义 | 默认 environment（worker 自动用 `dev-local` 或配置首个） |
 | `tracks[*].max_fix_retries` | 默认 fix 上限（worker `limits.max_retries_per_task` 默认 3） |
 
-**不消费**：`stages`（worker 不按 stage 编排）、`proposal_rules` / `rules.*`（pg-propose 专属）、`regression.suite`（pg-regression 专属）、`git.*`（pg-archive 专属）。
+**不消费**：`stages`（worker 不按 stage 编排）、`propose.guidelines` / `propose.injections`（pg-propose 专属）、`regression.suite`（pg-regression 专属）、`git.*`（pg-archive 专属）。
 
 启动时执行：
 

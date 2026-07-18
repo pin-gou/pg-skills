@@ -11,7 +11,7 @@
 | 痛点 | 现状 | 影响 |
 |---|---|---|
 | **概念结构不清** | 6 个平铺 Tab 各自孤立，看不到 Stage→Track→Module 的归属关系 | 新人"改了 backend test 不知道它属于哪个 track" |
-| **6 段缺失** | rules / build_rules / proposal_rules / verify_merge / flyway / git 完全没有 UI | 这些段只能手写 YAML |
+| **6 段缺失** | propose.guidelines / propose.injections / build.injections / verify_merge / flyway / git 完全没有 UI | 这些段只能手写 YAML |
 | **字段偷偷消失** | EnvironmentFlow 等 canvas 仅编辑 `script`，吞掉 `args / timeout_seconds / wait_for_completion / parallel / hosts / description` | 数据正确性无保障 |
 | **diff 缺失** | 保存是"开盲盒"，看不到改了哪里 | "怕改坏" 是项目 yaml 的核心恐惧 |
 | **冷启动劝退** | 依赖 `python3 -m http.server 8000`，README 与 vite 配置端口不一致（3028 vs 3008） | 首次启动就卡住 |
@@ -260,9 +260,9 @@ http://localhost:3028/?module=backend#test.unit
 | `stages[].environment.selection_rules[]` | ✅ 表单 | |
 | `fix_issue.*` | ✅ 表单 | 已有 |
 | `regression.suite.*` | ✅ 表单 | 已有 |
-| `rules.*` | ✅ 新增 | 自由对象结构 + JSON 编辑 |
-| `build_rules[]` | ✅ 新增 | 数组，每项编辑 id/type/target_agent/position/template |
-| `proposal_rules[]` | ✅ 新增 | 同上 |
+| `propose.guidelines.*` | ✅ 新增 | 自由对象结构 + JSON 编辑 |
+| `propose.injections.*` | ✅ 新增 | dict，key 为目标产物，value 为规则数组 |
+| `build.injections.*` | ✅ 新增 | dict，key 为 agent phase，每个 item 含 position + template |
 | `verify_merge.skip_tests_if_no_conflict` | ✅ 新增 | 简单 boolean |
 | `flyway.migration_path` | ✅ 新增 | 路径 string |
 | `git.default_branch` | ✅ 新增 | 路径 string |

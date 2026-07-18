@@ -187,22 +187,21 @@ def resolve_hooks(config: dict[str, Any], env_name: str) -> str:
 
 
 def resolve_build_rules(
-    config: dict[str, Any], target_agent: str,
+    config: dict[str, Any], phase: str,
 ) -> tuple[str, str]:
-    """读取 build_rules，按 target_agent 匹配，返回 (prepend, append) 文本。
+    """读取 build.injections.<phase>，返回 (prepend, append) 文本。
 
-    旧 pg-build 的 _enrich_context_with_prompt_injection + _merge_prompt_injection 逻辑。
+    从 project.yaml 的 build.injections 按 phase 直接取值，
+    无需再 filter type / target_agent（key 已隐含作用域）。
     """
-    rules = config.get("build_rules") or []
+    rules = (config.get("build", {})
+             .get("injections", {})
+             .get(phase, []))
     prepend_parts: list[str] = []
     append_parts: list[str] = []
 
     for rule in rules:
         if not isinstance(rule, dict):
-            continue
-        if rule.get("type") != "inject-prompt":
-            continue
-        if rule.get("target_agent") != target_agent:
             continue
         template = rule.get("template", "")
         if not template:

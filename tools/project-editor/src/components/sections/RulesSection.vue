@@ -1,23 +1,23 @@
 <template>
   <div class="section">
     <header class="section-header">
-      <h2>📐 rules — per-artifact 规则 (proposal / design / tasks)</h2>
+      <h2>📐 propose.guidelines — per-artifact 指南 (proposal / design / tasks)</h2>
     </header>
     <p class="hint">自由对象结构, 键为 artifact 名 (proposal/design/tasks), 值为字符串数组</p>
     <div class="rules-block">
-      <div v-for="(group, name) in rules" :key="String(name)" class="rule-group">
+      <div v-for="(group, name) in guidelines" :key="String(name)" class="rule-group">
         <div class="rule-group-header">
           <span class="rg-name">{{ String(name) }}</span>
           <button class="btn-icon" @click="removeGroup(String(name))">×</button>
         </div>
         <ArgsField
           :modelValue="group"
-          @update:modelValue="v => store.setAt(['rules', String(name)], v)"
+          @update:modelValue="v => store.setAt(['propose', 'guidelines', String(name)], v)"
         />
       </div>
       <div class="add-row">
-        <input v-model="newName" class="add-input" placeholder="新增 group 名 (proposal/design/tasks)" />
-        <button class="btn-sm" :disabled="!newName" @click="addGroup">+ 新增 group</button>
+        <input v-model="newName" class="add-input" placeholder="新增 key (proposal/design/tasks)" />
+        <button class="btn-sm" :disabled="!newName" @click="addGroup">+ 新增</button>
       </div>
     </div>
   </div>
@@ -29,18 +29,18 @@ import { useProjectStore } from '@/stores/projectStore'
 import ArgsField from '@/components/fields/ArgsField.vue'
 
 const store = useProjectStore()
-const rules = computed<Record<string, unknown>>(() => store.getSection('rules'))
+const guidelines = computed<Record<string, unknown>>(() => store.getSection('propose.guidelines'))
 const newName = ref('')
 
 function addGroup() {
   if (!newName.value) return
-  store.setAt(['rules', newName.value], [])
+  store.setAt(['propose', 'guidelines', newName.value], [])
   newName.value = ''
 }
 
 function removeGroup(name: string) {
-  if (!confirm(`删除 rules.${name}?`)) return
-  store.deleteAt(['rules', name])
+  if (!confirm(`删除 propose.guidelines.${name}?`)) return
+  store.deleteAt(['propose', 'guidelines', name])
 }
 </script>
 

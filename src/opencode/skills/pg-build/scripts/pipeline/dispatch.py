@@ -278,13 +278,12 @@ def build_ctx(
         if _gp and _gp.report_path:
             _gate_report_path = _gp.report_path
 
-    # === build_rules prompt injection — 从 project.yaml 读取 build_rules，
-    #     按 target_agent（"pg-build/{phase}"）匹配，返回 (prepend, append) 文本。
+    # === build.injections prompt injection — 从 project.yaml 读取
+    #     build.injections.<phase>，返回 (prepend, append) 文本。
     #     renderer 会在模板渲染完成后把 prepend/append 拼接到最终 prompt 前后。
     #     当 project_config 为空或无匹配规则时返回 ("", "")，不会影响渲染。
-    target_agent = f"pg-build/{phase}"
     _build_rules_prepend, _build_rules_append = resolve_build_rules(
-        _load_project_config_cached() or {}, target_agent,
+        _load_project_config_cached() or {}, phase,
     )
 
     # v3.6: per-track scenario-<track>.yaml (兼容旧 scenario.yaml)

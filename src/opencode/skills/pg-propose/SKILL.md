@@ -104,7 +104,7 @@ bash .opencode/skills/pg-propose/scripts/check-review-cache.sh
 python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
 ```
 
-从输出 JSON 获取：`rules` / `proposal_rules` / `tracks` / `stages`。
+从输出 JSON 获取：`propose`（含 `guidelines` 和 `injections`）/ `tracks` / `stages`。
 
 字段详细含义见 [references/config-fields.md](./references/config-fields.md)。
 
@@ -114,9 +114,9 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
 - 需切换目录的命令在配置中显式写 `cd <dir> && <cmd>`（如 `test: cd <module-name> && mvn test`）
 - `rebuild_and_restart` / `verify` 脚本应自包含 cwd 处理
 
-### 1f. 加载 proposal_rules（结构化规则注入）
+### 1f. 加载 propose.injections.proposal（结构化规则注入）
 
-`.pg/project.yaml` 的 `proposal_rules` 段是结构化规则列表，按 `after_section` 字段注入到 `proposal.md` 模板。字段约定与注入算法见 [references/proposal-templates.md](./references/proposal-templates.md)「proposal_rules 注入机制」段。
+`.pg/project.yaml` 的 `propose.injections.proposal` 段是结构化规则列表，按 `after_section` 字段注入到 `proposal.md` 模板。字段约定与注入算法见 [references/proposal-templates.md](./references/proposal-templates.md)「proposal_rules 注入机制」段。
 
 ---
 
@@ -130,7 +130,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
 
 路径：`.pg/changes/<change-name>/proposal.md`
 
-**模板 + proposal_rules 注入**见 [references/proposal-templates.md](./references/proposal-templates.md)。更新 TodoWrite 第 3 项。
+**模板 + propose.injections.proposal 注入**见 [references/proposal-templates.md](./references/proposal-templates.md)。更新 TodoWrite 第 3 项。
 
 ### 2b. design.md
 
@@ -432,7 +432,7 @@ python3 .opencode/skills/pg-propose/scripts/pg-auto-refine-check.py <change>
 
 ## 产物生成指导原则
 
-- `context`（来自 AGENTS.md，经 context-summary.yaml 缓存）和 `rules`（来自 config.yaml）是给你的约束，不可复制到产物中
+- `context`（来自 AGENTS.md，经 context-summary.yaml 缓存）和 `propose.guidelines`（来自 config.yaml）是给你的约束，不可复制到产物中
 - 每个产物文件写入后验证文件存在
 - 如果变更名称已存在，询问用户是继续还是新建
 

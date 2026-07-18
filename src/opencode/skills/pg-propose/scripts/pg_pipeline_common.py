@@ -1080,7 +1080,7 @@ def pg_build_dispatch_context(change, item_id, sub, config):
          so sub-agents know how to start/stop services
       4. _enrich_context_with_tasks — populate ctx["tasks_preformatted"] from
          tasks.md checkbox state
-      5. _enrich_context_with_prompt_injection — splice build_rules into prompt
+      5. _enrich_context_with_prompt_injection — splice build.injections into prompt
 
     Args:
         change: change name.
