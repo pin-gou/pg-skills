@@ -745,6 +745,36 @@ final-gate dispatch 之前，runner 强制检查所有非 simple、非 scenario 
 
 ---
 
+## v3.x 集成验证硬性约束
+
+### 背景
+
+当 `stages[*].environment.required=true` 时（如 `int` stage），该 stage 的集成验证 V-* 项**不允许 SKIP**。环境启动失败必须修复而非跳过。
+
+### 约束规则
+
+| 字段 | 行为 | 实现 |
+|------|------|------|
+| `required=true` | 集成验证不可 SKIP；服务必须启动 | verify agent 协议 + verify_mandatory.yaml 块 |
+| `required=false` | 允许 SKIP 豁免 | 当前行为 |
+| 缺省 | 视作 false | 保守 |
+
+### 启动失败处理
+
+1. 第 1-2 次失败：检查启动日志，尝试修复后再启动
+2. 第 3 次失败：`verify` agent 返回 `status: "fail"`，错误码 `ENV_STARTUP_RETRY_EXCEEDED`
+3. 编排器收到 `status: "fail"` → `workflow_failed` → 终止 pipeline
+
+### V-* 失败处理
+
+`required=true` 时 V-* 项发现代码 bug → **立即 escalate**（不 accumulate）。每次 escalate 触发一次 fix cycle，不浪费修复效率。
+
+### 实现位置
+
+- verify agent 协议：`opencode/agents/pg-build/verify.md` — §2 / §4.1
+- verify_mandatory 块：`prompt-templates/blocks/verify_mandatory.yaml`
+- renderer 注入：`scripts/template_engine/renderer.py` — §L199 / §L230
+
 ## final-gate 派发条件
 
 `final-gate` 是跨 track 的最终质量门，**但并非所有 pipeline 都会派发**。

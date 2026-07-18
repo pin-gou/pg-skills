@@ -1,0 +1,32 @@
+# verify_mandatory.yaml — 集成验证硬性约束指令块（v3.x）
+#
+# 注入时机：dispatch_file 生成时，检测 stage.environment.required=true 时自动注入
+# 注入位置：dispatch_file 末尾，子 agent 返回契约之前
+#
+# 本块与 verify.md agent 协议的 "启动失败处理" 小节联动：
+#   - verify.md 定义行为规则
+#   - 本块提供 dispatch 时注入的上下文
+
+verify_mandatory: |
+  ## 集成验证硬性约束（v3.x）
+
+  当前 stage 的 `environment.required=true`，**集成验证不可 SKIP**。
+
+  ### 约束规则
+
+  1. **禁止 SKIP**：任何 V-* 验证项都必须真实运行，不能标记 SKIP 豁免
+  2. **启动失败重试**：服务启动失败最多重试 3 次，超限返回 `status: "fail"`
+  3. **立即 escalate**：V-* 项发现代码 bug 时**立即**返回 `status: "escalate"`，
+     不要 accumulate 多项失败后再 escalate
+  4. **环境问题 = 修复环境**：环境无法启动属于配置/依赖问题，由人工修复；
+
+  ### 验证项
+
+  以下 V-* 项必须全部执行（不能 SKIP，不能 partial）：
+
+  {tasks_preformatted}
+
+  ### 启动失败处理
+
+  1. 第 1-2 次失败：检查日志，尝试修复后再启动
+  2. 第 3 次失败：返回 `status: "fail"`，错误码 `ENV_STARTUP_RETRY_EXCEEDED`

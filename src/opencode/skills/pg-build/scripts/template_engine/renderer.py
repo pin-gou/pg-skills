@@ -176,6 +176,7 @@ def render_dispatch(
     block_rollback = ""
     block_tasks = ""
     block_contract = ""
+    block_verify_mandatory = ""
 
     # 注：v2.2 起 blocks/hooks.yaml 内容已整合到 base.yaml 的 header_env 段，
     # 由 renderer 根据 phase 条件注入，不再单独加载。
@@ -184,6 +185,13 @@ def render_dispatch(
     if os.path.isfile(rollback_path):
         rollback_data = _load_yaml(rollback_path)
         block_rollback = rollback_data.get("prompt", "")
+
+    # v3.x: 集成验证硬性约束块（仅 phase=verify + env_required=true 时注入）
+    verify_mandatory_path = os.path.join(blocks_dir, "verify_mandatory.yaml")
+    if os.path.isfile(verify_mandatory_path):
+        vmd = _load_yaml(verify_mandatory_path)
+        # 不直接读取 prompt 字段；本块以 verify_mandatory 键注入，由渲染时条件判断
+        block_verify_mandatory = vmd.get("verify_mandatory", "")
 
     tasks_path = os.path.join(blocks_dir, "tasks.yaml")
     if os.path.isfile(tasks_path):
@@ -222,6 +230,10 @@ def render_dispatch(
     sections.append(_safe_format(template_str, ctx))
     if block_tasks:
         sections.append(_safe_format(block_tasks, ctx))
+    # v3.x: verify_mandatory 块（phase=verify + env_required=true 时注入）
+    # 在 tasks 块之后、rollback 之前（让硬性约束优先于修复上下文）
+    if block_verify_mandatory and phase == "verify" and ctx.get("env_required") is True:
+        sections.append(_safe_format(block_verify_mandatory, ctx))
     if block_rollback and ctx.get("rollback_context"):
         sections.append(_safe_format(block_rollback, ctx))
     # v2.1: 契约块始终在最后，强调返回值约束
