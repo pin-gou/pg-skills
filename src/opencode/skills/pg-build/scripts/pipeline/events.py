@@ -89,6 +89,7 @@ class PipelineRecord:
     tasks_updated: tuple[str, ...] = ()  # v2.2: escalate 时必填（失败 V-* 的 task_id）
     design_md_fault: bool = False  # v2.7: fix-review 检测到 design.md 文档层缺陷
     design_md_fault_location: str = ""  # v2.7: 文档缺陷位置 (file:line)
+    design_drift: str = ""  # v3.x: scenario-fix 检测到的 design 偏移（JSON 数组，纯 Markdown 累积）
 
 
 @dataclass(frozen=True)

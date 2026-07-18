@@ -676,8 +676,80 @@ def _handle_fix_review(
 
 
 # ============================================================
-# 子 reducer：fix
+# 工具函数：design drift 累积
 # ============================================================
+
+def _accumulate_design_drift(state: PipelineState, record: PipelineRecord) -> None:
+    """v3.x: 将 scenario-fix result 中的 design_drift 累积到 drift.md。
+
+    每次调用在 drift.md 的末尾追加一条 Drift 条目。
+    纯 Markdown 格式，仅人工审计使用，不做程序化处理。
+    """
+    if not record.design_drift:
+        return
+    try:
+        import json as _json
+        drift = _json.loads(record.design_drift) if isinstance(record.design_drift, str) else record.design_drift
+    except Exception:
+        return
+
+    location = drift.get("location", "未知位置")
+    reason = drift.get("reason", "未指定原因")
+    decision = drift.get("decision", "ACCEPT")
+    phase = drift.get("phase", "unknown")
+    scenario_id = drift.get("scenario_id", "unknown")
+
+    # 确定 drift.md 路径：change 下或 archive 下
+    change_root = _resolve_change_root(state.change)
+    drift_path = os.path.join(change_root, "drift.md")
+
+    # 初始化或追加
+    header = "# Design Drift Log\n\n"
+    entry = (
+        f"## Drift #{_get_next_drift_number(drift_path)}\n"
+        f"- **发现阶段**: {phase}\n"
+        f"- **场景**: {scenario_id}\n"
+        f"- **位置**: {location}\n"
+        f"- **原因**: {reason}\n"
+        f"- **决策**: {decision}\n\n"
+    )
+    try:
+        if not os.path.isfile(drift_path):
+            with open(drift_path, "w", encoding="utf-8") as f:
+                f.write(header)
+        with open(drift_path, "a", encoding="utf-8") as f:
+            f.write(entry)
+    except OSError:
+        pass
+
+
+def _get_next_drift_number(drift_path: str) -> int:
+    """读取现有 drift.md 确定下一个 Drift 编号。"""
+    if not os.path.isfile(drift_path):
+        return 1
+    import re as _re
+    try:
+        with open(drift_path, encoding="utf-8") as f:
+            content = f.read()
+        matches = _re.findall(r"^## Drift #(\d+)", content, _re.MULTILINE)
+        return max(int(m) for m in matches) + 1 if matches else 1
+    except (OSError, ValueError):
+        return 1
+
+
+def _resolve_change_root(change: str) -> str:
+    """解析 change 根目录，同 pg-validate-proposal.py 的 _resolve_change_root。"""
+    from pipeline.config import CHANGES_DIR
+    direct = os.path.join(CHANGES_DIR, change)
+    if os.path.isdir(direct) and os.path.isfile(os.path.join(direct, "design.md")):
+        return direct
+    import glob as _glob
+    candidates = _glob.glob(os.path.join(CHANGES_DIR, "archive", f"*-{change}"))
+    if candidates:
+        candidates.sort(reverse=True)
+        if os.path.isfile(os.path.join(candidates[0], "design.md")):
+            return candidates[0]
+    return direct
 
 def _handle_fix(
     state: PipelineState, record: PipelineRecord,

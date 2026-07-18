@@ -92,6 +92,12 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         "--design-md-fault-location", default="",
         help="v2.7: 文档缺陷位置 (file:line)",
     )
+    # ── v3.x 新增：design drift 标记 ──
+    p.add_argument(
+        "--design-drift", default="",
+        help="v3.x: scenario-fix 检测到的 design 偏移，JSON 格式。"
+             "例: '{\"phase\": \"scenario-execute\", \"location\": \"ProjectResponse 缺 network\"}'",
+    )
     # ── v2.4 新增：强制落盘参数 ──
     p.add_argument(
         "--output-path", default="",
@@ -136,6 +142,14 @@ def _build_result_dict(args: argparse.Namespace) -> dict[str, Any]:
         result["design_md_fault"] = True
         if args.design_md_fault_location:
             result["design_md_fault_location"] = args.design_md_fault_location
+    # v3.x: design drift 标记
+    if args.design_drift:
+        try:
+            import json as _json
+            drift = _json.loads(args.design_drift)
+            result["design_drift"] = drift
+        except (json.JSONDecodeError, TypeError):
+            pass
     return result
 
 

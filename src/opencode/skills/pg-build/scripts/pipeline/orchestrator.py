@@ -594,6 +594,7 @@ class Orchestrator:
         tasks_updated: list[str] | None = None,  # v2.2
         design_md_fault: bool = False,  # v2.7
         design_md_fault_location: str = "",  # v2.7
+        design_drift: str = "",  # v3.x: scenario-fix design 偏移记录（JSON 字符串）
     ) -> dict[str, Any]:
         """记录一次 sub-agent 完成事件。
 
@@ -672,6 +673,7 @@ class Orchestrator:
             tasks_updated=tuple(tasks_updated or []),
             design_md_fault=design_md_fault,  # v2.7
             design_md_fault_location=design_md_fault_location,  # v2.7
+            design_drift=design_drift,  # v3.x
         )
 
         # reducer
@@ -696,6 +698,11 @@ class Orchestrator:
             }
 
         # 写 event log
+        # ── v3.x: design drift I/O（在写 event log 之前） ──
+        if design_drift:
+            from pipeline.reducer import _accumulate_design_drift
+            _accumulate_design_drift(self.state, record)
+
         event_data = {
             "track": track,
             "phase": phase,

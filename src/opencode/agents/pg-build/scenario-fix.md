@@ -75,6 +75,38 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 - proposal.md / design.md / tasks.md
 - 其他 module 的源码
 
+### Step 3.5: 检测 Design Drift（v3.x）
+
+修复过程中若发现**设计文档未声明的契约、字段或行为**（即 "design 未要求但代码需要配合才能正确"的情况）：
+
+- **不需要修改 design.md**。build 流中 design 是 SSOT，代码修改不应回流到 design
+- 在返回 result.json 时通过 `--design-drift` 参数记录偏移
+- 格式：
+  ```json
+  {
+    "phase": "scenario-fix",
+    "fix_cycle": 1,
+    "scenario_id": "S-create-with-custom-cidr",
+    "location": "ProjectResponse 缺 network 字段",
+    "reason": "design.md 仅声明了 Request 含 network，但未声明 Response 也包含",
+    "decision": "ACCEPT"
+  }
+  ```
+- `decision` 取值：
+  - `ACCEPT` — 偏移合理，与功能目标一致
+  - `OVERRIDE` — 偏移是设计 bug，但 build 中不修 design
+- `pg-build-result` CLI 用法：
+  ```bash
+  python3 .opencode/skills/pg-build/scripts/pg-build-result \
+    --mode agent \
+    --status completed \
+    --track int.scr --phase scenario-fix \
+    --design-drift '{"phase":"scenario-fix","location":"...","reason":"...","decision":"ACCEPT"}' \
+    --output-path .../result.json --require-output
+  ```
+
+drift 记录由 orchestrator 自动累积到 `{change-dir}/drift.md`，不需要 agent 手动写文件。
+
 ### Step 4: 验证
 
 跑测试与 lint 确认修复有效：

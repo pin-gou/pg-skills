@@ -775,6 +775,58 @@ final-gate dispatch 之前，runner 强制检查所有非 simple、非 scenario 
 - verify_mandatory 块：`prompt-templates/blocks/verify_mandatory.yaml`
 - renderer 注入：`scripts/template_engine/renderer.py` — §L199 / §L230
 
+## v3.x Design Drift 协议
+
+### 背景
+
+build 过程中（如 scenario-fix 阶段）可能发现设计文档（design.md）未声明的契约、字段或行为。
+**不修改 design.md**（build 流中 design 是 SSOT），而是记录到 `drift.md` 供审计回溯。
+
+### 触发条件
+
+`scenario-fix` agent 在修复过程中发现以下情况之一时，应记录 design drift：
+
+- 设计文档未声明但代码必须实现的 API 字段
+- 设计文档未覆盖的边界条件
+- 设计文档与实现之间的语义偏差
+
+### 协议流程
+
+1. **scenario-fix agent 检测**：在修复过程中发现 design 偏移
+2. **记录到 result.json**：调用 `pg-build-result` 时传 `--design-drift '<json>'`
+3. **reducer 处理**：`PipelineRecord.design_drift` 字段在 record 事件中保留
+4. **orchestrator I/O**：`record()` 方法调用 `_accumulate_design_drift` 写入 `drift.md`
+5. **archive 迁移**：`bootstrap.py` 的 archive 逻辑自动将 `drift.md` 随 change 目录一起归档
+
+### drift.md 格式
+
+纯 Markdown，仅人工审计使用，不做程序化处理：
+
+```markdown
+# Design Drift Log
+
+## Drift #1
+- **发现阶段**: scenario-fix
+- **场景**: S-create-with-custom-cidr
+- **位置**: ProjectResponse 缺 network 字段
+- **原因**: design.md 仅声明了 Request 含 network，但未声明 Response 也包含
+- **决策**: ACCEPT
+```
+
+### 路径规则
+
+- build 期间生成 → `{change-dir}/drift.md`
+- archive 后追加 → `{archive-dir}/drift.md`
+- orchestrator 自动按时机选路径
+
+### 实现位置
+
+- `design_drift` 字段：`scripts/pipeline/events.py` — `PipelineRecord.design_drift`
+- 累积函数：`scripts/pipeline/reducer.py` — `_accumulate_design_drift`
+- 写入触发：`scripts/pipeline/orchestrator.py` — `record()` 方法
+- CLI 扩展：`scripts/pg-build-result` — `--design-drift` 参数
+- agent 协议：`opencode/agents/pg-build/scenario-fix.md` — §Step 3.5
+
 ## final-gate 派发条件
 
 `final-gate` 是跨 track 的最终质量门，**但并非所有 pipeline 都会派发**。

@@ -281,6 +281,10 @@ def main() -> None:
         if not design_md_fault_location:
             design_md_fault_location = file_values.get("design_md_fault_location", "")
 
+        # ── v3.x: design_drift 从文件加载 ──
+        design_drift_file = file_values.get("design_drift", "")
+        design_drift = json.dumps(design_drift_file) if isinstance(design_drift_file, dict) else str(design_drift_file)
+
         # ── status 兜底必填（CLI/文件都没有 → fatal）──
         if not status:
             print(json.dumps({
@@ -308,6 +312,7 @@ def main() -> None:
             tasks_updated=tasks_updated,
             design_md_fault=design_md_fault,
             design_md_fault_location=design_md_fault_location,
+            design_drift=design_drift,
         )
 
     elif command == "progress":
