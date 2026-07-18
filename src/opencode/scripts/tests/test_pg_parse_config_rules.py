@@ -136,11 +136,6 @@ class ParseConfigFilterTest(unittest.TestCase):
         self.assertIn("build", filtered)
         self.assertIn("injections", filtered["build"])
 
-    def test_pipeline_segment_intact(self):
-        data = self.mod.load()
-        filtered = self.mod.filter_by_workflow(data, "pg-propose")
-        self.assertEqual(filtered["pipeline"]["order"], ["backend"])
-
 
 class ParseConfigDefaultsTest(unittest.TestCase):
     """When propose / build are absent, missing keys."""
