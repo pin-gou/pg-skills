@@ -49,8 +49,6 @@ pnpm dev
 - ✅ **verify_merge** （skip_tests_if_no_conflict）
 - 🗄 **flyway** （migration_path）
 - 🌿 **git** （default_branch）
-- 🧪 **test_strategy** （自由对象）
-- 📏 **coding_standards** （字符串数组）
 
 ## 关键能力
 

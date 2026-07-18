@@ -104,7 +104,7 @@ bash .opencode/skills/pg-propose/scripts/check-review-cache.sh
 python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
 ```
 
-从输出 JSON 获取：`rules` / `proposal_rules` / `test_strategy` / `coding_standards` / `tracks` / `stages`。
+从输出 JSON 获取：`rules` / `proposal_rules` / `tracks` / `stages`。
 
 字段详细含义见 [references/config-fields.md](./references/config-fields.md)。
 

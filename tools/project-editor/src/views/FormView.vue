@@ -91,8 +91,6 @@ const groups = [
       { id: 'rules', label: 'rules', icon: '📐' },
       { id: 'build_rules', label: 'build_rules', icon: '🔨' },
       { id: 'proposal_rules', label: 'proposal_rules', icon: '📋' },
-      { id: 'test_strategy', label: 'test_strategy', icon: '🧪' },
-      { id: 'coding_standards', label: 'coding_standards', icon: '📏' },
     ],
   },
 ]
@@ -129,8 +127,6 @@ const resolvedSection = computed(() => {
     case 'verify_merge': return VerifyMergeSection
     case 'flyway': return FlywaySection
     case 'git': return GitSection
-    case 'test_strategy': return TestStrategySection
-    case 'coding_standards': return CodingStandardsSection
     default: return ModulesSection
   }
 })

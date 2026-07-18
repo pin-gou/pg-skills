@@ -65,8 +65,8 @@ WORKFLOW_KEYS = {
                          "git", "build_rules"],
     "pg-verify-and-merge": ["modules", "tracks", "stages",
                              "git", "flyway", "verify_merge"],
-    "pg-propose": ["modules", "tracks", "stages", "rules", "test_strategy",
-                    "coding_standards", "proposal_rules"],
+"pg-propose": ["modules", "tracks", "stages", "rules",
+                     "proposal_rules"],
     # pg-fix-issue v3.0: resolved_actions removed — service 启停统一由
     # pg-invoke-hook.py invoke-hook 渲染, parser 不再预渲染.
     # v3.2: 渲染从 pg-pipeline-runner.py invoke-hook 抽到 runtime 层独立 CLI

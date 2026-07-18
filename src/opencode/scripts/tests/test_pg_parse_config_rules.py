@@ -5,7 +5,7 @@ Verifies that:
   - pg-propose workflow sees proposal_rules segment
   - pg-build workflow sees build_rules segment
   - Both segments default to empty list when absent in config.yaml
-  - Existing rules / test_strategy / coding_standards / pipeline remain
+  - Existing rules / pipeline remain
     intact (backward compatibility)
 """
 

@@ -11,7 +11,7 @@
 | 痛点 | 现状 | 影响 |
 |---|---|---|
 | **概念结构不清** | 6 个平铺 Tab 各自孤立，看不到 Stage→Track→Module 的归属关系 | 新人"改了 backend test 不知道它属于哪个 track" |
-| **8 段缺失** | rules / build_rules / proposal_rules / verify_merge / flyway / git / test_strategy / coding_standards 完全没有 UI | 这些段只能手写 YAML |
+| **6 段缺失** | rules / build_rules / proposal_rules / verify_merge / flyway / git 完全没有 UI | 这些段只能手写 YAML |
 | **字段偷偷消失** | EnvironmentFlow 等 canvas 仅编辑 `script`，吞掉 `args / timeout_seconds / wait_for_completion / parallel / hosts / description` | 数据正确性无保障 |
 | **diff 缺失** | 保存是"开盲盒"，看不到改了哪里 | "怕改坏" 是项目 yaml 的核心恐惧 |
 | **冷启动劝退** | 依赖 `python3 -m http.server 8000`，README 与 vite 配置端口不一致（3028 vs 3008） | 首次启动就卡住 |
@@ -85,8 +85,6 @@
 │ ▸ verify_merge       │ │                                  │   │
 │ ▸ flyway             │ │ [复制此 module]                    │   │
 │ ▸ git                │ │ [从预设新增 ▾]                     │   │
-│ ▸ test_strategy      │ └──────────────────────────────────┘   │
-│ ▸ coding_standards   │                                          │
 │                      │                                          │
 │                      │  ⓘ schema.description 渲染为悬浮提示      │
 │                      │  ⚠ ajv 错误显示在字段下方红色提示        │
@@ -268,8 +266,6 @@ http://localhost:3028/?module=backend#test.unit
 | `verify_merge.skip_tests_if_no_conflict` | ✅ 新增 | 简单 boolean |
 | `flyway.migration_path` | ✅ 新增 | 路径 string |
 | `git.default_branch` | ✅ 新增 | 路径 string |
-| `test_strategy.*` | ✅ 新增 | 自由对象结构 |
-| `coding_standards[]` | ✅ 新增 | 字符串数组 |
 
 ---
 
@@ -434,7 +430,7 @@ function diffFields(before: object, after: object): DiffEntry[] {
 ### Phase 2: 补齐缺失段
 
 6. rules / build_rules / proposal_rules 表单组件
-7. verify_merge / flyway / git / test_strategy / coding_standards 表单组件
+7. verify_merge / flyway / git 表单组件
 8. README 重写 + 启动流程对齐
 
 **Phase 2 验收**：所有 schema 顶层段都有 UI，不再需要手写 YAML。
