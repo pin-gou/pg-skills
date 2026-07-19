@@ -87,14 +87,6 @@
               :modelValue="(track as any).timeout_seconds"
               :schema="timeoutNullableSchema"
               @update:modelValue="v => store.setAt(['tracks', String(name), 'timeout_seconds'], v)" />
-            <FormField name="on_failure" label="on_failure"
-              :modelValue="(track as any).on_failure"
-              :schema="trackFailureSchema"
-              @update:modelValue="v => store.setAt(['tracks', String(name), 'on_failure'], v)" />
-            <FormField name="fix_routing" label="fix_routing"
-              :modelValue="(track as any).fix_routing"
-              :schema="fixRoutingSchema"
-              @update:modelValue="v => store.setAt(['tracks', String(name), 'fix_routing'], v)" />
           </div>
           <div class="row-3">
             <FormField name="max_fix_retries" label="max_fix_retries"
@@ -150,14 +142,6 @@ const timeoutNullableSchema: JSONSchema7 = {
 const onFailureSchema: JSONSchema7 = {
   type: 'string', enum: ['fail', 'continue', 'retry'], default: 'fail',
   description: '单条命令失败处置',
-}
-const trackFailureSchema: JSONSchema7 = {
-  type: 'string', enum: ['workflow_failed', 'continue_all'], default: 'workflow_failed',
-  description: 'simple track 整体失败策略',
-}
-const fixRoutingSchema: JSONSchema7 = {
-  type: 'string', enum: ['source', 'auto', 'manual'], default: 'source',
-  description: 'verify 失败时如何分派修复',
 }
 const retrySchema: JSONSchema7 = {
   type: 'integer', minimum: 1, default: 2, description: 'on_failure=retry 时的最大重试次数',

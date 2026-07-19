@@ -306,7 +306,7 @@
                     "type": "string",
                     "enum": ["fail", "continue", "retry"],
                     "default": "fail",
-                    "description": "命令失败的处置策略. fail=按 track.on_failure 默认 (通常 workflow_failed); continue=记录 warn 并继续跑下一条; retry=立即重试 retry_max 次再按 fail 处理."
+                    "description": "命令失败的处置策略. fail=终止整个 pipeline (workflow_failed); continue=记录 warn 并继续跑下一条; retry=立即重试 retry_max 次再按 fail 处理."
                   },
                   "retry_max": {
                     "type": "integer",
@@ -331,21 +331,9 @@
           "default": 1800,
           "description": "simple track 默认命令超时 (秒), 作为 command.timeout_seconds=null 时的回退值. 再 null 表示不超时 (危险, 可能永久 hang). 默认 1800s = 30min."
         },
-        "on_failure": {
-          "type": "string",
-          "enum": ["workflow_failed", "continue_all"],
-          "default": "workflow_failed",
-          "description": "simple track 整体失败默认策略. workflow_failed=任一命令 fail 时整个 pipeline workflow_failed; continue_all=忽略所有失败继续跑 (通常用于 ad-hoc 脚本). 单条 command 可通过 on_failure 字段覆盖."
-        },
         "max_fix_retries": { "type": "integer", "minimum": 1, "default": 5, "description": "verify→fix 循环最大重试次数. T/D 只做一次, verify 失败后进入 fix→verify→fix 循环, 直到通过或达到此上限. 达到上限后强制进 gate 评估." },
         "max_fail_retries": { "type": "integer", "minimum": 1, "default": 3, "description": "subagent (test/dev/gate) 单次失败后的重派次数. 区别于 max_fix_retries (verify 失败循环)." },
         "max_gate_fix_retries": { "type": "integer", "minimum": 1, "default": 2, "description": "gate FAIL 后 fix-gate agent 的最大重试次数." },
-        "fix_routing": {
-          "type": "string",
-          "enum": ["source", "auto", "manual"],
-          "default": "source",
-          "description": "verify 失败时如何分派修复: source=本 track 内修; auto=按 git diff 跳到对应 module track; manual=ESCALATE LLM"
-        },
         "code_review_enabled": {
           "type": "boolean",
           "default": true,

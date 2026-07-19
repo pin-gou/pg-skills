@@ -194,7 +194,7 @@ def normalize_simple_command(entry, track_default_timeout=None):
       3. None (no timeout — caller's responsibility)
 
     Resolved on_failure precedence:
-      1. command.on_failure if present (override track default)
+      1. command.on_failure if present (default: "fail")
       2. "fail" (per-command default; track-level policy is applied by the
          runner after collecting all per-command failures)
 

@@ -44,7 +44,6 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 - `track.type` — 固定为 `simple`
 - `track.label` — track 显示标签
 - `track.timeout_seconds` — 全局默认 timeout（秒），1800
-- `track.on_failure` — track 级失败策略（`fail` / `continue_all`）
 
 ### 命令 SSOT
 
@@ -77,7 +76,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
    - runner 在编排器侧已用 `timeout N` 包裹时遵守；你自己执行时也建议在 bash 命令里加 `timeout` 防止卡死
    - stdout/stderr 建议 tee 到 `{report_seq}-{item}-simple.log`（可选）
 3. **失败处理**（按 per-cmd on_failure + track.on_failure 决策表）：
-   - `retry`：自动重试 `retry_max` 次，每次用 `retry_timeout_seconds` timeout；仍失败按 track.on_failure 处理
+   - `retry`：自动重试 `retry_max` 次，每次用 `retry_timeout_seconds` timeout；仍失败按默认策略 (workflow_failed) 处理
    - `continue`：记 warning，继续下一条
    - `fail`：立即返回 status=FAILED
 4. **全部完成或终止后**：用 `cat > 2-build/{report_seq}-{item}-simple.md <<'EOF' ... EOF` 写执行报告（路径由 dispatch_file 注入），包含：
@@ -92,7 +91,7 @@ orchestrator 派送本 agent 时，传给你的 prompt **仅含一个 `dispatch_
 | `continue` | 失败 warning 后继续 | 继续下一条 | 继续下一条 |
 | `retry` | 重试 retry_max 次再判定 | workflow_failed | warning + 继续 |
 
-**重要**：你**只负责决定 status=SUCCESS 或 status=FAILED**；`track.on_failure=continue_all` 由 runner record 阶段判定。
+**重要**：你**只负责决定 status=SUCCESS 或 status=FAILED**；runner 在 record 阶段按默认策略 (workflow_failed) 处理。
 
 ## 环境与 Hooks 调用约定（如果 stage.environment 存在）
 
