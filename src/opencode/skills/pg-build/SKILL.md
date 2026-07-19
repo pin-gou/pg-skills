@@ -78,11 +78,14 @@ $RUNNER reset <change> --resume              # 手动恢复（保留 snapshot，
 
 ```
 循环:
-  0. $RUNNER bootstrap <change>  → 检查 response:
-        • ok: false         → workflow_failed（fatal=true）。**禁止自动修复**（如 git checkout），展示 error 给用户。
-        • workflow_failed_detected: true → **检测到上次 pipeline 失败**。用 question tool 询问用户选择 Reset 或 Resume：
-          - 用户选 Reset → `$RUNNER bootstrap <change>`（无额外参数，清空状态从头开始）
+  0. $RUNNER bootstrap <change> --detect  → 检查 response:
+        • detected: true → **检测到上次 pipeline 因 terminal failure 终止**。
+          用 question tool 询问用户选择 Reset 或 Resume：
+          - 用户选 Reset → `$RUNNER bootstrap <change>`（自动清理 events + snapshot，从头开始）
           - 用户选 Resume → `$RUNNER bootstrap <change> --resume`（保留已完成 track 状态，从失败处继续）
+        • detected: false → 进入 step 0b
+  0b. $RUNNER bootstrap <change>  → 检查 response:
+        • ok: false         → workflow_failed（fatal=true）。**禁止自动修复**（如 git checkout），展示 error 给用户。
         • ok: true + env_hook_plan=null → 进入 step 1
         • ok: true + env_hook_plan ≠ null → bash 执行 plan.command，然后 env-action-result（phase 填 prepare_env/clean_env）→ 调 bootstrap 再次检查 env_hook_plan
   1. $RUNNER next <change>       → 检查 action 字段
@@ -141,7 +144,9 @@ python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py \
 
 ### Resume / Detect 协议（v3.10）
 
-当 `bootstrap <change>` 返回 `workflow_failed_detected: true` 时，编排器必须：
+**入口**：编排器在主循环 step 0 先调 `bootstrap <change> --detect`，而非直接调 `bootstrap <change>`。
+
+当 `bootstrap <change> --detect` 返回 `detected: true` 时，编排器必须：
 
 1. **不要自动 reset** — 用 question tool 询问用户：
 
