@@ -54,15 +54,44 @@ def main() -> None:
 
     # ── bootstrap 命令（独立命令，不依赖 Orchestrator）──
     if command == "bootstrap":
-        result = _bootstrap.cli_bootstrap(change)
+        # 解析可选参数 --resume / --detect
+        bs_parser = argparse.ArgumentParser(prog="pg-pipeline-runner.py bootstrap", add_help=False)
+        bs_parser.add_argument("change", nargs="?", default=change)
+        bs_parser.add_argument("--resume", action="store_true",
+                               help="从 workflow_failed 状态恢复，保留已完成 track 状态")
+        bs_parser.add_argument("--detect", action="store_true",
+                               help="只检测 workflow_failed 状态，不执行任何修改")
+        try:
+            bs_args = bs_parser.parse_args(sys.argv[3:])
+        except SystemExit:
+            # 无额外参数时 fallback（兼容旧用法）
+            bs_args = argparse.Namespace(change=change, resume=False, detect=False)
+
+        if bs_args.detect:
+            result = _bootstrap._detect_failed_state(change)
+        elif bs_args.resume:
+            # 先执行 resume 保留 snapshot，然后走 cli_bootstrap 完成后续初始化
+            reset_result = _bootstrap.cli_auto_reset(change, resume=True)
+            if reset_result.get("reset"):
+                result = _bootstrap.cli_bootstrap(change, resume=True)
+                result["auto_reset"] = reset_result
+            else:
+                result = _bootstrap.cli_bootstrap(change, resume=True)
+        else:
+            result = _bootstrap.cli_bootstrap(change)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 
     # ── reset 命令（独立命令，manual 入口，与 bootstrap 自动 reset 走同一函数）──
     # 默认场景：bootstrap 会自动检测 workflow_failed 并 reset，无需手动调用。
     # 本命令仅供编排器 / 排查场景需要显式 reset 时使用。
+    # 支持 --resume 参数：保留 snapshot 状态，仅重设为 running。
     if command == "reset":
-        result = _bootstrap.cli_auto_reset(change)
+        resume_flag = "--resume" in sys.argv[3:]
+        if resume_flag:
+            result = _bootstrap.cli_auto_reset(change, resume=True)
+        else:
+            result = _bootstrap.cli_auto_reset(change)
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return
 

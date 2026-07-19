@@ -53,7 +53,9 @@ test → dev → review → verify → gate
 ```bash
 RUNNER="python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py"
 
-$RUNNER bootstrap <change>
+$RUNNER bootstrap <change>                   # 正常启动 / 检测到失败时自动重置
+$RUNNER bootstrap <change> --detect          # 只检测失败状态，不修改文件
+$RUNNER bootstrap <change> --resume          # 从 workflow_failed 恢复，保留已完成 track
 $RUNNER next <change>
 $RUNNER record <change> --status <status> --report <path> --summary "<摘要>" [--outputs <p1>,<p2>] [--issues <i1>,<i2>] [--evidence <e1> [--evidence <e2> ...]] [--tasks-updated <t1> [--tasks-updated <t2> ...]]
   > **注意**：gate/final-gate 阶段的 `--summary` 必须包含 `gate_score: <0-100>`，例：`--summary "8/9 检查通过, gate_score: 91, p0_failures: []"`
@@ -61,8 +63,9 @@ $RUNNER progress <change>
 $RUNNER env-action <change> --phase prepare_env|clean_env --stage <stage> --env <env> [--timeout <seconds>]
 $RUNNER env-action-result <change> --phase prepare_env|clean_env --stage <stage> --env <env> --success true|false [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]
   注：--success 是布尔值 true|false，表示 hook 是否成功执行。
-      与 record 的 --status 字段（completed/failed/...）和 sub-agent 返回 JSON 的 status 字段含义都不同。
-  > **注意**：`--phase` 参数必须填 `prepare_env` 或 `clean_env`（不是 stage 名）
+      与 record 的 --status 字段（completed/failed/...）含义不同。
+$RUNNER reset <change>                       # 手动清除 terminal failed 状态
+$RUNNER reset <change> --resume              # 手动恢复（保留 snapshot，仅改 status 为 running）
 ```
 
 **status**: `completed | failed | escalate | pass | fail`
@@ -76,17 +79,20 @@ $RUNNER env-action-result <change> --phase prepare_env|clean_env --stage <stage>
 ```
 循环:
   0. $RUNNER bootstrap <change>  → 检查 response:
-       • ok: false         → workflow_failed（fatal=true）。**禁止自动修复**（如 git checkout），展示 error 给用户。
-       • ok: true + env_hook_plan=null → 进入 step 1
-       • ok: true + env_hook_plan ≠ null → bash 执行 plan.command，然后 env-action-result（phase 填 prepare_env/clean_env）→ 调 bootstrap 再次检查 env_hook_plan
+        • ok: false         → workflow_failed（fatal=true）。**禁止自动修复**（如 git checkout），展示 error 给用户。
+        • workflow_failed_detected: true → **检测到上次 pipeline 失败**。用 question tool 询问用户选择 Reset 或 Resume：
+          - 用户选 Reset → `$RUNNER bootstrap <change>`（无额外参数，清空状态从头开始）
+          - 用户选 Resume → `$RUNNER bootstrap <change> --resume`（保留已完成 track 状态，从失败处继续）
+        • ok: true + env_hook_plan=null → 进入 step 1
+        • ok: true + env_hook_plan ≠ null → bash 执行 plan.command，然后 env-action-result（phase 填 prepare_env/clean_env）→ 调 bootstrap 再次检查 env_hook_plan
   1. $RUNNER next <change>       → 检查 action 字段
   2. switch(action):
-       "env_switch"        → env-action → bash exec → env-action-result → 回 next
-       "dispatch"          → 派遣 sub-agent，传 dispatch_file 路径（不可修改）
-       "dispatch_final_gate" → 派遣 pg-build/gate agent
-       "advance"           → 回步骤 1
-       "done"              → 触发 verify-and-merge
-       "workflow_failed"   → 终止
+        "env_switch"        → env-action → bash exec → env-action-result → 回 next
+        "dispatch"          → 派遣 sub-agent，传 dispatch_file 路径（不可修改）
+        "dispatch_final_gate" → 派遣 pg-build/gate agent
+        "advance"           → 回步骤 1
+        "done"              → 触发 verify-and-merge
+        "workflow_failed"   → 终止
 ```
 
 ### 人工介入场景
@@ -132,6 +138,38 @@ python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py \
 **为何 severity 默认 fatal**：env hook 失败通常意味着环境异常，保守处理更安全；recoverable 是显式声明的"已知可恢复失败"，应由 hook 自身在 result.json 的 `severity` 字段中标注。
 
 **不自动修复原则**：任何 `ok: false` 或 `workflow_failed`（fatal=true）都不应触发编排器的自动修复行为——包括但不限于 git checkout、git branch 创建、文件修改、配置修改。编排器只输出错误信息给用户，由用户决定下一步操作。
+
+### Resume / Detect 协议（v3.10）
+
+当 `bootstrap <change>` 返回 `workflow_failed_detected: true` 时，编排器必须：
+
+1. **不要自动 reset** — 用 question tool 询问用户：
+
+```
+┌─────────────────────────────────────────────────────────┐
+│ 检测到上次 pipeline 因 int.scr:scenario-execute 失败     │
+│ 而终止。请选择恢复方式：                                 │
+│                                                         │
+│ ○ Reset（从头开始）— 清除所有状态，重新跑全部 track      │
+│ ● Resume（从失败处继续）— 保留已完成 track 状态          │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+2. 用户选择后：
+
+| 用户选择 | 编排器操作 | 效果 |
+|---------|-----------|------|
+| **Reset** | `$RUNNER bootstrap <change>` | 全量重置（删除 events + snapshot），从头开始 |
+| **Resume** | `$RUNNER bootstrap <change> --resume` | 保留 snapshot，仅将 status 从 "failed" 改为 "running" |
+
+3. Resume 后的行为：
+   - 已完成 track 的 `PhaseState` 保留在 snapshot 中
+   - `next()` 自动跳过已完成的 track，从第一个未完成的 phase 开始 dispatch
+   - 环境 hook 仍会执行（幂等）
+   - 所有 2-build/ 下的工件（dispatch files、reports、logs）保留
+
+**实现参考**：`bootstrap.py:_detect_failed_state`（只读检测）、`bootstrap.py:cli_auto_reset(resume=True)`（保留 snapshot）。
 
 ### Dispatch 协议
 

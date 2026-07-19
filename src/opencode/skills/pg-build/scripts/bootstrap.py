@@ -355,25 +355,26 @@ def maybe_bootstrap_init_commit(change: str, init_committed: bool) -> dict[str, 
 # ============================================================
 
 
-def cli_auto_reset(change: str) -> dict[str, Any]:
+def cli_auto_reset(change: str, *, resume: bool = False) -> dict[str, Any]:
     """检测 pipeline 是否处于 terminal failed 状态，自动清除 event_log + snapshot。
 
     触发条件（满足任一即 reset）：
       1. `2-build/pipeline.events` 的最后非空行为 `workflow_failed` 事件
       2. `2-build/pipeline.snapshot.json` 顶层 `status == "failed"`
 
-    只清除 `pipeline.events` 与 `pipeline.snapshot.json` 两个文件，
-    **保留** `2-build/` 下所有其他工件（dispatch files / result.json / report /
-    scenario.yaml / logs / 等）。git 状态完全不变，feature branch 上的提交不被触碰。
+    当 resume=True 时：
+      - 保留 snapshot，仅将 status 从 "failed" 改为 "running"
+      - 移除 event log 中最后一条 workflow_failed 事件
+      - 保留 2-build/ 下所有其他工件（同步已完成的 PhaseState）
+
+    当 resume=False 时（默认，当前行为）：
+      - 删除 pipeline.events 和 pipeline.snapshot.json
+      - 完整重置
 
     返回：
-      {"reset": True,  "reason": "...", "removed": ["events", "snapshot"]}
+      {"reset": True,  "reason": "...", "removed": [...]}
       或
       {"reset": False, "reason": "no terminal failed state"}
-
-    不修改任何 git 状态；不在 event log 中追加新事件（避免 reducer 重放时再次回到
-    terminal 状态）。调用方（如 cli_bootstrap）应在本函数返回 reset=True 后立即
-    走标准的 bootstrap → pipeline_started 流程。
     """
     build_dir = os.path.join(CHANGES_DIR, change, APPLY_DIR)
     events_path = os.path.join(build_dir, "pipeline.events")
@@ -387,12 +388,8 @@ def cli_auto_reset(change: str) -> dict[str, Any]:
         last_type = None
         try:
             with open(events_path, "r", encoding="utf-8", errors="replace") as fh:
-                # 从文件末尾往前读若干行（每行 JSON，UTF-8 多字节字符可能
-                # 跨块边界 — 用 errors="replace" 容错；最后 5 个非空行足够判定）
                 fh.seek(0, os.SEEK_END)
                 file_size = fh.tell()
-                # 直接读全文即可（event log 通常 < 几十 KB）；为简化逻辑，
-                # 取完整内容后取最后 5 个非空行
                 fh.seek(0)
                 content = fh.read()
                 tail_lines = [l.strip() for l in content.splitlines() if l.strip()][-5:]
@@ -408,13 +405,11 @@ def cli_auto_reset(change: str) -> dict[str, Any]:
         if last_type == "workflow_failed":
             trigger_reason = "event_log_last_workflow_failed"
 
-    # 条件 2：snapshot.status == "failed"（PipelineState.status 在 snapshot 顶层）
+    # 条件 2：snapshot.status == "failed"
     if not trigger_reason and os.path.isfile(snapshot_path):
         try:
             with open(snapshot_path, "r", encoding="utf-8") as fh:
                 snap = json.load(fh)
-            # snapshot 顶层 status 字段（state.status 是 reducer 重放状态，
-            # 用于在加载时的辅助检查；持久化字段以顶层为准）
             if snap.get("status") == "failed":
                 trigger_reason = "snapshot_status_failed"
         except (json.JSONDecodeError, KeyError, TypeError, OSError):
@@ -423,7 +418,36 @@ def cli_auto_reset(change: str) -> dict[str, Any]:
     if not trigger_reason:
         return {"reset": False, "reason": "no terminal failed state detected"}
 
-    # 执行 reset：只删 events + snapshot
+    if resume:
+        # ── Resume 模式：保留 snapshot，重置状态为 running ──
+        if os.path.isfile(snapshot_path):
+            with open(snapshot_path, "r", encoding="utf-8") as fh:
+                snap = json.load(fh)
+            snap["status"] = "running"
+            snap["failed_reason"] = None
+            with open(snapshot_path, "w", encoding="utf-8") as fh:
+                json.dump(snap, fh, indent=4, ensure_ascii=False)
+            removed.append("pipeline.snapshot.status reset to running")
+
+        # 只移除 event log 中最后一条 workflow_failed 事件
+        if os.path.isfile(events_path):
+            with open(events_path, "r", encoding="utf-8") as fh:
+                lines = [l for l in fh.read().splitlines() if l.strip()]
+            if lines:
+                try:
+                    last = json.loads(lines[-1])
+                    if last.get("type") == "workflow_failed":
+                        lines = lines[:-1]
+                except json.JSONDecodeError:
+                    pass
+                with open(events_path, "w", encoding="utf-8") as fh:
+                    for line in lines:
+                        fh.write(line + "\n")
+                removed.append("pipeline.events: removed last workflow_failed event")
+
+        return {"reset": True, "reason": f"{trigger_reason} (resume)", "removed": removed}
+
+    # ── 非 resume 模式：现有行为（删除 events + snapshot）──
     if os.path.isfile(events_path):
         os.remove(events_path)
         removed.append("pipeline.events")
@@ -432,6 +456,70 @@ def cli_auto_reset(change: str) -> dict[str, Any]:
         removed.append("pipeline.snapshot.json")
 
     return {"reset": True, "reason": trigger_reason, "removed": removed}
+
+
+def _detect_failed_state(change: str) -> dict[str, Any]:
+    """只读检测 pipeline 是否处于 terminal failed 状态。
+
+    与 cli_auto_reset 不同，本函数不修改任何文件。
+    用于编排器（LLM agent）在 bootstrap 前询问用户选择 reset 或 resume。
+
+    Returns:
+        检测到失败状态:
+          {"detected": True, "reason": "...", "last_track": "...", "last_phase": "..."}
+        未检测到:
+          {"detected": False, "reason": "no terminal failed state detected"}
+    """
+    build_dir = os.path.join(CHANGES_DIR, change, APPLY_DIR)
+    events_path = os.path.join(build_dir, "pipeline.events")
+    snapshot_path = os.path.join(build_dir, "pipeline.snapshot.json")
+
+    reason = ""
+    last_track = ""
+    last_phase = ""
+
+    # 条件 1：event log 最后一行是 workflow_failed
+    if os.path.isfile(events_path):
+        try:
+            with open(events_path, "r", encoding="utf-8", errors="replace") as fh:
+                fh.seek(0)
+                content = fh.read()
+                tail_lines = [l.strip() for l in content.splitlines() if l.strip()][-5:]
+                for line in tail_lines:
+                    try:
+                        evt = json.loads(line)
+                        if evt.get("type") == "workflow_failed":
+                            reason = "event_log_last_workflow_failed"
+                            detail = evt.get("detail", {})
+                            if isinstance(detail, dict):
+                                last_track = detail.get("track", detail.get("current_track", ""))
+                                last_phase = detail.get("phase", detail.get("current_phase", ""))
+                    except json.JSONDecodeError:
+                        continue
+        except OSError:
+            pass
+
+    # 条件 2：snapshot.status == "failed"
+    if not reason and os.path.isfile(snapshot_path):
+        try:
+            with open(snapshot_path, "r", encoding="utf-8") as fh:
+                snap = json.load(fh)
+            if snap.get("status") == "failed":
+                reason = "snapshot_status_failed"
+                last_track = snap.get("current_track", "")
+                last_phase = snap.get("current_phase", "")
+        except (json.JSONDecodeError, KeyError, TypeError, OSError):
+            pass
+
+    if not reason:
+        return {"detected": False, "reason": "no terminal failed state detected"}
+
+    return {
+        "detected": True,
+        "reason": reason,
+        "last_track": last_track,
+        "last_phase": last_phase,
+    }
 
 
 def _build_env_hook_plan(
@@ -852,12 +940,16 @@ def _inline_env_into_command(plan: dict[str, Any]) -> None:
         plan["command"] += f" > {shlex.quote(log_path)} 2>&1"
 
 
-def cli_bootstrap(change: str) -> dict[str, Any]:
+def cli_bootstrap(change: str, *, resume: bool = False) -> dict[str, Any]:
     """CLI 入口：执行 bootstrap 副作用（不含 env hook）+ 检测 pipeline 配置。
 
     v2.1.1 重构：
       - bootstrap 不再同步执行 prepare_env。env hook 拆到首次 `next()` 返回的
         `env_switch` action，由编排器按 plan 自己 bash 执行。
+
+    resume=True 时：
+      - 跳过 cli_auto_reset（已在 --resume 阶段执行）
+      - 跳过 ensure_feature_branch 和 auto_commit_on_init（已就绪）
 
     Returns:
         {
@@ -900,9 +992,12 @@ def cli_bootstrap(change: str) -> dict[str, Any]:
         #    让本次 bootstrap 能从干净状态重新开始。
         #    用户场景：scenario.yaml 等 SSOT 文件修改后重跑，避免 workflow_failed
         #    在 event log 里"卡死"pipeline。
-        auto_reset_result = cli_auto_reset(change)
-        if auto_reset_result.get("reset"):
-            result["auto_reset"] = auto_reset_result
+        if resume:
+            result["auto_reset"] = {"reset": True, "reason": "resume mode, skipped auto_reset"}
+        else:
+            auto_reset_result = cli_auto_reset(change)
+            if auto_reset_result.get("reset"):
+                result["auto_reset"] = auto_reset_result
     except Exception as e:
         result.setdefault("warnings", []).append(
             f"auto_reset failed (non-fatal): {e}"
@@ -928,12 +1023,13 @@ def cli_bootstrap(change: str) -> dict[str, Any]:
     except Exception as e:
         result["error"] = f"branch failed: {e}"
 
-    try:
-        init_commit = auto_commit_on_init(change)
-        if init_commit.get("committed") or init_commit.get("reason"):
-            result["init_commit"] = init_commit
-    except Exception as e:
-        result["error"] = f"init_commit failed: {e}"
+    if not resume:
+        try:
+            init_commit = auto_commit_on_init(change)
+            if init_commit.get("committed") or init_commit.get("reason"):
+                result["init_commit"] = init_commit
+        except Exception as e:
+            result["error"] = f"init_commit failed: {e}"
 
     try:
         plan = _build_env_hook_plan(change, "prepare_env")
