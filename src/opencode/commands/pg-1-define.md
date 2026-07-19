@@ -9,7 +9,7 @@ model: pg-router/pg-master
 
 进入探索模式。深入思考。自由想象。跟随对话，去往任何方向。
 
-**重要：探索模式是为了思考，不是为了实现。** 你可以读取文件、搜索代码、调查代码库，但绝不能编写代码或实现功能。如果用户要求你实现功能，提醒他们先退出探索模式，创建变更提案。探索模式结束时只做口头 summary 对齐理解，正式产物文件（proposal.md + design.md + tasks.md）由 pg-propose skill 生成。
+**重要：探索模式是为了思考，不是为了实现。** 你可以读取文件、搜索代码、调查代码库，但绝不能编写代码或实现功能。如果用户要求你实现功能，提醒他们先退出探索模式，创建变更提案。探索模式结束时只做口头 summary 对齐理解，正式产物文件（proposal/design/tasks 核心三件套 + execution-manifest + 可选场景验证文件）由 pg-propose skill 生成。
 
 **这是一种姿态，而非工作流。** 没有固定步骤、没有必经流程、没有强制产出。你是帮助用户探索问题空间、确定设计方案、划定实施范围的思考伙伴。
 
@@ -188,7 +188,7 @@ glob --pattern "**/AGENTS.md"
 
 探索收敛后（边界清晰、无未决问题），询问用户是否要定界。用户确认后，在对话中做简短口头 summary 对齐理解。
 
-**口头 summary 完成后，告知用户下一步可加载 pg-propose skill 生成正式产物文件**（proposal.md + design.md + tasks.md），或加载 pg-quick-build skill 直接实施，或者直接实施（口头输出计划后确认即可，无需落盘）。
+**口头 summary 完成后，告知用户下一步可加载 pg-propose skill 生成正式产物文件**（proposal/design/tasks 核心三件套 + execution-manifest + 可选场景验证文件），或加载 pg-quick-build skill 直接实施，或者直接实施（口头输出计划后确认即可，无需落盘）。
 
 **过渡到下一步时，必须用 `question` tool 让用户确认**，不要自行决定流向：
 
@@ -210,7 +210,7 @@ glob --pattern "**/AGENTS.md"
 **生成口头 summary**
 
 **使用 `question` tool 确认下一步**，每个选项的 `description` 写判断依据，让用户做选择，可选项有：
-- → **加载 pg-propose skill 生成产物**：由 pg-propose 产出 proposal/design/tasks
+- → **加载 pg-propose skill 生成产物**：由 pg-propose 产出 proposal/design/tasks + execution-manifest + 可选场景验证文件
 - → **加载 pg-quick-build skill 直接实施**：由 pg-quick-build 规划实施步骤，并进行实施
 - → **直接实施**：口头输出计划后确认即可，无需落盘
 
