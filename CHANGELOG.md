@@ -5,9 +5,45 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
-## [Unreleased]
-
 <!-- 下一版本在此累积 -->
+<!-- 将 VERSION 推进到 0.8.3，分析 git log / git diff，更新 CHANGELOG.md README.md -->
+
+## [0.8.3] - 2026-07-19
+
+### 新增
+
+- **pg-build 集成验证不可 SKIP**：基于 `stages[*].environment.required` 字段，集成验证环节不再允许被 SKIP，确保跨环境依赖必须满足才能继续 pipeline
+- **pg-propose 强制 API 端点文档完整性**：`design.md` 中的 API 端点定义必须包含完整的 Request/Response Body 结构，由 `pg-validate-proposal.py` 在校验阶段强制检查，缺失时输出 `api_endpoint_incomplete` 错误码
+- **pg-build scenario-fix drift.md 记录**：scenario-fix 在诊断后输出 `drift.md` 文档，记录 design 偏移、根因分析和修复方案，实现 scenario-fix 全流程可追溯
+- **pg-build scenario track 浏览器操作支持**：scenario-execute 中新增浏览器操作步骤（点击、输入、截图等），支持前端集成场景的自动化验证
+- **pg-build workflow_failed 后用户可选 reset/resume**：`workflow_failed` 状态下重新执行时，由用户选择是 reset（清空状态重来）还是 resume（从失败点继续），提升容错灵活性
+- **pg-build 启动前脏分支检查**：`pg-build` 启动前先检查当前分支是否不干净，脏分支时提示用户提交或 stash，避免意外覆盖
+- **AGENTS.md**：新增 AGENTS.md 文档，作为 pg-skills 的 AI 开发工作流共享能力层说明文档，涵盖架构概览、SSOT 规则、Agent 协议摘要、开发指南、错误排查等
+- **skills 介绍文档**：`docs/pg-skills.md` + 12 张 SVG 卡片（`docs/cards/`），系统介绍品构技能集的理念、痛点、支柱、SSOT、Hook 协议、上手流程等
+- **pg-propose 防御越界修改**：`pg-propose-review` 在修改时校验文件路径是否在 change 目录范围内，越界操作自动拒绝，保护项目其他文件不被意外修改
+- **pg-propose 移除日期前缀**：新建变更时不再自动添加日期前缀，变更目录名更简洁
+
+### 变更
+
+- **`build.injections` → `propose.injections` 重命名**：`project.schema.json` 及相关脚本中 `build.injections` 字段重命名为 `propose.injections`（propose 阶段注入，build 阶段消费），语义更准确
+- **`test_strategy` / `coding_standards` 字段清理**：`project.schema.json` 中移除废弃的 `test_strategy` 和 `coding_standards` 字段，减少配置噪声
+- **`project.schema.json` 废弃字段清理**：移除 `build.injections`（已重命名）、`test_strategy`、`coding_standards` 等废弃字段，schema 定义更精简
+- **pg-build SKILL 文档对齐**：SKILL.md 文档与实际 reducer 行为保持一致，修复文档与代码的偏差
+- **pg-1-define.md 更新**：`/1-pg-define` 命令文档更新，约束说明更清晰
+- **Python 3.7 兼容**：`pg-parse-config.py` 等脚本兼容 Python 3.7（移除 `rst` 依赖等）
+- **工具编辑器适配**：`tools/project-editor` 移除 `CodingStandardsSection.vue`、`TestStrategySection.vue` 及对应字段，与 `project.schema.json` 清理同步
+
+### 修复
+
+- **pg-build `git.default_branch` 配置读取**：修复 pg-build 读取 `git.default_branch` 配置时的键名解析错误
+- **测试脚本修复**：修复 `test_pg_parse_config_fix_issue.py`、`test_pg_parse_config_rules.py`、`test_prompt_injection.py`、`test_bootstrap.py`、`test_config.py` 等测试用例，适配 schema 变更
+
+### 备注
+
+- 影响面：75 个文件变更（+3943 / -809 LOC）。核心新增：集成验证不可 SKIP、API 端点强制完整性、drift.md 文档化、scenario track 浏览器操作、workflow_failed 用户选择 reset/resume、脏分支检查、AGENTS.md、skills 介绍文档
+- 破坏性：`build.injections` → `propose.injections` 重命名，既有 `.pg/project.yaml` 使用了 `build.injections` 的需更新为 `propose.injections`
+- `test_strategy` / `coding_standards` 字段移除，既有 `project.yaml` 中仍写这些字段不会报错但会被忽略
+- 20 commits，75 文件变更（+3943 / -809 LOC）。新增 9 个文件：`AGENTS.md`、`docs/pg-skills.md`、`docs/cards/` 下 12 张 SVG 卡片、`pg-build/prompt-templates/blocks/verify_mandatory.yaml`
 
 ## [0.8.3] - 2026-07-19
 
