@@ -62,7 +62,6 @@ prompt: |
 
   ### 触发 fix 循环
 
-  - score < escalate_threshold（默认 60） → 直接 workflow_failed
-  - pass_threshold（默认 80）≤ score < escalate_threshold → escalate 走 fix-review 循环
+  - score < pass_threshold → 一律 escalate 走 fix-review 循环（代码不会自愈，review 重试无意义）
   - score ≥ pass_threshold → completed → 进入 verify
   - **⚠️ P0 implementation_completeness FAIL**：即使 score ≥ pass_threshold，reducer 也会强制走 fix-review 循环（这是 v3.x 的硬约束，绕过 review_score 的兜底）

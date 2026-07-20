@@ -497,7 +497,7 @@ def _handle_review(
 
     - STATUS_COMPLETED → dispatch verify
     - STATUS_ESCALATE  → 创建 review-cycle 子 pipeline（独立计数 review_fix_cycles）
-    - STATUS_FAILED    → attempt++ 重试，耗尽进 workflow_failed
+    - STATUS_FAILED    → attempt++ 重试，耗尽进 workflow_failed（仅用于 agent 异常/崩溃场景）
 
     v3.x: 即使 sub-agent 返回 status=completed，若 summary.p0_failures 含
     `implementation_completeness`，仍强制 escalate（绕过 score pass）—— 防止

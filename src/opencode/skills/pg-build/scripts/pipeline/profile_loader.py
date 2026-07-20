@@ -8,7 +8,7 @@
 5. Union 合并多个 profile：检查项并集 + weight=max + threshold=min
 
 数据模型：
-- Profile(name, language, checks: dict[str, CheckConfig], pass_threshold, escalate_threshold)
+- Profile(name, language, checks: dict[str, CheckConfig], pass_threshold)
 - CheckConfig(enabled, weight, doc)  # doc 指向 markdown 路径
 """
 
@@ -57,7 +57,6 @@ class Profile:
     inherit: str = ""   # 父 profile 名（chain merge）
     checks: tuple[tuple[str, CheckConfig], ...] = ()  # 有序 dict
     pass_threshold: int = 80
-    escalate_threshold: int = 60
 
     def get_check(self, name: str) -> CheckConfig | None:
         for n, c in self.checks:
@@ -75,7 +74,6 @@ class Profile:
             "inherit": self.inherit,
             "checks": {n: dataclasses.asdict(c) for n, c in self.checks},
             "pass_threshold": self.pass_threshold,
-            "escalate_threshold": self.escalate_threshold,
         }
 
     def p0_check_names(self) -> tuple[str, ...]:
@@ -138,7 +136,6 @@ def _parse_profile(name: str, raw: dict[str, Any]) -> Profile:
         inherit=str(raw.get("inherit", "")),
         checks=checks,
         pass_threshold=int(raw.get("pass_threshold", 80)),
-        escalate_threshold=int(raw.get("escalate_threshold", 60)),
     )
 
 
@@ -246,7 +243,6 @@ def load_effective_profile(
     Union 语义：
       - checks: 并集（包含 inherit 链），weight 取 max，enabled 取 OR
       - pass_threshold: 只取用户显式 profile_names 的 min（不继承自 default）
-      - escalate_threshold: 同上
       - inherit 链：展开以收集所有 check 项
 
     设计理由：threshold 是"严格度"指标，default profile 的 80 不应稀释
@@ -297,16 +293,12 @@ def load_effective_profile(
 
     # Step 4: threshold 只用 explicit_loaded 的 min（不含 default inherit）
     pass_th = 100
-    esc_th = 100
     for prof in explicit_loaded:
         pass_th = min(pass_th, prof.pass_threshold)
-        esc_th = min(esc_th, prof.escalate_threshold)
 
     # fallback
     if pass_th == 100:
         pass_th = 80
-    if esc_th == 100:
-        esc_th = 60
 
     effective_name = profile_names[0]
 
@@ -316,7 +308,6 @@ def load_effective_profile(
         inherit="",
         checks=tuple(merged_checks.items()),
         pass_threshold=pass_th,
-        escalate_threshold=esc_th,
     )
 
 
@@ -377,15 +368,13 @@ def compute_review_score(
 def decide_review_disposition(
     profile: Profile, review_score: int,
 ) -> str:
-    """根据 score 与 threshold 决定 disposition。
+    """根据 score 与 pass_threshold 决定 disposition。
 
-    返回值：
-      - "completed": score ≥ pass_threshold → 进入 verify
-      - "escalate": pass_threshold > score ≥ escalate_threshold → fix-review
-      - "failed": score < escalate_threshold → workflow_failed
+    score < pass_threshold → 一律 escalate（代码不会自愈，review 重试无意义，直接走 fix-review）
+    score ≥ pass_threshold → completed → 进入 verify
+
+    注意：P0 implementation_completeness 的兜底在 reducer 层处理。
     """
     if review_score >= profile.pass_threshold:
         return "completed"
-    if review_score >= profile.escalate_threshold:
-        return "escalate"
-    return "failed"
+    return "escalate"

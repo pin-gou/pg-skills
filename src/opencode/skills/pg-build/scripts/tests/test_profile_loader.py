@@ -152,7 +152,6 @@ class TestLoadEffectiveProfile(unittest.TestCase):
         p = load_effective_profile(self.tmp, ["default"])
         self.assertIn("design_alignment", p.check_names())
         self.assertEqual(p.pass_threshold, 80)
-        self.assertEqual(p.escalate_threshold, 60)
 
     def test_union_two_profiles(self):
         p = load_effective_profile(self.tmp, ["security", "java-spring"])
@@ -165,7 +164,6 @@ class TestLoadEffectiveProfile(unittest.TestCase):
         self.assertIn("pattern_consistency", names)
         # threshold 不被 default 稀释
         self.assertEqual(p.pass_threshold, 85)  # min(90, 85)
-        self.assertEqual(p.escalate_threshold, 60)  # min(70, 60)
 
     def test_union_weight_max(self):
         # pattern_consistency: default 不定义，java-spring 定义 weight=20
@@ -390,19 +388,14 @@ class TestComputeReviewScore(unittest.TestCase):
 
 class TestDecideReviewDisposition(unittest.TestCase):
     def test_completed_above_pass_threshold(self):
-        p = Profile(name="x", pass_threshold=80, escalate_threshold=60)
+        p = Profile(name="x", pass_threshold=80)
         self.assertEqual(decide_review_disposition(p, 80), "completed")
         self.assertEqual(decide_review_disposition(p, 100), "completed")
 
-    def test_escalate_between_thresholds(self):
-        p = Profile(name="x", pass_threshold=80, escalate_threshold=60)
+    def test_escalate_below_pass_threshold(self):
+        p = Profile(name="x", pass_threshold=80)
         self.assertEqual(decide_review_disposition(p, 79), "escalate")
-        self.assertEqual(decide_review_disposition(p, 60), "escalate")
-
-    def test_failed_below_escalate_threshold(self):
-        p = Profile(name="x", pass_threshold=80, escalate_threshold=60)
-        self.assertEqual(decide_review_disposition(p, 59), "failed")
-        self.assertEqual(decide_review_disposition(p, 0), "failed")
+        self.assertEqual(decide_review_disposition(p, 0), "escalate")
 
 
 if __name__ == "__main__":
