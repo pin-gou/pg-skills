@@ -1036,7 +1036,7 @@ def cli_bootstrap(change: str, *, resume: bool = False) -> dict[str, Any]:
         # 检查当前 stage 是否已准备就绪（避免重复执行 prepare_env）
         from pipeline.snapshot import load_snapshot
         from pipeline.state import PipelineState
-        _snap = load_snapshot(os.path.join(CHANGES_DIR, change, APPLY_DIR))
+        _snap = load_snapshot(os.path.join(CHANGES_DIR, change))
         if _snap and _snap.current_stage in _snap.stage_prepared:
             result["env_hook_plan"] = None
         else:
