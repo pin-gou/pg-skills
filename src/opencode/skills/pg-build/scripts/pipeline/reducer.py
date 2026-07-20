@@ -155,8 +155,16 @@ def _fail_action(state: PipelineState, track: str, phase: str, reason: str) -> t
 
 def _dispatch_action(
     track: str, phase: str, cycle: int = 1, attempt: int = 1,
+    **detail_kw: Any,
 ) -> PipelineAction:
-    """构建 dispatch action。"""
+    """构建 dispatch action。
+
+    v3.11: 支持 **detail_kw 注入额外字段到 action.detail，
+    如 gate_reason、gate_summary 等，供编排器区分"正常完成"和"耗尽后强制完成"。
+    """
+    detail: dict[str, Any] = {}
+    if detail_kw:
+        detail.update(detail_kw)
     return PipelineAction(
         kind="dispatch",
         track=track,
@@ -164,6 +172,7 @@ def _dispatch_action(
         cycle=cycle,
         attempt=attempt,
         agent=PHASE_AGENTS.get(phase, ""),
+        detail=detail,
     )
 
 
@@ -415,12 +424,16 @@ def _handle_verify(
                 current_track=track,
                 current_phase="gate",
             )
-            return new_state, _dispatch_action(track, "gate", cycle=1)
+            return new_state, _dispatch_action(track, "gate", cycle=1,
+                                                gate_reason="fix_cycles_exhausted",
+                                                gate_summary=f"fix cycles exhausted ({fix_cycles}/{max_fix_loops}), force gate")
 
         # 创建 fix 子 pipeline
         # P0-A (v2.7)：从 record + verify phase 抽取父上下文，
         # 注入到 fix dispatch 的 {verify_report_path}/{reason}/{failed_at}/{source} 占位符。
-        verify_report_path = verify.report_path or ""
+        # v3.11: 优先使用 record.report_path（当前 verify agent 刚写入的报告路径），
+        # fallback 到 verify phase 中已保存的 report_path，确保首次 escalate 也能注入。
+        verify_report_path = record.report_path or verify.report_path or ""
         # failed_v_tasks 优先从 verify 报告 markdown 中解析（更可靠），
         # fallback 到 record.tasks_updated。
         failed_v = extract_failed_v_tasks(verify_report_path) if verify_report_path else []

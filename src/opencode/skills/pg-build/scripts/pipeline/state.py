@@ -128,6 +128,10 @@ class TrackState:
     # summary 写 '<phase> disabled by manifest (no phase_prompts.<phase>)'。
     verify_enabled: bool = True
     gate_enabled: bool = True
+    # v3.11 新增：verify agent 的失败报告模式
+    # "fail-fast"（默认）：遇到第一个 FAIL 立即 escalate
+    # "accumulate"：收集所有 FAIL 后一次性 escalate
+    verify_failure_mode: str = "fail-fast"
 
     # 富化上下文（由 _first_next 从 project.yaml 预填充）
     module_roots: str = ""               # "[webvirt-backend, webvirt-agent-proto]"
@@ -181,6 +185,7 @@ class TrackState:
             "code_review_languages": list(self.code_review_languages),
             "verify_enabled": self.verify_enabled,
             "gate_enabled": self.gate_enabled,
+            "verify_failure_mode": self.verify_failure_mode,
         }
 
     @classmethod
@@ -223,6 +228,7 @@ class TrackState:
             code_review_languages=tuple(d.get("code_review_languages", ())),
             verify_enabled=d.get("verify_enabled", True),
             gate_enabled=d.get("gate_enabled", True),
+            verify_failure_mode=d.get("verify_failure_mode", "fail-fast"),
         )
 
     def replace(self, **kwargs: Any) -> "TrackState":

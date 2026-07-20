@@ -903,6 +903,7 @@ def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
                 track_configs[tid].setdefault("type", cfg.get("type", "standard"))
                 track_configs[tid].setdefault("description", cfg.get("description", ""))
                 track_configs[tid].setdefault("timeout_seconds", cfg.get("timeout_seconds", 1800))
+                track_configs[tid].setdefault("verify_failure_mode", cfg.get("verify_failure_mode", "fail-fast"))
         except Exception:
             pass
 
@@ -1032,14 +1033,21 @@ def cli_bootstrap(change: str, *, resume: bool = False) -> dict[str, Any]:
             result["error"] = f"init_commit failed: {e}"
 
     try:
-        plan = _build_env_hook_plan(change, "prepare_env")
-        if not plan.get("ok"):
-            result["ok"] = False
-            result["error"] = plan.get("error", "plan build failed")
-        elif not plan.get("skipped"):
-            _inline_env_into_command(plan)
-            plan_for_orchestrator = {k: v for k, v in plan.items() if k != "env"}
-            result["env_hook_plan"] = plan_for_orchestrator
+        # 检查当前 stage 是否已准备就绪（避免重复执行 prepare_env）
+        from pipeline.snapshot import load_snapshot
+        from pipeline.state import PipelineState
+        _snap = load_snapshot(os.path.join(CHANGES_DIR, change, APPLY_DIR))
+        if _snap and _snap.current_stage in _snap.stage_prepared:
+            result["env_hook_plan"] = None
+        else:
+            plan = _build_env_hook_plan(change, "prepare_env")
+            if not plan.get("ok"):
+                result["ok"] = False
+                result["error"] = plan.get("error", "plan build failed")
+            elif not plan.get("skipped"):
+                _inline_env_into_command(plan)
+                plan_for_orchestrator = {k: v for k, v in plan.items() if k != "env"}
+                result["env_hook_plan"] = plan_for_orchestrator
     except Exception as e:
         result["ok"] = False
         result["error"] = f"plan build exception: {e}"

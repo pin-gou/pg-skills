@@ -354,6 +354,8 @@ def build_ctx(
         "source": "",
         "escalation_reason": "",
         "failed_v_tasks_inline": "",
+        # v3.11: verify 失败报告模式
+        "verify_failure_mode": t.verify_failure_mode if hasattr(t, 'verify_failure_mode') else "fail-fast",
     }
 
     # === P0-A (v2.7)：从 current_sub_pipeline 注入父报告路径 + ROLLBACK 上下文 ===

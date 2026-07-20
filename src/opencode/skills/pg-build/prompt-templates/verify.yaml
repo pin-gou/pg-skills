@@ -43,3 +43,16 @@ prompt: |
   完成验证后，自行用 cat > 写盘到 2-build/{report_filename}。
   格式：Markdown，包含每项验证的结论（PASS / FAIL）及证据。
   **必须**含"实现完整性核查"段，含上面 3 个检查命令的输出与判定。
+
+{% if verify_failure_mode == "fail-fast" %}
+   ### 验证策略：fail-fast（默认）
+   遇到第一个 FAIL 的 V-* 验证项时，立即返回 escalate。
+   不要在失败后继续验证后续项——后续项可能因前置条件不满足而误报 FAIL。
+   返回前在 tasks_updated 中记录本次发现的 FAIL 项。
+{% elif verify_failure_mode == "accumulate" %}
+   ### 验证策略：accumulate（收集模式）
+   对所有 V-* 验证项逐一执行，无论是否失败。
+   将全部 FAIL 项汇总到 tasks_updated 中，一次性返回 escalate。
+   这样 fix agent 可以一次修复所有问题，减少 fix cycle 轮数。
+   注意：确保每个 V-* 项独立执行，不因前置项失败而跳过后续项。
+{% endif %}

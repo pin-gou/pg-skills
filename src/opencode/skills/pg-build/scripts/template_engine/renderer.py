@@ -47,9 +47,70 @@ PHASES_WITHOUT_ENV: frozenset[str] = frozenset({"test", "gate", "simple", "final
 
 
 def _load_yaml(path: str) -> dict[str, Any]:
+    """Load a YAML file that may contain Jinja2 template blocks.
+
+    Handles two formats:
+    1. YAML frontmatter (--- ... ---) + Jinja2 template body — extract frontmatter only
+    2. Pure YAML with {placeholder} strings — safe_load works fine
+    3. Mixed YAML + Jinja2 tags ({%%}/{{}}) — safe_load would fail on the Jinja2,
+       so we fall back to a simple key: value regex extractor for the YAML frontmatter
+       portion (everything before the first block scalar | or >).
+    """
     import yaml as _yaml
-    with open(path, encoding="utf-8") as f:
-        return _yaml.safe_load(f) or {}
+    import re as _re
+    with open(path, encoding="utf-8-sig") as f:
+        raw = f.read()
+
+    # Strip BOM already handled by utf-8-sig open
+    stripped = raw.lstrip("\r\n")
+
+    # Format 1: YAML frontmatter --- ... ---
+    if stripped.startswith("---"):
+        end = stripped.find("\n---", 3)
+        if end >= 0:
+            frontmatter = stripped[3:end].strip()
+            if frontmatter:
+                return _yaml.safe_load(frontmatter) or {}
+            return {}
+
+    # Format 2: standard YAML (no Jinja2 or Jinja2 only in scalar strings)
+    # yaml.safe_load handles {placeholder} inside | blocks fine
+    try:
+        result = _yaml.safe_load(raw)
+        if isinstance(result, dict):
+            return result
+        # If safe_load returns a string, it means the YAML parser stopped at
+        # a Jinja2 tag and consumed everything after as a scalar string.
+        # Fall through to frontmatter extraction.
+    except Exception:
+        pass
+
+    # Format 3: Mixed YAML + Jinja2 — extract key: value pairs before the first
+    # block scalar (| or >) or first indented line after a Jinja2 tag.
+    # We do a simple regex scan for "key: value" lines in the first non-comment,
+    # non-blank portion of the file.
+    frontmatter_lines = []
+    for line in raw.splitlines():
+        ls = line.lstrip()
+        # Stop at block scalar marker or indented content (prompt body)
+        if ls.startswith("|") or ls.startswith(">"):
+            break
+        # Stop at first indented non-Jinja line after YAML keys (prompt body starts)
+        if frontmatter_lines and ls and not ls.startswith("#") and not ls.startswith("{"):
+            # Check if it looks like YAML continuation (indented under a key)
+            if line.startswith(" ") or line.startswith("\t"):
+                break
+        if ls and not ls.startswith("#"):
+            frontmatter_lines.append(line.rstrip())
+
+    fm_text = "\n".join(frontmatter_lines)
+    if fm_text.strip():
+        try:
+            return _yaml.safe_load(fm_text) or {}
+        except Exception:
+            pass
+
+    return {}
 
 
 def _safe_format(text: str, ctx: dict[str, Any]) -> str:
