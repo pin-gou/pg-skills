@@ -396,6 +396,56 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <p style="margin:0">这 4 个支柱就是后续章节的目录骨架：§3 讲 <strong>支柱 3（环境归零）</strong>、§4 讲 <strong>支柱 1+4（出生证明 + 门控）</strong>、§5 讲<strong>支柱 4 的 fix-issue 路径</strong>、§6 讲<strong>支柱 2 的回归闭环</strong>。</p>
 </div>
 
+<div class="subsection-card">
+<h2 style="margin-top:16px">使用 pg-skills 的日常体感</h2>
+<p>这是开发者用 pg-skills 跑一个 change（一次变更）时，时间线上大致发生的事：</p>
+
+<ol style="padding-left:20px; margin:8px 0">
+  <li style="margin:12px 0"><strong><code>/1-pg-define</code> — 约 20 分钟</strong><br>
+  跟 AI 对齐"这次变更要做什么 / 不做什么 / 边界在哪"<br>
+  <span style="font-size:13px;color:var(--muted)">产出：清晰的范围定义（写入 .pg/context/）</span></li>
+
+  <li style="margin:12px 0"><strong><code>/2-pg-propose</code> — 自动</strong><br>
+  按定义生成完整的 spec 链路：
+  <ul style="font-size:13px;color:var(--muted);margin:4px 0">
+    <li><code>proposal.md</code> — 这次变更为什么做、做什么</li>
+    <li><code>design.md</code> — 技术方案</li>
+    <li><code>tasks.md</code> — 任务拆分（每个任务 2-5 分钟可完成粒度）</li>
+    <li><code>execution-manifest.yaml</code> — 本次执行的 SSOT</li>
+    <li><code>scenario-&lt;track&gt;.yaml</code> — 真实环境 E2E 场景定义</li>
+  </ul></li>
+
+  <li style="margin:12px 0"><strong><code>/3-pg-build</code> — 1-8 小时（取决于变更规模）· 无人工干预</strong><br>
+  编排器自动跑完：
+  <ul style="font-size:13px;color:var(--muted);margin:4px 0">
+    <li>自动准备环境（按 manifest 的 stage→env 映射调 hook）</li>
+    <li>自动写失败的测试（TDD 红 phase，确认真的失败后才进入实现）</li>
+    <li>自动写实现代码 · 自动做代码 Review</li>
+    <li>自动门控检查（gate + final-gate）</li>
+    <li>真实场景验证（Scenario 真起 dev/staging 环境跑端到端）</li>
+  </ul>
+  <span style="font-size:13px;color:var(--muted)">跑完直接产出一个可以验收的 change。</span></li>
+
+  <li style="margin:12px 0"><strong>你验收 — 几分钟</strong><br>
+  <span style="font-size:13px;color:var(--muted)">大多数情况下（约 80%）一次就达到预期，直接合并；<br>
+  剩余约 20% 的情况，AI 的产出跟预期有偏差——你用 vibecoding（人机对话微调）做细微调整即可达到预期。</span></li>
+</ol>
+
+<div class="card" style="margin-top:8px">
+  <p style="margin:0"><strong>长期迭代回路</strong>：跑完一轮后，产品上线不是终点。pg-skills 还有两条自动回路：</p>
+  <ul style="margin:8px 0 0; padding-left:20px">
+    <li><strong>自动回归</strong>：<code>/4-pg-regression &lt;suite&gt;</code> 选定测试套件，自动初始化环境跑回归，对失败的测试自动修复脚本（不创建 PR），对失败的生产代码自动修复并创建 PR 给你审；</li>
+    <li><strong>Bug 修复</strong>：<code>/5-pg-fix-issue</code> 拿到 bug 描述后，按 propose → build 同款流程产出修复 patch。</li>
+  </ul>
+  <p style="margin:8px 0 0"><strong>开发者要做的两件事</strong>：</p>
+  <ol style="margin:4px 0 0; padding-left:20px">
+    <li><strong>定义每个 change 的边界</strong>（用 <code>/1-pg-define</code> 想清楚要做什么 / 不做什么）；</li>
+    <li><strong>验收每个 change 的结果</strong>（看 build 产物是否符合预期，不符合就 vibecoding 微调；之后审 <code>/4-pg-regression</code> 提的 PR 即可）。</li>
+  </ol>
+  <p style="margin-top:8px; font-style:italic; color:var(--primary)">中间那 1-8 小时的实现 + 验证过程，全部由 pg-skills 在事件溯源 pipeline 引擎上跑完——<strong>人不参与</strong>。</p>
+</div>
+</div>
+
 <h2>1.4 AI 在每一步的角色</h2>
 
 <p>「让 AI 写出可托付的代码」——这里「<strong>写出</strong>」二字要分开看：</p>
@@ -2270,10 +2320,33 @@ document.querySelectorAll('.checklist input[type="checkbox"]').forEach(cb => {
   });
 });
 
-// Show first section by default
-sections.forEach((s, i) => {
-  s.classList.toggle('active', i === 0);
-});
+// Show section based on URL hash, or first section by default
+function navigateToHash() {
+  const hash = window.location.hash.slice(1);
+  if (!hash) {
+    sections.forEach((s, i) => s.classList.toggle('active', i === 0));
+    return;
+  }
+  const target = document.getElementById(hash);
+  if (!target) {
+    sections.forEach((s, i) => s.classList.toggle('active', i === 0));
+    return;
+  }
+  const parentSection = target.closest('.section');
+  sections.forEach(s => s.classList.remove('active'));
+  if (parentSection) parentSection.classList.add('active');
+  target.classList.add('active');
+  navLinks.forEach(l => {
+    l.classList.remove('active');
+    if (l.getAttribute('href') === '#' + hash) l.classList.add('active');
+  });
+  setTimeout(() => {
+    const y = target.getBoundingClientRect().top + window.scrollY - 80;
+    window.scrollTo({ top: y, behavior: 'smooth' });
+  }, 50);
+}
+
+navigateToHash();
 </script>
 </body>
 </html>
