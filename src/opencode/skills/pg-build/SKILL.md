@@ -91,7 +91,7 @@ $RUNNER reset <change> --resume              # 手动恢复（保留 snapshot，
   1. $RUNNER next <change>       → 检查 action 字段
   2. switch(action):
         "env_switch"        → env-action → bash exec → env-action-result → 回 next
-        "dispatch"          → 派遣 sub-agent，传 dispatch_file 路径（不可修改）
+        "dispatch"          → 派遣 sub-agent（`agent` 字段指定 agent 类型），传 dispatch_file 路径（不可修改）
         "dispatch_final_gate" → 派遣 pg-build/gate agent
         "advance"           → 回步骤 1
         "done"              → 触发 verify-and-merge
@@ -178,10 +178,12 @@ python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py \
 
 ### Dispatch 协议
 
-runner 返回 dispatch action 带 `dispatch_file` 字段。编排器：
+runner 返回 dispatch action 带 `dispatch_file` 和 `agent` 字段。编排器：
 1. **绝不允许读取 dispatch_file 内容**。只需把文件路径传给 sub-agent。
-2. 正确用法：`task(prompt="读取 {dispatch_file} 并执行任务，完成后用 pg-build-result 脚本生成返回 JSON")`。
+2. `agent` 字段指定 sub-agent 类型（如 `pg-build/review`），**必须** 作为 `task` 工具的 `subagent_type` 参数严格使用，禁止替换为其他 agent。
+3. 正确用法：`task(subagent_type="pg-build/review", prompt="读取 {dispatch_file} 并执行任务，完成后用 pg-build-result 脚本生成返回 JSON")`，其中 `subagent_type` 的值从 `next()` 返回的 `agent` 字段直接读取。
    错误用法：调用 task 工具时，提示词的内容比 `读取 {dispatch_file} 并执行任务，完成后用 pg-build-result 脚本生成返回 JSON` 更多，比如将 `dispatch_file` 进行摘要后放在提示词里。sub agent 会自己阅读 dispatch_file 全文，编排器不要对提示词做无意义的修改。
+4. **如果指定 agent 派遣失败**（sub-agent 返回 `status: failed`），**禁止** 替换为其他 agent 类型重新派遣。应调用 `record --status failed --summary "<原因>"` 回报 pipeline，由 reducer 按 `max_fail_retries` 协议自动重试。
 
 ### Sub-agent 返回契约
 
