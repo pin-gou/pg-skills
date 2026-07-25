@@ -13,7 +13,7 @@ version: 1
 # 合并策略：Union
 #   - checks: 并集，weight 取 max，enabled 取 OR
 #   - pass_threshold: 取 min（更严格）
-#   - escalate_threshold: 取 min（更严格）
+
 
 profiles:
 
@@ -44,7 +44,6 @@ profiles:
         weight: 10
         doc: test_contract
     pass_threshold: 80
-    escalate_threshold: 60
 
   # ============================================================
   # Java Spring profile（自动派发：language=java/kotlin/scala）
@@ -117,4 +116,3 @@ profiles:
         weight: 10
         doc: error_silence
     pass_threshold: 90
-    escalate_threshold: 70

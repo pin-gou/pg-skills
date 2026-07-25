@@ -542,7 +542,7 @@ def format_section_body(section: dict, change_name: str = "<change>") -> str:
             f"- [ ] {section['n']}.1 review agent 读 design.md + tasks.md + .pg/code-review/code-review.yaml 细则\n"
             f"- [ ] {section['n']}.2 review agent 对 git diff feat/pg/{change_name} 做静态审查\n"
             f"- [ ] {section['n']}.3 review agent 输出 review_score + p0_failures 到本 section 对应的 review 报告（路径由 dispatch 注入）\n"
-            f"- [ ] {section['n']}.4 score < pass_threshold → escalate 至 fix-review；score < escalate_threshold → workflow_failed"
+            f"- [ ] {section['n']}.4 score < pass_threshold → escalate 至 fix-review；score ≥ pass_threshold → completed → 进入 verify"
         )
     if section["sub"] == "verify":
         return f"- [ ] {section['n']}.1 执行 lint（runner 通过 modules 注入命令）\n" \

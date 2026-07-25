@@ -439,7 +439,6 @@ profiles:
   default:           # 兜底
     checks: { design_alignment: ..., scope_creep: ..., ... }
     pass_threshold: 80
-    escalate_threshold: 60
   java-spring:       # 语言 profile（自动派发）
     inherit: default
     checks: { pattern_consistency: ..., null_safety: ... }
@@ -465,7 +464,7 @@ profiles:
 | `checks` | 并集（包含 inherit 链） |
 | `weight` | `max(各 profile 同名项)` |
 | `enabled` | `OR`（任一为 true 即 true） |
-| `pass_threshold` / `escalate_threshold` | `min`（更严格）— **仅取显式 profile，不含 inherit 链** |
+| `pass_threshold` | `min`（更严格）— **仅取显式 profile，不含 inherit 链** |
 
 ### Track 配置
 
@@ -511,31 +510,9 @@ review_score: <0-100>, p0_failures: [R-1, R-3]
 | review_score 范围 | disposition | 下一步 |
 |--------------|-------------|--------|
 | ≥ pass_threshold | `completed` | → verify |
-| escalate_threshold ≤ score < pass | `escalate` | → fix-review 循环（独立计数 `review_fix_cycles`） |
-| < escalate_threshold | `failed` | → reducer 自动重试 review phase（同 dispatch_file，`attempt++`，`attempt ≤ max_fail_retries`），耗尽 → `workflow_failed` |
+| < pass_threshold | `escalate` | → fix-review 循环（独立计数 `review_fix_cycles`） |
 
-### review failed 重试协议
 
-`status=failed` 触发 reducer 自动重试，与 verify/test/dev failed 复用同一 `attempt` 计数器（来自 `PhaseState.attempt`）：
-
-| Attempt | reducer 行为 | next 返回 |
-|---------|------------|-----------|
-| 1 → 2 | `attempt++`，dispatch 同 phase（`dispatch_file` 不变，`cycle` 不变） | `dispatch` 同一 phase，`attempt: 2` |
-| 2 → 3 | 同上 | 同上 |
-| `attempt > max_fail_retries` | `workflow_failed` | `workflow_failed` |
-
-**与 fix-review 循环的区别**：
-
-| 维度 | review failed 重试 | review escalate 修复 |
-|------|---------------------|----------------------|
-| 触发 | `status=failed`（score < escalate_threshold） | `status=escalate`（score ≥ escalate_threshold） |
-| 计数字段 | `PhaseState.attempt`（与 verify/test/dev 共享） | `review_fix_cycles`（独立计数） |
-| 子 agent | 同 dispatch_file 重派 | `pg-build/fix-review` agent |
-| 终止 | `attempt > max_fail_retries` → `workflow_failed` | `review_fix_cycles >= max_review_fix_retries` → force verify |
-
-**reducer 实现位置**：`scripts/pipeline/reducer.py:591-601` (`_handle_review` 的 `STATUS_FAILED` 分支)。
-
-**测试覆盖**：`scripts/tests/test_reducer.py::test_review_failed_retries` + `test_review_failed_retries_within_limit`。
 
 ### fix-review 循环
 

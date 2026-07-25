@@ -132,14 +132,12 @@ class TestLoadEffectiveProfile(unittest.TestCase):
                   design_alignment:    { enabled: true, weight: 30, doc: design_alignment }
                   scope_creep:         { enabled: true, weight: 25, doc: scope_creep }
                 pass_threshold: 80
-                escalate_threshold: 60
               security:
                 language: any
                 checks:
                   secret_leak: { enabled: true, weight: 25, doc: secret_leak }
                   auth_bypass: { enabled: true, weight: 20, doc: auth_bypass }
                 pass_threshold: 90
-                escalate_threshold: 70
               java-spring:
                 inherit: default
                 language: java

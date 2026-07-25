@@ -112,8 +112,7 @@ review_score = sum(weight for enabled & pass) / sum(weight for enabled) * 100
 | review_score vs threshold | disposition | 状态 |
 |----------------------|-------------|------|
 | score ≥ pass_threshold | completed | 进入 verify |
-| pass > score ≥ escalate | escalate | 触发 fix-review 循环 |
-| score < escalate | failed | workflow_failed |
+| score < pass_threshold | escalate | 触发 fix-review 循环 |
 
 ### 6. 输出报告
 
@@ -126,7 +125,7 @@ review_score = sum(weight for enabled & pass) / sum(weight for enabled) * 100
 |--------|-------|
 | review_score | {score} |
 | pass_threshold | {profile.pass_threshold} |
-| escalate_threshold | {profile.escalate_threshold} |
+
 | disposition | {completed/escalate/failed} |
 
 ## Profile

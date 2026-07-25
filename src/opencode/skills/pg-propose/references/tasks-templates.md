@@ -240,7 +240,7 @@ v3.x 起，仅当 `tracks.<id>.code_review_enabled=true` 时此章节才出现�
 - [ ] {N}.1 review agent 读 design.md + tasks.md + .pg/code-review/code-review.yaml 细则
 - [ ] {N}.2 review agent 对 git diff feat/pg/{change} 做静态审查
 - [ ] {N}.3 review agent 输出 review_score + p0_failures 到 2-build/{seq}-{track_id}-review.md
-- [ ] {N}.4 score < pass_threshold → escalate 至 fix-review；score < escalate_threshold → workflow_failed
+- [ ] {N}.4 score < pass_threshold → escalate 至 fix-review；score ≥ pass_threshold → completed → 进入 verify
 ```
 
 **禁止**：
