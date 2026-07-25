@@ -52,6 +52,47 @@ skeleton 中的"sentinel"占位符，LLM 编辑时**必须**替换为真实内�
 
 ---
 
+## 覆盖度维度与 `covers` 字段协议（v3.10 新增）
+
+### 5 个覆盖度维度
+
+详见 [SKILL.md "Scenario 编排规则"第 5 条](../SKILL.md)。`check_scenario_coverage(doc, v_count, design_mentions_frontend)` 按以下启发式自动分类：
+
+| 维度 | 判定信号 |
+|------|---------|
+| `happy` | when 含 expect_status 200/201 且无非 browser 步骤 |
+| `negative` | when 含 expect_status >= 400 或 description 含失败/不存在/非法等关键字 |
+| `permission` | description 含权限/跨租户/RBAC 等关键字 |
+| `cross-module` | when 步骤数 ≥ 3 或 description 含联调/跨模块等关键字 |
+| `ui-smoke` | when 任一步骤 type=browser |
+
+阈值：≥3 个维度。少于则 `scenario_coverage_dimension_missing` 警告。
+
+### `covers` 字段
+
+每个 Scenario 可选含 `covers: [V-xxx-N, V-yyy-M]` 列表，引用 design.md 中已定义的 V-* 验证项 ID。校验规则：
+
+- **缺失**：warning 级（`scenario_coverage_covers_unset`），不阻塞
+- **空数组** `covers: []`：同上
+- **引用不存在的 V-***：报错 `scenario_placeholder_unfilled`（视为占位符未替换）
+
+### 类型维度
+
+`scenario.<track>.yaml` 整体须满足：
+- 含 ≥1 个 Scenario 的 `when[]` 含 `type=api`（或默认 api）步骤
+- 当 design.md 含 frontend track V-* 时，还须含 ≥1 个 `type=browser` Scenario
+
+满足则无警告；缺则 `scenario_coverage_type_imbalance` 警告。
+
+### 数量下限
+
+`len(scenarios) >= max(2, ceil(V_count * 0.8))`：
+
+- `V_count` = design.md 中 V-* 总行数（含 dev / int / real-integration 各 stage）
+- 不足时仅 warning（`scenario_coverage_count_below_min`），提示"建议补充"并列出未覆盖的 V-* 列表
+
+---
+
 ## placeholder 校验协议（v3.7 新增，v3.9 扩展 browser 字段）
 
 ### 触发时机
@@ -141,6 +182,9 @@ scenarios:
       - <curl 输出文件路径>
       - <screenshot 文件路径>
       - <console 日志路径>
+    covers:                                  # v3.10 新增（推荐，可选）
+      - V-backend-1
+      - V-frontend-2
 ```
 
 ### Browser action 字段表
@@ -170,7 +214,7 @@ scenarios:
 | `critical` | `true` = 禁止 SKIP；`false` = 可记录 SKIPPED 后继续 |
 | `_meta` | 自由字段，pg-build 会忽略，可保留也可删除 |
 | 顺序 | 所有 `critical: true` 排在 `critical: false` 之前 |
-| 数量 | 1-5 个；超出后提示用户拆分 |
+| 数量 | 建议 `max(3, ceil(V_count × 0.8))`，上限软化为 7；下限 2（v3.10） |
 | `type` 字段 | 可选，默认 `api`；`type=browser` 时需按 browser action 字段表填写必填字段 |
 | 混合类型 | 同一 Scenario 的 `when` 数组可混用 `type=api` 和 `type=browser` 步骤 |
 | `evidence` 字段 | 写 `2-build/<report_seq>-<scenario_id>-evidence.json` 等**带占位符**的相对路径。LLM 只需把 `<scenario_id>` 替换为真实 id；`<report_seq>` 由 pg-build 编排器在 dispatch 时注入。scenario-execute agent 写盘时会按 `{report_seq}` 前缀拼接出最终绝对路径，避免多次派遣（首次 execute / fix 后重跑 execute）覆盖同 scenario 的历史 evidence |

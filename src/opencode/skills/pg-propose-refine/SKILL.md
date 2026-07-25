@@ -4,7 +4,7 @@ description: 读取 review-notes.md（v4 单文档）或 review-decisions.yaml�
 license: MIT
 metadata:
   author: pg
-  version: "4.0"
+  version: "4.2"
 ---
 
 # pg-propose-refine（决策应用器）
@@ -440,3 +440,46 @@ v4 起，**不再有独立的 applied 区**——所有"已应用"状态直接�
 `environment_override` **不修改** review-notes.md（这是 review-decisions 的工件，不是环境选择）。
 
 如需在 review 阶段记录此次 environment 调整的原因，请在 review-notes.md 的「自审发现的问题」或备注中**手工添加**说明。本 skill 不会自动写 review-notes.md。
+
+---
+
+## 第八步：Git 提交选项（自 v4.2 起）
+
+refine 完成后，自动展示当前 Git 变更并询问是否提交和推送：
+
+### 8.1 展示变更
+
+执行 `git status --short` 列出待提交文件（限定 `.pg/changes/<change-name>/` 范围内的产物变更），以表格形式向用户展示：
+
+```
+ M .pg/changes/<change-name>/design.md
+ M .pg/changes/<change-name>/tasks.md
+ M .pg/changes/<change-name>/1-propose-review/review-notes.md
+```
+
+### 8.2 询问提交意愿
+
+使用 `question` 工具询问用户：
+
+| 选项 | 行为 |
+|------|------|
+| **提交并推送**（推荐） | 执行 8.3 完整提交流程 |
+| **仅查看，暂不提交** | 跳过，收尾展示后直接结束 |
+| **自定义提交信息** | 用户输入自己的 commit message |
+
+### 8.3 提交流程
+
+1. **`git add`**：仅添加 `.pg/changes/<change-name>/` 路径下的变更文件
+2. **`git commit`**：提交信息自动生成（用户可选自定义）：
+   ```
+   docs: <change-name> 应用评审决策
+   ```
+3. **`git push`**：推送到远端（若 push 失败则提示用户手动处理）
+4. **展示结果**：提交成功后展示 `git log --oneline -3` 最近三条记录
+
+### 8.4 规则
+
+- 不修改 scope boundary contract（只展示和提交，不产生新决策）
+- 限定 add 范围：只操作 `.pg/changes/<change-name>/` 路径，不误提其他业务代码
+- 幂等：无变更时直接跳过 8.1，不报错
+- 中断安全：git push 失败不影响 refine 产物完整性（已 commit 到本地）

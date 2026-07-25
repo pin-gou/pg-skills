@@ -137,6 +137,8 @@ def detect_review_modified(review_path: str, product_paths: list[str]) -> bool:
 # 校验 review-notes.md 中所有 issue_decision 的 "目标" 字段是否在变更目录内
 # 越界 → exit code 3
 _PRODUCT_FILES = frozenset({"proposal.md", "design.md", "tasks.md", "review-notes.md",
+                            "on-conditions-eval.md", "scenario-scr.yaml",
+                            "scenario-<track>.yaml", "execution-manifest.yaml",
                             "proposal/design/tasks/review-notes.md"})
 _TARGET_PATTERN = re.compile(r"-\s*目标[:：]\s*`?([^`\n]+)`?", re.MULTILINE)
 _PRODUCT_REF_INLINE = re.compile(

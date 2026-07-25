@@ -499,8 +499,17 @@ scenarios:
 
 1. **顺序写**：所有 `critical: true` Scenario 排在 `critical: false` 之前
 2. **每个 Scenario 含 6 段**（given / when / then / and / evidence / critical）
-3. **`and` cleanup 段必备**：每个 Scenario 都含 `and`，避免失败时脏数据污染
-4. **Scenario 数量**：1-5 个；超出后提示用户拆分（避免单次 Phase 不可控超时）
+3. **`and` cleanup 段必备**：每个 Scenario 都含 `and`，避免失败时脏数据污染（纯 browser-only 场景除外）
+4. **Scenario 数量动态**：建议数 = `max(3, ceil(design.md 的 V-* 总数 × 0.8))`；上限软化为 7（超出仅 warning，不阻塞）；下限 2（含正/负至少各 1）
+5. **覆盖度 5 维度**：scenario 集合须覆盖下列维度至少 3 项——
+   - **happy**：正常流程跑通（200/201 + 资源落地）
+   - **negative**：错误路径（404/422/403/资源不存在/参数非法）
+   - **permission**：权限/边界（跨 tenant 访问、RBAC 拒绝）
+   - **cross-module**：跨模块联调（backend + frontend + agent 联合）
+   - **ui-smoke**：浏览器冒烟（type=browser，验证 DOM/Network/console）
+6. **类型维度**：当 design.md 包含 frontend track 的 V-* 时，scenario 集合须同时含 ≥1 个 `type=api` 与 ≥1 个 `type=browser` 的 Scenario；纯 backend 改动不强制
+7. **`covers` 追溯字段**：每个 Scenario 推荐含 `covers: [V-xxx-N, ...]` 列表，引用 design.md 中至少 1 条 V-* 验证项；`covers` 字段缺失或空数组 → review-notes 警告（不阻塞）
+8. **生成时优先级**：先写 happy → 再补 negative → 再补 permission / cross-module → 最后补 ui-smoke；`critical: true` 限 1-3 个（happy + 1 个 negative）
 
 **严禁生成**以下文件（v1 遗留物，pg-build 不再读取）：
 

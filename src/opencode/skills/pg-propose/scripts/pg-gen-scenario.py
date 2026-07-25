@@ -82,7 +82,112 @@ def _read_scenario_decisions(change: str) -> dict | None:
     return decisions if decisions else None
 
 
-def _build_skeleton_yaml(change: str, track_id: str) -> dict:
+def _build_api_skeleton_template(idx: int, covers_placeholder: list | None = None) -> dict:
+    """v3.10: 单个 API 类型 scenario skeleton 模板.
+
+    idx 用于生成不同 scenario_id 占位（unique）。
+    covers_placeholder: 写入 'covers' 字段, LLM 必填替换为真实 V-* ID.
+    """
+    return {
+        "scenario_id": f"S-<unique-name-{idx}>",
+        "critical": True,
+        "description": "一句话描述此 Scenario 验证目标（LLM 必填）",
+        "given": [
+            "<前置条件 1>",
+            "<前置条件 2>",
+        ],
+        "covers": covers_placeholder if covers_placeholder is not None else [
+            "<V-xxx-N>",
+        ],
+        "when": [
+            {
+                "name": "<动作名>",
+                "type": "api",
+                "method": "GET",
+                "url": "/api/.../...",
+                "expect_status": 200,
+            },
+        ],
+        "then": [
+            "status_code == 200",
+            "response.<field> matches <regex>",
+        ],
+        "and": [
+            {"name": "<cleanup>", "action": "HTTP DELETE /api/.../.../..."},
+        ],
+        "evidence": [
+            "2-build/<report_seq>-<scenario_id>-evidence.json",
+        ],
+    }
+
+
+def _build_browser_skeleton_template(idx: int, covers_placeholder: list | None = None) -> dict:
+    """v3.10: 单个 browser 类型 scenario skeleton 模板."""
+    return {
+        "scenario_id": f"S-<unique-name-{idx}-browser>",
+        "critical": False,
+        "description": "一句话描述此 Browser Scenario 验证目标（LLM 必填）",
+        "given": [
+            "<前置条件 1>",
+        ],
+        "covers": covers_placeholder if covers_placeholder is not None else [
+            "<V-frontend-N>",
+        ],
+        "when": [
+            {
+                "name": "导航到页面",
+                "type": "browser",
+                "action": "navigate",
+                "url": "/path/to/page",
+            },
+            {
+                "name": "点击按钮",
+                "type": "browser",
+                "action": "click",
+                "selector": "<CSS选择器>",
+            },
+            {
+                "name": "填写输入框",
+                "type": "browser",
+                "action": "fill",
+                "selector": "<CSS选择器>",
+                "value": "<输入值>",
+            },
+            {
+                "name": "截图验证",
+                "type": "browser",
+                "action": "screenshot",
+            },
+        ],
+        "then": [
+            "dom: <selector> exists",
+            "console: no errors",
+        ],
+        "and": [],
+        "evidence": [
+            "2-build/<report_seq>-<scenario_id>-evidence.json",
+            "2-build/<report_seq>-<scenario_id>-screenshot.png",
+        ],
+    }
+
+
+def _compute_target_scenario_count(v_count: int) -> int:
+    """v3.10: 派生 skeleton 数量.
+
+    公式: max(3, ceil(v_count * 0.8)), 上限软化为 7.
+    v_count <= 0 → 默认 3.
+    """
+    if v_count <= 0:
+        return 3
+    target = (v_count * 8 + 9) // 10  # ceil(v_count * 0.8)
+    target = max(3, target)
+    target = min(7, target)
+    return target
+
+
+def _build_skeleton_yaml(
+    change: str, track_id: str, v_count: int = 0, design_mentions_frontend: bool = False,
+) -> dict:
     """构造 scenario-<track-id>.yaml skeleton —— LLM 在阶段三自审时填充。
 
     v3.7: 占位符可由 check_scenario_placeholders 检测（每个字段含一个
@@ -90,95 +195,39 @@ def _build_skeleton_yaml(change: str, track_id: str) -> dict:
 
     v3.9: 生成两个 skeleton scenario：一个 type=api（向后兼容），
     一个 type=browser（浏览器交互场景，使用 Chrome DevTools MCP 工具）。
-    LLM 按实际需求保留并填充：若不需要 browser 场景可删除第二个 scenario；
-    若不需要 API 场景可删除第一个并调整第二个的 type。
+
+    v3.10: 数量按 design.md V-* 数动态派生 (max(3, ceil(V*0.8)), 上限 7);
+    强制含 ≥1 个 type=browser scenario 当 design 含 frontend V-* 时.
     """
+    target_count = _compute_target_scenario_count(v_count)
+    covers_placeholder = ["<V-xxx-N>"]
+
+    scenarios: list[dict] = []
+    # 生成 API scenarios: target_count - 1 个 (browser 占一位)
+    api_count = max(1, target_count - 1)
+    for i in range(1, api_count + 1):
+        scenarios.append(_build_api_skeleton_template(i, covers_placeholder))
+
+    # 当 design 含 frontend V-* 时强制加 browser scenario
+    if design_mentions_frontend:
+        scenarios.append(_build_browser_skeleton_template(api_count + 1, covers_placeholder))
+
     return {
-        "scenarios": [
-            {
-                "scenario_id": "S-<unique-name>",
-                "critical": True,
-                "description": "一句话描述此 Scenario 验证目标（LLM 必填）",
-                "given": [
-                    "<前置条件 1>",
-                    "<前置条件 2>",
-                ],
-                "when": [
-                    {
-                        "name": "<动作名>",
-                        "type": "api",
-                        "method": "GET",
-                        "url": "/api/.../...",
-                        "expect_status": 200,
-                    },
-                ],
-                "then": [
-                    "status_code == 200",
-                    "response.<field> matches <regex>",
-                ],
-                "and": [
-                    {"name": "<cleanup>", "action": "HTTP DELETE /api/.../.../..."},
-                ],
-                "evidence": [
-                    "2-build/<report_seq>-<scenario_id>-evidence.json",
-                ],
-            },
-            {
-                "scenario_id": "S-<unique-name>-browser",
-                "critical": False,
-                "description": "一句话描述此 Browser Scenario 验证目标（LLM 必填）",
-                "given": [
-                    "<前置条件 1>",
-                ],
-                "when": [
-                    {
-                        "name": "导航到页面",
-                        "type": "browser",
-                        "action": "navigate",
-                        "url": "/path/to/page",
-                    },
-                    {
-                        "name": "点击按钮",
-                        "type": "browser",
-                        "action": "click",
-                        "selector": "<CSS选择器>",
-                    },
-                    {
-                        "name": "填写输入框",
-                        "type": "browser",
-                        "action": "fill",
-                        "selector": "<CSS选择器>",
-                        "value": "<输入值>",
-                    },
-                    {
-                        "name": "截图验证",
-                        "type": "browser",
-                        "action": "screenshot",
-                    },
-                ],
-                "then": [
-                    "dom: <selector> exists",
-                    "console: no errors",
-                ],
-                "and": [],
-                "evidence": [
-                    "2-build/<report_seq>-<scenario_id>-evidence.json",
-                    "2-build/<report_seq>-<scenario_id>-screenshot.png",
-                ],
-            },
-        ],
+        "scenarios": scenarios,
         "_meta": {
             "_comment": (
                 "scenario-<track>.yaml 由 pg-gen-scenario.py 生成的 skeleton, "
                 "LLM 必填。scenario_id / given / when / then / and / evidence "
-                "是必填段, critical / description 必填, _meta 段最终会被 pg-build "
-                "scenario-execute agent 忽略。"
+                "是必填段, critical / description 必填, covers 是 v3.10 推荐必填段。"
+                "_meta 段最终会被 pg-build scenario-execute agent 忽略。"
                 "v3.9: when[].type 可选, 默认 api; type=browser 时需填写 browser action 字段。"
-                "若不需要 browser 场景可删除第二个 scenario。"
+                "v3.10: 数量按 design V-* 数动态派生, 上限 7。"
+                "若不需要 browser 场景可删除最后一个 scenario；"
+                "若 V-* 不足, 建议补充 scenario 而非合并现有 scenario。"
             ),
             "change": change,
             "track_id": track_id,
-            "schema_version": "v3.9",
+            "schema_version": "v3.10",
         },
     }
 
@@ -414,6 +463,195 @@ def check_scenario_file(filepath: str) -> list[tuple[str, str]]:
     return check_scenario_placeholders(doc)
 
 
+# v3.10: scenario 覆盖度校验 — warning 级 (不阻塞 validate)
+_V_COUNT_RE = __import__("re").compile(r"\|\s*(V-[A-Za-z0-9_-]+-[A-Za-z0-9_-]+)\s*\|")
+
+
+def parse_design_v_count(change: str) -> int:
+    """v3.10: 从 .pg/changes/<change>/design.md 的 ## Verification Criteria 段
+    数 V-* 行.
+
+    匹配模式: 表格行 | V-xxx-N | ... |
+    仅在 design.md 存在且含 Verification Criteria 段时返回 > 0.
+    """
+    design_path = os.path.join(CHANGES_DIR, change, "design.md")
+    if not os.path.isfile(design_path):
+        return 0
+    try:
+        with open(design_path, encoding="utf-8") as f:
+            content = f.read()
+    except Exception:
+        return 0
+    if "## Verification Criteria" not in content:
+        return 0
+    section = content.split("## Verification Criteria", 1)[1]
+    ids = set()
+    for line in section.splitlines():
+        m = _V_COUNT_RE.search(line)
+        if m:
+            ids.add(m.group(1))
+    return len(ids)
+
+
+def design_mentions_frontend(change: str) -> bool:
+    """v3.10: design.md Verification Criteria 中是否含 V-frontend-* 引用."""
+    design_path = os.path.join(CHANGES_DIR, change, "design.md")
+    if not os.path.isfile(design_path):
+        return False
+    try:
+        with open(design_path, encoding="utf-8") as f:
+            content = f.read()
+    except Exception:
+        return False
+    if "## Verification Criteria" not in content:
+        return False
+    section = content.split("## Verification Criteria", 1)[1]
+    return bool(_V_COUNT_RE.search(section) and "V-frontend-" in section)
+
+
+def _classify_scenario_dimension(sc: dict) -> set[str]:
+    """v3.10: 把单个 scenario 分类到 5 个维度 (happy / negative / permission / cross-module / ui-smoke).
+
+    启发式:
+      - happy: when 含 expect_status 200/201 且无 type=browser
+      - negative: when 含 expect_status >= 400 或描述含'失败/不存在/非法'关键字
+      - permission: 描述含'权限/跨租户/跨项目/RBAC/越权'
+      - cross-module: when 步骤数 >= 3 (跨多个 API), 或 description 含 '联调/跨模块/端到端'
+      - ui-smoke: 任一 when step type=browser
+    """
+    dims: set[str] = set()
+    description = str(sc.get("description", ""))
+    whens = sc.get("when") or []
+    has_browser = any(
+        isinstance(w, dict) and w.get("type", "api") == "browser" for w in whens
+    )
+    if has_browser:
+        dims.add("ui-smoke")
+
+    # expect_status 收集
+    api_statuses = [
+        w.get("expect_status") for w in whens
+        if isinstance(w, dict) and w.get("type", "api") == "api"
+    ]
+    if not api_statuses and not has_browser:
+        api_statuses = [
+            w.get("expect_status") for w in whens
+            if isinstance(w, dict) and w.get("expect_status") is not None
+        ]
+    neg_keywords = ("失败", "不存在", "非法", "错误", "missing", "fail", "error", "invalid")
+    perm_keywords = ("权限", "跨租户", "跨项目", "RBAC", "越权", "permission")
+    cross_keywords = ("联调", "跨模块", "端到端", "cross-module", "end-to-end")
+
+    if any(isinstance(s, int) and s >= 400 for s in api_statuses) or any(
+        k in description.lower() for k in neg_keywords
+    ):
+        dims.add("negative")
+    if any(isinstance(s, int) and 200 <= s < 300 for s in api_statuses) and not has_browser:
+        dims.add("happy")
+    if any(k in description for k in perm_keywords) or any(k in description.lower() for k in ("permission",)):
+        dims.add("permission")
+    if len(whens) >= 3 or any(k in description for k in cross_keywords) or any(
+        k in description.lower() for k in ("cross-module", "end-to-end")
+    ):
+        dims.add("cross-module")
+    return dims
+
+
+def check_scenario_coverage(
+    scenario_doc: dict, v_count: int = 0, design_mentions_frontend: bool = False,
+) -> list[tuple[str, str]]:
+    """v3.10: 校验 scenario 集合覆盖度 (warning 级, 不阻塞).
+
+    4 类 issue:
+      - scenario_coverage_dimension_missing: 5 维度未覆盖够 3 项
+      - scenario_coverage_count_below_min: len < max(2, ceil(V*0.8)), 含未覆盖 V-* 列表
+      - scenario_coverage_type_imbalance: design 含 frontend 但缺 api 或 browser
+      - scenario_coverage_covers_unset: Scenario 缺 covers 字段
+      - scenario_coverage_critical_overflow: critical=true 超过 3 个
+
+    Args:
+        scenario_doc: 已解析的 scenario YAML dict
+        v_count: design.md 中 V-* 总数 (由 parse_design_v_count 返回)
+        design_mentions_frontend: design.md 是否含 V-frontend-*
+    """
+    issues: list[tuple[str, str]] = []
+    if not isinstance(scenario_doc, dict):
+        return issues
+    scenarios = scenario_doc.get("scenarios") or []
+    if not isinstance(scenarios, list) or not scenarios:
+        return issues  # placeholder 校验负责 catch 空数组
+
+    # 维度聚合
+    all_dims: set[str] = set()
+    for sc in scenarios:
+        if isinstance(sc, dict):
+            all_dims.update(_classify_scenario_dimension(sc))
+
+    if len(all_dims) < 3:
+        issues.append((
+            "scenario_coverage_dimension_missing",
+            f"scenarios 集合仅覆盖 {len(all_dims)} 个维度 {sorted(all_dims)}, "
+            f"建议至少 3 个 (happy/negative/permission/cross-module/ui-smoke)",
+        ))
+
+    # 数量下限: max(2, ceil(V*0.8))
+    if v_count > 0:
+        min_count = max(2, (v_count * 8 + 9) // 10)
+        if len(scenarios) < min_count:
+            issues.append((
+                "scenario_coverage_count_below_min",
+                f"scenarios 数={len(scenarios)} < 建议下限 {min_count} (由 V-*={v_count} 派生). "
+                f"建议补充覆盖更多 V-* 验证项, 未覆盖 V-*: 数量提示 — 重新审视 V-* 列表",
+            ))
+
+    # 类型维度
+    if design_mentions_frontend and scenarios:
+        has_api = False
+        has_browser = False
+        for sc in scenarios:
+            if not isinstance(sc, dict):
+                continue
+            for w in sc.get("when") or []:
+                if not isinstance(w, dict):
+                    continue
+                t = w.get("type", "api")
+                if t == "browser":
+                    has_browser = True
+                else:
+                    has_api = True
+        if not has_api or not has_browser:
+            issues.append((
+                "scenario_coverage_type_imbalance",
+                f"design.md 含 V-frontend-*, scenario 集合需 ≥1 API + ≥1 browser. "
+                f"当前 api={has_api}, browser={has_browser}",
+            ))
+
+    # covers 字段
+    for idx, sc in enumerate(scenarios):
+        if not isinstance(sc, dict):
+            continue
+        if "covers" not in sc:
+            issues.append((
+                "scenario_coverage_covers_unset",
+                f"scenarios[{idx}] 缺 covers 字段 (v3.10 推荐), "
+                f"应在 each scenario 中引用 design.md 的 V-* ID",
+            ))
+
+    # critical 过多
+    critical_count = sum(
+        1 for sc in scenarios
+        if isinstance(sc, dict) and sc.get("critical") is True
+    )
+    if critical_count > 3:
+        issues.append((
+            "scenario_coverage_critical_overflow",
+            f"critical=true 数={critical_count} 超过建议 3 个, "
+            f"过多会放大 execute 阶段 escalate 噪音",
+        ))
+
+    return issues
+
+
 def main():
     if len(sys.argv) < 2:
         print("Usage: python3 pg-gen-scenario.py <change>", file=sys.stderr)
@@ -442,11 +680,16 @@ def main():
         return
 
     written = []
+    # v3.10: 先解析 design.md 的 V-* 数与 frontend 提及, 作为 skeleton 派生输入
+    v_count = parse_design_v_count(change)
+    frontend_mentioned = design_mentions_frontend(change)
     for track_id, decision in enabled_tracks.items():
         filename = f"scenario-{track_id}.yaml"
         scenario_path = os.path.join(CHANGES_DIR, change, filename)
         os.makedirs(os.path.dirname(scenario_path), exist_ok=True)
-        skeleton = _build_skeleton_yaml(change, track_id)
+        skeleton = _build_skeleton_yaml(
+            change, track_id, v_count=v_count, design_mentions_frontend=frontend_mentioned,
+        )
         with open(scenario_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(
                 skeleton, f,
@@ -461,6 +704,8 @@ def main():
         "scenario_tracks_enabled": True,
         "action": f"skeletons written for {len(written)} track(s): {', '.join(written)}",
         "reason": next(iter(enabled_tracks.values()))["reason"],
+        "v_count": v_count,
+        "design_mentions_frontend": frontend_mentioned,
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
 

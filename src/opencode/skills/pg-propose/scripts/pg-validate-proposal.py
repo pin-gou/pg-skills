@@ -660,6 +660,7 @@ def cmd_manifest(change):
     tasks_path = os.path.join(CHANGES_DIR, change, "tasks.md")
 
     all_issues = []
+    coverage_warnings: list[tuple[str, str]] = []  # v3.10: warning 级, 不阻塞
     valid = True
 
     # 1. Check files exist
@@ -726,6 +727,49 @@ def cmd_manifest(change):
     for code, msg in consistency_issues:
         print(f"  [{code}] {msg}", file=sys.stderr)
         all_issues.append(code)
+
+    # 7.5 v3.10: scenario 覆盖度校验（warning 级, 不阻塞）
+    if (_pg_gen_scenario is not None
+            and yaml is not None
+            and hasattr(_pg_gen_scenario, "check_scenario_coverage")):
+        try:
+            v_count = _pg_gen_scenario.parse_design_v_count(change)
+            frontend_mentioned = _pg_gen_scenario.design_mentions_frontend(change)
+            import glob as _glob
+            for scenario_path in _glob.glob(
+                os.path.join(
+                    os.path.join(CHANGES_DIR, change),
+                    "scenario-*.yaml",
+                )
+            ):
+                try:
+                    with open(scenario_path, encoding="utf-8") as _f:
+                        scenario_doc = yaml.safe_load(_f)
+                    coverage_issues = _pg_gen_scenario.check_scenario_coverage(
+                        scenario_doc,
+                        v_count=v_count,
+                        design_mentions_frontend=frontend_mentioned,
+                    )
+                    fname = os.path.basename(scenario_path)
+                    for code, msg in coverage_issues:
+                        coverage_warnings.append((code, f"{fname}: {msg}"))
+                except Exception as e:
+                    coverage_warnings.append((
+                        "scenario_coverage_check_failed",
+                        f"{os.path.basename(scenario_path)}: {e}",
+                    ))
+        except Exception as e:
+            coverage_warnings.append((
+                "scenario_coverage_check_failed",
+                f"coverage scan 异常: {e}",
+            ))
+
+    # 8. v3.10: scenario 覆盖度 warning 打印（不阻塞）
+    if coverage_warnings:
+        print(f"\nWARN: {len(coverage_warnings)} scenario coverage warnings (不阻塞 validate):",
+              file=sys.stderr)
+        for code, msg in coverage_warnings:
+            print(f"  [WARN:{code}] {msg}", file=sys.stderr)
 
     # 7. Result
     if all_issues:

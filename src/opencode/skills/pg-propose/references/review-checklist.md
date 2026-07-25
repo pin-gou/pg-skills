@@ -91,6 +91,20 @@ LLM 在生成 `1-propose-review/review-notes.md` 之前，必须对照本文档�
 
 ---
 
+## 3.5.8 scenario 覆盖度审计（v3.10，仅当 `scenario_tracks_decision` 至少一个 track enabled 时执行）
+
+| 检查项 | 说明 | 严重度 |
+|--------|------|--------|
+| 维度覆盖 | scenario 集合是否覆盖 5 维度（happy/negative/permission/cross-module/ui-smoke）至少 3 项？ | 重要 |
+| 数量下限 | `len(scenarios) >= max(2, ceil(V_count * 0.8))`？不足时列出未覆盖的 V-* | 重要 |
+| 类型维度 | 当 design 含 frontend V-* 时，scenario 是否同时含 ≥1 API + ≥1 browser？ | 重要 |
+| covers 字段 | 每个 Scenario 是否含 `covers: [V-*]` 且引用存在的 V-*？ | 建议（缺则 warning） |
+| critical 比例 | `critical=true` 数量是否在 1-3 范围内（过多会放大 escalate 噪音）？ | 建议 |
+
+**审查方式**：LLM 直接调用 `python3 .opencode/skills/pg-propose/scripts/pg-gen-scenario.py parse-coverage <change>`（v3.10 新增 CLI 子命令，可选）；或人工对照上方"scenario 编排规则"8 条逐项打勾。
+
+---
+
 ## 写入 review-notes.md
 
 把 7 项检查的发现 + 5 项通用决策合并写入 `.pg/changes/<change-name>/1-propose-review/review-notes.md`。

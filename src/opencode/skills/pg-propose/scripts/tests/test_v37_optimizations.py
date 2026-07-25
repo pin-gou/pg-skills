@@ -419,5 +419,206 @@ class TestAutoRefineCheck(unittest.TestCase):
         self.assertEqual(r["exit_code"], 2)
 
 
+# ============================================================
+# v3.10 scenario 覆盖度校验 — parse_design_v_count / check_scenario_coverage / dynamic skeleton
+# ============================================================
+
+
+class TestParseDesignVCount(unittest.TestCase):
+    """parse_design_v_count: 从 design.md ## Verification Criteria 段数 V-* 行."""
+
+    def setUp(self):
+        self.tmpdir = tempfile.mkdtemp()
+        self.addCleanup(shutil.rmtree, self.tmpdir, ignore_errors=True)
+        # mock CHANGES_DIR via monkey-patch
+        self._orig_changes_dir = _scenario.CHANGES_DIR
+        _scenario.CHANGES_DIR = self.tmpdir
+        self.addCleanup(lambda: setattr(_scenario, "CHANGES_DIR", self._orig_changes_dir))
+
+    def _write_design(self, change: str, content: str):
+        os.makedirs(os.path.join(self.tmpdir, change), exist_ok=True)
+        with open(os.path.join(self.tmpdir, change, "design.md"), "w", encoding="utf-8") as f:
+            f.write(content)
+
+    def test_no_design_md_returns_zero(self):
+        r = _scenario.parse_design_v_count("no-design-change")
+        self.assertEqual(r, 0)
+
+    def test_no_verification_section_returns_zero(self):
+        self._write_design("c1", "## 架构\n\n无 Verification Criteria 段。\n")
+        r = _scenario.parse_design_v_count("c1")
+        self.assertEqual(r, 0)
+
+    def test_counts_all_v_id_rows(self):
+        """含 Verification Criteria 段及多行 V-*-N 表格 → 返回行数."""
+        design = (
+            "## Verification Criteria\n"
+            "\n"
+            "### dev backend Verification Criteria\n"
+            "\n"
+            "| ID | 验证项 |\n"
+            "|-----|--------|\n"
+            "| V-backend-1 | a |\n"
+            "| V-backend-2 | b |\n"
+            "| V-backend-3 | c |\n"
+            "\n"
+            "### dev frontend Verification Criteria\n"
+            "\n"
+            "| ID | 验证项 |\n"
+            "|-----|--------|\n"
+            "| V-frontend-1 | x |\n"
+            "| V-frontend-2 | y |\n"
+            "\n"
+            "### int backend Verification Criteria\n"
+            "\n"
+            "| ID | 验证项 |\n"
+            "|-----|--------|\n"
+            "| V-backend-int-1 | m |\n"
+        )
+        self._write_design("c2", design)
+        r = _scenario.parse_design_v_count("c2")
+        self.assertEqual(r, 6)
+
+
+class TestCheckScenarioCoverage(unittest.TestCase):
+    """check_scenario_coverage: 维度/数量/类型/covers warning-only 校验."""
+
+    def _mk_doc(self, scenarios: list) -> dict:
+        return {"scenarios": scenarios}
+
+    def _mk_api_scenario(self, sid: str, expect_status: int = 200, covers=None, critical: bool = True) -> dict:
+        sc = {
+            "scenario_id": sid,
+            "critical": critical,
+            "description": f"{sid} desc",
+            "given": [f"given for {sid}"],
+            "when": [
+                {"name": "call api", "type": "api", "method": "GET",
+                 "url": "/api/example/webvirt.pangee.cmit.com/v3/things", "expect_status": expect_status},
+            ],
+            "then": [f"status_code == {expect_status}"],
+            "and": [],
+            "evidence": [f"2-build/x-{sid}-evidence.json"],
+        }
+        if covers is not None:
+            sc["covers"] = covers
+        return sc
+
+    def _mk_browser_scenario(self, sid: str, covers=None) -> dict:
+        sc = {
+            "scenario_id": sid,
+            "critical": False,
+            "description": f"{sid} desc",
+            "given": [f"given for {sid}"],
+            "when": [
+                {"name": "导航", "type": "browser", "action": "navigate", "url": "/page"},
+                {"name": "截图", "type": "browser", "action": "screenshot"},
+            ],
+            "then": ["dom: body exists"],
+            "and": [],
+            "evidence": [f"2-build/x-{sid}-evidence.json"],
+        }
+        if covers is not None:
+            sc["covers"] = covers
+        return sc
+
+    def test_minimal_one_scenario_warns_dimension_and_count(self):
+        doc = self._mk_doc([self._mk_api_scenario("S-one")])
+        issues = _scenario.check_scenario_coverage(doc, v_count=5, design_mentions_frontend=False)
+        codes = [i[0] for i in issues]
+        self.assertIn("scenario_coverage_dimension_missing", codes)
+        self.assertIn("scenario_coverage_count_below_min", codes)
+
+    def test_3_api_no_browser_with_frontend_design_warns_type(self):
+        doc = self._mk_doc([self._mk_api_scenario(f"S-api-{i}") for i in range(3)])
+        issues = _scenario.check_scenario_coverage(doc, v_count=4, design_mentions_frontend=True)
+        codes = [i[0] for i in issues]
+        self.assertIn("scenario_coverage_type_imbalance", codes)
+
+    def test_full_coverage_no_warnings(self):
+        """5 维度全覆盖 + 数量达标 + api+browser 都有 + covers 全填 → 无 issue."""
+        scs = [
+            self._mk_api_scenario("S-happy", 200, covers=["V-1"], critical=True),
+            self._mk_api_scenario("S-negative-404", 404, covers=["V-2"], critical=False),
+            self._mk_api_scenario("S-permission-403", 403, covers=["V-3"], critical=False),
+            self._mk_api_scenario("S-cross-module", 200, covers=["V-4"], critical=False),
+            self._mk_browser_scenario("S-ui-smoke", covers=["V-5"]),
+        ]
+        doc = self._mk_doc(scs)
+        issues = _scenario.check_scenario_coverage(doc, v_count=5, design_mentions_frontend=True)
+        self.assertEqual(issues, [])
+
+    def test_below_min_count_includes_uncovered_v_list(self):
+        """v_count=10 但只 2 scenario → issue message 含'未覆盖 V-*'提示."""
+        doc = self._mk_doc([self._mk_api_scenario("S-only")])
+        issues = _scenario.check_scenario_coverage(
+            doc, v_count=10, design_mentions_frontend=True,
+        )
+        msgs = [i[1] for i in issues if i[0] == "scenario_coverage_count_below_min"]
+        self.assertEqual(len(msgs), 1)
+        self.assertIn("V-", msgs[0])
+
+    def test_covers_unset_warns(self):
+        """covers 字段缺失 → warning."""
+        sc = self._mk_api_scenario("S-no-covers")  # _mk_api_scenario 仅在 covers 不是 None 时才设置
+        doc = self._mk_doc([sc])
+        issues = _scenario.check_scenario_coverage(
+            doc, v_count=3, design_mentions_frontend=False,
+        )
+        codes = [i[0] for i in issues]
+        self.assertIn("scenario_coverage_covers_unset", codes)
+
+    def test_critical_too_many_warns(self):
+        """critical=true 超过 3 个 → warning."""
+        scs = [self._mk_api_scenario(f"S-c{i}", critical=True) for i in range(5)]
+        doc = self._mk_doc(scs)
+        issues = _scenario.check_scenario_coverage(
+            doc, v_count=5, design_mentions_frontend=False,
+        )
+        codes = [i[0] for i in issues]
+        self.assertIn("scenario_coverage_critical_overflow", codes)
+
+
+class TestDynamicSkeletonGeneration(unittest.TestCase):
+    """_build_skeleton_yaml: v_count → scenario 数量动态派生."""
+
+    def test_no_v_count_default_3(self):
+        skel = _scenario._build_skeleton_yaml("c1", "scr")
+        # 默认 + browser 模板 → 至少 2
+        self.assertGreaterEqual(len(skel["scenarios"]), 2)
+
+    def test_v_count_8_yields_6_scenarios(self):
+        skel = _scenario._build_skeleton_yaml("c2", "scr", v_count=8)
+        # max(3, ceil(8*0.8)=7) → 上限 7, 但前 6 个 + 1 browser
+        self.assertGreaterEqual(len(skel["scenarios"]), 6)
+        self.assertLessEqual(len(skel["scenarios"]), 7)
+
+    def test_v_count_20_capped_at_7(self):
+        skel = _scenario._build_skeleton_yaml("c3", "scr", v_count=20)
+        self.assertLessEqual(len(skel["scenarios"]), 7)
+
+    def test_frontend_design_includes_browser(self):
+        skel = _scenario._build_skeleton_yaml("c4", "scr", v_count=4, design_mentions_frontend=True)
+        # 至少一个 scenario 含 type=browser 步骤
+        any_browser = False
+        for sc in skel["scenarios"]:
+            for w in sc.get("when", []):
+                if w.get("type") == "browser":
+                    any_browser = True
+                    break
+            if any_browser:
+                break
+        self.assertTrue(any_browser)
+
+    def test_skeleton_includes_covers_field(self):
+        """v3.10: skeleton 中每个 Scenario 须含 covers 占位字段."""
+        skel = _scenario._build_skeleton_yaml("c5", "scr", v_count=3)
+        for sc in skel["scenarios"]:
+            self.assertIn("covers", sc)
+            # covers 是数组或含占位符 → 都视为'LLM 必填'
+            covers_val = sc["covers"]
+            self.assertTrue(isinstance(covers_val, list))
+
+
 if __name__ == "__main__":
     unittest.main()
