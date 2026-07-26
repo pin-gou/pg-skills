@@ -480,38 +480,29 @@ simple track（`tracks.<id>.type == "simple"`）在 tasks.md 中**只占 1 个�
 - [ ] 24.1 gate agent 读取 verification report
 - [ ] 24.2 gate agent 输出 Gate Assessment
 
-## 25. real-integration.{track-id}:scenario-prepare - 真机场景准备
-
-#### 步骤组 1：环境就绪
-
-- [ ] 25.1 编排器已自动 prepare_env（real-integration stage 的 environment 配置；runner 负责）
-
-#### 步骤组 2：service start
-
-- [ ] 25.2 scenario-prepare agent 按 track.modules 顺序（[backend, frontend, agent]）invoke-hook start 各 role instance
-- [ ] 25.3 每个 role 启动后立刻 invoke-hook health_check 验证就绪
-- [ ] 25.4 全部 health_check PASS → record(scenario-prepare, "completed")
-- [ ] 25.5 任一 role 启动 / health_check FAIL → record(scenario-prepare, "failed") → workflow_failed
-
-## 26. real-integration.{track-id}:scenario-execute - 真机场景执行
+## 25. real-integration.{track-id}:scenario-execute - 真机场景执行
 
 #### 步骤组 1：scenario.yaml 读取
 
-- [ ] 26.1 确认 `.pg/changes/<change>/scenario.yaml` 存在且每个 Scenario 含 6 段（scenario_id / critical / given / when / then / evidence；and 可选）
-- [ ] 26.2 校验 scenario_id 全局唯一、critical 字段为 bool
+- [ ] 25.1 确认 `.pg/changes/<change>/scenario-{track-id}.yaml` 存在且每个 Scenario 含 6 段（scenario_id / critical / given / when / then / evidence；and 可选）
+- [ ] 25.2 校验 scenario_id 全局唯一、critical 字段为 bool
 
-#### 步骤组 2：执行
+#### 步骤组 2：环境就绪（编排器自动，scenario agent 无需处理）
 
-- [ ] 26.3 按 scenario_id 排序：先 critical=true，后 critical=false
-- [ ] 26.4 串行执行每个 Scenario 的 given → when → then → and（cleanup）
-- [ ] 26.5 产出结构化 JSON 证据到 `2-build/<report_seq>-<scenario_id>-evidence.json`（`<report_seq>` 与本 phase 主报告共享同一 seq，由 dispatch_file 注入；加 seq 前缀避免多次 execute 派遣覆盖同 scenario 的历史 evidence）
-- [ ] 26.6 critical=true FAIL → 立即停止后续 Scenario，全部标记 SKIPPED → record(scenario-execute, "escalate")
-- [ ] 26.7 全部通过 / 仅 critical=false 部分失败 → record(scenario-execute, "completed") 或 escalate（依据失败率）
+- [ ] 25.3 编排器在 dispatch scenario-execute 前自动执行 `restart_all_instances` env-action，确保环境是最新一次构建版本（runner 负责，无需在此步骤中执行）
 
-#### 步骤组 3：cleanup 与写盘
+#### 步骤组 3：执行
 
-- [ ] 26.8 失败 Scenario 的 and 阶段 cleanup 必须执行（避免脏数据污染）
-- [ ] 26.9 scenario-execute agent 写盘报告到 `2-build/<seq>-real-integration.{track-id}-scenario-execute.md`
+- [ ] 25.4 按 scenario_id 排序：先 critical=true，后 critical=false
+- [ ] 25.5 串行执行每个 Scenario 的 given → when → then → and（cleanup）
+- [ ] 25.6 产出结构化 JSON 证据到 `2-build/<report_seq>-<scenario_id>-evidence.json`（`<report_seq>` 与本 phase 主报告共享同一 seq，由 dispatch_file 注入；加 seq 前缀避免多次 execute 派遣覆盖同 scenario 的历史 evidence）
+- [ ] 25.7 critical=true FAIL → 立即停止后续 Scenario，全部标记 SKIPPED → record(scenario-execute, "escalate")
+- [ ] 25.8 全部通过 / 仅 critical=false 部分失败 → record(scenario-execute, "completed") 或 escalate（依据失败率）
+
+#### 步骤组 4：cleanup 与写盘
+
+- [ ] 25.9 失败 Scenario 的 and 阶段 cleanup 必须执行（避免脏数据污染）
+- [ ] 25.10 scenario-execute agent 写盘报告到 `2-build/<seq>-real-integration.{track-id}-scenario-execute.md`
 
 **注意**：scenario-execute 失败时 → record(execute, "escalate") → 编排器自动 dispatch scenario-fix 子 pipeline（scenario-fix 不在 tasks.md 中出现，与 verify/fix / gate/fix-gate 的约定一致）。
 

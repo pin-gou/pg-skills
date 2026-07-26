@@ -14,7 +14,7 @@ import tempfile
 import unittest
 
 
-_SCRIPTS_DIR = "/home/ubuntu/workspace/oc1-web-virt/.opencode/skills/pg-propose/scripts"
+_SCRIPTS_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def _load(name, path):

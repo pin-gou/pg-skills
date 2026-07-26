@@ -73,10 +73,10 @@ STANDARD_SUBS = [
     ("gate",  lambda stage_name: f"{stage_name} 门控审查"),
 ]
 
-# v3.5: 每个 scenario-type track 通用的 sub 列表
-# scenario-prepare / scenario-execute（scenario-fix 是子 pipeline，不出现在 tasks.md heading 中）
+# v3.x: 每个 scenario-type track 通用的 sub 列表
+# scenario-execute 是唯一主 phase; scenario-fix 是子 pipeline, 不出现在 tasks.md heading 中
+# (环境就绪由 restart_all_instances env-action 在 dispatch scenario-execute 前自动保证)
 SCENARIO_SUBS = [
-    ("scenario-prepare", lambda stage_name: f"真机场景准备"),
     ("scenario-execute", lambda stage_name: f"真机场景执行"),
 ]
 
@@ -553,22 +553,14 @@ def format_section_body(section: dict, change_name: str = "<change>") -> str:
 
 
 def _format_scenario_body(section: dict, change_name: str) -> str:
-    """v3.6: 生成 scenario track 章节的 skeleton body。
+    """v3.x: 生成 scenario track 章节的 skeleton body。
 
     与 standard track 不同，scenario 章节即使 `is_affected=False` 也产出完整模板，
     因为 scenario 是常驻节点，LLM 应始终填充。
+    环境就绪由 restart_all_instances env-action 在 dispatch scenario-execute 前自动保证。
     """
     n = section["n"]
     sub = section["sub"]
-
-    if sub == "scenario-prepare":
-        return (
-            f"#### 步骤组 1：service start\n\n"
-            f"- [ ] {n}.1 scenario-prepare agent 按 `stage.environment.instances` 中的顺序逐个 invoke-hook start 每个 instance\n"
-            f"- [ ] {n}.2 每个 role 启动后立刻 invoke-hook health_check 验证就绪\n"
-            f"- [ ] {n}.3 全部 health_check PASS → record(scenario-prepare, \"completed\")\n"
-            f"- [ ] {n}.4 任一 role 启动 / health_check FAIL → record(scenario-prepare, \"failed\") → workflow_failed"
-        )
 
     if sub == "scenario-execute":
         return (

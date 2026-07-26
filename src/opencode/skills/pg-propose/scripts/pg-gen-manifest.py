@@ -442,9 +442,10 @@ def build_manifest(change: str) -> dict:
                         commands.append(cmd.get("cmd", ""))
                 entry["commands"] = commands
             elif is_scenario:
-                # v3.6: scenario track phase_prompts + scenario_yaml
+                # v3.x: scenario track phase_prompts + scenario_yaml
+                # (scenario-prepare 已删除, 环境就绪由 restart_all_instances env-action 自动保证)
                 prompts = {}
-                scenario_sub_order = ("scenario-prepare", "scenario-execute")
+                scenario_sub_order = ("scenario-execute",)
                 for sub_name in scenario_sub_order:
                     if sub_name in track_info["phases"]:
                         prompts[sub_name] = {

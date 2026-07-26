@@ -14,8 +14,6 @@ import sys
 import tempfile
 import unittest
 
-sys.path.insert(0, "/home/ubuntu/workspace/oc1-web-virt/.pg/skills/src/opencode/skills/pg-propose/scripts")
-
 import importlib.util
 
 
@@ -28,7 +26,7 @@ def _load(name, path):
     return mod
 
 
-SCRIPTS = "/home/ubuntu/workspace/oc1-web-virt/.pg/skills/src/opencode/skills/pg-propose/scripts"
+SCRIPTS = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.insert(0, SCRIPTS)
 
 _skel = _load("skel", f"{SCRIPTS}/pg-gen-tasks-skeleton.py")
@@ -131,8 +129,8 @@ class TestBuildSectionsWithDecision(unittest.TestCase):
         decisions = _skel._compute_scenario_decisions(CONFIG, "scenario-test=true", "")
         secs = _skel.build_sections(CONFIG, set(), set(), scenario_decisions=decisions)
         sc = [s for s in secs if s.get("is_scenario")]
-        self.assertEqual(len(sc), 2)
-        self.assertEqual([s["sub"] for s in sc], ["scenario-prepare", "scenario-execute"])
+        self.assertEqual(len(sc), 1)
+        self.assertEqual([s["sub"] for s in sc], ["scenario-execute"])
 
     def test_enabled_false_no_scenario_sections(self):
         decisions = _skel._compute_scenario_decisions(CONFIG, "scenario-test=false", "")
@@ -144,7 +142,7 @@ class TestBuildSectionsWithDecision(unittest.TestCase):
         decisions = _skel._compute_scenario_decisions(CONFIG, "", "")
         secs = _skel.build_sections(CONFIG, set(), set(), scenario_decisions=decisions)
         sc = [s for s in secs if s.get("is_scenario")]
-        self.assertEqual(len(sc), 2)
+        self.assertEqual(len(sc), 1)
 
     def test_multi_track_partial_enable(self):
         decisions = _skel._compute_scenario_decisions(

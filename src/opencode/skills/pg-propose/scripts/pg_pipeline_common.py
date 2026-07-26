@@ -153,7 +153,7 @@ def get_track_type(config, item):
     Return values:
       - 'track': standard TDVG sequence (test → dev → review → verify → gate)
       - 'phase': runner dispatches the pg-build/simple sub-agent to execute commands
-      - 'scenario' (v3.5): scenario-prepare → scenario-execute → (scenario-fix → scenario-execute)*
+      - 'scenario' (v3.x): restart_all_instances env-action → scenario-execute → (scenario-fix → scenario-execute)*
 
     The `item` argument may be either a bare track id (e.g. "openapi-gen")
     or a qualified item id (e.g. "dev.openapi-gen", as used by

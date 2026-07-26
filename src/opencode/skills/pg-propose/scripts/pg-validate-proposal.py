@@ -219,7 +219,7 @@ def _validate_track(track, prefix):
                 issues.append((f"{prefix}_phase_prompts_not_object",
                                f"{prefix} phase_prompts 必须是 object"))
             else:
-                for required_sub in ("scenario-prepare", "scenario-execute"):
+                for required_sub in ("scenario-execute",):
                     if required_sub not in pp:
                         issues.append((f"{prefix}_missing_sub_{required_sub}",
                                        f"{prefix} phase_prompts 缺少 {required_sub}"))
@@ -253,9 +253,10 @@ def _validate_manifest_vs_tasks(manifest, tasks_sections):
         for track_idx, track in enumerate(stage.get("tracks", [])):
             if track.get("type") == "simple":
                 continue
-# v3.5: scenario track uses scenario-prepare/scenario-execute instead of test/dev
+# v3.x: scenario track uses scenario-execute only (scenario-prepare removed,
+            # env readiness handled by restart_all_instances env-action)
             if track.get("type") == "scenario":
-                subs_to_check = ("scenario-prepare", "scenario-execute")
+                subs_to_check = ("scenario-execute",)
             else:
                 subs_to_check = ("test", "dev", "review", "verify", "gate")
             for sub_name in subs_to_check:
