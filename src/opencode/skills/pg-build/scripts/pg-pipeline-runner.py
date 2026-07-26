@@ -7,8 +7,8 @@
   python3 pg-pipeline-runner.py next <change>
   python3 pg-pipeline-runner.py record <change> --status <status> [--report <path>] [--summary <文本>] [--outputs <p1,p2>] [--issues <i1,i2>] [--evidence <e>] [--tasks-updated <t1,t2,...|--tasks-updated t1 --tasks-updated t2>]
   python3 pg-pipeline-runner.py progress <change>
-  python3 pg-pipeline-runner.py env-action <change> --phase <prepare_env|clean_env> --stage <stage> --env <env> [--timeout <seconds>]
-  python3 pg-pipeline-runner.py env-action-result <change> --phase <prepare_env|clean_env> --stage <stage> --env <env> --success <true|false> [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]
+  python3 pg-pipeline-runner.py env-action <change> --phase <prepare_env|clean_env|restart> --stage <stage> --env <env> [--timeout <seconds>]
+  python3 pg-pipeline-runner.py env-action-result <change> --phase <prepare_env|clean_env|restart> --stage <stage> --env <env> --success <true|false> [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]
 """
 
 from __future__ import annotations

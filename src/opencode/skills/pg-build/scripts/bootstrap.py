@@ -32,6 +32,7 @@ from typing import Any
 from pipeline.events import (
     EVT_PREPARE_ENV_STARTED, EVT_PREPARE_ENV_COMPLETED,
     EVT_CLEAN_ENV_STARTED, EVT_CLEAN_ENV_COMPLETED,
+    EVT_RESTART_ALL_INSTANCES_STARTED, EVT_RESTART_ALL_INSTANCES_COMPLETED,
 )
 from pipeline.event_log import EventLog
 from pipeline.config import load_project_config
@@ -546,7 +547,7 @@ def _build_env_hook_plan(
           "error": str|None,
         }
     """
-    if phase_name not in ("prepare_env", "clean_env"):
+    if phase_name not in ("prepare_env", "clean_env", "restart"):
         return {"ok": False, "skipped": False, "error": f"invalid phase: {phase_name}"}
 
     config_path = os.path.join(PROJECT_ROOT, ".pg", "project.yaml")
@@ -597,6 +598,59 @@ def _build_env_hook_plan(
         return {"ok": True, "skipped": True}
 
     env_cfg = (config.get("environments") or {}).get(env_name, {})
+
+    # v3.x: restart phase 不读 env_cfg[phase_name], 而是构造 pg-invoke-hook.py 调用.
+    # 因为 restart_all_instances 是 env-level action 复合 (stop → start → health_check),
+    # 不对应单个 hook 脚本.
+    if phase_name == "restart":
+        if not env_cfg.get("roles"):
+            return {"ok": True, "skipped": True}
+        invoke_hook_script = os.path.join(
+            PROJECT_ROOT, ".pg", "skills", "src", "runtime", "bin", "pg-invoke-hook.py"
+        )
+        if not os.path.isfile(invoke_hook_script):
+            return {"ok": False, "skipped": False,
+                    "error": f"pg-invoke-hook.py not found at {invoke_hook_script}"}
+        cmd = (
+            f"python3 {invoke_hook_script} invoke-hook"
+            f" --session {change}"
+            f" --env {env_name}"
+            f" --action restart_all_instances"
+            f" --skill pg-build"
+        )
+        log_path = os.path.join(
+            CHANGES_DIR, change, APPLY_DIR,
+            f"restart-{_now_iso().replace(':', '-')}.log"
+        )
+        result_file = os.path.join(
+            CHANGES_DIR, change, APPLY_DIR,
+            f"restart-result.json"
+        )
+        hook_log_dir = os.path.join(CHANGES_DIR, change, APPLY_DIR, "logs")
+        _env = os.environ.copy()
+        _env.setdefault("PG_PROJECT_ROOT", PROJECT_ROOT)
+        _env.setdefault("PG_SKILLS_PATH", os.path.join(PROJECT_ROOT, ".pg", "skills"))
+        _env["PG_RUN_CALLER"] = "pg-build"
+        _env["PG_ENV"] = env_name
+        _env["PG_STAGE"] = stage_name or ""
+        _env["PG_HOOK_TYPE"] = "restart"
+        _env["PG_HOOK_LOG_DIR"] = hook_log_dir
+        _env["PG_LOG_FILE"] = log_path
+        _env["PG_RESULT_FILE"] = result_file
+        timeout = explicit_timeout or 600
+        return {
+            "ok": True,
+            "skipped": False,
+            "command": cmd,
+            "env_name": env_name,
+            "stage_name": stage_name or "",
+            "timeout_seconds": timeout,
+            "log_path": log_path,
+            "result_file": result_file,
+            "hook_log_dir": hook_log_dir,
+            "env": _env,
+        }
+
     action = env_cfg.get(phase_name)
     if not action:
         return {"ok": True, "skipped": True}
@@ -1083,7 +1137,9 @@ def cli_env_action(change: str, phase_name: str, stage_name: str, env_name: str,
     event_log = EventLog(change_root=change_root)
     started_type = (
         EVT_PREPARE_ENV_STARTED if phase_name == "prepare_env"
-        else EVT_CLEAN_ENV_STARTED
+        else EVT_CLEAN_ENV_STARTED if phase_name == "clean_env"
+        else EVT_RESTART_ALL_INSTANCES_STARTED if phase_name == "restart"
+        else EVT_PREPARE_ENV_STARTED  # 兜底
     )
     try:
         ev = event_log.append(started_type, {
@@ -1160,7 +1216,9 @@ def cli_env_action_result(
 
     completed_type = (
         EVT_PREPARE_ENV_COMPLETED if phase_name == "prepare_env"
-        else EVT_CLEAN_ENV_COMPLETED
+        else EVT_CLEAN_ENV_COMPLETED if phase_name == "clean_env"
+        else EVT_RESTART_ALL_INSTANCES_COMPLETED if phase_name == "restart"
+        else EVT_PREPARE_ENV_COMPLETED  # 兜底
     )
     completed_data: dict[str, Any] = {
         "stage": stage_name,
@@ -1183,6 +1241,7 @@ def cli_env_action_result(
 
     state = load_snapshot(change_root) or PipelineState(change=change)
     new_prepared = set(state.stage_prepared)
+    new_restarted = set(state.stage_restarted)
     new_current = state.current_stage
 
     if phase_name == "prepare_env":
@@ -1192,9 +1251,16 @@ def cli_env_action_result(
     elif phase_name == "clean_env":
         if stage_name:
             new_prepared.discard(stage_name)
+            new_restarted.discard(stage_name)
+    elif phase_name == "restart":
+        # v3.x: restart phase 单独记录 stage_restarted 集合, 不影响 stage_prepared.
+        # 这样 fix 后 scenario-execute 重跑能感知"已 restart"而跳过再次 restart.
+        if stage_name:
+            new_restarted.add(stage_name)
 
     new_state = state.replace(
         stage_prepared=new_prepared,
+        stage_restarted=new_restarted,
         current_stage=new_current,
     )
     try:
@@ -1205,5 +1271,6 @@ def cli_env_action_result(
 
     result["ok"] = True
     result["stage_prepared"] = sorted(new_prepared)
+    result["stage_restarted"] = sorted(new_restarted)
     result["current_stage"] = new_current
     return result

@@ -82,12 +82,7 @@ PHASE_RULES: dict[str, dict[str, Any]] = {
         "outputs_required": False,
         "tasks_updated_required": False,
     },
-    # v3.5: scenario track 专用 phase rules
-    "scenario-prepare": {
-        "evidence_required": True,
-        "report_required": True,
-        "tasks_updated_required": False,
-    },
+    # v3.x: scenario track 专用 phase rules (scenario-prepare 已删除, 由 restart_all_instances env-action 替代)
     "scenario-execute": {
         "evidence_required": True,
         "report_required": True,

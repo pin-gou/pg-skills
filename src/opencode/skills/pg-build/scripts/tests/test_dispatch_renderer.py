@@ -155,8 +155,9 @@ class TestEnvBlockInjection(unittest.TestCase):
         self.assertNotIn("stage.environment.instances", content)
         self.assertNotIn("运行时环境操作指令", content)
 
-    def test_scenario_prepare_injects_env_hooks(self):
-        content = render_dispatch("scenario-prepare", _ctx("scenario-prepare"))
+    def test_scenario_execute_injects_env_hooks(self):
+        """v3.x: scenario-execute 取代 scenario-prepare, 注入 env hooks 段."""
+        content = render_dispatch("scenario-execute", _ctx("scenario-execute"))
         self.assertIn("stage.environment.hooks", content)
         self.assertIn("stage.environment.instances", content)
         self.assertIn("运行时环境操作指令", content)

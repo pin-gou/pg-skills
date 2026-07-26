@@ -1,28 +1,24 @@
-"""scenario track 端到端测试（v3.5）。
+"""Tests for scenario track lifecycle.
 
-覆盖：
-- state.py: SUB_SCENARIO_* 常量 + SCENARIO_FIX_CYCLE_PHASES
-- events.py: PHASE_STATUS_ALLOWED / EVT_SCENARIO_CYCLE_STARTED
-- sub_pipeline.py: create_scenario_fix_cycle + 推进
-- reducer.py: _handle_scenario_prepare / _handle_scenario_execute /
-              _handle_scenario_fix 全分支（完成 / escalate / fix exhausted / failed）
-- detect.py: _detect_scenario_action 三阶段路由
-- dispatch.py: PHASE_AGENTS 含 scenario-* + extract_scenario_md
-- sub_agent_contract.py: PHASE_RULES 含 scenario-*
-- orchestrator 集成：bootstrap → prepare → execute → (fix → execute)* → completed
+v3.x 重构: scenario-prepare 已删除, 由 restart_all_instances env-action 替代.
+scenario track 直接 dispatch scenario-execute, detect 在 dispatch 前检查
+stage_restarted 确保环境是最新一次构建.
+
+测试范围:
+1. state.py 常量 (SUB_SCENARIO_EXECUTE / SUB_SCENARIO_FIX / SCENARIO_PHASES)
+2. events.py 状态矩阵 (PHASE_STATUS_ALLOWED)
+3. sub_pipeline.py: create_scenario_fix_cycle
+4. reducer: scenario-execute (completed / escalate / failed)
+5. reducer: scenario-fix (子 pipeline 完成后回到 execute)
+6. detect.py: scenario track 路由 (含 restart 前置检查)
+7. dispatch.py: PHASE_AGENTS + ALLOWED_STATUSES (scenario-prepare 已删除)
+8. sub_agent_contract: PHASE_RULES (scenario-prepare 已删除)
 """
 
-from __future__ import annotations
-
 import os
-import sys
 import unittest
 
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
-
 from pipeline.events import (
-    PipelineRecord,
-    PipelineAction,
     PipelineRecord,
     PHASE_STATUS_ALLOWED,
     EVT_SCENARIO_CYCLE_STARTED,
@@ -36,14 +32,12 @@ from pipeline.state import (
     PipelineState,
     TrackState,
     PhaseState,
-    SUB_SCENARIO_PREPARE,
     SUB_SCENARIO_EXECUTE,
     SUB_SCENARIO_FIX,
     SCENARIO_FIX_CYCLE_PHASES,
     SCENARIO_PHASES,
 )
 from pipeline.sub_pipeline import (
-    SubPipeline,
     create_scenario_fix_cycle,
     SCENARIO_FIX_CYCLE,
 )
@@ -76,10 +70,18 @@ def _make_state(
     track_id: str = "real-integration.scenario-test",
     track_type: str = "scenario",
     max_fix_retries: int = 5,
-    prepare_status: str = "completed",
     env_name: str = "dev-local",
+    stage_restarted: tuple = (),
+    current_stage: str = "",
+    stage_order: tuple = (),
+    stage_env_map: dict | None = None,
+    stage_env_timeout: dict | None = None,
 ) -> PipelineState:
-    """构造一个 PipelineState 含一个 scenario track。"""
+    """构造一个 PipelineState 含一个 scenario track。
+
+    v3.x: 不再含 scenario-prepare phase; stage_restarted / current_stage /
+    stage_order / stage_env_map 用于触发 detect 的 restart env_switch.
+    """
     t = TrackState(
         track_id=track_id,
         bare="scenario-test",
@@ -87,7 +89,6 @@ def _make_state(
         modules=("backend", "frontend", "agent"),
         max_fix_retries=max_fix_retries,
         max_fail_retries=3,
-        prepare_status=prepare_status,
         env_name=env_name,
     )
     return PipelineState(
@@ -97,6 +98,12 @@ def _make_state(
         tracks={track_id: t},
         status="running",
         current_track=track_id,
+        current_phase="",
+        stage_order=stage_order,
+        stage_env_map=stage_env_map or {},
+        stage_env_timeout=stage_env_timeout or {},
+        current_stage=current_stage,
+        stage_restarted=set(stage_restarted),
     )
 
 
@@ -106,12 +113,13 @@ def _make_state(
 
 class TestStateScenarioPhases(unittest.TestCase):
     def test_sub_scenario_phase_constants(self):
-        self.assertEqual(SUB_SCENARIO_PREPARE, "scenario-prepare")
         self.assertEqual(SUB_SCENARIO_EXECUTE, "scenario-execute")
         self.assertEqual(SUB_SCENARIO_FIX, "scenario-fix")
 
-    def test_scenario_phases_tuple(self):
-        self.assertEqual(SCENARIO_PHASES, ("scenario-prepare", "scenario-execute"))
+    def test_scenario_phases_tuple_excludes_prepare(self):
+        # v3.x: scenario-prepare 已删除
+        self.assertEqual(SCENARIO_PHASES, ("scenario-execute",))
+        self.assertNotIn("scenario-prepare", SCENARIO_PHASES)
 
     def test_scenario_fix_cycle_phases(self):
         self.assertEqual(SCENARIO_FIX_CYCLE_PHASES, ("scenario-fix",))
@@ -123,14 +131,9 @@ class TestStateScenarioPhases(unittest.TestCase):
 
 class TestEventScenarioPhases(unittest.TestCase):
     def test_phase_status_allowed_covers_scenario(self):
-        self.assertIn(SUB_SCENARIO_PREPARE, PHASE_STATUS_ALLOWED)
         self.assertIn(SUB_SCENARIO_EXECUTE, PHASE_STATUS_ALLOWED)
         self.assertIn(SUB_SCENARIO_FIX, PHASE_STATUS_ALLOWED)
-        # prepare / fix: completed + failed
-        self.assertEqual(
-            PHASE_STATUS_ALLOWED[SUB_SCENARIO_PREPARE],
-            frozenset({STATUS_COMPLETED, STATUS_FAILED}),
-        )
+        self.assertNotIn("scenario-prepare", PHASE_STATUS_ALLOWED)
         self.assertEqual(
             PHASE_STATUS_ALLOWED[SUB_SCENARIO_FIX],
             frozenset({STATUS_COMPLETED, STATUS_FAILED}),
@@ -177,78 +180,15 @@ class TestScenarioFixCycle(unittest.TestCase):
 
 
 # ============================================================
-# 4. reducer: scenario-prepare
-# ============================================================
-
-class TestScenarioPrepare(unittest.TestCase):
-    def test_prepare_completed_dispatches_execute(self):
-        state = _make_state()
-        # 模拟场景：scenario-prepare 已 running
-        state = state.replace(
-            tracks={
-                **state.tracks,
-                "real-integration.scenario-test": state.tracks[
-                    "real-integration.scenario-test"
-                ].replace(
-                    phases={
-                        SUB_SCENARIO_PREPARE: PhaseState(status="running", attempt=1),
-                    },
-                ),
-            },
-        )
-        record = PipelineRecord(
-            track="real-integration.scenario-test",
-            phase=SUB_SCENARIO_PREPARE,
-            status=STATUS_COMPLETED,
-            summary="all roles ready",
-        )
-        new_state, action = reduce_state(state, record)
-        self.assertEqual(action.kind, "dispatch")
-        self.assertEqual(action.phase, SUB_SCENARIO_EXECUTE)
-        self.assertEqual(
-            new_state.tracks["real-integration.scenario-test"]
-            .phases[SUB_SCENARIO_PREPARE].status,
-            "completed",
-        )
-        self.assertEqual(new_state.current_phase, SUB_SCENARIO_EXECUTE)
-
-    def test_prepare_failed_workflow_failed(self):
-        state = _make_state()
-        state = state.replace(
-            tracks={
-                **state.tracks,
-                "real-integration.scenario-test": state.tracks[
-                    "real-integration.scenario-test"
-                ].replace(
-                    phases={
-                        SUB_SCENARIO_PREPARE: PhaseState(status="running", attempt=1),
-                    },
-                ),
-            },
-        )
-        record = PipelineRecord(
-            track="real-integration.scenario-test",
-            phase=SUB_SCENARIO_PREPARE,
-            status=STATUS_FAILED,
-            summary="backend health_check failed",
-        )
-        new_state, action = reduce_state(state, record)
-        self.assertEqual(action.kind, "workflow_failed")
-        self.assertIn("scenario-prepare", action.detail["reason"])
-
-
-# ============================================================
-# 5. reducer: scenario-execute
+# 4. reducer: scenario-execute
 # ============================================================
 
 class TestScenarioExecute(unittest.TestCase):
     def test_execute_completed_track_done(self):
         state = _make_state()
-        # 模拟 prepare 已 completed
         t = state.tracks["real-integration.scenario-test"]
         t = t.replace(
             phases={
-                SUB_SCENARIO_PREPARE: PhaseState(status="completed"),
                 SUB_SCENARIO_EXECUTE: PhaseState(status="running", attempt=1),
             },
         )
@@ -264,7 +204,6 @@ class TestScenarioExecute(unittest.TestCase):
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "advance")
-        # track 标记为 completed
         self.assertEqual(
             new_state.tracks["real-integration.scenario-test"].status,
             "completed",
@@ -276,7 +215,6 @@ class TestScenarioExecute(unittest.TestCase):
         t = state.tracks["real-integration.scenario-test"]
         t = t.replace(
             phases={
-                SUB_SCENARIO_PREPARE: PhaseState(status="completed"),
                 SUB_SCENARIO_EXECUTE: PhaseState(
                     status="running", attempt=1,
                     report_path="/tmp/exec.md",
@@ -304,7 +242,6 @@ class TestScenarioExecute(unittest.TestCase):
         self.assertEqual(sp.kind, SCENARIO_FIX_CYCLE)
         self.assertEqual(sp.parent_phase, "scenario-execute")
         self.assertEqual(sp.failed_v_tasks, ("S-create-vm",))
-        # fix_cycles 应追加 1 条
         fix_cycles = new_state.tracks[
             "real-integration.scenario-test"
         ].phases[SUB_SCENARIO_EXECUTE].fix_cycles
@@ -315,7 +252,6 @@ class TestScenarioExecute(unittest.TestCase):
         t = state.tracks["real-integration.scenario-test"]
         t = t.replace(
             phases={
-                SUB_SCENARIO_PREPARE: PhaseState(status="completed"),
                 SUB_SCENARIO_EXECUTE: PhaseState(status="running", attempt=1),
             },
         )
@@ -336,7 +272,6 @@ class TestScenarioExecute(unittest.TestCase):
 
     def test_execute_escalate_exhausted_workflow_failed(self):
         """max_fix_retries 耗尽 → workflow_failed（不复用 accept_gap）。"""
-        # 设置 fix_cycles 已达 max_fix_retries
         state = _make_state(max_fix_retries=3)
         existing_cycles = tuple(
             {"cycle": i, "status": "completed"} for i in range(1, 4)
@@ -344,7 +279,6 @@ class TestScenarioExecute(unittest.TestCase):
         t = state.tracks["real-integration.scenario-test"]
         t = t.replace(
             phases={
-                SUB_SCENARIO_PREPARE: PhaseState(status="completed"),
                 SUB_SCENARIO_EXECUTE: PhaseState(
                     status="running", attempt=1,
                     fix_cycles=existing_cycles,
@@ -371,7 +305,6 @@ class TestScenarioExecute(unittest.TestCase):
         t = state.tracks["real-integration.scenario-test"]
         t = t.replace(
             phases={
-                SUB_SCENARIO_PREPARE: PhaseState(status="completed"),
                 SUB_SCENARIO_EXECUTE: PhaseState(status="running", attempt=1),
             },
         )
@@ -392,7 +325,7 @@ class TestScenarioExecute(unittest.TestCase):
 
 
 # ============================================================
-# 6. reducer: scenario-fix (子 pipeline 中的 scenario-fix)
+# 5. reducer: scenario-fix (子 pipeline 中的 scenario-fix)
 # ============================================================
 
 class TestScenarioFixHandler(unittest.TestCase):
@@ -409,7 +342,6 @@ class TestScenarioFixHandler(unittest.TestCase):
             bare="scenario-test",
             modules=("backend",),
             phases={
-                SUB_SCENARIO_PREPARE: PhaseState(status="completed"),
                 SUB_SCENARIO_EXECUTE: PhaseState(
                     status="running",
                     fix_cycles=(
@@ -430,7 +362,6 @@ class TestScenarioFixHandler(unittest.TestCase):
 
     def test_scenario_fix_completed_advances_to_execute(self):
         state = self._state_with_fix_subpipeline()
-        # 走 sub_pipeline 路径
         record = PipelineRecord(
             track="real-integration.scenario-test",
             phase=SUB_SCENARIO_FIX,
@@ -443,7 +374,6 @@ class TestScenarioFixHandler(unittest.TestCase):
         self.assertEqual(action.kind, "dispatch")
         self.assertEqual(action.phase, SUB_SCENARIO_EXECUTE)
         self.assertIsNone(new_state.current_sub_pipeline)
-        # fix_cycles 的最后一条标记为 completed
         fix_cycles = new_state.tracks[
             "real-integration.scenario-test"
         ].phases[SUB_SCENARIO_EXECUTE].fix_cycles
@@ -468,32 +398,51 @@ class TestScenarioFixHandler(unittest.TestCase):
 
 
 # ============================================================
-# 7. detect.py: scenario track 路由
+# 6. detect.py: scenario track 路由 + restart 前置检查
 # ============================================================
 
 class TestDetectScenarioAction(unittest.TestCase):
-    def test_detect_initial_dispatches_prepare(self):
-        state = _make_state()
+    def test_detect_initial_dispatches_restart_then_execute(self):
+        """v3.x: scenario track 首次 dispatch 应先 env_switch[restart], 再 execute.
+
+        注意: 实际场景里 stage_prepared 必先有值 (prepare_env 已跑过).
+        测试中用 track_id 格式 "integration.scenario-test" 让 extract_stage 返回 "integration".
+        """
+        state = _make_state(
+            track_id="integration.scenario-test",
+            stage_order=("integration",),
+            current_stage="integration",
+            stage_env_map={"integration": "dev-3tier"},
+            stage_env_timeout={"dev-3tier": 600},
+            stage_restarted=(),
+        )
+        # 模拟 prepare_env 已完成 (stage_prepared 含 "integration")
+        state = state.replace(stage_prepared={"integration"})
+        action = detect_mod.next_pending(state)
+        self.assertEqual(action.kind, "env_switch")
+        self.assertEqual(action.phase, "restart")
+        self.assertEqual(action.track, "integration.scenario-test")
+        self.assertEqual(action.detail["stage"], "integration")
+        self.assertEqual(action.detail["env_name"], "dev-3tier")
+
+    def test_detect_after_restart_dispatches_execute(self):
+        """v3.x: stage_restarted 含当前 stage 且 stage_prepared 含时, dispatch scenario-execute."""
+        state = _make_state(
+            track_id="integration.scenario-test",
+            stage_order=("integration",),
+            current_stage="integration",
+            stage_env_map={"integration": "dev-3tier"},
+            stage_restarted=("integration",),
+        )
+        state = state.replace(stage_prepared={"integration"})
         action = detect_mod.next_pending(state)
         self.assertEqual(action.kind, "dispatch")
-        self.assertEqual(action.phase, SUB_SCENARIO_PREPARE)
-        self.assertEqual(action.track, "real-integration.scenario-test")
+        self.assertEqual(action.phase, SUB_SCENARIO_EXECUTE)
+        self.assertEqual(action.track, "integration.scenario-test")
 
-    def test_detect_prepare_completed_dispatches_execute(self):
-        t = TrackState(
-            track_id="real-integration.scenario-test",
-            bare="scenario-test",
-            modules=("backend",),
-            phases={
-                SUB_SCENARIO_PREPARE: PhaseState(status="completed"),
-            },
-        )
-        state = PipelineState(
-            change="t",
-            pipeline_order=("real-integration.scenario-test",),
-            track_types={"real-integration.scenario-test": "scenario"},
-            tracks={"real-integration.scenario-test": t},
-        )
+    def test_detect_no_stage_info_dispatches_execute_directly(self):
+        """无 stage_order 时 (向后兼容旧 state), 直接 dispatch execute."""
+        state = _make_state()  # 默认 stage_order=()
         action = detect_mod.next_pending(state)
         self.assertEqual(action.kind, "dispatch")
         self.assertEqual(action.phase, SUB_SCENARIO_EXECUTE)
@@ -519,15 +468,13 @@ class TestDetectScenarioAction(unittest.TestCase):
 
 
 # ============================================================
-# 8. dispatch.py: PHASE_AGENTS + ALLOWED_STATUSES + extract_scenario_md
+# 7. dispatch.py: PHASE_AGENTS + ALLOWED_STATUSES (scenario-prepare 已删除)
 # ============================================================
 
 class TestDispatchScenario(unittest.TestCase):
-    def test_phase_agents_contains_scenario(self):
-        self.assertEqual(
-            dispatch_mod.PHASE_AGENTS.get(SUB_SCENARIO_PREPARE),
-            "pg-build/scenario-prepare",
-        )
+    def test_phase_agents_excludes_scenario_prepare(self):
+        """v3.x: scenario-prepare agent 已删除."""
+        self.assertNotIn("scenario-prepare", dispatch_mod.PHASE_AGENTS)
         self.assertEqual(
             dispatch_mod.PHASE_AGENTS.get(SUB_SCENARIO_EXECUTE),
             "pg-build/scenario-execute",
@@ -537,8 +484,8 @@ class TestDispatchScenario(unittest.TestCase):
             "pg-build/scenario-fix",
         )
 
-    def test_phase_allowed_statuses_contains_scenario(self):
-        self.assertIn(SUB_SCENARIO_PREPARE, dispatch_mod.PHASE_ALLOWED_STATUSES)
+    def test_phase_allowed_statuses_excludes_scenario_prepare(self):
+        self.assertNotIn("scenario-prepare", dispatch_mod.PHASE_ALLOWED_STATUSES)
         self.assertIn(SUB_SCENARIO_EXECUTE, dispatch_mod.PHASE_ALLOWED_STATUSES)
         self.assertIn(SUB_SCENARIO_FIX, dispatch_mod.PHASE_ALLOWED_STATUSES)
         # execute 含 escalate
@@ -571,13 +518,14 @@ class TestDispatchScenario(unittest.TestCase):
 
 
 # ============================================================
-# 9. sub_agent_contract: PHASE_RULES
+# 8. sub_agent_contract: PHASE_RULES (scenario-prepare 已删除)
 # ============================================================
 
 class TestSubAgentContractScenario(unittest.TestCase):
-    def test_phase_rules_contain_scenario(self):
-        for phase in (SUB_SCENARIO_PREPARE, SUB_SCENARIO_EXECUTE, SUB_SCENARIO_FIX):
-            self.assertIn(phase, PHASE_RULES)
+    def test_phase_rules_exclude_scenario_prepare(self):
+        self.assertNotIn("scenario-prepare", PHASE_RULES)
+        self.assertIn(SUB_SCENARIO_EXECUTE, PHASE_RULES)
+        self.assertIn(SUB_SCENARIO_FIX, PHASE_RULES)
 
     def test_scenario_execute_escalate_only_tasks(self):
         rule = PHASE_RULES[SUB_SCENARIO_EXECUTE]
@@ -585,25 +533,13 @@ class TestSubAgentContractScenario(unittest.TestCase):
 
 
 # ============================================================
-# 10. orchestrator-level: 完整 prepare → execute → fix → execute → completed
+# 9. orchestrator-level: 完整 execute → fix → execute → completed
 # ============================================================
 
 class TestScenarioTrackEnd2End(unittest.TestCase):
     def test_full_lifecycle_no_failure(self):
-        """完整路径：prepare.completed → execute.completed → track 完成。"""
+        """完整路径：execute.completed → track 完成。"""
         state = _make_state()
-        # 记录 prepare.completed
-        state, _ = reduce_state(
-            state,
-            PipelineRecord(
-                track="real-integration.scenario-test",
-                phase=SUB_SCENARIO_PREPARE,
-                status=STATUS_COMPLETED,
-                summary="roles ready",
-            ),
-        )
-        self.assertEqual(state.current_phase, SUB_SCENARIO_EXECUTE)
-        # 记录 execute.completed
         new_state, action = reduce_state(
             state,
             PipelineRecord(
@@ -620,20 +556,10 @@ class TestScenarioTrackEnd2End(unittest.TestCase):
         )
 
     def test_full_lifecycle_with_one_fix_cycle(self):
-        """完整路径：prepare.completed → execute.escalate → fix.completed → execute.completed。"""
+        """完整路径：execute.escalate → fix.completed → execute.completed。"""
         state = _make_state()
 
-        # Step 1: prepare.completed
-        state, _ = reduce_state(
-            state,
-            PipelineRecord(
-                track="real-integration.scenario-test",
-                phase=SUB_SCENARIO_PREPARE,
-                status=STATUS_COMPLETED,
-            ),
-        )
-
-        # Step 2: execute.escalate
+        # Step 1: execute.escalate
         state, action = reduce_state(
             state,
             PipelineRecord(
@@ -647,7 +573,7 @@ class TestScenarioTrackEnd2End(unittest.TestCase):
         self.assertEqual(action.kind, "dispatch")
         self.assertEqual(action.phase, SUB_SCENARIO_FIX)
 
-        # Step 3: fix.completed → 应回到 execute
+        # Step 2: fix.completed → 应回到 execute
         state, action = reduce_state(
             state,
             PipelineRecord(
@@ -662,7 +588,7 @@ class TestScenarioTrackEnd2End(unittest.TestCase):
         self.assertEqual(action.phase, SUB_SCENARIO_EXECUTE)
         self.assertIsNone(state.current_sub_pipeline)
 
-        # Step 4: execute.completed → track 完成
+        # Step 3: execute.completed → track 完成
         new_state, action = reduce_state(
             state,
             PipelineRecord(
@@ -687,17 +613,7 @@ class TestScenarioTrackEnd2End(unittest.TestCase):
         """完整路径：execute 连续 escalate 直到耗尽 max_fix_retries=1。"""
         state = _make_state(max_fix_retries=1)
 
-        # Step 1: prepare.completed
-        state, _ = reduce_state(
-            state,
-            PipelineRecord(
-                track="real-integration.scenario-test",
-                phase=SUB_SCENARIO_PREPARE,
-                status=STATUS_COMPLETED,
-            ),
-        )
-
-        # Step 2-3: 第一次 escalate + fix（这是允许的 1 次 fix cycle）
+        # Step 1-2: 第一次 escalate + fix（这是允许的 1 次 fix cycle）
         state, _ = reduce_state(
             state,
             PipelineRecord(
@@ -717,7 +633,7 @@ class TestScenarioTrackEnd2End(unittest.TestCase):
             ),
         )
 
-        # Step 4: 第二次 escalate → max_fix_retries=1 已耗尽 → workflow_failed
+        # Step 3: 第二次 escalate → max_fix_retries=1 已耗尽 → workflow_failed
         new_state, action = reduce_state(
             state,
             PipelineRecord(

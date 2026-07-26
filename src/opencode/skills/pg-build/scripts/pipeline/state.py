@@ -22,12 +22,13 @@ REVIEW_SUB = "review"
 FIX_REVIEW_SUB = "fix-review"
 
 # v3.5: scenario track（type=scenario）专用的 phase 与子 pipeline 常量
-# scenario track 不走 TDVG，走 prepare → execute → (fix → execute)* 循环
-SUB_SCENARIO_PREPARE = "scenario-prepare"
+# scenario track 不走 TDVG，走 execute → (fix → restart_all → execute)* 循环。
+# restart_all_instances 是 env-action（pg-invoke-hook.py），由 detect 在 dispatch
+# execute 前插入，已自动确保环境是最新一次构建版本。
 SUB_SCENARIO_EXECUTE = "scenario-execute"
 SUB_SCENARIO_FIX = "scenario-fix"
 
-SCENARIO_PHASES: tuple[str, ...] = (SUB_SCENARIO_PREPARE, SUB_SCENARIO_EXECUTE)
+SCENARIO_PHASES: tuple[str, ...] = (SUB_SCENARIO_EXECUTE,)
 SCENARIO_FIX_CYCLE_PHASES: tuple[str, ...] = (SUB_SCENARIO_FIX,)
 
 
@@ -263,6 +264,8 @@ class PipelineState:
     stage_env_timeout: dict[str, int] = field(default_factory=dict)  # {"dev-local": 600} hook timeout
     current_stage: str = ""
     stage_prepared: set[str] = field(default_factory=set)        # 已 prepare 的 stage 集合
+    # v3.x: 已完成 restart_all_instances 的 stage 集合 (scenario-execute 前置)
+    stage_restarted: set[str] = field(default_factory=set)
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -285,6 +288,7 @@ class PipelineState:
             "stage_env_timeout": dict(self.stage_env_timeout),
             "current_stage": self.current_stage,
             "stage_prepared": list(self.stage_prepared),
+            "stage_restarted": list(self.stage_restarted),
         }
         if self.current_sub_pipeline is not None:
             if hasattr(self.current_sub_pipeline, "to_dict"):
@@ -329,6 +333,7 @@ class PipelineState:
             stage_env_timeout=d.get("stage_env_timeout", {}),
             current_stage=d.get("current_stage", ""),
             stage_prepared=set(d.get("stage_prepared", [])),
+            stage_restarted=set(d.get("stage_restarted", [])),
         )
 
     def replace(self, **kwargs: Any) -> "PipelineState":

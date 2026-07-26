@@ -279,7 +279,8 @@ def render_dispatch(
     #  - PHASES_WITH_ENV (dev/verify/fix/fix-gate): 注入 header_env（紧跟 Stage 配置，含
     #    env_instances + env_hooks + 运行时环境操作指令 + ROLE/INSTANCE 来源解释）
     #  - PHASES_WITHOUT_ENV (test/gate/simple/final-gate): 跳过 header_env
-    inject_env = phase in PHASES_WITH_ENV or phase == "scenario-prepare"
+    #  - scenario-execute: 需读取 env instances (用于 API URL 拼接) → 也注入
+    inject_env = phase in PHASES_WITH_ENV or phase == "scenario-execute"
 
     # 4. 合并 base + blocks + phase 模板
     sections = []

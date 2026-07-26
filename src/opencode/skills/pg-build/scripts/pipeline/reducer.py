@@ -23,7 +23,6 @@ from pipeline.state import (
     SIMPLE_SUB,
     REVIEW_SUB,
     FIX_REVIEW_SUB,
-    SUB_SCENARIO_PREPARE,
     SUB_SCENARIO_EXECUTE,
     SUB_SCENARIO_FIX,
 )
@@ -283,9 +282,8 @@ def reduce_state(
         return _handle_fix_gate(state, record)
 
     # ─── scenario track 专用 (v3.5) ───
-    # scenario-prepare / scenario-execute 是主 phase；
-    # scenario-fix 仅在子 pipeline 中走，但这里也作为兜底入口处理
-    if phase in (SUB_SCENARIO_PREPARE, SUB_SCENARIO_EXECUTE, SUB_SCENARIO_FIX):
+    # scenario-execute 是主 phase；scenario-fix 仅在子 pipeline 中走，但这里也作为兜底入口处理
+    if phase in (SUB_SCENARIO_EXECUTE, SUB_SCENARIO_FIX):
         return _handle_scenario(state, record)
 
     # ─── final-gate 优先于 gate ───
@@ -889,49 +887,11 @@ def _handle_scenario(
     state: PipelineState, record: PipelineRecord,
 ) -> tuple[PipelineState, PipelineAction]:
     """scenario track 的统一入口，按 phase 分派给子 handler。"""
-    if record.phase == SUB_SCENARIO_PREPARE:
-        return _handle_scenario_prepare(state, record)
     if record.phase == SUB_SCENARIO_EXECUTE:
         return _handle_scenario_execute(state, record)
     if record.phase == SUB_SCENARIO_FIX:
         return _handle_scenario_fix(state, record)
     return _error_action(state, f"invalid scenario phase: {record.phase!r}")
-
-
-def _handle_scenario_prepare(
-    state: PipelineState, record: PipelineRecord,
-) -> tuple[PipelineState, PipelineAction]:
-    """scenario-prepare 处理：
-      - completed → dispatch scenario-execute
-      - failed    → workflow_failed（不进入 execute，prepare 失败时不能执行 Scenario）
-
-    prepare 阶段不允许内部重试（runner 的 prepare_env 自身的 max_fail_retries 已够用，
-    prepare agent 内部决定如何重试 invoke-hook）。这里只做最终判定。
-    """
-    track = record.track
-    if track not in state.tracks:
-        return _error_action(state, f"track not found: {track}")
-    t = state.tracks[track]
-
-    if record.status == STATUS_COMPLETED:
-        t = _update_phase(
-            t, SUB_SCENARIO_PREPARE, status="completed",
-            summary=record.summary, report_path=record.report_path,
-        )
-        new_state = state.replace(
-            tracks={**state.tracks, track: t},
-            current_track=track, current_phase=SUB_SCENARIO_EXECUTE,
-        )
-        return new_state, _dispatch_action(track, SUB_SCENARIO_EXECUTE)
-
-    elif record.status == STATUS_FAILED:
-        # prepare 失败 = workflow_failed
-        return _fail_action(
-            state, track, SUB_SCENARIO_PREPARE,
-            f"{track}:{SUB_SCENARIO_PREPARE} failed: {record.summary}",
-        )
-
-    return _error_action(state, f"invalid {SUB_SCENARIO_PREPARE} status: {record.status!r}")
 
 
 def _handle_scenario_execute(

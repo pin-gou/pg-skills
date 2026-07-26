@@ -12,7 +12,6 @@ from pipeline.state import (
     FIX_SUB,
     FIX_GATE_SUB,
     SIMPLE_SUB,
-    SUB_SCENARIO_PREPARE,
     SUB_SCENARIO_EXECUTE,
 )
 from pipeline.sub_pipeline import SCENARIO_FIX_CYCLE
@@ -97,13 +96,33 @@ def next_pending(state: PipelineState) -> PipelineAction:
                     },
                 )
 
-        # 检测 stage 边界：需要 prepare 新 stage 的环境
+        # 检测 stage 边界: 需要 prepare 新 stage 的环境
         if next_stage and next_stage not in state.stage_prepared:
             _env_name = state.stage_env_map.get(next_stage, "")
             return PipelineAction(
                 kind="env_switch",
                 track=first_pending_track,
                 phase="prepare_env",
+                detail={
+                    "stage": next_stage,
+                    "env_name": _env_name,
+                    "hook_timeout_seconds": state.stage_env_timeout.get(_env_name, 600),
+                },
+            )
+
+        # v3.x: scenario track 当前 stage 已 prepare, 但 scenario-execute dispatch
+        # 前需 restart_all_instances. 类比 prepare_env 的 stage 边界检测, 但用
+        # stage_restarted 单独记录.
+        if (
+            next_stage
+            and state.track_types.get(first_pending_track) == "scenario"
+            and next_stage not in state.stage_restarted
+        ):
+            _env_name = state.stage_env_map.get(next_stage, "")
+            return PipelineAction(
+                kind="env_switch",
+                track=first_pending_track,
+                phase="restart",
                 detail={
                     "stage": next_stage,
                     "env_name": _env_name,
@@ -197,22 +216,22 @@ def _phase_index(phase: str) -> int:
 
 
 def _detect_scenario_action(state: PipelineState, track_id: str) -> PipelineAction:
-    """v3.5 新增：scenario track 的 dispatch 决策。
+    """v3.x 重构：scenario track 的 dispatch 决策。
 
     状态机：
-      prepare pending    → dispatch prepare
-      prepare running    → dispatch prepare（重试）
-      prepare failed     → reducer 已 workflow_failed；不应再触发
-      prepare completed  → execute pending → dispatch execute
-      execute pending    → dispatch execute
-      execute running    → dispatch execute（重试）
+      execute pending    → restart env-action (if needed) → dispatch execute
+      execute running    → restart env-action (if needed) → dispatch execute (重试)
       execute completed  → reducer 已 advance；不应再触发
       execute failed     → reducer 已 workflow_failed；不应再触发
       子 pipeline 活跃   → 子 pipeline 的 current_phase（scenario-fix）
+
+    v3.x: scenario-prepare phase 已删除. 环境就绪由 restart_all_instances env-action
+    保证, 由本函数在 dispatch scenario-execute 前自动插入 (类比 prepare_env
+    在 standard track 前的 stage 边界检测).
     """
     t = state.tracks.get(track_id)
 
-    # 子 pipeline 活跃：路由到子 pipeline 当前 phase（scenario-fix）
+    # 子 pipeline 活跃: 路由到子 pipeline 当前 phase (scenario-fix)
     if state.current_sub_pipeline is not None:
         sp = state.current_sub_pipeline
         if sp.kind == SCENARIO_FIX_CYCLE and sp.parent_track == track_id:
@@ -227,24 +246,10 @@ def _detect_scenario_action(state: PipelineState, track_id: str) -> PipelineActi
     if t is None:
         return PipelineAction(kind="advance", track=track_id)
 
-    prepare = t.phases.get(SUB_SCENARIO_PREPARE)
-    if prepare is None or prepare.status in ("pending", ""):
-        return PipelineAction(
-            kind="dispatch",
-            track=track_id,
-            phase=SUB_SCENARIO_PREPARE,
-            cycle=1,
-        )
-    if prepare.status == "running":
-        return PipelineAction(
-            kind="dispatch",
-            track=track_id,
-            phase=SUB_SCENARIO_PREPARE,
-            cycle=1,
-            attempt=prepare.attempt or 1,
-        )
-
+    # 注: 主入口的 stage 边界检查已包含 restart env_switch (detect.py:113-129).
+    # 这里只处理 stage_order 为空的向后兼容路径.
     execute = t.phases.get(SUB_SCENARIO_EXECUTE)
+
     if execute is None or execute.status in ("pending", ""):
         return PipelineAction(
             kind="dispatch",
@@ -261,5 +266,5 @@ def _detect_scenario_action(state: PipelineState, track_id: str) -> PipelineActi
             attempt=execute.attempt or 1,
         )
 
-    # prepare.completed + execute.completed/failed（reducer 已处理，不应到这）
+    # execute.completed/failed（reducer 已处理，不应到这）
     return PipelineAction(kind="advance", track=track_id)

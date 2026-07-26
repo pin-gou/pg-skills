@@ -486,45 +486,30 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
         self._write_mock_result()
         return self.orch.record(status, **kwargs)
 
-    def test_next_pending_dispatches_scenario_prepare(self):
+    def test_next_pending_dispatches_scenario_execute(self):
+        """v3.x: scenario track 首次 next() 直接 dispatch scenario-execute (scenario-prepare 已删除)."""
         action = self._next_dispatch()
         self.assertEqual(action.get("action"), "dispatch")
-        self.assertEqual(action.get("sub"), "scenario-prepare")
+        self.assertEqual(action.get("sub"), "scenario-execute")
         self.assertEqual(action.get("item"), "real-integration.scenario-test")
-        self.assertEqual(action.get("agent"), "pg-build/scenario-prepare")
+        self.assertEqual(action.get("agent"), "pg-build/scenario-execute")
         self.assertTrue(os.path.isfile(action["dispatch_file"]))
         basename = os.path.basename(action["dispatch_file"])
-        self.assertIn("scenario-prepare-dispatch", basename)
+        self.assertIn("scenario-execute-dispatch", basename)
         self.assertIn("expected_result_path", action)
-        self.assertIn("scenario-prepare-result", action["expected_result_path"])
-
-    def test_prepare_completed_dispatches_scenario_execute(self):
-        self._next_dispatch()
-        r = self._record(
-            "completed",
-            summary="all roles ready",
-            report_path=self._touch("/tmp/prepare.md"),
-            outputs="/tmp/prepare.log",
-        )
-        self.assertEqual(r.get("action"), "dispatch")
-        self.assertEqual(r.get("sub"), "scenario-execute")
-        self.assertTrue(os.path.isfile(r["dispatch_file"]))
-        self.assertIn("scenario-execute-dispatch", os.path.basename(r["dispatch_file"]))
+        self.assertIn("scenario-execute-result", action["expected_result_path"])
 
     def test_execute_completed_track_done(self):
         """scenario-execute.completed → reducer 返回 advance；state 应推进到 track.completed。"""
         from pipeline.reducer import reduce_state
         from pipeline.events import PipelineRecord, STATUS_COMPLETED
-        from pipeline.state import SUB_SCENARIO_PREPARE, SUB_SCENARIO_EXECUTE
+        from pipeline.state import SUB_SCENARIO_EXECUTE
 
-        # 跳过 orchestrator 的 final-gate retry：直接构造 state 后调 reducer
         state = self.orch.state
-        # 模拟 prepare 已完成
         track = state.tracks["real-integration.scenario-test"]
         from pipeline.state import PhaseState
         track = track.replace(
             phases={
-                SUB_SCENARIO_PREPARE: PhaseState(status="completed"),
                 SUB_SCENARIO_EXECUTE: PhaseState(status="running", attempt=1),
             },
         )
@@ -553,8 +538,6 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
         )
 
     def test_execute_escalate_dispatches_scenario_fix(self):
-        self._next_dispatch()
-        self._record("completed", summary="ready", report_path=self._touch("/tmp/p.md"))
         self._next_dispatch()  # dispatch scenario-execute
         r = self._record(
             "escalate",
@@ -570,8 +553,6 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
         self.assertEqual(len(t.phases["scenario-execute"].fix_cycles), 1)
 
     def test_fix_completed_returns_to_scenario_execute(self):
-        self._next_dispatch()
-        self._record("completed", summary="ready", report_path=self._touch("/tmp/p.md"))
         self._next_dispatch()  # dispatch scenario-execute
         self._record(
             "escalate",
@@ -599,32 +580,18 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
         self.assertEqual(fix_cycles[-1]["status"], "completed")
 
     def test_execute_escalate_no_tasks_updated_error(self):
-        self._next_dispatch()
-        self._record("completed", summary="ready", report_path=self._touch("/tmp/p.md"))
         self._next_dispatch()  # dispatch scenario-execute
         r = self._record(
             "escalate",
             summary="some summary",
             report_path=self._touch("/tmp/exec.md"),
         )
-        # tasks_updated 缺省 → sub_agent_contract 或 reducer 校验失败（任一即可）
         self.assertEqual(r.get("action"), "error")
         reason = r.get("reason", "").lower()
         self.assertTrue(
             "tasks_updated" in reason or "tasks-updated" in reason,
             f"expected tasks_updated in reason, got {r.get('reason')!r}",
         )
-
-    def test_prepare_failed_workflow_failed(self):
-        self._next_dispatch()
-        r = self._record(
-            "failed",
-            summary="backend health_check timed out",
-            report_path=self._touch("/tmp/prepare.md"),
-        )
-        self.assertEqual(r.get("action"), "workflow_failed")
-        self.assertIn("scenario-prepare", r.get("reason", ""))
-        self.assertTrue(r.get("fatal"))
 
     def test_execute_escalate_exhausted_workflow_failed(self):
         """max_fix_retries=1：第 1 次 escalate → fix；第 2 次 escalate → workflow_failed。"""
@@ -637,10 +604,7 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
             },
         )
         self.orch.state = state
-        self._next_dispatch()
-        self._record("completed", summary="ready", report_path=self._touch("/tmp/p.md"))
         self._next_dispatch()  # dispatch execute
-        # 第一次 escalate + fix（允许的 1 次 fix cycle）
         self._record(
             "escalate", summary="S-mock failed",
             tasks_updated=["S-mock"], report_path=self._touch("/tmp/exec1.md"),
@@ -652,7 +616,6 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
             outputs=self._touch("/tmp/fix.md"),
         )
         self._next_dispatch()  # dispatch execute (re-run)
-        # 第二次 escalate → max_fix_retries=1 已耗尽 → workflow_failed
         r = self._record(
             "escalate", summary="S-mock failed again",
             tasks_updated=["S-mock"], report_path=self._touch("/tmp/exec2.md"),

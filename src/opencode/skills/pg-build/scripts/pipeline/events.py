@@ -22,14 +22,13 @@ SUB_REVIEW = "review"
 SUB_FIX_REVIEW = "fix-review"
 
 # v3.5: scenario track 专用 phase（type=scenario，不走 TDVG）
-SUB_SCENARIO_PREPARE = "scenario-prepare"
 SUB_SCENARIO_EXECUTE = "scenario-execute"
 SUB_SCENARIO_FIX = "scenario-fix"
 
 ALL_SUBS: tuple[str, ...] = (
     SUB_TEST, SUB_DEV, SUB_REVIEW, SUB_VERIFY, SUB_GATE,
     SUB_FIX, SUB_FIX_REVIEW, SUB_FIX_GATE, SUB_SIMPLE,
-    SUB_SCENARIO_PREPARE, SUB_SCENARIO_EXECUTE, SUB_SCENARIO_FIX,
+    SUB_SCENARIO_EXECUTE, SUB_SCENARIO_FIX,
 )
 
 
@@ -60,8 +59,7 @@ PHASE_STATUS_ALLOWED: dict[str, frozenset[str]] = {
     SUB_FIX_REVIEW: frozenset({STATUS_COMPLETED, STATUS_FAILED}),
     SUB_FIX_GATE:      frozenset({STATUS_COMPLETED, STATUS_FAILED}),
     SUB_GATE:          frozenset({STATUS_PASS, STATUS_FAIL}),
-    # v3.5: scenario track 专用 phase
-    SUB_SCENARIO_PREPARE: frozenset({STATUS_COMPLETED, STATUS_FAILED}),
+    # v3.x: scenario track 专用 phase (scenario-prepare 已删除, 由 restart_all_instances 替代)
     SUB_SCENARIO_EXECUTE: frozenset({STATUS_COMPLETED, STATUS_ESCALATE, STATUS_FAILED}),
     SUB_SCENARIO_FIX:     frozenset({STATUS_COMPLETED, STATUS_FAILED}),
     # final-gate 用 phase="gate" 但 track="final-gate"，由 caller 区分
@@ -128,6 +126,9 @@ EVT_PREPARE_ENV_STARTED = "prepare_env_started"
 EVT_PREPARE_ENV_COMPLETED = "prepare_env_completed"
 EVT_CLEAN_ENV_STARTED = "clean_env_started"
 EVT_CLEAN_ENV_COMPLETED = "clean_env_completed"
+# v3.x: restart_all_instances env-action (替代 scenario-prepare 的 start+health_check 职责)
+EVT_RESTART_ALL_INSTANCES_STARTED = "restart_all_instances_started"
+EVT_RESTART_ALL_INSTANCES_COMPLETED = "restart_all_instances_completed"
 EVT_DISPATCH_STARTED = "dispatch_started"
 EVT_RECORD_RECEIVED = "record_received"
 EVT_FIX_CYCLE_STARTED = "fix_cycle_started"
@@ -147,6 +148,7 @@ ALL_EVENT_TYPES: tuple[str, ...] = (
     EVT_PIPELINE_STARTED, EVT_BOOTSTRAP_STEP_COMPLETED,
     EVT_PREPARE_ENV_STARTED, EVT_PREPARE_ENV_COMPLETED,
     EVT_CLEAN_ENV_STARTED, EVT_CLEAN_ENV_COMPLETED,
+    EVT_RESTART_ALL_INSTANCES_STARTED, EVT_RESTART_ALL_INSTANCES_COMPLETED,
     EVT_DISPATCH_STARTED, EVT_RECORD_RECEIVED,
     EVT_FIX_CYCLE_STARTED, EVT_GATE_CYCLE_STARTED,
     EVT_SUB_PIPELINE_COMPLETED, EVT_TRACK_COMPLETED,

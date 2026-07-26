@@ -31,8 +31,7 @@ PHASE_AGENTS: dict[str, str] = {
     "fix":      "pg-build/fix",
     "fix-gate": "pg-build/fix-gate",
     "simple":   "pg-build/simple",
-    # v3.5: scenario track 专用
-    "scenario-prepare": "pg-build/scenario-prepare",
+    # v3.x: scenario track 专用 (scenario-prepare 已删除, 由 restart_all_instances 替代)
     "scenario-execute": "pg-build/scenario-execute",
     "scenario-fix":     "pg-build/scenario-fix",
 }
@@ -47,8 +46,7 @@ PHASE_ALLOWED_STATUSES: dict[str, str] = {
     "fix": "completed | failed",
     "fix-gate": "completed | failed",
     "gate": "pass | fail",
-    # v3.5: scenario track 专用
-    "scenario-prepare": "completed | failed",
+    # v3.x: scenario track 专用
     "scenario-execute": "completed | escalate | failed",
     "scenario-fix":     "completed | failed",
 }

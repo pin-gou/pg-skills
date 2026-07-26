@@ -131,7 +131,7 @@ def find_pg_skills_root(project_root: Path) -> Path:
 
 
 # 与原 cmd_invoke_hook 一致 (line 3166-3168)
-ENV_LEVEL_ACTIONS = ("prepare_env", "clean_env")
+ENV_LEVEL_ACTIONS = ("prepare_env", "clean_env", "restart_all_instances")
 
 # Caller 维度枚举 (与 .pg/hooks/lib/common.sh:pg_resolve_paths 的 case 分支同步)
 CALLER_PG_BUILD = "pg-build"
@@ -256,6 +256,80 @@ def build_env_level_hook_spec(
         "wait_for_completion": True,
     }
     return spec
+
+
+def build_restart_all_specs(
+    session: str,
+    env: str,
+    stage: str,
+    env_cfg: dict,
+    project_root: Path,
+    caller: str = CALLER_AD_HOC,
+) -> list:
+    """构建 restart_all_instances 的三阶段 spec list.
+
+    行为:
+      Phase 1 — 逆序停止所有 instance (reversed(roles.items()) × reversed(instances)).
+      Phase 2 — 正序启动所有 instance (YAML 顺序, 沿用 per-role start wait_for_completion).
+      Phase 3 — 正序 health_check (仅当 role.actions.health_check 已声明).
+
+    返回 list[dict], 每个元素是 build_role_hook_spec 生成的 spec. 调用方负责
+    按顺序 fork-exec pg-run-hook.py 并聚合整体退出码.
+    """
+    roles = env_cfg.get("roles") or {}
+    specs: list = []
+
+    # Phase 1: 逆序停止所有 instance
+    for role_name, role_cfg in reversed(list(roles.items())):
+        stop_cfg = (role_cfg.get("actions") or {}).get("stop")
+        if not stop_cfg:
+            continue
+        for inst in reversed(role_cfg.get("instances") or []):
+            inst_obj = inst if isinstance(inst, dict) else {"name": inst}
+            specs.append(build_role_hook_spec(
+                session=session, env=env, stage=stage, action="stop",
+                role=role_name, instance=inst_obj["name"],
+                instance_host=inst_obj.get("host", ""),
+                act_cfg=stop_cfg, tail_lines=None,
+                project_root=project_root, caller=caller,
+                wait_for_completion=True,
+            ))
+
+    # Phase 2: 正序启动所有 instance
+    for role_name, role_cfg in roles.items():
+        start_cfg = (role_cfg.get("actions") or {}).get("start")
+        if not start_cfg:
+            continue
+        for inst in role_cfg.get("instances") or []:
+            inst_obj = inst if isinstance(inst, dict) else {"name": inst}
+            specs.append(build_role_hook_spec(
+                session=session, env=env, stage=stage, action="start",
+                role=role_name, instance=inst_obj["name"],
+                instance_host=inst_obj.get("host", ""),
+                act_cfg=start_cfg, tail_lines=None,
+                project_root=project_root, caller=caller,
+                wait_for_completion=_resolve_wait_for_completion(
+                    "start", None, start_cfg.get("wait_for_completion")
+                ),
+            ))
+
+    # Phase 3: 正序 health_check (仅当 role.actions.health_check 已声明)
+    for role_name, role_cfg in roles.items():
+        hc_cfg = (role_cfg.get("actions") or {}).get("health_check")
+        if not hc_cfg:
+            continue
+        for inst in role_cfg.get("instances") or []:
+            inst_obj = inst if isinstance(inst, dict) else {"name": inst}
+            specs.append(build_role_hook_spec(
+                session=session, env=env, stage=stage, action="health_check",
+                role=role_name, instance=inst_obj["name"],
+                instance_host=inst_obj.get("host", ""),
+                act_cfg=hc_cfg, tail_lines=None,
+                project_root=project_root, caller=caller,
+                wait_for_completion=True,
+            ))
+
+    return specs
 
 
 def build_role_hook_spec(
@@ -402,11 +476,12 @@ def invoke_hook_main(argv=None) -> int:
     parser.add_argument("--action", required=True,
                         choices=["start", "stop", "restart", "logs", "tail",
                                  "health_check",
-                                 "prepare_env", "clean_env"],
+                                 "prepare_env", "clean_env",
+                                 "restart_all_instances"],
                         help=(
                             "action to trigger. start/stop/restart/logs/tail/health_check are "
                             "per-role lifecycle actions (require --role and "
-                            "--instance); prepare_env/clean_env are "
+                            "--instance); prepare_env/clean_env/restart_all_instances are "
                             "environment-level lifecycle hooks (ignore "
                             "--role/--instance)."
                         ))
@@ -491,25 +566,55 @@ def invoke_hook_main(argv=None) -> int:
 
     env_cfg = (config.get("environments") or {}).get(args.env) or {}
 
-    # Environment-level lifecycle hooks (prepare_env / clean_env) are
-    # NOT role-scoped: they live directly under environments.<env>.
+    # Environment-level lifecycle hooks (prepare_env / clean_env / restart_all_instances)
+    # are NOT role-scoped: prepare_env / clean_env live directly under environments.<env>.
+    # restart_all_instances 走特殊路径: 内部展开为 stop → start → health_check 三阶段.
     if args.action in ENV_LEVEL_ACTIONS:
-        env_hook_cfg = env_cfg.get(args.action)
-        if not env_hook_cfg:
-            sys.stderr.write(
-                f"Error: action '{args.action}' not defined in "
-                f"environments.{args.env}\n"
+        if args.action == "restart_all_instances":
+            # restart_all_instances 忽略 --role/--instance (env-level action)
+            if args.role or args.instance:
+                sys.stderr.write(
+                    "Error: --action restart_all_instances ignores --role/--instance\n"
+                )
+                return 1
+            if not env_cfg.get("roles"):
+                sys.stderr.write(
+                    f"Error: env '{args.env}' has no roles defined\n"
+                )
+                return 1
+            specs = build_restart_all_specs(
+                session=args.session,
+                env=args.env,
+                stage=args.stage,
+                env_cfg=env_cfg,
+                project_root=project_root,
+                caller=args.caller,
             )
-            return 1
-        spec = build_env_level_hook_spec(
-            session=args.session,
-            env=args.env,
-            stage=args.stage,
-            action=args.action,
-            act_cfg=env_hook_cfg,
-            project_root=project_root,
-            caller=args.caller,
-        )
+            if not specs:
+                sys.stderr.write(
+                    f"Error: env '{args.env}' has no startable/stoppable instances "
+                    f"(no role.actions.start or stop defined)\n"
+                )
+                return 1
+            # 走多 spec 流程 (后续 _run_multi_specs 处理)
+            spec = {"_multi_specs": specs, "action": "restart_all_instances"}
+        else:
+            env_hook_cfg = env_cfg.get(args.action)
+            if not env_hook_cfg:
+                sys.stderr.write(
+                    f"Error: action '{args.action}' not defined in "
+                    f"environments.{args.env}\n"
+                )
+                return 1
+            spec = build_env_level_hook_spec(
+                session=args.session,
+                env=args.env,
+                stage=args.stage,
+                action=args.action,
+                act_cfg=env_hook_cfg,
+                project_root=project_root,
+                caller=args.caller,
+            )
     else:
         # Per-role lifecycle action (start / stop / restart / logs / tail / health_check).
         if args.role not in (env_cfg.get("roles") or {}):
@@ -556,9 +661,15 @@ def invoke_hook_main(argv=None) -> int:
 
     # --log-dir 覆盖: 透传 PG_HOOK_LOG_DIR 到 hook (pg-run-hook.py:_PG_ENV_MAP 已映射)
     if args.log_dir:
-        spec["hook_log_dir"] = args.log_dir
-        spec["log_path"] = str(Path(args.log_dir) / Path(spec["log_path"]).name)
-        spec["hook_result_path"] = str(Path(args.log_dir) / Path(spec["hook_result_path"]).name)
+        if "_multi_specs" in spec:
+            for s in spec["_multi_specs"]:
+                s["hook_log_dir"] = args.log_dir
+                s["log_path"] = str(Path(args.log_dir) / Path(s["log_path"]).name)
+                s["hook_result_path"] = str(Path(args.log_dir) / Path(s["hook_result_path"]).name)
+        else:
+            spec["hook_log_dir"] = args.log_dir
+            spec["log_path"] = str(Path(args.log_dir) / Path(spec["log_path"]).name)
+            spec["hook_result_path"] = str(Path(args.log_dir) / Path(spec["hook_result_path"]).name)
 
     # --timeout-override 覆盖: 输出 WARN (不阻止, ad-hoc 调试可用) 后替换
     if args.timeout_override is not None:
@@ -566,7 +677,11 @@ def invoke_hook_main(argv=None) -> int:
             f"WARN: --timeout-override={args.timeout_override} 覆盖 "
             f"project.yaml timeout_seconds={spec.get('timeout_seconds')}\n"
         )
-        spec["timeout_seconds"] = args.timeout_override
+        if "_multi_specs" in spec:
+            for s in spec["_multi_specs"]:
+                s["timeout_seconds"] = args.timeout_override
+        else:
+            spec["timeout_seconds"] = args.timeout_override
 
     pg_hook_runner = (
         find_pg_skills_root(project_root)
@@ -577,6 +692,24 @@ def invoke_hook_main(argv=None) -> int:
             f"Error: pg-run-hook.py not found at {pg_hook_runner}\n"
         )
         return 2
+
+    # multi-spec 路径: 顺序 fork-exec 每个子 spec, 任一失败早退
+    if "_multi_specs" in spec:
+        overall_ok = True
+        for sub_spec in spec["_multi_specs"]:
+            try:
+                proc = subprocess.run(
+                    ["python3", str(pg_hook_runner)],
+                    input=json.dumps(sub_spec, indent=2),
+                    text=True,
+                    cwd=str(project_root),
+                )
+            except KeyboardInterrupt:
+                return 0
+            if proc.returncode != 0:
+                overall_ok = False
+                break
+        return 0 if overall_ok else 1
 
     try:
         proc = subprocess.run(
