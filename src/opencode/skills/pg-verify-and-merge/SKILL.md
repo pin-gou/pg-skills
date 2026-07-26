@@ -16,6 +16,12 @@ pg-build 完成后，将 feature branch 合并到 master 前，先将 feature br
 
 **核心原则：** 在合并后的代码上验证，不在 feature branch 上验证。
 
+**最终 workspace 状态约束**（v3.0 补充）：
+
+- **合并成功（Phase 3 commit + push 完成）**：Phase 4 切回 default_branch，流程结束。
+- **合并失败（Phase 3 中止或上游 Phase 失败）**：Phase 4 **保持当前 workspace 不动**，留给人工排查。
+- **禁止**：合并成功后切回 feature branch（即使想清理 feature branch 也应由人在 default_branch 上独立执行）。
+
 **关键改进（v3.0）**：
 
 - **与 pg-regression / pg-fix-issue 同一套配置**：所有命令、路径、env 派生自 `.pg/project.yaml`，不再有 v2 的 `pipeline.tracks.*.lint` 和已废弃的 `testSuites.*` 段引用（硬切换，无兼容层）。
@@ -343,6 +349,8 @@ fi
 >
 > **状态保持：** Phase 2 整个过程都运行在 `Git.default_branch` 分支上，此时工作区已经包含 feature branch 的变更（staged but not committed）。Phase 2 验证的就是合并后的代码。
 >
+> **最终 workspace 约束：** Phase 4 成功后切回 `Git.default_branch`；失败时保持当前 workspace 不动（详见 §Phase 4 与 §异常处理）。
+>
 > **跳过逻辑**：当 `SKIP_TESTS=true` 时，整个 Phase 2 输出跳过原因，不执行任何测试。
 
 #### Phase 2a-2e 通用逻辑：envSetup → verifySetup → runAllCommand → 解析
@@ -493,24 +501,36 @@ git push origin "$DEFAULT_BRANCH"
 
 ---
 
-### Phase 4: 清理
+### Phase 4: 清理（按合并结果分支）
 
 ```bash
-CURRENT_BRANCH=$(cat temp/feature-branch.txt 2>/dev/null || git branch --show-current)
 DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default_branch'])")
+CURRENT_BRANCH=$(cat temp/feature-branch.txt 2>/dev/null || git branch --show-current)
 
-# 防御性收尾：无条件切回 default_branch
-# 确保即使 Phase 1 失败后编排者走了 feature branch fallback，最终 workspace 仍在 master
-git checkout "$DEFAULT_BRANCH"
-
-# 提示保留 feature branch 用于审计（后续手工清理）
-echo "Feature branch '$CURRENT_BRANCH' has been merged and committed to $DEFAULT_BRANCH"
-echo "Feature branch 保留用于审计，后续手工清理时执行:"
-echo "  git branch -d $CURRENT_BRANCH"
-echo "  git push origin --delete $CURRENT_BRANCH"
+# 检测 Phase 3 是否成功（HEAD 是本次合并的 commit）
+# 启发式：HEAD commit message 含 Merge/feat/fix/chore/refactor/perf/docs 前缀
+HEAD_MSG=$(git log -1 --format=%s HEAD 2>/dev/null)
+if echo "$HEAD_MSG" | grep -qE "^(Merge branch|feat\(|fix\(|chore\(|refactor\(|perf\(|docs\()"; then
+    # === 成功路径：已合并并 commit，切回 default_branch ===
+    git checkout "$DEFAULT_BRANCH"
+    echo "✓ Workspace 已切回 $DEFAULT_BRANCH"
+    echo "✓ Feature branch '$CURRENT_BRANCH' 已合并，保留用于审计"
+    echo "  后续手工清理时（在 $DEFAULT_BRANCH 上）执行:"
+    echo "    git branch -d $CURRENT_BRANCH"
+    echo "    git push origin --delete $CURRENT_BRANCH"
+else
+    # === 失败路径：Phase 3 未完成，保持当前 workspace 不动 ===
+    echo "⚠️ 检测到合并未完成（Phase 3 失败或中止）"
+    echo "  Workspace 保留在 $CURRENT_BRANCH 供人工排查"
+    echo "  排查完成后，由人决定是否切回 $DEFAULT_BRANCH"
+    exit 1
+fi
 ```
 
-**注意：** Phase 4 无条件执行 `git checkout $DEFAULT_BRANCH` 作为防御性收尾。不再依赖"整个流程都在 default_branch 上"的假设——即使编排者在 Phase 1 失败后走了 feature branch fallback，Phase 4 也保证最终 workspace 回到 master。
+**注意：** Phase 4 不再"无条件切回 default_branch"，而是按 Phase 3 的实际结果分支：
+
+- **成功**（HEAD 是本次合并的 commit）→ 切回 default_branch → 流程结束
+- **失败**（HEAD 不是合并 commit）→ 保持当前 workspace 不动 → `exit 1` 让编排器中止
 
 ---
 
@@ -523,6 +543,8 @@ Skip Tests: <true|false>
 Skip Reason: <reason if skipped>
 Phase: <phase> (<phase_name>)
 状态: SUCCESS|FAILED
+最终 workspace: <branch-name>  ← SUCCESS 时必为 Git.default_branch；FAILED 时为执行中止分支
+最终 HEAD SHA: <git rev-parse HEAD>
 ```
 
 失败时额外输出：
@@ -547,6 +569,14 @@ Phase: <phase> (<phase_name>)
 | Phase 3 | 中止，提示手动解决合并问题 | 冲突窗口期 default_branch 可能又有新提交 |
 
 **不回退。** 任何阶段失败直接中止并报告，由人工决策下一步。
+
+### Phase 4 之后的越权操作（防御性约束）
+
+| 场景 | 行为 |
+|------|------|
+| 合并**成功**后主动切回 feature branch | **视为协议违反**。清理 feature branch 应由人在 default_branch 上独立执行 |
+| 合并**失败**后主动切到 default_branch | **视为协议违反**。失败时 workspace 应保留在错误现场供人排查 |
+| 合并成功后直接 `git branch -D` 删除 feature branch（即使 squash merge 完成） | 不在本 SKILL 权限内 — squash commit 在 default_branch 上独立存在，feature branch 删除策略由项目治理决定 |
 
 ## 与 pg-build 的集成
 
