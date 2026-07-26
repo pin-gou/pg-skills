@@ -125,7 +125,6 @@ review_score = sum(weight for enabled & pass) / sum(weight for enabled) * 100
 |--------|-------|
 | review_score | {score} |
 | pass_threshold | {profile.pass_threshold} |
-
 | disposition | {completed/escalate/failed} |
 
 ## Profile
