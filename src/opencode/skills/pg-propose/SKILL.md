@@ -98,6 +98,64 @@ bash .opencode/skills/pg-propose/scripts/check-review-cache.sh
 
 更新 TodoWrite 第 2 项。
 
+### 1d.5 加载环境能力声明（env-capability.yaml）
+
+**职责**：让 LLM 知道每个 environment 在 `prepare_env` 之后"会拥有什么能力"，避免 scenario 因为"环境未就绪"虚假跳过。这是与 1d 同构的另一条 context 加载链。
+
+```bash
+bash .opencode/skills/pg-propose/scripts/check-env-capability.sh
+```
+
+**输出协议**（与 `check-review-cache.sh` 同构）：
+
+- `STATUS=HIT` → 缓存有效，从输出 `---` 后读取 `capability` 字段
+- `STATUS=MISS <REASON>` → 缓存失效，进入下面重生成
+
+**MISS 触发的两级动作**：
+
+1. 调 `python3 .pg/skills/src/opencode/scripts/pg-gen-env-fingerprint.py`
+   - 读 `.pg/project.yaml`，找 `environments.*.prepare_env.script` 列出的所有脚本
+   - 扫描 `.pg/hooks/**`（跳过 `.pg/skills/`、`.env`、`*.md`、隐藏文件、`target`/`dist`/`build`/`node_modules`）
+   - SHA256 各文件 + `.pg/project.yaml` 本身
+   - 写入 `.pg/context/env-fingerprint.yaml`（含 `schema_version` / `generated_at` / `project_yaml_sha256` / `prepare_scripts` / `files`）
+
+2. 由当前 LLM inline 提取 capability body：
+   - **输入**：`.pg/context/env-fingerprint.yaml` + `.pg/project.yaml` 的 `environments` 段 + 每个 env 的 prepare 脚本全文
+   - **输出骨架**（写到 `.pg/context/env-capability.yaml` 的 `capability.<env_name>` 字段）：
+     ```yaml
+     services:    # 该 env 提供的外部服务能力列表
+                  # 每条: {name, type, endpoint?, purpose?}
+                  # type 自由字符串 (s3 / postgres / k8s / redis / etc.)
+     seed_data:   # prepare 脚本写入的种子数据
+                  # 每条: {table?, semantic_role?}
+                  # 不强制枚举 ID 字段——不同项目 ID 命名不一样
+     constraints: # 推理得出的隐性约束 (如 "agent 仅 install 不 enable")
+     notes: |     # 自由文本，含动态值命名规则 (如 S3 bucket 模板)
+     ```
+   - **铁规**：
+     - 严禁猜测脚本里没写的内容；不确定就空
+     - 不引入 project.yaml schema 之外的强制性字段——LLM 自决
+     - **禁止覆盖** `generated_at` 与 `fingerprints` 段（属于 Python 写管辖）
+   - skill 本身**不解析脚本依赖**——LLM 看脚本自己提，跨项目骨架保持极简
+
+**LLM context 注入**（完成后）：
+
+```
+## 环境能力声明（来自 .pg/context/env-capability.yaml）
+
+### <env_name> 当前能力
+{ capability.<env_name> 全文 }
+
+⚠️ 写 proposal.md / design.md / tasks.md / scenario-*.yaml 时：
+  - 若引用 capability 已声明的能力 → 标 `provided_by: env-capability.yaml#<env_name>.<key>`
+  - 不得以 "环境未就绪" / "OSS 未配置" / "测试数据缺失" 为由跳过
+  - 动态值（hostname 拼接的 bucket 名 / DB 写入的 OSS ID 等）参考 capability.notes 段的命名规则
+```
+
+**禁止**：把 capability 内容复制到 proposal.md / design.md / tasks.md / scenario-*.yaml 产物里——它只是约束看的，不应当显式出现。
+
+更新 TodoWrite 第 2 项（拆分为 "加载项目上下文" + "加载环境能力声明" 两个子项）。
+
 ### 1e. 获取管线配置（从 config.yaml 读取）
 
 ```bash
