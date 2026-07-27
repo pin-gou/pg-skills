@@ -621,7 +621,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 </div>
 
 <h2>2.3 AGENTS.md 的角色</h2>
-<p>AGENTS.md 是 AI 的"入职手册"——包含项目的技术栈、包结构、数据库约定、编码风格、路径规范等。pg-propose 会自动从 AGENTS.md 提取上下文写入 <code>.pg/context/summary.yaml</code>。</p>
+<p>AGENTS.md 是 AI 的"入职手册"——包含项目的技术栈、包结构、数据库约定、编码风格、路径规范等。pg-propose 直接通读所有 AGENTS.md 提取上下文作为 LLM 约束，不生成中间缓存文件。</p>
 </div>
 
 <!-- ============================================================ -->

@@ -286,12 +286,7 @@ def cmd_doctor(args) -> int:
             if not os.access(sh, os.X_OK):
                 warnings.append(f'.pg/hooks/{sh.name} not executable (chmod +x)')
 
-    # 5. .pg/context/summary.yaml 存在?（如果声明了 context）
-    summary = pg_dir / 'context' / 'summary.yaml'
-    if not summary.exists():
-        warnings.append('.pg/context/summary.yaml not found (optional but recommended)')
-
-    # 6. .pg/hooks/lib/common.sh 存在? (pg_resolve_paths per-skill 路径路由)
+    # 5. .pg/hooks/lib/common.sh 存在? (pg_resolve_paths per-skill 路径路由)
     # 若 .pg/hooks/ 下有 hook 但缺 lib/common.sh, hook 走 $PG_LOG_FILE 单一日志,
     # pg-regression / pg-fix-issue 日志会回落到 scripts/logs 而非预期的
     # .pg/regression/<suite>/<env>-logs / .pg/fix-issue/<change>/<env>-logs
@@ -320,7 +315,7 @@ def cmd_doctor(args) -> int:
             except Exception as e:
                 warnings.append(f'.pg/hooks/lib/common.sh 读失败: {e}')
 
-    # 7. .pg/context/agent-protocol.md 存在? (pg-init-project Phase 5 产出)
+    # 6. .pg/context/agent-protocol.md 存在? (pg-init-project Phase 5 产出)
     #    agent 拿 SSOT / 调 hook / 找日志的速查文件. 缺失说明 Phase 5 未跑,
     #    agent 可能用错入口 (如直接 bash .pg/hooks/... 而非 pg-invoke-hook.py).
     agent_protocol = pg_dir / 'context' / 'agent-protocol.md'
@@ -335,7 +330,7 @@ def cmd_doctor(args) -> int:
         ok_count += 1
         print('✓ .pg/context/agent-protocol.md 存在 (agent SSOT 速查已就位)')
 
-    # 8. 根 AGENTS.md 含 agent-protocol 引用? (pg-init-project Phase 5 联动检查)
+    # 7. 根 AGENTS.md 含 agent-protocol 引用? (pg-init-project Phase 5 联动检查)
     #    Phase 5 生成 agent-protocol.md 后, 必须有 AGENTS.md 引用它, 否则 agent 找不到.
     #    仅检查根 AGENTS.md (sub-module 的引用由各自维护, 不强制).
     root_agents_md = project_root / 'AGENTS.md'

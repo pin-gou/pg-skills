@@ -17,10 +17,10 @@
 #   HIT:  STATUS=HIT\n---\n<env-capability.yaml content>
 #   MISS: STATUS=MISS\nREASON=<reason>\n[DETAIL=<detail>]\n---\nCURRENT_FINGERPRINTS:\n<entries>
 #
-# Protocol mirrors check-review-cache.sh so skill agents can consume it the
-# same way (read after `---` separator).
+# Output protocol: STATUS=HIT/MISS line + `---` separator + YAML body
+# (LLM agents read the YAML body after the `---` line).
 #
-# v0.9.0 — parallels check-review-cache.sh protocol.
+# v0.9.0 — STATUS=HIT/MISS + `---` 分隔符协议 (LLM agent 直接读取 `---` 后的 YAML 内容)。
 
 set -uo pipefail
 

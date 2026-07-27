@@ -75,7 +75,7 @@
 - {事务边界要求：哪些方法必须 @Transactional}
 
 ### 错误码与编号段
-- 新增错误码必须落在对应模块的编号段内（参考 `.pg/context/summary.yaml` 的 `rules` 或 AGENTS.md）
+- 新增错误码必须落在对应模块的编号段内（参考 AGENTS.md）
 
 ### 可观测性
 - 关键日志点：{INFO/WARN/ERROR 级别、含哪些字段}

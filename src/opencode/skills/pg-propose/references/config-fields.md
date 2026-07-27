@@ -36,7 +36,7 @@ pg-propose 与下游 skill 在引用 config.yaml 字段时必须遵循本文档�
 | 2 design 生成 | `propose.guidelines.design`, `stages[*]`, `tracks[*]`, `environments[*]` |
 | 2 execution-manifest.yaml 生成（环境选择字段） | `stages[*].environment.required`, `stages[*].environment.selection_rules`, `environments` |
 | 2 tasks 生成 | `propose.guidelines.tasks`, `stages[*]`, `tracks[*]`, `tracks[*].on_conditions`, `modules[*]`, `environments[*]` |
-| 3 自审 | `propose.guidelines`, `context-summary.yaml.rules` |
+| 3 自审 | `propose.guidelines`, 所有 AGENTS.md |
 
 ---
 

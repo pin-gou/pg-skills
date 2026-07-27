@@ -16,7 +16,7 @@
 # {change-name} 评审
 
 **生成时间**：{当前时间戳}
-**自审依据**：.pg/context/summary.yaml 的 rules + 6 类检查清单
+**自审依据**：所有 AGENTS.md 的 rules + 6 类检查清单
 
 ## 通用决策（5 项骨架）
 
@@ -77,7 +77,7 @@
 
 ### 默认值覆盖优先级
 
-1. 项目硬编码（context-summary.yaml 的 rules 中的硬性规范）
+1. 项目硬编码（AGENTS.md 中的硬性规范）
 2. design.md "影响面"章节中的明确声明
 3. LLM 自由推导（无明确依据时的最佳猜测）
 

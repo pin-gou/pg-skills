@@ -55,7 +55,7 @@ metadata:
 
 ```
 1.  [待开始] 创建变更目录
-2.  [待开始] 加载项目上下文（AGENTS.md → context-summary.yaml）
+2.  [待开始] 加载项目上下文（读取所有 AGENTS.md）
 3.  [待开始] 生成 proposal.md
 4.  [待开始] 生成 design.md
 5.  [待开始] 判定 affected_tracks & **scenario track(s) 启用决策**（核心：影响后续三个产物一致性）
@@ -85,16 +85,64 @@ mkdir -p ".pg/changes/<change-name>/1-propose-review"
 
 验证目录已创建。更新 TodoWrite 第 1 项。
 
-### 1d. 加载项目上下文（从 AGENTS.md 提取，经 context-summary.yaml 缓存）
+### 1d. 加载项目上下文（直接读取所有 AGENTS.md）
+
+直接通读项目内所有 AGENTS.md，提取约束作为 LLM 的 context（无需中间缓存）。通过 `find` 列出所有 AGENTS.md 路径：
+
+> **排除目录覆盖范围**（按语言/工具分组）：
+> - VCS: `.git`
+> - pg-skills 自身: `.pg/skills`（避免扫到 skill 仓库内部嵌套的 AGENTS.md / SKILL.md）
+> - JS / TS / Node: `node_modules`, `dist`, `build`, `.next`, `.nuxt`, `.svelte-kit`, `.turbo`, `coverage`, `playwright-report`, `storybook-static`
+> - Java / Kotlin / JVM: `target`, `.gradle`, `out`
+> - Python: `__pycache__`, `.venv`, `venv`, `.pytest_cache`, `.mypy_cache`, `.ruff_cache`, `.tox`, `htmlcov`
+> - Go / Ruby / PHP: `vendor`, `.bundle`, `vendor/bundle`
+> - C# / .NET: `bin`, `obj`
+> - Flutter / Dart: `.dart_tool`, `.flutter-plugins`
+> - Elixir: `_build`, `deps`
+> - Swift / iOS: `DerivedData`
 
 ```bash
-bash .opencode/skills/pg-propose/scripts/check-review-cache.sh
+find . -name AGENTS.md \
+  -not -path '*/.git/*' \
+  -not -path '*/.pg/skills/*' \
+  -not -path '*/node_modules/*' \
+  -not -path '*/dist/*' \
+  -not -path '*/build/*' \
+  -not -path '*/.next/*' \
+  -not -path '*/.nuxt/*' \
+  -not -path '*/.svelte-kit/*' \
+  -not -path '*/.turbo/*' \
+  -not -path '*/coverage/*' \
+  -not -path '*/playwright-report/*' \
+  -not -path '*/storybook-static/*' \
+  -not -path '*/target/*' \
+  -not -path '*/.gradle/*' \
+  -not -path '*/out/*' \
+  -not -path '*/__pycache__/*' \
+  -not -path '*/.venv/*' \
+  -not -path '*/venv/*' \
+  -not -path '*/.pytest_cache/*' \
+  -not -path '*/.mypy_cache/*' \
+  -not -path '*/.ruff_cache/*' \
+  -not -path '*/.tox/*' \
+  -not -path '*/htmlcov/*' \
+  -not -path '*/vendor/*' \
+  -not -path '*/.bundle/*' \
+  -not -path '*/vendor/bundle/*' \
+  -not -path '*/bin/*' \
+  -not -path '*/obj/*' \
+  -not -path '*/.dart_tool/*' \
+  -not -path '*/.flutter-plugins/*' \
+  -not -path '*/_build/*' \
+  -not -path '*/deps/*' \
+  -not -path '*/DerivedData/*' \
+  | sort
 ```
 
-- **`STATUS=HIT`** → 缓存有效，从输出 `---` 后读取 `context` 字段
-- **`STATUS=MISS`** → 缓存未命中，末尾 `CURRENT_FINGERPRINTS:` 包含所有 AGENTS.md 指纹；执行 1d.2 重新提取
+LLM 通读这些文件，提取：
 
-缓存未命中处理：读取所有 AGENTS.md → 提取 `context`（tech_stack / package / database_conventions / coding_conventions / design_patterns / domain）和 `rules`（review 检查条目列表）→ 写入 `.pg/context/summary.yaml`，含 `generated_at` / `fingerprints` / `context` / `rules`。
+- `context`（tech_stack / package / database_conventions / coding_conventions / design_patterns / domain）
+- `rules`（review 检查条目列表）
 
 更新 TodoWrite 第 2 项。
 
@@ -106,7 +154,7 @@ bash .opencode/skills/pg-propose/scripts/check-review-cache.sh
 bash .opencode/skills/pg-propose/scripts/check-env-capability.sh
 ```
 
-**输出协议**（与 `check-review-cache.sh` 同构）：
+**输出协议**：
 
 - `STATUS=HIT` → 缓存有效，从输出 `---` 后读取 `capability` 字段
 - `STATUS=MISS <REASON>` → 缓存失效，进入下面重生成
@@ -342,7 +390,7 @@ python3 .opencode/skills/pg-propose/scripts/pg-validate-proposal.py manifest CHA
 
 ## 阶段三：自审（内联自 pg-propose-refine）
 
-**本阶段不修改 proposal/design/tasks 本身**，只读产物 + AGENTS.md 规则 + context-summary.yaml，对以下 6 类问题做系统化检查，把发现写入 `.pg/changes/<change-name>/1-propose-review/review-notes.md`（新文件）。
+**本阶段不修改 proposal/design/tasks 本身**，只读产物 + 所有 AGENTS.md，对以下 6 类问题做系统化检查，把发现写入 `.pg/changes/<change-name>/1-propose-review/review-notes.md`（新文件）。
 
 更新 TodoWrite 第 11 项。
 
@@ -490,7 +538,7 @@ python3 .opencode/skills/pg-propose/scripts/pg-auto-refine-check.py <change>
 
 ## 产物生成指导原则
 
-- `context`（来自 AGENTS.md，经 context-summary.yaml 缓存）和 `propose.guidelines`（来自 config.yaml）是给你的约束，不可复制到产物中
+- `context`（来自所有 AGENTS.md）和 `propose.guidelines`（来自 config.yaml）是给你的约束，不可复制到产物中
 - 每个产物文件写入后验证文件存在
 - 如果变更名称已存在，询问用户是继续还是新建
 
@@ -588,6 +636,11 @@ scenarios:
 ---
 
 ## 文档变更记录
+
+- **v3.8（2026-07-26）**：删除 `.pg/context/summary.yaml` 中间缓存 + 扩展 `find AGENTS.md` 排除目录。
+  - 删除 `summary.yaml` 缓存层：1d 阶段改为直接通读所有 AGENTS.md 提取 context，不再生成 / 读取 `.pg/context/summary.yaml`。联动删除 `scripts/check-review-cache.sh`、`src/runtime/bin/pg` 中 summary.yaml 检查项（doctor 编号重排 1-7）。`references/review-notes-format.md` / `references/design-templates.md` / `references/config-fields.md` 中"summary.yaml"字面替换为"AGENTS.md"。`docs/index.html` 描述同步更新。
+  - 扩展 `find` 排除目录：除原有 `node_modules / target / .git / dist / build` 外，新增 `.pg/skills`（避免递归到 skill 仓库自身）+ 多语言 build 目录（`.next / .nuxt / .svelte-kit / .turbo / coverage / playwright-report / storybook-static / .gradle / out / __pycache__ / .venv / venv / .pytest_cache / .mypy_cache / .ruff_cache / .tox / htmlcov / vendor / .bundle / vendor/bundle / bin / obj / .dart_tool / .flutter-plugins / _build / deps / DerivedData`）。分组说明用 Markdown blockquote 写在代码块上方，避免行内 `#` 注释破坏 `\` 续行。
+  - **向后兼容**：旧项目的 `.pg/context/summary.yaml` 文件可手动删除（pg-skills 不再读取）。新 `find` 命令对历史 change 目录无影响。
 
 - **v3.7（2026-07-15）**：流程精简与自动应用。
   - **优化项 1**：合并 2e/2f 内的两次 `pg-validate-proposal.py` 调用到 2g，**唯一**校验点统一错误口径。
