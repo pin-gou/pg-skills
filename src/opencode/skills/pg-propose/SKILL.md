@@ -24,6 +24,13 @@ metadata:
 - ✅ `pg-validate-proposal.py` 新增 2 条 env-capability 交叉校验规则（`scenario_given_exceeds_env_capacity` / `scenario_given_unknown_host_id`）
 - ✅ `design-templates.md` 新增"环境限制与验证策略"段模板
 
+**v1.0.0 (v6 hook 协议) 起**：
+- 🔄 **删除** 旧 env-capability.yaml / fingerprint 机制，由 `describe_env` 脚本 + `.pg/changes/<change-id>/env-description.yaml` 取代
+- 🔄 **删除** `pg-gen-env-fingerprint.py` / `check-env-capability.sh` / `--env-summary` 参数 / `_meta.env_constraint` 字段
+- ✅ `pg-invoke-hook.py` 新增 `--action describe_env`，自动注入 `PG_CHANGE_ID` / `PG_OUTPUT_PATH`
+- ✅ `pg-propose` 阶段 1d.5 改为：调用 describe_env → 读 `.pg/changes/<id>/env-description.yaml` → 直接喂给 LLM 编写 design/tasks/scenario
+- ✅ `pg-build scenario-execute` 直接消费 `.pg/changes/<id>/env-description.yaml`，**移除** dynamic_values / ${VAR} 占位符机制
+
 ## 文档导航
 
 | 关心的问题 | 看哪里 |
@@ -145,63 +152,88 @@ LLM 通读这些文件，提取：
 
 更新 TodoWrite 第 2 项。
 
-### 1d.5 加载环境能力声明（env-capability.yaml）
+### 1d.5 生成环境描述（env-description.yaml，per-change）
 
-**职责**：让 LLM 知道每个 environment 在 `prepare_env` 之后"会拥有什么能力"，避免 scenario 因为"环境未就绪"虚假跳过。这是与 1d 同构的另一条 context 加载链。
+**职责**：让 LLM 知道当前 change 在目标 environment 上的真实状态（不是 design-time 假设），作为 design.md / tasks.md / scenario-*.yaml 的输入。这是 v6 新流程，与旧 env-capability.yaml 机制不兼容：旧机制是 LLM 看 prepare 脚本猜能力，新机制是项目自带 describe_env 脚本真实探测。
+
+**关键约束**：
+- describe_env 与 prepare_env **独立**：两脚本分别维护，describe_env 不调用 prepare_env，不假设其已执行
+- describe_env **必须显式声明**在 `environments.<env>.describe_env.script`，无默认值（Q8 决策）
+- 文件位置：`.pg/changes/<change-id>/env-description.yaml`（per-change 特定，固定路径覆盖，Q1 决策）
+- 失败处理：**中断**调用方（Q2 决策，无 partial / fallback / LLM 推断兜底）
+- 不再有 fingerprint / HIT-MISS 机制（Q4 决策）：每次 propose 都重新执行 describe_env
+
+**执行协议**：
 
 ```bash
-bash .opencode/skills/pg-propose/scripts/check-env-capability.sh
+# 由 caller (pg-propose) 显式调用, 注入 PG_RUN_CALLER=pg-propose
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
+  --caller pg-propose \
+  --session <change-id> \
+  --env <env-name> \
+  --action describe_env \
+  --change-id <change-id>
 ```
 
-**输出协议**：
+**注入环境变量**（SSOT: `src/runtime/spec/hook-env-vars.yaml` v6）：
 
-- `STATUS=HIT` → 缓存有效，从输出 `---` 后读取 `capability` 字段
-- `STATUS=MISS <REASON>` → 缓存失效，进入下面重生成
+| 变量 | 必读 | 用途 |
+|---|---|---|
+| `PG_RUN_CALLER` | ✅ | 调用方标识（pg-propose） |
+| `PG_PROJECT_ROOT` | ✅ | 项目根路径 |
+| `PG_SESSION_ID` | ✅ | session-id（日志路由） |
+| `PG_CHANGE_ID` | ✅ | change-id（输出路径） |
+| `PG_ENV_NAME` | ✅ | 目标 environment 名 |
+| `PG_OUTPUT_PATH` | ✅ | env-description.yaml 输出绝对路径（脚本必须写入此文件） |
+| `PG_HOOK_LOG_DIR` | - | 日志目录 |
+| `PG_LOG_FILE` | - | hook stdout/stderr 目标 |
+| `PG_HOOK_TIMEOUT` | - | 超时秒数 |
 
-**MISS 触发的两级动作**：
+**脚本行为契约**：
 
-1. 调 `python3 .pg/skills/src/opencode/scripts/pg-gen-env-fingerprint.py`
-   - 读 `.pg/project.yaml`，找 `environments.*.prepare_env.script` 列出的所有脚本
-   - 扫描 `.pg/hooks/**`（跳过 `.pg/skills/`、`.env`、`*.md`、隐藏文件、`target`/`dist`/`build`/`node_modules`）
-   - SHA256 各文件 + `.pg/project.yaml` 本身
-   - 写入 `.pg/context/env-fingerprint.yaml`（含 `schema_version` / `generated_at` / `project_yaml_sha256` / `prepare_scripts` / `files`）
+1. **只读探测**：不修改环境状态（不启停服务、不写种子数据、不动 DB schema）
+2. **输出 schema**：严格符合 `src/runtime/spec/env-description.schema.json`（6 段 + relations）
+3. **失败处理**：
+   - 退出非 0 → 调用方中断，提示用户修复 describe_env 脚本
+   - 失败现场：写 `${PG_OUTPUT_PATH}.partial`（含 `described_status: failed`），便于调试
+4. **必读检查**：缺 `PG_RUN_CALLER` / `PG_PROJECT_ROOT` / `PG_CHANGE_ID` / `PG_ENV_NAME` / `PG_OUTPUT_PATH` 任意一个即报错退出
 
-2. 由当前 LLM inline 提取 capability body：
-   - **输入**：`.pg/context/env-fingerprint.yaml` + `.pg/project.yaml` 的 `environments` 段 + 每个 env 的 prepare 脚本全文
-   - **输出骨架**（写到 `.pg/context/env-capability.yaml` 的 `capability.<env_name>` 字段）：
-     ```yaml
-     services:    # 该 env 提供的外部服务能力列表
-                  # 每条: {name, type, endpoint?, purpose?}
-                  # type 自由字符串 (s3 / postgres / k8s / redis / etc.)
-     seed_data:   # prepare 脚本写入的种子数据
-                  # 每条: {table?, semantic_role?}
-                  # 不强制枚举 ID 字段——不同项目 ID 命名不一样
-     constraints: # 推理得出的隐性约束 (如 "agent 仅 install 不 enable")
-     notes: |     # 自由文本，含动态值命名规则 (如 S3 bucket 模板)
-     ```
-   - **铁规**：
-     - 严禁猜测脚本里没写的内容；不确定就空
-     - 不引入 project.yaml schema 之外的强制性字段——LLM 自决
-     - **禁止覆盖** `generated_at` 与 `fingerprints` 段（属于 Python 写管辖）
-   - skill 本身**不解析脚本依赖**——LLM 看脚本自己提，跨项目骨架保持极简
+**schema 结构**（6 段 + relations，每段可选）：
 
-**LLM context 注入**（完成后）：
+- `infra_services` — 基础设施服务（DB / Cache / MQ / 对象存储 / K8s / 容器运行时 / 服务网格）
+- `business_systems` — 业务系统（上下游 / 兄弟服务 / mock / stub）
+- `data_resources` — 数据资源（DB schema / 种子数据 / 消息主题 / 文件 / CRD）
+- `config_resources` — 配置资源（应用配置 / TLS 证书 / env vars / 密钥）
+- `runtime_environment` — 运行时环境（OS / 网络 / DNS / 虚拟设备 / 监控接入 / cron）
+- `external_dependencies` — 外部依赖（第三方 SaaS / 跨集群 / 共享基础设施）
+- `relations` — 跨段关联（depends_on / owns / reads / writes / references / proxies_to / monitors）
+
+详细字段定义见 `src/runtime/spec/env-description.schema.json` JSON Schema。
+
+**LLM context 注入**（describe_env 执行成功后）：
 
 ```
-## 环境能力声明（来自 .pg/context/env-capability.yaml）
+## 环境描述（来自 .pg/changes/<change-id>/env-description.yaml）
 
-### <env_name> 当前能力
-{ capability.<env_name> 全文 }
+### <env_name> 资源拓扑
+{ env-description.yaml.environments.<env_name> 全文 }
 
 ⚠️ 写 proposal.md / design.md / tasks.md / scenario-*.yaml 时：
-  - 若引用 capability 已声明的能力 → 标 `provided_by: env-capability.yaml#<env_name>.<key>`
+  - scenario given 必须引用 6 段中已声明的具体资源（如 `infra_services[name=kubernetes].instances[0].id`）
   - 不得以 "环境未就绪" / "OSS 未配置" / "测试数据缺失" 为由跳过
-  - 动态值（hostname 拼接的 bucket 名 / DB 写入的 OSS ID 等）参考 capability.notes 段的命名规则
+  - 资源命名 / ID 规则参考 `infra_services` / `data_resources` 中真实 instance id
+  - 状态判断参考 `data_resources[].state.status`（empty / seeded / configured / partial / unknown）
 ```
 
-**禁止**：把 capability 内容复制到 proposal.md / design.md / tasks.md / scenario-*.yaml 产物里——它只是约束看的，不应当显式出现。
+**禁止**：
+- 把 env-description.yaml 内容复制到 proposal.md / design.md / tasks.md / scenario-*.yaml 产物里——它只是约束看的
+- 修改 `.pg/context/env-capability.yaml`（已废弃，本版本不再支持旧路径）
 
-更新 TodoWrite 第 2 项（拆分为 "加载项目上下文" + "加载环境能力声明" 两个子项）。
+**示例**：
+
+完整 env-description.yaml 示例见 `examples/env-description.example.yaml`（K8s + DB + Cache + 业务系统场景）。
+
+更新 TodoWrite 第 2 项（拆分为 "加载项目上下文" + "生成环境描述" 两个子项）。
 
 ### 1e. 获取管线配置（从 config.yaml 读取）
 
@@ -345,37 +377,33 @@ LLM **不直接写** execution-manifest.yaml，通过 CLI 工具基于 tasks.md 
 
 **步骤**：
 
-1. **生成环境能力摘要（LLM 强制步骤，不可跳过）**：
+1. **读取 env-description.yaml 作为 scenario 编写输入**：
 
-   从阶段 1d.5 已加载的 `env-capability.yaml` 中，针对 `--environment` 指定的目标 env（取 `environment_map` 中 int stage 对应的 env），提取以下信息并写入 LLM 工作记忆：
+   v6 新流程：从阶段 1d.5 生成的 `.pg/changes/<change-id>/env-description.yaml` 中，针对 `--environment` 指定的目标 env，提取以下信息并写入 LLM 工作记忆：
 
-   - **可用 host**：`seed_data` 中 `table=host` 的所有记录（id / hostname / status / semantic_role）
-   - **真实 agent**：哪些 host 实际有 agent 进程（semantic_role 含 "agent" 或 "本机 host (含 agent)"）
-   - **可用 services**：`services` 段的 type / endpoint / semantic_role
-   - **缺失能力**：seed_data 中**没有**但本次变更可能需要的数据（如"无 VXLAN 种子"、"无远端 peer"）
+   - **infra_services**：可用基础设施（DB / Cache / MQ / K8s 等），包括 `instances[].id` / `endpoint` / `version` / `reachable`
+   - **business_systems**：业务系统（上下游 / mock），包括 `endpoints[].url` / `auth`
+   - **data_resources**：数据资源状态（重点关注 `state.status` = empty/seeded/configured/partial）
+   - **config_resources**：配置 / 凭证 / TLS 证书的位置与编码
+   - **runtime_environment**：OS / DNS / 网络配置
+   - **external_dependencies**：外部依赖与 fallback 策略
+   - **relations**：资源间依赖关系
 
-   输出格式（3-8 行纯文本，**用 `--env-summary` 参数传给 pg-gen-scenario.py**）：
+   scenario given 必须**直接引用** env-description.yaml 中已声明的具体资源路径，例如：
+   - `infra_services[name=kubernetes].instances[0].id` 为 `kuboard-dev-1-15`
+   - `data_resources[name=kb_helm_chart_repo].state.status` 为 `empty`（scenario 必须显式声明由前置 scenario 创建）
 
-   ```
-   [ENV-SUMMARY <env-name>]
-   hosts: N seeds (列出关键 host 及状态)
-   real_agent: M (列出有 agent 的 host id)
-   <变更相关能力>: 有/无 (如 "vxlan: 本机有 vxlan.1 vni=1 但无远端 peer")
-   services: 列出可用 services
-   constraints: 一句话总结环境限制 (如 "单 host 环境，无法验证多 host overlay 拓扑")
-   ```
-
-2. 调用脚本，传入 `--env-summary`：
+2. 调用脚本（**v6 不再需要 `--env-summary` 参数**，env-description.yaml 已包含全部信息）：
 
    ```bash
-   python3 .opencode/skills/pg-propose/scripts/pg-gen-scenario.py CHANGE_NAME --env-summary "[ENV-SUMMARY dev-local] hosts: 5 seeds (1 localhost w/ agent, 4 e2e) ..."
+   python3 .opencode/skills/pg-propose/scripts/pg-gen-scenario.py CHANGE_NAME
    ```
    脚本自动：
    - 读 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段（SSOT）
-   - 遍历每个 enabled=true 的 track，写 `scenario-<track-id>.yaml` skeleton（LLM 必填 Scenario 内容），`_meta.env_constraint` 字段写入 `--env-summary` 传入的摘要
+   - 遍历每个 enabled=true 的 track，写 `scenario-<track-id>.yaml` skeleton（LLM 必填 Scenario 内容）
    - 无 enabled track → no-op（不写文件）
 
-3. LLM 填充 scenario.yaml：将 skeleton 中的 S-example 替换为真实 Scenario（**given/then 必须受 `_meta.env_constraint` 约束**）
+3. LLM 填充 scenario.yaml：将 skeleton 中的 S-example 替换为真实 Scenario（**given/then 必须引用 env-description.yaml 中的具体资源**）
 4. （文件存在性快速检查，仅 `ls` 级别，**不调用 pg-validate-proposal.py**）：
    - 确认所有 `scenario-<track>.yaml` 已生成
 5. 校验统一推迟到阶段 2g。

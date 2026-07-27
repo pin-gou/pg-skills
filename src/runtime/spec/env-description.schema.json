@@ -1,0 +1,474 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pg-skills.local/spec/env-description.schema.json",
+  "title": "env-description",
+  "description": "环境描述 YAML, 由 describe_env 脚本生成. 描述 prepare_env 准备完毕后的环境状态, 是 pg-propose / pg-fix-issue / pg-regression 生成 design/tasks/scenario 的输入. 文件位置: .pg/changes/<change-id>/env-description.yaml (per-change 特定, 与 pg-build scenario-execute 直接消费).",
+  "type": "object",
+  "required": ["schema_version", "described_by", "described_at", "described_for", "environments"],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "schema 版本, 当前固定为 1"
+    },
+    "described_by": {
+      "type": "string",
+      "minLength": 1,
+      "description": "生成此描述的脚本名 (eg. describe-env.sh)"
+    },
+    "described_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "生成时间, ISO8601 UTC"
+    },
+    "described_for": {
+      "type": "object",
+      "required": ["caller", "environment"],
+      "additionalProperties": false,
+      "properties": {
+        "caller": {
+          "type": "string",
+          "enum": ["pg-propose", "pg-fix-issue", "pg-regression"],
+          "description": "调用方标识"
+        },
+        "change": {
+          "type": "string",
+          "description": "change-id (pg-regression 可省略)"
+        },
+        "session": {
+          "type": "string",
+          "description": "session-id (pg-regression 必填)"
+        },
+        "environment": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-]*$",
+          "description": "目标 environment 名"
+        }
+      }
+    },
+    "environments": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/definitions/EnvironmentBlock" }
+    }
+  },
+
+  "definitions": {
+    "EnvironmentBlock": {
+      "type": "object",
+      "description": "单 environment 的描述. 6 段为正交语义, 跨段关系用 relations 表达.",
+      "additionalProperties": false,
+      "properties": {
+        "infra_services": { "type": "array", "items": { "$ref": "#/definitions/InfraService" } },
+        "business_systems": { "type": "array", "items": { "$ref": "#/definitions/BusinessSystem" } },
+        "data_resources": { "type": "array", "items": { "$ref": "#/definitions/DataResource" } },
+        "config_resources": { "type": "array", "items": { "$ref": "#/definitions/ConfigResource" } },
+        "runtime_environment": { "type": "array", "items": { "$ref": "#/definitions/RuntimeEnvironment" } },
+        "external_dependencies": { "type": "array", "items": { "$ref": "#/definitions/ExternalDependency" } },
+        "relations": { "type": "array", "items": { "$ref": "#/definitions/Relation" } }
+      }
+    },
+
+    "InfraService": {
+      "type": "object",
+      "description": "基础设施服务: DB / Cache / MQ / 对象存储 / 搜索引擎 / 配置中心 / K8s 集群 / 容器运行时 / 服务网格.",
+      "required": ["name", "type", "category", "instances"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-_]*$",
+          "description": "资源名 (项目内唯一)"
+        },
+        "type": {
+          "type": "string",
+          "description": "服务类型 (开放枚举, 如 postgres|mysql|mariadb|redis|minio|kafka|kind|k3d|elasticsearch|nacos)"
+        },
+        "category": {
+          "type": "string",
+          "enum": [
+            "database", "cache", "mq", "object_storage",
+            "search_engine", "config_center",
+            "container_orchestration", "container_runtime",
+            "service_mesh", "other"
+          ],
+          "description": "服务分类"
+        },
+        "instances": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/Instance" }
+        },
+        "state": { "$ref": "#/definitions/InfraState" },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["persistent", "ephemeral", "transient"],
+          "description": "资源生命周期"
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "Instance": {
+      "type": "object",
+      "required": ["id", "endpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "id": { "type": "string", "description": "实例唯一标识 (eg. kuboard-dev-1-15, postgres-1)" },
+        "endpoint": { "type": "string", "description": "host:port 形式" },
+        "role": { "type": "string", "description": "primary|replica|broker|node|controller|worker 等" },
+        "version": { "type": "string" },
+        "reachable": { "type": "boolean" },
+        "health_check": { "$ref": "#/definitions/HealthCheck" }
+      }
+    },
+
+    "InfraState": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "initialized": { "type": "boolean" },
+        "replicas": { "type": "integer", "minimum": 0 },
+        "topology": {
+          "type": "string",
+          "enum": ["single", "master-replica", "cluster", "multi-master"]
+        }
+      }
+    },
+
+    "BusinessSystem": {
+      "type": "object",
+      "description": "业务系统: 上下游业务服务 / 兄弟服务 / mock / stub.",
+      "required": ["name", "type", "category", "endpoints"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["rest-api", "grpc", "graphql", "soap", "mock", "stub", "webhook"]
+        },
+        "category": {
+          "type": "string",
+          "enum": ["upstream", "downstream", "sibling", "mock", "stub", "partner"]
+        },
+        "endpoints": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "$ref": "#/definitions/Endpoint" }
+        },
+        "auth": { "$ref": "#/definitions/AuthRef" },
+        "contract_ref": {
+          "type": "string",
+          "description": "API 契约文件路径 (相对 project root)"
+        },
+        "mock_config": { "$ref": "#/definitions/MockConfig" },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["persistent", "ephemeral", "transient"]
+        },
+        "reachable": { "type": "boolean" },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "Endpoint": {
+      "type": "object",
+      "required": ["name", "url"],
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "url": { "type": "string" },
+        "method": { "type": "string" },
+        "health_check": { "$ref": "#/definitions/HealthCheck" }
+      }
+    },
+
+    "MockConfig": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "behavior": {
+          "type": "string",
+          "enum": ["record-replay", "stateful", "stateless", "fault-injection"]
+        },
+        "scenarios": { "type": "string" }
+      }
+    },
+
+    "DataResource": {
+      "type": "object",
+      "description": "数据资源: DB schema / 种子数据 / 消息主题 / 文件数据 / CRD.",
+      "required": ["name", "type", "state", "lifecycle"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "db-table", "db-view", "db-row",
+            "file", "directory",
+            "kafka-topic", "rabbitmq-queue",
+            "redis-key", "s3-bucket", "s3-object",
+            "crd", "configmap", "secret"
+          ]
+        },
+        "owner": {
+          "type": "string",
+          "description": "引用 infra_services.name 或 business_systems.name"
+        },
+        "state": { "$ref": "#/definitions/ResourceState" },
+        "schema_ref": { "type": "string" },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["persistent", "ephemeral"]
+        },
+        "cleanup": {
+          "type": "string",
+          "enum": ["drop", "truncate", "archive", "keep"]
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "ResourceState": {
+      "type": "object",
+      "required": ["status"],
+      "additionalProperties": false,
+      "properties": {
+        "status": {
+          "type": "string",
+          "enum": ["empty", "seeded", "configured", "partial", "unknown"]
+        },
+        "row_count": { "type": "integer", "minimum": 0 },
+        "sample": {
+          "type": "array",
+          "maxItems": 3,
+          "description": "1-3 个真实样本"
+        },
+        "last_verified_at": { "type": "string", "format": "date-time" },
+        "verified_by": { "type": "string" }
+      }
+    },
+
+    "ConfigResource": {
+      "type": "object",
+      "description": "配置资源: 应用配置 / TLS 证书 / env vars / 密钥.",
+      "required": ["name", "type", "location", "scope"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "yaml-config", "properties-config", "toml-config",
+            "env-vars", "tls-cert", "tls-key", "ca-cert",
+            "keystore", "secret-mount", "file"
+          ]
+        },
+        "location": {
+          "type": "string",
+          "description": "文件 / 挂载点 / 环境变量名前缀"
+        },
+        "encoding": {
+          "type": "string",
+          "enum": ["plain", "base64", "encrypted", "reference"]
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["application", "instance", "environment", "global"]
+        },
+        "format": { "type": "string" },
+        "references": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "引用的密钥名列表"
+        },
+        "content_hash": {
+          "type": "string",
+          "description": "内容指纹, 用于漂移检测 (eg. sha256:abc...)"
+        },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["persistent", "ephemeral", "transient"]
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "RuntimeEnvironment": {
+      "type": "object",
+      "description": "运行时环境: OS / 网络 / DNS / 虚拟设备 / 监控接入 / 定时任务.",
+      "required": ["name", "type", "config", "scope"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": [
+            "os", "network", "dns", "firewall",
+            "filesystem-mount", "virtual-device",
+            "monitoring", "cron", "system-service", "kernel-param"
+          ]
+        },
+        "config": {
+          "type": "object",
+          "description": "类型相关的配置块"
+        },
+        "scope": {
+          "type": "string",
+          "enum": ["environment", "host", "cluster"]
+        },
+        "validation": { "$ref": "#/definitions/Validation" },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["persistent", "ephemeral", "transient"]
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "Validation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "command": { "type": "string" },
+        "expect": { "type": "string" }
+      }
+    },
+
+    "ExternalDependency": {
+      "type": "object",
+      "description": "外部依赖: 第三方 SaaS / 跨集群服务 / 共享基础设施.",
+      "required": ["name", "type", "category", "endpoint"],
+      "additionalProperties": false,
+      "properties": {
+        "name": {
+          "type": "string",
+          "pattern": "^[a-z][a-z0-9-_]*$"
+        },
+        "type": {
+          "type": "string",
+          "enum": ["saas", "cross-cluster", "shared-infra", "partner-api"]
+        },
+        "category": {
+          "type": "string",
+          "description": "项目分类 (eg. payment / messaging)"
+        },
+        "endpoint": { "type": "string" },
+        "auth": { "$ref": "#/definitions/AuthRef" },
+        "sla": {
+          "type": "object",
+          "description": "SLA 描述 (availability, latency_p99_ms 等)"
+        },
+        "reachable": { "type": "boolean" },
+        "health_check": { "$ref": "#/definitions/HealthCheck" },
+        "fallback": { "$ref": "#/definitions/FailureStrategy" },
+        "lifecycle": {
+          "type": "string",
+          "enum": ["persistent", "ephemeral", "transient"]
+        },
+        "tags": {
+          "type": "array",
+          "items": { "type": "string" }
+        }
+      }
+    },
+
+    "Relation": {
+      "type": "object",
+      "description": "跨段关联: 表达资源间依赖/所有权/读写/引用/代理/监控关系.",
+      "required": ["from", "to", "type", "criticality"],
+      "additionalProperties": false,
+      "properties": {
+        "from": { "type": "string", "description": "源资源 name" },
+        "to": { "type": "string", "description": "目标资源 name" },
+        "type": {
+          "type": "string",
+          "enum": ["depends_on", "owns", "reads", "writes", "references", "proxies_to", "monitors"]
+        },
+        "criticality": {
+          "type": "string",
+          "enum": ["required", "optional", "best-effort"]
+        },
+        "description": { "type": "string" }
+      }
+    },
+
+    "AuthRef": {
+      "type": "object",
+      "required": ["user", "encoding"],
+      "additionalProperties": false,
+      "properties": {
+        "user": {
+          "type": "string",
+          "description": "用户名 / 密钥引用名"
+        },
+        "encoding": {
+          "type": "string",
+          "enum": ["plain", "base64", "oauth", "jwt", "mtls", "none"]
+        },
+        "secret_ref": {
+          "type": "string",
+          "description": "引用 config_resources.name (sensitive 数据)"
+        }
+      }
+    },
+
+    "HealthCheck": {
+      "type": "object",
+      "required": ["method", "path", "expect_status"],
+      "additionalProperties": false,
+      "properties": {
+        "method": { "type": "string" },
+        "path": { "type": "string" },
+        "expect_status": { "type": "integer" },
+        "expect_body_contains": { "type": "string" },
+        "timeout_seconds": { "type": "integer", "default": 3 },
+        "retry_count": { "type": "integer", "default": 1 }
+      }
+    },
+
+    "FailureStrategy": {
+      "type": "object",
+      "required": ["strategy"],
+      "additionalProperties": false,
+      "properties": {
+        "strategy": {
+          "type": "string",
+          "enum": ["skip", "retry", "mock", "fail", "degrade"]
+        },
+        "mock": { "type": "string" },
+        "max_retries": { "type": "integer" },
+        "backoff_seconds": { "type": "integer" }
+      }
+    }
+  }
+}

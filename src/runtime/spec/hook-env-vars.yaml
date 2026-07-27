@@ -10,7 +10,7 @@
 #   2. .pg/skills/README.md §7.1.5 (人类阅读版表格)
 #   3. 一致性测试: src/runtime/tests/test_hook_env_vars_ssot.py
 
-version: 5
+version: 6
 scope: environments
 
 # 硬注入: pg-run-hook.py:build_env 必填, 与 spec 无关
@@ -26,7 +26,7 @@ always_injected:
   - name: PG_RUN_CALLER
     type: enum
     source: "$PG_RUNNER_ORIGIN -> 'ad-hoc' (历史 alias, 仍兼容读取)"
-    enum: [pg-build, pg-regression, pg-fix-issue, ad-hoc]
+    enum: [pg-build, pg-regression, pg-fix-issue, pg-propose, ad-hoc]
     description: 调用方身份
 
 # spec 注入: pg-run-hook.py:_PG_ENV_MAP 由 spec.<key> 注入
@@ -71,6 +71,17 @@ spec_injected:
   - name: PG_RESULT_FILE
     spec_key: hook_result_path
     description: hook 写 result.json 的路径
+  - name: PG_CHANGE_ID
+    spec_key: change_id
+    description: |
+      change-id (v6 新增). 仅 describe_env 必填: 用于脚本写入 .pg/changes/<change-id>/env-description.yaml.
+      其他 action 可省略, 仍注入 PG_RUN_SESSION (向后兼容).
+  - name: PG_OUTPUT_PATH
+    spec_key: output_path
+    description: |
+      describe_env 输出文件绝对路径 (v6 新增). describe_env 必填, 其他 action 不注入.
+      pg-invoke-hook.py 按 caller 路由: pg-propose → .pg/changes/<change-id>/, 
+      pg-fix-issue → .pg/fix-issue/<change-id>/, pg-regression → .pg/regression/<session>/.
 
 # 已废弃, 不再注入 (旧 hook 必须改为新名)
 removed:

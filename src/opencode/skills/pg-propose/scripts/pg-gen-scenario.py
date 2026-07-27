@@ -2,7 +2,7 @@
 """pg-gen-scenario.py — Generate per-track scenario-<track>.yaml skeletons.
 
 Usage:
-    python3 pg-gen-scenario.py <change> [--env-summary "text"]
+    python3 pg-gen-scenario.py <change>
 
 Reads `.pg/changes/<change>/1-propose-review/on-conditions-eval.md` to find
 `scenario_tracks_decision` segment (SSOT written by `pg-gen-tasks-skeleton.py`).
@@ -15,8 +15,10 @@ Behavior:
 
 This script is pure-function (zero side effects beyond writing scenario files).
 
-v0.9.0: 新增 `--env-summary` 参数。传入时在 `_meta.env_constraint` 字段写入环境约束摘要，
-LLM 填充 scenario 时 based on 此约束调整 given/then。
+v0.9.0 (历史): 新增 `--env-summary` 参数，写入 `_meta.env_constraint` 字段。
+v1.0.0 (v6 hook 协议): **删除** `--env-summary` 与 `_meta.env_constraint`.
+  取代方案: env-description.yaml 由 describe_env 脚本生成, LLM 在填充 scenario
+  given 时直接引用 .pg/changes/<id>/env-description.yaml 中的具体资源路径.
 
 v3.7: 新增 `check_scenario_placeholders()` / `check_scenario_file()` 工具函数，
 供 `pg-validate-proposal.py` 调用以校验 LLM 是否已替换所有占位符。
@@ -190,7 +192,6 @@ def _compute_target_scenario_count(v_count: int) -> int:
 
 def _build_skeleton_yaml(
     change: str, track_id: str, v_count: int = 0, design_mentions_frontend: bool = False,
-    env_summary: str | None = None,
 ) -> dict:
     """构造 scenario-<track-id>.yaml skeleton —— LLM 在阶段三自审时填充。
 
@@ -228,8 +229,9 @@ def _build_skeleton_yaml(
                 "v3.10: 数量按 design V-* 数动态派生, 上限 7。"
                 "若不需要 browser 场景可删除最后一个 scenario；"
                 "若 V-* 不足, 建议补充 scenario 而非合并现有 scenario。"
+                "v1.0 (v6 hook 协议): scenario given 直接引用 .pg/changes/<id>/env-description.yaml 中的资源路径, "
+                "不再使用 _meta.env_constraint 字段."
             ),
-            "env_constraint": env_summary,
             "change": change,
             "track_id": track_id,
             "schema_version": "v3.10",
@@ -659,15 +661,10 @@ def check_scenario_coverage(
 
 def main():
     if len(sys.argv) < 2:
-        print("Usage: python3 pg-gen-scenario.py <change> [--env-summary 'text']", file=sys.stderr)
+        print("Usage: python3 pg-gen-scenario.py <change>", file=sys.stderr)
         sys.exit(1)
 
     change = sys.argv[1]
-    env_summary = None
-    if "--env-summary" in sys.argv:
-        idx = sys.argv.index("--env-summary")
-        if idx + 1 < len(sys.argv):
-            env_summary = sys.argv[idx + 1]
 
     decisions = _read_scenario_decisions(change)
 
@@ -700,7 +697,6 @@ def main():
         os.makedirs(os.path.dirname(scenario_path), exist_ok=True)
         skeleton = _build_skeleton_yaml(
             change, track_id, v_count=v_count, design_mentions_frontend=frontend_mentioned,
-            env_summary=env_summary,
         )
         with open(scenario_path, "w", encoding="utf-8") as f:
             yaml.safe_dump(

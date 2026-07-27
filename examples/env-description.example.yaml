@@ -1,0 +1,178 @@
+# env-description.example.yaml
+# 示例: 描述一个 K8s + DB + Cache + 业务系统的完整环境
+# 真实项目由 describe_env 脚本生成, 字段必须严格符合 env-description.schema.json
+
+schema_version: 1
+described_by: describe-env.sh
+described_at: 2026-07-27T08:00:00Z
+described_for:
+  caller: pg-propose
+  change: add-helm-chart-validation
+  session: add-helm-chart-validation
+  environment: dev-local
+environments:
+  dev-local:
+    infra_services:
+      - name: kubernetes
+        type: kind/k3d
+        category: container_orchestration
+        instances:
+          - id: kuboard-dev-1-15
+            endpoint: localhost:6443
+            role: node
+            version: v1.15.12
+            reachable: true
+          - id: kuboard-dev-1-28
+            endpoint: localhost:6444
+            role: node
+            version: v1.28.15
+            reachable: true
+        state:
+          initialized: true
+          topology: cluster
+        lifecycle: persistent
+        tags: [multi-version, regression-critical]
+
+      - name: kb-mariadb
+        type: mariadb
+        category: database
+        instances:
+          - id: kb-mariadb-1
+            endpoint: 10.0.0.5:3307
+            role: primary
+            version: "10.5"
+            reachable: true
+            health_check:
+              method: nc
+              path: "3307"
+              expect_status: 0
+              timeout_seconds: 3
+        lifecycle: persistent
+        tags: [critical]
+
+      - name: kb-redis
+        type: redis
+        category: cache
+        instances:
+          - id: kb-redis-1
+            endpoint: 10.0.0.6:6379
+            role: primary
+            version: "6.2"
+            reachable: true
+        lifecycle: ephemeral
+        tags: [shared]
+
+    business_systems:
+      - name: kb-api
+        type: rest-api
+        category: downstream
+        endpoints:
+          - name: primary
+            url: http://kb-api:8080
+            method: POST
+            health_check:
+              method: GET
+              path: /healthz
+              expect_status: 200
+              timeout_seconds: 3
+        auth:
+          user: admin
+          encoding: base64
+        contract_ref: ./api/kb-openapi.yaml
+        lifecycle: persistent
+        reachable: true
+        tags: [critical]
+
+    data_resources:
+      - name: kb_helm_chart_repo
+        type: db-table
+        owner: kb-mariadb
+        state:
+          status: empty
+          row_count: 0
+          last_verified_at: 2026-07-27T08:00:00Z
+          verified_by: describe-env.sh
+        lifecycle: ephemeral
+        cleanup: drop
+        tags: [regression-critical]
+
+      - name: kb_cluster
+        type: db-table
+        owner: kb-mariadb
+        state:
+          status: seeded
+          row_count: 5
+          sample:
+            - name: dev-1.15.12
+              version: v1.15.12
+            - name: dev-1.21.14
+              version: v1.21.14
+            - name: dev-1.28.15
+              version: v1.28.15
+        lifecycle: persistent
+        cleanup: keep
+
+    config_resources:
+      - name: kb-admin-credentials
+        type: secret-mount
+        location: /etc/kb-admin
+        encoding: base64
+        scope: environment
+        format: env
+        references:
+          - ADMIN_USER
+          - ADMIN_PASS
+        content_hash: sha256:abc123...
+        lifecycle: persistent
+        tags: [sensitive]
+
+    runtime_environment:
+      - name: dev-dns
+        type: dns
+        config:
+          records:
+            - name: kb.local
+              value: 10.0.0.5
+            - name: api.local
+              value: 10.0.0.10
+        scope: environment
+        validation:
+          command: nslookup kb.local
+          expect: "10.0.0.5"
+        lifecycle: persistent
+
+    external_dependencies:
+      - name: docker-registry
+        type: shared-infra
+        category: registry
+        endpoint: https://registry.local:5000
+        reachable: true
+        health_check:
+          method: GET
+          path: /v2/_catalog
+          expect_status: 200
+        fallback:
+          strategy: mock
+          mock: ./mocks/docker-registry-fallback.yaml
+        lifecycle: persistent
+        tags: [shared]
+
+    relations:
+      - from: kb-api
+        to: kb-mariadb
+        type: depends_on
+        criticality: required
+        description: kb-api 读写 kb-mariadb 主库
+      - from: kb_helm_chart_repo
+        to: kb-mariadb
+        type: owns
+        criticality: required
+      - from: kb-api
+        to: kb-admin-credentials
+        type: references
+        criticality: required
+        description: 登录需读取 ADMIN_USER/ADMIN_PASS
+      - from: kb-redis
+        to: kb-api
+        type: monitors
+        criticality: optional

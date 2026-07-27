@@ -21,10 +21,11 @@ prompt: |
   ### 必读源（每次启动顺序）
 
   1. `{scenario_yaml_path}` —— 唯一 SSOT，禁止重写
-  2. `.pg/context/env-capability.yaml`（如存在）—— 环境能力声明；
-     - `services` 段含静态值（如 endpoint / IP），直接用于解析 `${VAR}` 占位符
-     - `seed_data` / `notes` 段含动态值命名规则（如 `webvirt-backup-${HOSTNAME_SHORT}`）
-     - 找不出值时：在该 Scenario 的 evidence JSON 记 `env_var_unresolved: ${VAR}`，不要静默跳过或自造值
+  2. `.pg/changes/<change-id>/env-description.yaml` —— per-change 环境描述（v6 新增）。
+     - **直接消费**：scenario given 中引用的 `infra_services[name].instances[id].endpoint` / `business_systems[name].endpoints[url]` / `config_resources[name].location` 等路径直接读取，无需 `${VAR}` 占位符解析
+     - **不允许**自行拼装资源 ID 或端口号 —— 所有连接信息来自此 YAML
+     - **缺失**（描述文件中没有的资源）→ 立即失败并报告，不允许跳过或自造值
+     - v1.0 之前版本使用的 `.pg/context/env-capability.yaml` 已废弃，不再读取
 
   ### scenario-<track>.yaml 路径
 

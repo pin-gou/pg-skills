@@ -84,12 +84,14 @@ PROJECT_ROOT = find_project_root()
 # Map spec fields to PG_* env var names. Each entry: spec_key -> env_var.
 # All keys are optional; only non-empty values are injected.
 #
-# v5 SSOT: .pg/skills/src/runtime/spec/hook-env-vars.yaml
+# v6 SSOT: .pg/skills/src/runtime/spec/hook-env-vars.yaml
 #   改动 _PG_ENV_MAP 必须同步 SSOT 文件 + README §7.1.5
 #   测试校验: src/runtime/tests/test_hook_env_vars_ssot.py
 #
 # 协议范围: 仅 environments 维度. modules 维度不走 hook 协议 (pg-run 直接 cwd 调用).
 # 历史 alias (PG_SKILL_NAME / PG_CHANGE_NAME / PG_MODULE) 不再注入.
+# v6 新增 PG_CHANGE_ID / PG_OUTPUT_PATH: 仅 describe_env 使用, 其他 action 即使传了
+# 这两个 spec_key 也会被注入 (脚本读不到 env var 不报错即可).
 _PG_ENV_MAP = {
     "session": "PG_RUN_SESSION",
     "caller": "PG_RUN_CALLER",
@@ -102,6 +104,8 @@ _PG_ENV_MAP = {
     "hook_log_dir": "PG_HOOK_LOG_DIR",
     "log_path": "PG_LOG_FILE",
     "hook_result_path": "PG_RESULT_FILE",
+    "change_id": "PG_CHANGE_ID",
+    "output_path": "PG_OUTPUT_PATH",
 }
 
 

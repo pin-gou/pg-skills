@@ -178,7 +178,7 @@
 
     "environment": {
       "type": "object",
-      "description": "环境定义: role × host × instance topology + per-role lifecycle actions + cross-role orchestration + env-level lifecycle hooks (prepare_env / clean_env)",
+      "description": "环境定义: role × host × instance topology + per-role lifecycle actions + cross-role orchestration + env-level lifecycle hooks (prepare_env / describe_env / clean_env). prepare_env 与 describe_env 独立: prepare_env 真实执行环境准备动作, describe_env 只读探测并产出 env-description.yaml 给 pg-propose / pg-fix-issue / pg-regression 作为 design/tasks/scenario 的输入.",
       "required": ["roles"],
       "additionalProperties": false,
       "properties": {
@@ -186,6 +186,16 @@
         "prepare_env": {
           "description": "env 级生命周期 hook: 启动该 env 前的准备工作 (db migrate / seed / dependencies). runner 在 environment.required=true 的 stage 开头调一次.",
           "$ref": "#/definitions/action"
+        },
+        "describe_env": {
+          "type": "object",
+          "description": "env 级描述脚本: 只读探测当前环境状态, 输出 env-description.yaml. 由 pg-propose / pg-fix-issue / pg-regression 在选定 environment 后调用. 不依赖 prepare_env (两脚本独立维护). 必须显式声明, 无默认值.",
+          "required": ["script"],
+          "additionalProperties": false,
+          "properties": {
+            "script": { "type": "string", "minLength": 1, "description": "describe_env 脚本路径, 相对 project.yaml" },
+            "timeout_seconds": { "type": "integer", "minimum": 1, "description": "执行超时 (秒), 默认 60" }
+          }
         },
         "clean_env": {
           "description": "env 级生命周期 hook: 跑完该 env 后的清理工作 (drop temp data / stop services). runner 在 environment.required=true 的 stage 结尾调一次.",

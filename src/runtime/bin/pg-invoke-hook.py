@@ -131,15 +131,19 @@ def find_pg_skills_root(project_root: Path) -> Path:
 
 
 # 与原 cmd_invoke_hook 一致 (line 3166-3168)
-ENV_LEVEL_ACTIONS = ("prepare_env", "clean_env", "restart_all_instances")
+ENV_LEVEL_ACTIONS = ("prepare_env", "describe_env", "clean_env", "restart_all_instances")
 
 # Caller 维度枚举 (与 .pg/hooks/lib/common.sh:pg_resolve_paths 的 case 分支同步)
 CALLER_PG_BUILD = "pg-build"
 CALLER_PG_REGRESSION = "pg-regression"
 CALLER_PG_FIX_ISSUE = "pg-fix-issue"
+CALLER_PG_PROPOSE = "pg-propose"
 CALLER_PG_AGENT = "pg-agent"
 CALLER_AD_HOC = "ad-hoc"
-KNOWN_CALLERS = (CALLER_PG_BUILD, CALLER_PG_REGRESSION, CALLER_PG_FIX_ISSUE, CALLER_PG_AGENT, CALLER_AD_HOC)
+KNOWN_CALLERS = (CALLER_PG_BUILD, CALLER_PG_REGRESSION, CALLER_PG_FIX_ISSUE, CALLER_PG_PROPOSE, CALLER_PG_AGENT, CALLER_AD_HOC)
+
+# v6 新增: describe_env 触发者 (生成 env-description.yaml 供下游消费)
+DESCRIBE_ENV_CALLERS = (CALLER_PG_PROPOSE, CALLER_PG_FIX_ISSUE, CALLER_PG_REGRESSION)
 
 
 def _resolve_wait_for_completion(action: str, cli_value, cfg_value=None):
@@ -189,6 +193,7 @@ def pg_log_dir_for_skill(caller: str, session: str, env: str, project_root: Path
       pg-build       -> .pg/changes/<session>/2-build/<env>-logs
       pg-regression  -> .pg/regression/<session>/<env>-logs   (session = <suite>-<date>-<seq>)
       pg-fix-issue   -> .pg/fix-issue/<session>/<env>-logs    (session 已含 fix- 前缀)
+      pg-propose     -> .pg/changes/<session>/2-propose/<env>-logs
       pg-agent       -> .pg/agent/<session>/<env>-logs        (LLM agent 通用入口, session = <iso-date>-<keyword>)
       ad-hoc         -> .pg/ad-hoc/<session>/<env>-logs       (独立顶级目录, 不与 SKILL 命名空间混)
     """
@@ -200,6 +205,8 @@ def pg_log_dir_for_skill(caller: str, session: str, env: str, project_root: Path
         return base / "regression" / session / dir_name
     if caller == CALLER_PG_FIX_ISSUE:
         return base / "fix-issue" / session / dir_name
+    if caller == CALLER_PG_PROPOSE:
+        return base / "changes" / session / "2-propose" / dir_name
     if caller == CALLER_PG_AGENT:
         return base / "agent" / session / dir_name
     # ad-hoc
@@ -253,6 +260,69 @@ def build_env_level_hook_spec(
         "hook_log_dir": str(hook_log_dir),
         "hook_result_path": result_path,
         "caller": caller,
+        "wait_for_completion": True,
+    }
+    return spec
+
+
+def build_describe_env_spec(
+    session: str,
+    env: str,
+    stage: str,
+    act_cfg: dict,
+    project_root: Path,
+    caller: str,
+    change_id: str,
+) -> dict:
+    """Build pg-run-hook.py spec for describe_env (v6 新增).
+
+    describe_env 与 prepare_env / clean_env 同属 env-level, 但有两个差异:
+      1. 必须注入 PG_CHANGE_ID + PG_OUTPUT_PATH (脚本写入 .pg/changes/<id>/env-description.yaml)
+      2. caller 限定为 pg-propose / pg-fix-issue / pg-regression
+         (其他 caller 调用直接报错, 因为没有语义上的"描述"用途)
+
+    输出路径按 caller 路由:
+      pg-propose     -> .pg/changes/<change_id>/env-description.yaml
+      pg-fix-issue   -> .pg/fix-issue/<change_id>/env-description.yaml
+      pg-regression  -> .pg/regression/<session>/env-description.yaml
+
+    脚本超时默认 60s (仅探测, 不应长跑); YAML 缺 timeout_seconds 时回落到此值.
+    """
+    inner_cmd = "bash " + shlex.quote(act_cfg["script"])
+
+    hook_log_dir = pg_log_dir_for_skill(caller, session, env, project_root)
+    log_path = str(hook_log_dir / "env.describe_env.log")
+    result_path = str(hook_log_dir / "env.describe_env.result.json")
+
+    if caller == CALLER_PG_PROPOSE:
+        output_path = str(project_root / ".pg" / "changes" / change_id / "env-description.yaml")
+    elif caller == CALLER_PG_FIX_ISSUE:
+        output_path = str(project_root / ".pg" / "fix-issue" / change_id / "env-description.yaml")
+    elif caller == CALLER_PG_REGRESSION:
+        output_path = str(project_root / ".pg" / "regression" / session / "env-description.yaml")
+    else:
+        sys.stderr.write(
+            f"Error: --action describe_env requires caller in {DESCRIBE_ENV_CALLERS}, got '{caller}'\n"
+        )
+        sys.exit(2)
+
+    spec = {
+        "cmd": inner_cmd,
+        "session": session,
+        "change": session,
+        "stage": stage,
+        "env": env,
+        "role": "",
+        "instance_name": "",
+        "instance_host": "",
+        "hook_type": "describe_env",
+        "timeout_seconds": act_cfg.get("timeout_seconds") or 60,
+        "log_path": log_path,
+        "hook_log_dir": str(hook_log_dir),
+        "hook_result_path": result_path,
+        "caller": caller,
+        "change_id": change_id,
+        "output_path": output_path,
         "wait_for_completion": True,
     }
     return spec
@@ -455,6 +525,13 @@ def invoke_hook_main(argv=None) -> int:
                             "DEPRECATED alias of --session. 仅作 1 个版本兼容, "
                             "SKILL / pg-run / agent 应改为 --session."
                         ))
+    parser.add_argument("--change-id", dest="change_id", default=None,
+                        help=(
+                            "change-id (v6 新增). --action describe_env 必填, "
+                            "用于生成 env-description.yaml 路径 (.pg/changes/<id>/). "
+                            "其他 action 可省略. 与 --session 含义不同: --session 是日志/"
+                            "audit 标识, --change-id 是产物路径标识."
+                        ))
     parser.add_argument("--env", required=True,
                         help="environment name (must be in project.yaml environments)")
     parser.add_argument("--stage", default="manual",
@@ -476,14 +553,15 @@ def invoke_hook_main(argv=None) -> int:
     parser.add_argument("--action", required=True,
                         choices=["start", "stop", "restart", "logs", "tail",
                                  "health_check",
-                                 "prepare_env", "clean_env",
+                                 "prepare_env", "describe_env", "clean_env",
                                  "restart_all_instances"],
                         help=(
                             "action to trigger. start/stop/restart/logs/tail/health_check are "
                             "per-role lifecycle actions (require --role and "
-                            "--instance); prepare_env/clean_env/restart_all_instances are "
-                            "environment-level lifecycle hooks (ignore "
-                            "--role/--instance)."
+                            "--instance); prepare_env/describe_env/clean_env/restart_all_instances "
+                            "are environment-level lifecycle hooks (ignore --role/--instance). "
+                            "describe_env (v6): caller 限定 pg-propose/pg-fix-issue/pg-regression, "
+                            "自动注入 PG_CHANGE_ID + PG_OUTPUT_PATH, 写入 env-description.yaml."
                         ))
     parser.add_argument("--tail-lines", type=int, default=None,
                         help="(logs/tail only) append --tail-lines N to hook args")
@@ -493,7 +571,7 @@ def invoke_hook_main(argv=None) -> int:
                             "调用方身份 (caller 维度路由). "
                             "硬缺省 'ad-hoc' — 任何不显式传 --skill 的调用都视为 ad-hoc, "
                             "日志落到 .pg/ad-hoc/<session>/<env>-logs/."
-                            "SKILL (pg-build / pg-regression / pg-fix-issue) 必须显式标注."
+                            "SKILL (pg-build / pg-regression / pg-fix-issue / pg-propose) 必须显式标注."
                         ))
     parser.add_argument("--log-dir", default=None,
                         help=(
@@ -566,8 +644,9 @@ def invoke_hook_main(argv=None) -> int:
 
     env_cfg = (config.get("environments") or {}).get(args.env) or {}
 
-    # Environment-level lifecycle hooks (prepare_env / clean_env / restart_all_instances)
-    # are NOT role-scoped: prepare_env / clean_env live directly under environments.<env>.
+    # Environment-level lifecycle hooks (prepare_env / describe_env / clean_env /
+    # restart_all_instances) are NOT role-scoped: prepare_env / describe_env /
+    # clean_env live directly under environments.<env>.
     # restart_all_instances 走特殊路径: 内部展开为 stop → start → health_check 三阶段.
     if args.action in ENV_LEVEL_ACTIONS:
         if args.action == "restart_all_instances":
@@ -598,6 +677,42 @@ def invoke_hook_main(argv=None) -> int:
                 return 1
             # 走多 spec 流程 (后续 _run_multi_specs 处理)
             spec = {"_multi_specs": specs, "action": "restart_all_instances"}
+        elif args.action == "describe_env":
+            # describe_env: 必须显式声明在 environments.<env>.describe_env, 且 caller 必须是
+            # pg-propose / pg-fix-issue / pg-regression (其他 caller 无语义).
+            if args.caller not in DESCRIBE_ENV_CALLERS:
+                sys.stderr.write(
+                    f"Error: --action describe_env requires --caller in "
+                    f"{DESCRIBE_ENV_CALLERS}, got '{args.caller}'\n"
+                )
+                return 1
+            if not args.change_id:
+                sys.stderr.write(
+                    "Error: --action describe_env requires --change-id\n"
+                )
+                return 1
+            describe_cfg = env_cfg.get("describe_env")
+            if not describe_cfg:
+                sys.stderr.write(
+                    f"Error: action 'describe_env' not defined in "
+                    f"environments.{args.env}.describe_env (must be explicit)\n"
+                )
+                return 1
+            script_path = project_root / describe_cfg["script"]
+            if not script_path.is_file():
+                sys.stderr.write(
+                    f"Error: describe_env script not found: {script_path}\n"
+                )
+                return 2
+            spec = build_describe_env_spec(
+                session=args.session,
+                env=args.env,
+                stage=args.stage,
+                act_cfg=describe_cfg,
+                project_root=project_root,
+                caller=args.caller,
+                change_id=args.change_id,
+            )
         else:
             env_hook_cfg = env_cfg.get(args.action)
             if not env_hook_cfg:

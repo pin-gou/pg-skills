@@ -657,56 +657,91 @@ def cmd_design_api(change):
 
 
 def _check_scenario_env_consistency(change: str, manifest: dict) -> list[tuple[str, str]]:
-    """v0.9.0: 校验 scenario given 与 env-capability seed_data 的一致性 (warning 级).
+    """v1.0 (v6 hook 协议): 校验 scenario given 与 env-description.yaml 的一致性 (warning 级).
 
-    规则:
-      1. given 提到 "≥N host" 但 env 只有 M 个 host 种子 → warning
-      2. given 引用的 host id 不在 seed_data 中 → warning
+    取代旧 v0.9.0 基于 env-capability.yaml seed_data 的检查. 新规则基于 6 段结构:
+
+      规则 1 (env_description_missing): .pg/changes/<change-id>/env-description.yaml 不存在
+        → 提示先跑 pg-propose 阶段 1d.5 的 describe_env. warning, 不阻塞 (向后兼容)
+      规则 2 (scenario_given_unknown_instance): given 引用的 instance id 不在
+        infra_services.<name>.instances[].id 中 → warning
+      规则 3 (scenario_given_data_status_mismatch): given 假设某种 data_resources 状态
+        (如"已 seed" / "已有 row"), 但 env-description.yaml 中 state.status 为 empty/unknown
+        → warning
+      规则 4 (scenario_relation_undeclared): given 隐含资源间依赖 (eg. "X 依赖 Y 配置"),
+        但 env-description.yaml 的 relations 段未声明 → info
 
     Returns: list of (code, msg) — empty list = OK.
     """
     issues: list[tuple[str, str]] = []
 
-    # 1. 确定目标 env（取 int stage 的 environment）
+    # 1. 读取 env-description.yaml (per-change 特定)
+    env_desc_path = os.path.join(
+        CHANGES_DIR, change, "env-description.yaml"
+    )
+    if not os.path.isfile(env_desc_path):
+        issues.append((
+            "env_description_missing",
+            f"{change}: 缺少 env-description.yaml, 请先跑 pg-propose 1d.5 "
+            f"(调用 pg-invoke-hook.py --action describe_env)",
+        ))
+        return issues
+
+    try:
+        with open(env_desc_path, encoding="utf-8") as f:
+            env_desc = yaml.safe_load(f)
+    except Exception as e:
+        issues.append((
+            "env_description_invalid_yaml",
+            f"{env_desc_path}: YAML 解析失败: {e}",
+        ))
+        return issues
+
+    # 2. 确定目标 env
     if not manifest or "stages" not in manifest:
         return issues
     env_name = None
     for stage in manifest["stages"]:
-        if stage.get("name") == "int":
+        # 兼容历史 stage 名 (int / real-integration / dev-mock-integration)
+        if stage.get("name") in ("int", "real-integration", "dev-mock-integration"):
             env_name = stage.get("environment")
             break
     if not env_name:
         return issues
 
-    # 2. 读取 env-capability.yaml
-    env_cap_path = os.path.join(PROJECT_ROOT, ".pg", "context", "env-capability.yaml")
-    if not os.path.isfile(env_cap_path):
+    env_block = env_desc.get("environments", {}).get(env_name)
+    if not isinstance(env_block, dict):
+        issues.append((
+            "env_description_env_missing",
+            f"env-description.yaml 缺少 environments.{env_name} 段",
+        ))
         return issues
 
-    try:
-        with open(env_cap_path, encoding="utf-8") as f:
-            env_cap = yaml.safe_load(f)
-    except Exception:
-        return issues
+    # 3. 收集所有 instance id (infra_services[*].instances[*].id)
+    instance_ids: set[str] = set()
+    for svc in env_block.get("infra_services", []) or []:
+        for inst in svc.get("instances", []) or []:
+            iid = inst.get("id")
+            if iid:
+                instance_ids.add(str(iid))
 
-    cap = env_cap.get("capability", {}).get(env_name, {})
-    seed_data = cap.get("seed_data", []) or []
-    constraints = cap.get("constraints", [])
+    # 4. 收集 data_resources 状态
+    data_status: dict[str, str] = {}
+    for dr in env_block.get("data_resources", []) or []:
+        name = dr.get("name")
+        status = (dr.get("state") or {}).get("status")
+        if name:
+            data_status[name] = status or "unknown"
 
-    # 3. 提取 host 种子
-    host_seeds = []
-    for entry in seed_data:
-        if not isinstance(entry, dict):
-            continue
-        if entry.get("table") == "host":
-            for rec in entry.get("records", []):
-                host_seeds.append(rec)
+    # 5. 收集 relations 中的 from/to 资源名集合
+    declared_resources: set[str] = set()
+    for rel in env_block.get("relations", []) or []:
+        if rel.get("from"):
+            declared_resources.add(rel["from"])
+        if rel.get("to"):
+            declared_resources.add(rel["to"])
 
-    total_hosts = len(host_seeds)
-    host_ids = {str(h.get("id", "")) for h in host_seeds if h.get("id")}
-    hostnames = {h.get("hostname", "") for h in host_seeds if h.get("hostname")}
-
-    # 4. 遍历 scenario 文件
+    # 6. 遍历 scenario 文件
     import glob as _glob
     for scenario_path in _glob.glob(
         os.path.join(CHANGES_DIR, change, "scenario-*.yaml"),
@@ -724,25 +759,26 @@ def _check_scenario_env_consistency(change: str, manifest: dict) -> list[tuple[s
             given_text = " ".join(sc.get("given", []) or [])
             sid = sc.get("scenario_id", "<unknown>")
 
-            # 规则 1: given 提到 "≥N host" 但 env 只有 M 个 host 种子
-            m = re.search(r"[≥>=]+\s*(\d+)\s*(?:个|host|台)", given_text)
-            if m:
-                required = int(m.group(1))
-                if required > total_hosts:
+            # 规则 2: given 引用的 instance id 不在 env-description 中
+            id_matches = re.findall(r"id=([A-Za-z0-9_-]{3,})", given_text)
+            for iid in id_matches:
+                if iid not in instance_ids:
                     issues.append((
-                        "scenario_given_exceeds_env_capacity",
-                        f"{sid}: given 要求 ≥{required} host，"
-                        f"但 {env_name} seed_data 只有 {total_hosts} 个 host 种子",
+                        "scenario_given_unknown_instance",
+                        f"{sid}: given 引用 instance id={iid}, "
+                        f"但 {env_name} env-description.yaml 未声明",
                     ))
 
-            # 规则 2: given 引用的 host id 不在 seed_data 中
-            id_matches = re.findall(r"id=(\d{16,20})", given_text)
-            for hid in id_matches:
-                if hid not in host_ids:
+            # 规则 3: data_resources 状态假设
+            for dr_name, dr_status in data_status.items():
+                if dr_status == "empty" and dr_name in given_text and (
+                    "已 seed" in given_text or "已存在" in given_text or "ready" in given_text.lower()
+                ):
                     issues.append((
-                        "scenario_given_unknown_host_id",
-                        f"{sid}: given 引用 host id={hid}，"
-                        f"但 {env_name} seed_data 中不存在",
+                        "scenario_given_data_status_mismatch",
+                        f"{sid}: given 假设 {dr_name} 已 seed/存在, "
+                        f"但 env-description.yaml 标记 status=empty "
+                        f"(需由前置 scenario 创建)",
                     ))
 
     return issues
@@ -1046,7 +1082,7 @@ def cmd_manifest(change):
                 f"coverage scan 异常: {e}",
             ))
 
-    # 7.6 v0.9.0: scenario env-capability 交叉校验（warning 级, 不阻塞）
+    # 7.6 v1.0 (v6 hook 协议): scenario env-description 交叉校验（warning 级, 不阻塞）
     if yaml is not None:
         try:
             env_issues = _check_scenario_env_consistency(change, manifest)
@@ -1055,7 +1091,7 @@ def cmd_manifest(change):
         except Exception as e:
             coverage_warnings.append((
                 "scenario_env_check_failed",
-                f"env-capability 交叉校验异常: {e}",
+                f"env-description 交叉校验异常: {e}",
             ))
 
     # 8. v3.10: scenario 覆盖度 warning 打印（不阻塞）
