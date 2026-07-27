@@ -656,6 +656,98 @@ def cmd_design_api(change):
     print("OK: all endpoints have Request/Response Body coverage")
 
 
+def _check_scenario_env_consistency(change: str, manifest: dict) -> list[tuple[str, str]]:
+    """v0.9.0: 校验 scenario given 与 env-capability seed_data 的一致性 (warning 级).
+
+    规则:
+      1. given 提到 "≥N host" 但 env 只有 M 个 host 种子 → warning
+      2. given 引用的 host id 不在 seed_data 中 → warning
+
+    Returns: list of (code, msg) — empty list = OK.
+    """
+    issues: list[tuple[str, str]] = []
+
+    # 1. 确定目标 env（取 int stage 的 environment）
+    if not manifest or "stages" not in manifest:
+        return issues
+    env_name = None
+    for stage in manifest["stages"]:
+        if stage.get("name") == "int":
+            env_name = stage.get("environment")
+            break
+    if not env_name:
+        return issues
+
+    # 2. 读取 env-capability.yaml
+    env_cap_path = os.path.join(PROJECT_ROOT, ".pg", "context", "env-capability.yaml")
+    if not os.path.isfile(env_cap_path):
+        return issues
+
+    try:
+        with open(env_cap_path, encoding="utf-8") as f:
+            env_cap = yaml.safe_load(f)
+    except Exception:
+        return issues
+
+    cap = env_cap.get("capability", {}).get(env_name, {})
+    seed_data = cap.get("seed_data", []) or []
+    constraints = cap.get("constraints", [])
+
+    # 3. 提取 host 种子
+    host_seeds = []
+    for entry in seed_data:
+        if not isinstance(entry, dict):
+            continue
+        if entry.get("table") == "host":
+            for rec in entry.get("records", []):
+                host_seeds.append(rec)
+
+    total_hosts = len(host_seeds)
+    host_ids = {str(h.get("id", "")) for h in host_seeds if h.get("id")}
+    hostnames = {h.get("hostname", "") for h in host_seeds if h.get("hostname")}
+
+    # 4. 遍历 scenario 文件
+    import glob as _glob
+    for scenario_path in _glob.glob(
+        os.path.join(CHANGES_DIR, change, "scenario-*.yaml"),
+    ):
+        try:
+            with open(scenario_path, encoding="utf-8") as f:
+                scenario_doc = yaml.safe_load(f)
+        except Exception:
+            continue
+        if not isinstance(scenario_doc, dict):
+            continue
+        for sc in scenario_doc.get("scenarios", []):
+            if not isinstance(sc, dict):
+                continue
+            given_text = " ".join(sc.get("given", []) or [])
+            sid = sc.get("scenario_id", "<unknown>")
+
+            # 规则 1: given 提到 "≥N host" 但 env 只有 M 个 host 种子
+            m = re.search(r"[≥>=]+\s*(\d+)\s*(?:个|host|台)", given_text)
+            if m:
+                required = int(m.group(1))
+                if required > total_hosts:
+                    issues.append((
+                        "scenario_given_exceeds_env_capacity",
+                        f"{sid}: given 要求 ≥{required} host，"
+                        f"但 {env_name} seed_data 只有 {total_hosts} 个 host 种子",
+                    ))
+
+            # 规则 2: given 引用的 host id 不在 seed_data 中
+            id_matches = re.findall(r"id=(\d{16,20})", given_text)
+            for hid in id_matches:
+                if hid not in host_ids:
+                    issues.append((
+                        "scenario_given_unknown_host_id",
+                        f"{sid}: given 引用 host id={hid}，"
+                        f"但 {env_name} seed_data 中不存在",
+                    ))
+
+    return issues
+
+
 def cmd_manifest(change):
     """Validate execution-manifest.yaml consistency."""
     manifest_path = os.path.join(CHANGES_DIR, change, "execution-manifest.yaml")
@@ -952,6 +1044,18 @@ def cmd_manifest(change):
             coverage_warnings.append((
                 "scenario_coverage_check_failed",
                 f"coverage scan 异常: {e}",
+            ))
+
+    # 7.6 v0.9.0: scenario env-capability 交叉校验（warning 级, 不阻塞）
+    if yaml is not None:
+        try:
+            env_issues = _check_scenario_env_consistency(change, manifest)
+            for code, msg in env_issues:
+                coverage_warnings.append((code, msg))
+        except Exception as e:
+            coverage_warnings.append((
+                "scenario_env_check_failed",
+                f"env-capability 交叉校验异常: {e}",
             ))
 
     # 8. v3.10: scenario 覆盖度 warning 打印（不阻塞）

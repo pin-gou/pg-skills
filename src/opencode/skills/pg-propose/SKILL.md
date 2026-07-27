@@ -5,7 +5,7 @@ license: MIT
 compatibility: 需要 `.pg/changes/` 目录结构和 `.pg/project.yaml` 统一配置文件。
 metadata:
   author: pg
-  version: "0.8.4"
+  version: "0.9.0"
 ---
 
 # pg-propose
@@ -18,11 +18,11 @@ metadata:
 - `execution-manifest.yaml`（按 tasks.md 结构化生成的 pipeline 编排清单）
 - `1-propose-review/on-conditions-eval.md`（机械评估记录 + scenario_tracks_decision SSOT）
 
-**v0.8.4 起**：
-- ❌ 删除 review-notes.md 自审 + pg-propose-refine 流程
-- ✅ 5 项 common decisions 固化为 `pg-gen-tasks-skeleton.py` 常量块
-- ✅ `pg-validate-proposal.py` 新增 3 条机械校验规则（V-* 映射 / scenario 引用防护 / 章节编号连续性）
-- ✅ 产物生成后直接进入 `/3-pg-build` 或 `/2b-pg-quick-build`
+**v0.9.0 起**：
+- ✅ 阶段 2f 新增"环境能力摘要"强制步骤，scenario given 必须与 `env-capability.yaml` 一致
+- ✅ `pg-gen-scenario.py` 新增 `--env-summary` 参数，写入 `_meta.env_constraint` 字段
+- ✅ `pg-validate-proposal.py` 新增 2 条 env-capability 交叉校验规则（`scenario_given_exceeds_env_capacity` / `scenario_given_unknown_host_id`）
+- ✅ `design-templates.md` 新增"环境限制与验证策略"段模板
 
 ## 文档导航
 
@@ -243,6 +243,8 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
 
 **模板 + V-* 编号规则**见 [references/design-templates.md](./references/design-templates.md)。更新 TodoWrite 第 4 项。
 
+**v0.9.0 新增**：design.md 必须包含"环境限制与验证策略"段（在"错误码与编号段"之后、"可观测性"之前），依据 `.pg/context/env-capability.yaml` 判断每个 V-* 在目标 env 是否可验证。该段是阶段 2f scenario 编写的直接输入。
+
 ### 2c. 判定变更类型 & affected_tracks & scenario track(s) 启用决策
 
 **affected_tracks 推导算法**见 [references/orchestration-model.md](./references/orchestration-model.md)「affected_tracks 推导」段。
@@ -343,18 +345,40 @@ LLM **不直接写** execution-manifest.yaml，通过 CLI 工具基于 tasks.md 
 
 **步骤**：
 
-1. 调用脚本：
+1. **生成环境能力摘要（LLM 强制步骤，不可跳过）**：
+
+   从阶段 1d.5 已加载的 `env-capability.yaml` 中，针对 `--environment` 指定的目标 env（取 `environment_map` 中 int stage 对应的 env），提取以下信息并写入 LLM 工作记忆：
+
+   - **可用 host**：`seed_data` 中 `table=host` 的所有记录（id / hostname / status / semantic_role）
+   - **真实 agent**：哪些 host 实际有 agent 进程（semantic_role 含 "agent" 或 "本机 host (含 agent)"）
+   - **可用 services**：`services` 段的 type / endpoint / semantic_role
+   - **缺失能力**：seed_data 中**没有**但本次变更可能需要的数据（如"无 VXLAN 种子"、"无远端 peer"）
+
+   输出格式（3-8 行纯文本，**用 `--env-summary` 参数传给 pg-gen-scenario.py**）：
+
+   ```
+   [ENV-SUMMARY <env-name>]
+   hosts: N seeds (列出关键 host 及状态)
+   real_agent: M (列出有 agent 的 host id)
+   <变更相关能力>: 有/无 (如 "vxlan: 本机有 vxlan.1 vni=1 但无远端 peer")
+   services: 列出可用 services
+   constraints: 一句话总结环境限制 (如 "单 host 环境，无法验证多 host overlay 拓扑")
+   ```
+
+2. 调用脚本，传入 `--env-summary`：
+
    ```bash
-   python3 .opencode/skills/pg-propose/scripts/pg-gen-scenario.py CHANGE_NAME
+   python3 .opencode/skills/pg-propose/scripts/pg-gen-scenario.py CHANGE_NAME --env-summary "[ENV-SUMMARY dev-local] hosts: 5 seeds (1 localhost w/ agent, 4 e2e) ..."
    ```
    脚本自动：
-- 读 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段（SSOT）
-    - 遍历每个 enabled=true 的 track，写 `scenario-<track-id>.yaml` skeleton（LLM 必填 Scenario 内容）
-    - 无 enabled track → no-op（不写文件）
-2. LLM 填充 scenario.yaml：将 skeleton 中的 S-example 替换为真实 Scenario
-3. （文件存在性快速检查，仅 `ls` 级别，**不调用 pg-validate-proposal.py**）：
+   - 读 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段（SSOT）
+   - 遍历每个 enabled=true 的 track，写 `scenario-<track-id>.yaml` skeleton（LLM 必填 Scenario 内容），`_meta.env_constraint` 字段写入 `--env-summary` 传入的摘要
+   - 无 enabled track → no-op（不写文件）
+
+3. LLM 填充 scenario.yaml：将 skeleton 中的 S-example 替换为真实 Scenario（**given/then 必须受 `_meta.env_constraint` 约束**）
+4. （文件存在性快速检查，仅 `ls` 级别，**不调用 pg-validate-proposal.py**）：
    - 确认所有 `scenario-<track>.yaml` 已生成
-4. 校验统一推迟到阶段 2g。
+5. 校验统一推迟到阶段 2g。
 
 ### 2g. 三产物一致性校验（**唯一**校验点）
 
@@ -563,6 +587,13 @@ scenarios:
 ---
 
 ## 文档变更记录
+
+- **v0.9.0（2026-07-27）**：scenario 环境一致性强化。
+  - 阶段 2f 新增步骤 2「生成环境能力摘要」（LLM 强制步骤）：从 env-capability.yaml 提取目标 env 的 host/services/缺失能力，输出 `[ENV-SUMMARY]` 作为 scenario given/then 的硬约束
+  - 硬约束：scenario given 必须与 `[ENV-SUMMARY]` 一致；then 中数量断言 ≤ env 实际 host 数；不可验证的 V-* 不应出现在 scenario covers 中
+  - `references/design-templates.md` 新增"环境限制与验证策略"段模板（design 阶段暴露哪些 V-* 在目标 env 不可验证）
+  - `pg-gen-scenario.py` 新增 `--env-summary` 可选参数：skeleton 中注入 `[ENV-CONSTRAINT]` YAML 注释块
+  - `pg-validate-proposal.py` 新增 `scenario_given_exceeds_env_capacity` / `scenario_given_unknown_host_id` 两条 warning 级规则（兜底拦截）
 
 - **v0.8.3（2026-07-27）**：删除 review-notes 自审 + pg-propose-refine 流程。
   - 删除阶段三 6 类自审清单 + 4a/4b 智能分流 + review-notes.md 产物

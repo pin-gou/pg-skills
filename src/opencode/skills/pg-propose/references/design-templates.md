@@ -77,6 +77,23 @@
 ### 错误码与编号段
 - 新增错误码必须落在对应模块的编号段内（参考 AGENTS.md）
 
+### 环境限制与验证策略
+
+> **必填**（v0.9.0 新增）。本段是 scenario 编写的直接输入——每个 scenario 的 given/then 都从"可验证"列派生。
+> 依据 `.pg/context/env-capability.yaml` 中目标 env 的 `seed_data` / `services` 判断。
+
+| 功能契约 (V-*) | {target_env} 可验证 | 验证方式 | 不可验证部分的处理 |
+|---------------|:---:|------|------|
+| {V-xxx-1 一句话描述} | ✅ / ❌ | scenario / 单元测试 / verify 阶段 | 生产环境验证 / CI 性能门禁 / mock 降级 |
+
+**填充规则**：
+- "可验证"列：依据 env-capability.yaml 的 seed_data 判断（如 "dev-local 只有 1 个真实 agent" → 多 host 拓扑 ❌）
+- "验证方式"列：必须是 `scenario` / `单元测试` / `verify 阶段` 三选一
+- "不可验证部分"列：**不能留空**——必须说明降级策略（生产验证 / CI 门禁 / mock）
+- 若某 V-* 在目标 env 完全不可验证且无降级策略，应考虑将该 V-* 从 design 中移除或标注为"未来迭代"
+
+**设计 rationale**：scenario 阶段（2f）会读取本段，仅对"✅ 可验证"的 V-* 编写 scenario covers。避免 scenario given 假设环境不具备的资源（如 "≥2 host CONNECTED" 但 env 只有 1 个 agent）。
+
 ### 可观测性
 - 关键日志点：{INFO/WARN/ERROR 级别、含哪些字段}
 - 关键指标：{Counter/Gauge 名}
