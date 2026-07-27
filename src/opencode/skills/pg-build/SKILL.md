@@ -87,10 +87,14 @@ $RUNNER reset <change> --resume              # 手动恢复（保留 snapshot，
   0b. $RUNNER bootstrap <change>  → 检查 response:
         • ok: false         → workflow_failed（fatal=true）。**禁止自动修复**（如 git checkout），展示 error 给用户。
         • ok: true + env_hook_plan=null → 进入 step 1
-        • ok: true + env_hook_plan ≠ null → bash 执行 plan.command，然后 env-action-result（phase 填 prepare_env/clean_env）→ 调 bootstrap 再次检查 env_hook_plan
+        • ok: true + env_hook_plan ≠ null 且 skipped=false → **严格按顺序执行以下 3 条命令（不可跳过任何一条）**：
+            CMD-1: bash "<env_hook_plan.command 的完整内容>"    ← 实际执行 hook 脚本
+            CMD-2: $RUNNER env-action-result <change> --phase prepare_env --stage <env_hook_plan.stage_name> --env <env_hook_plan.env_name> --success <CMD-1 exit code == 0 ? true : false>
+            CMD-3: $RUNNER bootstrap <change>                  ← 必须再次调 bootstrap 检查是否还有下一个 env_hook_plan
+          • ok: true + env_hook_plan ≠ null 且 skipped=true → 跳过 CMD-1，直接执行 CMD-2 + CMD-3
   1. $RUNNER next <change>       → 检查 action 字段
   2. switch(action):
-        "env_switch"        → env-action → bash exec → env-action-result → 回 next
+        "env_switch"        → env-action 获取 plan → **bash 执行 plan.command（不可跳过）** → env-action-result → 回 next
         "dispatch"          → 派遣 sub-agent（`agent` 字段指定 agent 类型），传 dispatch_file 路径（不可修改）
         "dispatch_final_gate" → 派遣 pg-build/gate agent
         "advance"           → 回步骤 1
@@ -115,6 +119,7 @@ $RUNNER reset <change> --resume              # 手动恢复（保留 snapshot，
 | 2 | 如果上一次是 `dispatch`/`retry`，sub-agent 是否已派遣？ | 先派遣，等返回 |
 | 3 | 如果 sub-agent 已返回，`expected_result_path` 是否已落盘？ | 检查文件存在性 |
 | 4 | 如果已落盘，是否已调 `record --result-json`？ | 先 record |
+| 5 | 如果 bootstrap 返回了 `env_hook_plan`（skipped=false），是否已 bash 执行 `plan.command`？ | **先执行 bash，再调 env-action-result**（禁止跳过） |
 
 **只有 4 项全部满足，才能调 `next`。**
 

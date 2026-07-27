@@ -1177,6 +1177,32 @@ def cli_env_action(change: str, phase_name: str, stage_name: str, env_name: str,
     return result
 
 
+def _verify_hook_executed(change: str, phase_name: str, log_path: str) -> str | None:
+    """验证 env hook 是否实际执行过。返回 None 表示通过，否则返回错误信息。
+
+    检查逻辑：
+      1. 如果编排器传了 --log-path 且文件存在 → 通过
+      2. 否则 glob 搜索 build dir 下 {phase_name}-*.log → 存在则通过
+      3. 都不存在 → hook 从未执行，拒绝 success=true
+    """
+    import glob as _glob
+
+    if log_path and os.path.isfile(log_path):
+        return None
+
+    build_dir = os.path.join(CHANGES_DIR, change, APPLY_DIR)
+    pattern = os.path.join(build_dir, f"{phase_name}-*.log")
+    if _glob.glob(pattern):
+        return None
+
+    return (
+        f"success=true 但未检测到 hook 执行痕迹：\n"
+        f"  log_path={log_path or '(未传)'} 不存在\n"
+        f"  glob {pattern} 无匹配\n"
+        f"请先 bash 执行 env_hook_plan.command，再调 env-action-result。"
+    )
+
+
 def cli_env_action_result(
     change: str,
     phase_name: str,
@@ -1196,6 +1222,7 @@ def cli_env_action_result(
       - 写 pipeline.snapshot.json
 
     v2.x 变更：参数 ok → success（与 CLI 入参名对齐）。
+    v2.7 新增：success=true 时验证 hook 实际执行过（log 文件存在性检查）。
     """
     from pipeline.snapshot import load_snapshot, save_snapshot
     from pipeline.state import PipelineState
@@ -1210,6 +1237,12 @@ def cli_env_action_result(
         "current_stage": "",
         "error": None,
     }
+
+    if success:
+        verify_err = _verify_hook_executed(change, phase_name, log_path)
+        if verify_err:
+            result["error"] = verify_err
+            return result
 
     change_root = os.path.join(CHANGES_DIR, change)
     event_log = EventLog(change_root=change_root)
@@ -1237,6 +1270,9 @@ def cli_env_action_result(
     if not success:
         result["ok"] = False
         result["error"] = error or f"{phase_name} failed (exit_code={exit_code})"
+        result["next_action"] = "bootstrap"
+        result["next_command"] = f"python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py bootstrap {change}"
+        result["next_hint"] = "失败后仍需调 bootstrap 让 pipeline 进入 failed 状态"
         return result
 
     state = load_snapshot(change_root) or PipelineState(change=change)
@@ -1273,4 +1309,7 @@ def cli_env_action_result(
     result["stage_prepared"] = sorted(new_prepared)
     result["stage_restarted"] = sorted(new_restarted)
     result["current_stage"] = new_current
+    result["next_action"] = "bootstrap"
+    result["next_command"] = f"python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py bootstrap {change}"
+    result["next_hint"] = "必须再次调 bootstrap 检查是否还有下一个 env_hook_plan，env_hook_plan=null 后才能调 next"
     return result

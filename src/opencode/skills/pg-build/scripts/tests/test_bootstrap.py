@@ -354,6 +354,14 @@ class TestCliBootstrap(unittest.TestCase):
         else:
             os.environ.pop("PG_PROJECT_ROOT", None)
 
+    def _create_fake_log(self, phase_name: str = "prepare_env") -> str:
+        """创建假 log 文件，供 cli_env_action_result success=true 验证通过。"""
+        build_dir = os.path.join(self.change_root, "2-build")
+        log_path = os.path.join(build_dir, f"{phase_name}-fake.log")
+        with open(log_path, "w") as f:
+            f.write("fake log\n")
+        return log_path
+
     def test_cli_bootstrap_structure(self):
         """cli_bootstrap 返回正确结构 (无项目配置时 env_hook_plan 为 None)。"""
         result = bootstrap.cli_bootstrap("test-change")
@@ -620,14 +628,36 @@ environments:
             status="running",
         )
         save_snapshot(self.change_root, state)
+        log_path = self._create_fake_log("prepare_env")
 
         result = bootstrap.cli_env_action_result(
             "test-change", "prepare_env", "dev", "dev-local",
-            success=True, log_path="/tmp/fake.log", exit_code=0,
+            success=True, log_path=log_path, exit_code=0,
         )
         self.assertTrue(result["ok"])
         self.assertIn("dev", result["stage_prepared"])
         self.assertEqual(result["current_stage"], "dev")
+
+    def test_cli_env_action_result_success_without_execution_is_rejected(self):
+        """v2.7: success=true 但 hook 未实际执行（无 log）时应拒绝。"""
+        from pipeline.snapshot import save_snapshot, load_snapshot
+        state = PipelineState(
+            change="test-change",
+            stage_order=("dev",),
+            stage_env_map={"dev": "dev-local"},
+            current_stage="",
+            stage_prepared=set(),
+        )
+        save_snapshot(self.change_root, state)
+
+        result = bootstrap.cli_env_action_result(
+            "test-change", "prepare_env", "dev", "dev-local",
+            success=True, log_path="/tmp/definitely-not-created.log", exit_code=0,
+        )
+        self.assertFalse(result["ok"])
+        self.assertIn("请先 bash 执行 env_hook_plan.command", result["error"])
+        state_after = load_snapshot(self.change_root)
+        self.assertNotIn("dev", state_after.stage_prepared)
 
     def test_cli_env_action_result_clean_env(self):
         """clean_env 成功: stage_prepared 移除 stage, current_stage 不变。"""
@@ -640,10 +670,11 @@ environments:
             stage_prepared={"dev"},
         )
         save_snapshot(self.change_root, state)
+        log_path = self._create_fake_log("clean_env")
 
         result = bootstrap.cli_env_action_result(
             "test-change", "clean_env", "dev", "dev-local",
-            success=True, log_path="/tmp/fake.log", exit_code=0,
+            success=True, log_path=log_path, exit_code=0,
         )
         self.assertTrue(result["ok"])
         self.assertNotIn("dev", result["stage_prepared"])
@@ -688,27 +719,30 @@ environments:
         save_snapshot(self.change_root, state)
 
         # 1) prepare_env dev
+        log1 = self._create_fake_log("prepare_env")
         r1 = bootstrap.cli_env_action_result(
             "test-change", "prepare_env", "dev", "dev-local",
-            success=True, log_path="/tmp/1.log", exit_code=0,
+            success=True, log_path=log1, exit_code=0,
         )
         self.assertTrue(r1["ok"])
         self.assertEqual(r1["stage_prepared"], ["dev"])
         self.assertEqual(r1["current_stage"], "dev")
 
         # 2) clean_env dev (dev 的工作完成后)
+        log2 = self._create_fake_log("clean_env")
         r2 = bootstrap.cli_env_action_result(
             "test-change", "clean_env", "dev", "dev-local",
-            success=True, log_path="/tmp/2.log", exit_code=0,
+            success=True, log_path=log2, exit_code=0,
         )
         self.assertTrue(r2["ok"])
         self.assertEqual(r2["stage_prepared"], [])
         self.assertEqual(r2["current_stage"], "dev")  # current_stage 不变
 
         # 3) prepare_env integration
+        log3 = self._create_fake_log("prepare_env")
         r3 = bootstrap.cli_env_action_result(
             "test-change", "prepare_env", "integration", "dev-3tier",
-            success=True, log_path="/tmp/3.log", exit_code=0,
+            success=True, log_path=log3, exit_code=0,
         )
         self.assertTrue(r3["ok"])
         self.assertEqual(sorted(r3["stage_prepared"]), ["integration"])
