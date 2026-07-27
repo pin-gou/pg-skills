@@ -143,7 +143,8 @@ CALLER_AD_HOC = "ad-hoc"
 KNOWN_CALLERS = (CALLER_PG_BUILD, CALLER_PG_REGRESSION, CALLER_PG_FIX_ISSUE, CALLER_PG_PROPOSE, CALLER_PG_AGENT, CALLER_AD_HOC)
 
 # v6 新增: describe_env 触发者 (生成 env-description.yaml 供下游消费)
-DESCRIBE_ENV_CALLERS = (CALLER_PG_PROPOSE, CALLER_PG_FIX_ISSUE, CALLER_PG_REGRESSION)
+# v7: caller=ad-hoc 也允许 (pg-run 手动探测, 落到 .pg/ad-hoc/<session>/)
+DESCRIBE_ENV_CALLERS = (CALLER_PG_PROPOSE, CALLER_PG_FIX_ISSUE, CALLER_PG_REGRESSION, CALLER_AD_HOC)
 
 
 def _resolve_wait_for_completion(action: str, cli_value, cfg_value=None):
@@ -272,19 +273,19 @@ def build_describe_env_spec(
     act_cfg: dict,
     project_root: Path,
     caller: str,
-    change_id: str,
 ) -> dict:
-    """Build pg-run-hook.py spec for describe_env (v6 新增).
+    """Build pg-run-hook.py spec for describe_env (v6 新增, v7 caller 扩 ad-hoc).
 
     describe_env 与 prepare_env / clean_env 同属 env-level, 但有两个差异:
-      1. 必须注入 PG_CHANGE_ID + PG_OUTPUT_PATH (脚本写入 .pg/changes/<id>/env-description.yaml)
-      2. caller 限定为 pg-propose / pg-fix-issue / pg-regression
-         (其他 caller 调用直接报错, 因为没有语义上的"描述"用途)
+      1. 必须注入 PG_CHANGE_ID + PG_OUTPUT_PATH (脚本写入 env-description.yaml)
+      2. caller 限定为 pg-propose / pg-fix-issue / pg-regression / ad-hoc
+         (其他 caller 调用直接报错)
 
-    输出路径按 caller 路由:
-      pg-propose     -> .pg/changes/<change_id>/env-description.yaml
-      pg-fix-issue   -> .pg/fix-issue/<change_id>/env-description.yaml
+    输出路径按 caller 路由 (统一用 --session 作为路径派生源, 不再单独传 --change-id):
+      pg-propose     -> .pg/changes/<session>/env-description.yaml
+      pg-fix-issue   -> .pg/fix-issue/<session>/env-description.yaml
       pg-regression  -> .pg/regression/<session>/env-description.yaml
+      ad-hoc         -> .pg/ad-hoc/<session>/env-description.yaml
 
     脚本超时默认 60s (仅探测, 不应长跑); YAML 缺 timeout_seconds 时回落到此值.
     """
@@ -295,11 +296,13 @@ def build_describe_env_spec(
     result_path = str(hook_log_dir / "env.describe_env.result.json")
 
     if caller == CALLER_PG_PROPOSE:
-        output_path = str(project_root / ".pg" / "changes" / change_id / "env-description.yaml")
+        output_path = str(project_root / ".pg" / "changes" / session / "env-description.yaml")
     elif caller == CALLER_PG_FIX_ISSUE:
-        output_path = str(project_root / ".pg" / "fix-issue" / change_id / "env-description.yaml")
+        output_path = str(project_root / ".pg" / "fix-issue" / session / "env-description.yaml")
     elif caller == CALLER_PG_REGRESSION:
         output_path = str(project_root / ".pg" / "regression" / session / "env-description.yaml")
+    elif caller == CALLER_AD_HOC:
+        output_path = str(project_root / ".pg" / "ad-hoc" / session / "env-description.yaml")
     else:
         sys.stderr.write(
             f"Error: --action describe_env requires caller in {DESCRIBE_ENV_CALLERS}, got '{caller}'\n"
@@ -321,7 +324,7 @@ def build_describe_env_spec(
         "hook_log_dir": str(hook_log_dir),
         "hook_result_path": result_path,
         "caller": caller,
-        "change_id": change_id,
+        "change_id": session,
         "output_path": output_path,
         "wait_for_completion": True,
     }
@@ -525,13 +528,6 @@ def invoke_hook_main(argv=None) -> int:
                             "DEPRECATED alias of --session. 仅作 1 个版本兼容, "
                             "SKILL / pg-run / agent 应改为 --session."
                         ))
-    parser.add_argument("--change-id", dest="change_id", default=None,
-                        help=(
-                            "change-id (v6 新增). --action describe_env 必填, "
-                            "用于生成 env-description.yaml 路径 (.pg/changes/<id>/). "
-                            "其他 action 可省略. 与 --session 含义不同: --session 是日志/"
-                            "audit 标识, --change-id 是产物路径标识."
-                        ))
     parser.add_argument("--env", required=True,
                         help="environment name (must be in project.yaml environments)")
     parser.add_argument("--stage", default="manual",
@@ -686,9 +682,9 @@ def invoke_hook_main(argv=None) -> int:
                     f"{DESCRIBE_ENV_CALLERS}, got '{args.caller}'\n"
                 )
                 return 1
-            if not args.change_id:
+            if not args.session:
                 sys.stderr.write(
-                    "Error: --action describe_env requires --change-id\n"
+                    "Error: --action describe_env requires --session\n"
                 )
                 return 1
             describe_cfg = env_cfg.get("describe_env")
@@ -711,7 +707,6 @@ def invoke_hook_main(argv=None) -> int:
                 act_cfg=describe_cfg,
                 project_root=project_root,
                 caller=args.caller,
-                change_id=args.change_id,
             )
         else:
             env_hook_cfg = env_cfg.get(args.action)

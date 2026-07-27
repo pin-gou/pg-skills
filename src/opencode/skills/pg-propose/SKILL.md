@@ -167,12 +167,12 @@ LLM 通读这些文件，提取：
 
 ```bash
 # 由 caller (pg-propose) 显式调用, 注入 PG_RUN_CALLER=pg-propose
+# v7 起: 统一用 --session 作为路径派生源, 不再传 --change-id
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
   --caller pg-propose \
   --session <change-id> \
   --env <env-name> \
-  --action describe_env \
-  --change-id <change-id>
+  --action describe_env
 ```
 
 **注入环境变量**（SSOT: `src/runtime/spec/hook-env-vars.yaml` v6）：

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# pg-skills template: environment describe_env action (v6).
+# pg-skills template: environment describe_env action (v7).
 #
 # 用法:
 #   1. 把本文件复制到 .pg/hooks/describe-env.sh
@@ -14,13 +14,13 @@
 #   environments.<env>.describe_env.script
 #
 # 由 pg-invoke-hook.py --action describe_env 调起 (PG_HOOK_TYPE=describe_env),
-# 调用方限定: pg-propose / pg-fix-issue / pg-regression.
+# 调用方限定 (v7): pg-propose / pg-fix-issue / pg-regression / ad-hoc.
 #
-# 注入 env vars (SSOT: src/runtime/spec/hook-env-vars.yaml v6):
+# 注入 env vars (SSOT: src/runtime/spec/hook-env-vars.yaml v6+):
 #   - PG_RUN_CALLER     调用方身份
 #   - PG_PROJECT_ROOT   项目根
 #   - PG_SESSION_ID     session-id (per-SKILL 路由标识)
-#   - PG_CHANGE_ID      change-id (本 change 标识)
+#   - PG_CHANGE_ID      change-id (v7 起与 --session 等价; hook 仅消费作日志标识)
 #   - PG_ENV_NAME       目标 environment 名
 #   - PG_OUTPUT_PATH    env-description.yaml 输出绝对路径 (必须写入)
 #   - PG_HOOK_LOG_DIR   日志目录
@@ -43,7 +43,7 @@ set -uo pipefail  # 注意: 不加 -e, 由 hook-helpers.sh trap ERR 控制
 : "${PG_RUN_CALLER:?describe_env requires PG_RUN_CALLER}"
 : "${PG_PROJECT_ROOT:?describe_env requires PG_PROJECT_ROOT}"
 : "${PG_CHANGE_ID:?describe_env requires PG_CHANGE_ID}"
-: "${PG_ENV_NAME:?describe_env requires PG_ENV_NAME}"
+: "${PG_ENV:?describe_env requires PG_ENV}"
 : "${PG_OUTPUT_PATH:?describe_env requires PG_OUTPUT_PATH}"
 
 SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"

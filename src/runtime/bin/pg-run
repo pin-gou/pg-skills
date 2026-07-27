@@ -271,6 +271,7 @@ def _action_label(action_name: str) -> str:
         "logs": "查看日志",
         "tail": "tail 日志",
         "prepare_env": "准备环境",
+        "describe_env": "探测环境",
         "clean_env": "清理环境",
         "build": "构建",
         "lint": "静态检查",
@@ -624,10 +625,14 @@ def _build_quick_items() -> list:
 def _build_env_items(env_name: str, config: dict) -> list:
     cfg = config.get("environments", {}).get(env_name, {})
     items = []
-    for a in ("prepare_env", "clean_env"):
+    desc_map = {
+        "prepare_env": "准备环境",
+        "describe_env": "探测环境 (只读, 写入 env-description.yaml)",
+        "clean_env": "清理环境",
+    }
+    for a in ("prepare_env", "describe_env", "clean_env"):
         if a in cfg:
-            desc = {"prepare_env": "准备环境", "clean_env": "清理环境"}.get(a, a)
-            items.append((a, desc))
+            items.append((a, desc_map[a]))
     return items
 
 
@@ -777,7 +782,7 @@ def _exec_quick_action(idx: int, env_name: str, config: dict, project_root: Path
 
 def _exec_env_action(idx: int, env_name: str, config: dict, project_root: Path):
     cfg = config.get("environments", {}).get(env_name, {})
-    env_actions = [a for a in ("prepare_env", "clean_env") if a in cfg]
+    env_actions = [a for a in ("prepare_env", "describe_env", "clean_env") if a in cfg]
     if idx >= len(env_actions):
         return
     action_name = env_actions[idx]
@@ -791,12 +796,21 @@ def _exec_env_action(idx: int, env_name: str, config: dict, project_root: Path):
     print(_c("1;33", f"  {a_label}: {label}"))
     print(_c("1;36", "=" * 60))
 
+    extra_args = ""
+    if action_name == "describe_env":
+        session_id = "manual"
+        extra_args = (
+            f" --session {shlex.quote(session_id)}"
+            f" --caller ad-hoc"
+        )
+        print(f"  session: {session_id} (写入 .pg/ad-hoc/{session_id}/env-description.yaml)")
+
     start = time.time()
     if hook.is_file():
         cmd = (
             f"python3 {shlex.quote(str(hook))} invoke-hook"
             f" --env {shlex.quote(env_name)}"
-            f" --action {shlex.quote(action_name)} --session manual"
+            f" --action {shlex.quote(action_name)}{extra_args}"
         )
         rc = run_shell(
             cmd, cwd=project_root, timeout=action_cfg.get("timeout_seconds", 300)
@@ -1121,7 +1135,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     parser.add_argument("--instance", help="instance 名称")
     parser.add_argument(
         "--action",
-        help="action 名称（build/lint/test.*/start/stop/health_check/logs/tail/prepare_env/clean_env/start_all_instances/stop_all_instances/prepare_env_and_start）",
+        help="action 名称（build/lint/test.*/start/stop/health_check/logs/tail/prepare_env/describe_env/clean_env/start_all_instances/stop_all_instances/prepare_env_and_start）",
     )
     parser.add_argument("--cmd", help="直接执行的 shell 命令（跳过菜单）")
     return parser.parse_args(argv)
@@ -1169,13 +1183,20 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
         }
         return run_shell(cmd, cwd=project_root, timeout=timeout, extra_env=env)
 
-    if args.env and args.action in ("prepare_env", "clean_env"):
+    if args.env and args.action in ("prepare_env", "describe_env", "clean_env"):
         hook = find_invoke_hook(project_root)
+        extra_args = ""
+        if args.action == "describe_env":
+            session_id = "manual"
+            extra_args = (
+                f" --session {shlex.quote(session_id)}"
+                f" --caller ad-hoc"
+            )
         cmd = (
             f"python3 {shlex.quote(str(hook))} invoke-hook"
             f" --env {shlex.quote(args.env)}"
             f" --action {shlex.quote(args.action)}"
-            f" --session manual"
+            f"{extra_args}"
         )
         return run_shell(cmd, cwd=project_root)
 
@@ -1257,6 +1278,7 @@ def main():
             and args.action
             in (
                 "prepare_env",
+                "describe_env",
                 "clean_env",
                 "start_all_instances",
                 "stop_all_instances",

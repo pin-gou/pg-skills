@@ -29,8 +29,8 @@
       "properties": {
         "caller": {
           "type": "string",
-          "enum": ["pg-propose", "pg-fix-issue", "pg-regression"],
-          "description": "调用方标识"
+          "enum": ["pg-propose", "pg-fix-issue", "pg-regression", "ad-hoc"],
+          "description": "调用方标识 (v7+ 加 ad-hoc: pg-run 手动探测场景)"
         },
         "change": {
           "type": "string",

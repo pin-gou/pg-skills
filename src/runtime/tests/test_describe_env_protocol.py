@@ -180,7 +180,8 @@ class TestInvokeHookDescribeEnv(unittest.TestCase):
         m = re.search(r"DESCRIBE_ENV_CALLERS\s*=\s*\((.*?)\)", text, re.DOTALL)
         self.assertIsNotNone(m, "找不到 DESCRIBE_ENV_CALLERS 定义")
         block = m.group(1)
-        for caller in ("CALLER_PG_PROPOSE", "CALLER_PG_FIX_ISSUE", "CALLER_PG_REGRESSION"):
+        for caller in ("CALLER_PG_PROPOSE", "CALLER_PG_FIX_ISSUE",
+                       "CALLER_PG_REGRESSION", "CALLER_AD_HOC"):
             self.assertIn(caller, block, f"DESCRIBE_ENV_CALLERS 缺 {caller}")
 
     def test_build_describe_env_spec_function_exists(self):
@@ -188,27 +189,48 @@ class TestInvokeHookDescribeEnv(unittest.TestCase):
         self.assertIn("def build_describe_env_spec", text,
                       "缺少 build_describe_env_spec 实现")
 
+    def test_build_describe_env_spec_no_change_id_param(self):
+        """v7: build_describe_env_spec 不再有 change_id 参数, 仅 session."""
+        text = INVOKE_HOOK_PY.read_text(encoding="utf-8")
+        m = re.search(r"def build_describe_env_spec\((.*?)\)", text, re.DOTALL)
+        self.assertIsNotNone(m, "找不到 build_describe_env_spec 签名")
+        sig = m.group(1)
+        self.assertNotIn("change_id", sig,
+                         "build_describe_env_spec 签名仍包含 change_id 参数 (v7 应移除)")
+
     def test_pg_propose_caller_in_known_callers(self):
         text = INVOKE_HOOK_PY.read_text(encoding="utf-8")
         m = re.search(r"KNOWN_CALLERS\s*=\s*\((.*?)\)", text, re.DOTALL)
         self.assertIsNotNone(m, "找不到 KNOWN_CALLERS 定义")
         self.assertIn("CALLER_PG_PROPOSE", m.group(1), "KNOWN_CALLERS 缺 CALLER_PG_PROPOSE")
 
-    def test_change_id_flag_added(self):
+    def test_ad_hoc_caller_in_known_callers(self):
+        """v7: ad-hoc 进入 DESCRIBE_ENV_CALLERS 白名单."""
         text = INVOKE_HOOK_PY.read_text(encoding="utf-8")
-        self.assertIn('"--change-id"', text, "缺少 --change-id CLI 参数")
+        m = re.search(r"DESCRIBE_ENV_CALLERS\s*=\s*\((.*?)\)", text, re.DOTALL)
+        self.assertIsNotNone(m, "找不到 DESCRIBE_ENV_CALLERS 定义")
+        self.assertIn("CALLER_AD_HOC", m.group(1),
+                      "DESCRIBE_ENV_CALLERS 未包含 CALLER_AD_HOC")
 
-    def test_change_id_required_for_describe_env(self):
+    def test_change_id_flag_removed(self):
+        """v7: --change-id CLI flag 已硬删除 (Q2 决策)."""
         text = INVOKE_HOOK_PY.read_text(encoding="utf-8")
-        # 在 describe_env 分支内检查
+        self.assertNotIn('--change-id"', text,
+                         "--change-id CLI flag 不应再存在 (v7 已硬删除)")
+
+    def test_session_required_for_describe_env(self):
+        """v7: describe_env 必填改为 --session (替代 --change-id)."""
+        text = INVOKE_HOOK_PY.read_text(encoding="utf-8")
         m = re.search(
             r'elif args\.action == "describe_env":(.*?)\n        else:',
             text, re.DOTALL
         )
         self.assertIsNotNone(m, "找不到 describe_env 分支")
         block = m.group(1)
-        self.assertIn("args.change_id", block,
-                      "describe_env 分支未校验 args.change_id 必填")
+        self.assertIn("args.session", block,
+                      "describe_env 分支未校验 args.session 必填")
+        self.assertNotIn("args.change_id", block,
+                         "describe_env 分支不应再校验 args.change_id")
 
 
 class TestRunHookEnvMap(unittest.TestCase):
