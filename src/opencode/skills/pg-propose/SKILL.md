@@ -1,11 +1,11 @@
 ---
 name: pg-propose
-description: 生成一个变更提案，一次性产出所有产物（proposal、design、tasks、review-notes）。用户描述需求后，自动生成完整的提案文档与评审文档，供 pg-build 实现。
+description: 生成一个变更提案，一次性产出所有产物（proposal、design、tasks、manifest、scenario）。v0.8.4 起 review-notes 自审 + refine 流程已删除，由 pg-validate-proposal.py 机械校验替代。
 license: MIT
 compatibility: 需要 `.pg/changes/` 目录结构和 `.pg/project.yaml` 统一配置文件。
 metadata:
   author: pg
-  version: "3.7"
+  version: "0.8.4"
 ---
 
 # pg-propose
@@ -16,9 +16,13 @@ metadata:
 - `design.md`（怎么做、验证标准）
 - `tasks.md`（按 stages × tracks 划分的实现步骤 + 验证描述）
 - `execution-manifest.yaml`（按 tasks.md 结构化生成的 pipeline 编排清单）
-- `1-propose-review/review-notes.md`（单文档评审）
+- `1-propose-review/on-conditions-eval.md`（机械评估记录 + scenario_tracks_decision SSOT）
 
-产物就绪后，可执行 `/2.1-pg-propose-refine` 进一步评审。
+**v0.8.4 起**：
+- ❌ 删除 review-notes.md 自审 + pg-propose-refine 流程
+- ✅ 5 项 common decisions 固化为 `pg-gen-tasks-skeleton.py` 常量块
+- ✅ `pg-validate-proposal.py` 新增 3 条机械校验规则（V-* 映射 / scenario 引用防护 / 章节编号连续性）
+- ✅ 产物生成后直接进入 `/3-pg-build` 或 `/2b-pg-quick-build`
 
 ## 文档导航
 
@@ -30,8 +34,6 @@ metadata:
 | tasks.md 模板 / 章节生成算法 / 各子章节模板 | [references/tasks-templates.md](./references/tasks-templates.md) |
 | on_conditions / stages × tracks × modules 三层编排模型 | [references/orchestration-model.md](./references/orchestration-model.md) |
 | `.pg/project.yaml` 字段索引 | [references/config-fields.md](./references/config-fields.md) |
-| review-notes.md 格式 / 决策符号 | [references/review-notes-format.md](./references/review-notes-format.md) |
-| 6 类自审清单（3.5.1-3.5.7） | [references/review-checklist.md](./references/review-checklist.md) |
 | scenario 格式 + placeholder 校验协议 | [references/scenario-format.md](./references/scenario-format.md) |
 
 > **本文件职责**：只承载「流程编排 + 阶段契约 + 黑/白名单」。所有模板字符串、字段定义、规则清单一律下放到 references/ 单一 SSOT。
@@ -64,10 +66,7 @@ metadata:
 7.  [待开始] LLM 填充 tasks.md body
 8.  [待开始] 调用 pg-gen-manifest.py 生成 execution-manifest.yaml
 9.  [待开始] （条件）调用 pg-gen-scenario.py 生成 scenario.yaml
-10. [待开始] 调用 pg-validate-proposal.py 三产物一致性校验（含 v3.7 placeholder 校验）
-11. [待开始] 自审 6 类问题，写入 review-notes.md
-12. [待开始] 决策复核 manifest（基于 on-conditions-eval.md 的 scenario_tracks_decision 段）
-13. [待开始] 调用 pg-auto-refine-check.py 检测是否自动应用；最终确认产物
+10. [待开始] 调用 pg-validate-proposal.py 三产物一致性校验（含 v0.8.3 三条新规则 + placeholder 校验）
 ```
 
 ### 1b. 确认变更名称
@@ -382,72 +381,48 @@ python3 .opencode/skills/pg-propose/scripts/pg-validate-proposal.py manifest CHA
 - `scenario_yaml_missing` → 跑 pg-gen-scenario.py 生成（scenario track 启用时）
 - `scenario_yaml_should_not_exist` → 删除 scenario-<track>.yaml（scenario track 禁用时）
 - `scenario_yaml_orphan` → 删除 scenario-<track>.yaml 或重新跑 2d-2f
-- `scenario_placeholder_unfilled` → LLM 必填段未替换（v3.7 新增）
+- `scenario_placeholder_unfilled` → LLM 必填段未替换
 - 修正后回到对应产物生成步
-- 第 3 轮仍失败 → 将残留问题记录到 review-notes.md 的「阻塞」段
+- 第 3 轮仍失败 → workflow_failed，提示用户重跑 pg-propose 重新生成产物
 
 ---
 
-## 阶段三：自审（内联自 pg-propose-refine）
+## 阶段三：机械校验（v0.8.3 替代自审）
 
-**本阶段不修改 proposal/design/tasks 本身**，只读产物 + 所有 AGENTS.md，对以下 6 类问题做系统化检查，把发现写入 `.pg/changes/<change-name>/1-propose-review/review-notes.md`（新文件）。
+**v0.8.4 起**：`pg-validate-proposal.py` 已集成 3 条新规则，替代原 6 类 LLM 自审 + review-notes 决策表。`review-notes.md` 不再生成。
 
-更新 TodoWrite 第 11 项。
+**校验规则**（详见 `pg-validate-proposal.py` `_validate_v0_8_3_rules` 段）：
 
-**6 类自审清单**（详见 [references/review-checklist.md](./references/review-checklist.md)）：
+| 规则 | 触发条件 | 等级 |
+|------|---------|------|
+| `v_identifier_uncovered` | design.md V-{track}-N 未被 tasks.md verify 章节引用 | WARN |
+| `scenario_yaml_referenced` | tasks.md body 引用 scenario-*.yaml 路径 | WARN |
+| `tasks_md_section_duplicate` / `tasks_md_section_skipped` | 章节编号重号 / 跳号 | WARN |
 
-| 编号 | 检查类别 |
-|------|---------|
-| 3.5.1 | 范围一致性（proposal "包含/不包含" vs tasks 实际工作） |
-| 3.5.2 | API 完整性（请求体/响应/状态码/权限/边界） |
-| 3.5.3 | 设计缺陷（数据模型/异常处理/安全/性能/幂等） |
-| 3.5.4 | 任务歧义（动作/上下文/验收/依赖/文件路径） |
-| 3.5.5 | 验证流程（覆盖率/可测试性/负面场景/跨 stage 依赖） |
-| 3.5.6 | 测试案例影响（受影响测试/新增测试/测试数据/测试隔离） |
+WARN 不阻塞 build，但会显著提示 LLM 在阶段 2g 后重点审视。
 
-**on_conditions 评估复核**（3.5.7）：见 [references/orchestration-model.md](./references/orchestration-model.md)「on_conditions & 机械评估」段。
+**5 项 common decisions 固化**（替代 review-notes.md 决策表）：
 
-**manifest 决策复核**（v3 新增，3.5.8）：见本节末尾"manifest 决策复核"段。
-pg-gen-manifest.py 已在 manifest.tracks[].enabled / reason / on_conditions_eval
-字段中写入机械评估结果；阶段三 LLM 复核时把决策表同步到 review-notes.md。
+| 字段 | 默认值 | 含义 |
+|------|-------|------|
+| `error_response_strategy` | A | ApiResponse 全局统一格式 |
+| `auth_scope` | project | /tenants/{t}/projects/{p}/ scope |
+| `data_migration_strategy` | C | 默认无 schema 变更 |
+| `transaction_boundary` | A | 默认单 service @Transactional |
+| `frontend_interaction_style` | A | 默认 el-dialog 弹窗 |
 
-**review-notes.md 格式 + 决策符号 + 5 项通用决策默认值**：见 [references/review-notes-format.md](./references/review-notes-format.md)。
+修改路径：直接改 `pg-gen-tasks-skeleton.py` 顶部 `COMMON_DECISIONS` 常量块，重跑 `pg-gen-tasks-skeleton.py` 生效。
 
-review-notes.md 必含段：
+**阶段三行为契约**：
 
-- 5 项通用决策表（error_response_strategy / auth_scope / data_migration_strategy / transaction_boundary / frontend_interaction_style）
-- on_conditions 评估记录段（从 `on-conditions-eval.md` 合并；含 `scenario_tracks_decision` 段）
-- **manifest 决策复核段**（v3 新增，从 `execution-manifest.yaml` 的 tracks[].enabled / reason / on_conditions_eval 同步）
-- 6 类自审发现的问题清单（按 阻塞 / 重要 / 建议 三档）
-- 一致性检查结果（✅/⚠️/❌）
-- 评审说明段（编辑指引）
-
-### manifest 决策复核（v3 新增）
-
-`pg-gen-manifest.py` 在生成 `execution-manifest.yaml` 时，已为每个 track 填入：
-
-- `enabled: bool` — 是否启用（pg-build 派发唯一依据）
-- `reason: str` — 决策理由（on_conditions 命中项 + LLM 决策依据）
-- `on_conditions_eval: {matched_rules, unmatched_rules, path_hit_count, semantic_hit_count}` — 机械评估结果
-- `target_module: str`（e2e track 必填）— 限定修复模块
-- `scenario_yaml: str`（scenario track 必填）— 指向 `scenario-<track-id>.yaml`
-
-阶段三 LLM 复核时，需要把以下表格同步写入 review-notes.md：
-
-| track | 机械评估 | manifest.enabled | 理由 | 一致 | 最终 |
-|-------|---------|-----------------|------|------|------|
-| backend-e2e | on_conditions 全部未命中 | false | LLM 未列入 affected_tracks | ✅ | [ ] |
-| frontend-e2e | on_conditions 命中 2 条 | true | 命中 + LLM 决策启用 | ✅ | [ ] |
-| agent-e2e | on_conditions 命中 1 条 | true | 命中 + LLM 决策启用 | ✅ | [ ] |
-| scenario-<track> | （来自 `scenario_tracks_decision` SSOT） | true / false | LLM 阶段二 2c 决策 + 依据 | ✅ | [ ] |
-
-**复核动作**：
-
-1. 对每行"最终"勾选 `[x]`（同意 manifest 决策）或 `[~]` + 写依据（覆盖）
-2. 不一致项（如 on_conditions 未命中但 enabled=true）必须在 review-notes.md 标注"建议禁用"或"建议人工介入"
-3. e2e track 必须确认 target_module 填写正确
-4. **scenario track 行的 manifest.enabled 必须与 `on-conditions-eval.md` 的 `scenario_tracks_decision` 对应 track 的 enabled 完全一致**（SSOT）
-5. manifest 缺 enabled 字段的旧 change 走 pg-propose-refine 重新生成
+- **禁止**使用 `question` tool 中断流程
+- **禁止**自动修改 proposal/design/tasks 主体内容
+- **禁止**手工修改 `execution-manifest.yaml` 的 `enabled` / `reason` / `on_conditions_eval` 字段
+  - 如需变更，**必须重跑** `pg-gen-tasks-skeleton.py` + `pg-gen-manifest.py` + `pg-gen-scenario.py`，让 SSOT 自动同步
+- **禁止**在 scenario track 启用时手工编辑 `tasks.md` 删除 scenario 章节
+   - 必须改 `--scenario-decisions "track=false"` 重跑 2d
+- **唯一允许的产物修改**：纯格式问题（markdown 标题层级错乱、代码块语言标记缺失、明显笔误）
+- 校验完成后更新 TodoWrite 第 10 项为完成
 
 ### scenario track 一致性约束
 
@@ -460,50 +435,11 @@ scenario track 是常驻 track，但 LLM 仍可在阶段二 2c 决策为某个 t
 
 违反时 `pg-validate-proposal.py` 会报 `scenario_yaml_missing` / `scenario_yaml_should_not_exist` / `scenario_yaml_orphan` 错误，必须修复。
 
-### 阶段三行为契约
-
-- **禁止**使用 `question` tool 中断流程
-- **禁止**自动修改 proposal/design/tasks 主体内容
-- **禁止**手工修改 `execution-manifest.yaml` 的 `enabled` / `reason` / `on_conditions_eval` 字段
-  - 如需变更，**必须重跑** `pg-gen-tasks-skeleton.py` + `pg-gen-manifest.py` + `pg-gen-scenario.yaml`，让 SSOT 自动同步
-- **禁止**在 scenario track 启用时手工编辑 `tasks.md` 删除 scenario 章节
-   - 必须改 `--scenario-decisions "track=false"` 重跑 2d
-- **唯一允许的产物修改**：纯格式问题（markdown 标题层级错乱、代码块语言标记缺失、明显笔误），且修改后必须在 review-notes.md 中留痕记录"格式修正: X→Y"
-- 自审完成后更新 TodoWrite 第 11 项为完成
-
 ---
 
 ## 阶段四：最终确认
 
-更新 TodoWrite 第 13 项。
-
-产物生成完成且单文档评审（review-notes.md）已写入后，更新 TodoWrite 全部标记为完成。直接向用户展示产物摘要。
-
-### 4a. (v3.7) 智能分流：自动应用 vs 提示 refine
-
-阶段三自审后，本阶段会先调用**自动应用检测器**：
-
-```bash
-python3 .opencode/skills/pg-propose/scripts/pg-auto-refine-check.py <change>
-```
-
-**全推荐条件（必须 ALL 满足）**：
-
-1. **5 项 common_decisions**：`当前 == 推荐`（没有 `✅` 标记、未手工修改）
-2. **issue_decisions 状态**：所有 `[ ]` 仍处于待定，**无任何 `[~]`**（用户已表达 SKIP 意图）
-3. **用户未编辑过**：review-notes.md 中无 `[x]`（已修复）/ `[~]`（SKIP）/ `✅`（已应用）/ `已应用时间` 标记
-
-**任一不满足** → 走 4b 传统路径，要求用户手动编辑 review-notes.md 后调用 `/2.1-pg-propose-refine`。
-
-**全部满足** → 走 4a 自动应用路径，LLM 在本阶段直接执行 `pg-propose-refine` 的"全推荐场景"分支（机械应用 5 项 common_decisions + 冻结），无需用户输入。"issue_decisions"此时无任何用户意图表达，按各自严重度的默认值（阻塞=FIX，重要=FIX，建议=SKIP）写入"决策应用记录"段。
-
-### 4b. 人工 refine 路径
-
-仅在 4a 检测条件不满足时进入。
-
-更新 TodoWrite 第 13 项。
-
-产物生成完成且单文档评审（review-notes.md）已写入后，更新 TodoWrite 全部标记为完成。直接向用户展示产物摘要：
+更新 TodoWrite 全部标记为完成。直接向用户展示产物摘要：
 
 - 变更名称、产物位置、已创建文件（5+ 个产物）：
   - `.pg/changes/<change>/proposal.md`（必填）
@@ -512,27 +448,19 @@ python3 .opencode/skills/pg-propose/scripts/pg-auto-refine-check.py <change>
   - `.pg/changes/<change>/execution-manifest.yaml`（必填）
   - `.pg/changes/<change>/scenario-<track>.yaml`（**每个启用**的 scenario track 一个）
   - `.pg/changes/<change>/1-propose-review/on-conditions-eval.md`（必填）
-  - `.pg/changes/<change>/1-propose-review/review-notes.md`（必填）
 - 报告 `scenario_tracks_decision` 状态（从 on-conditions-eval.md 读取）：
   - 每个 scenario track 的 `enabled` 状态：`{track_id}: {enabled/disabled}`
   - enabled track → tasks.md / manifest / scenario-<track>.yaml 三产物均含对应章节
   - disabled track → 上述三产物均不含该 track（避免冗余）
-- review-notes.md 内容摘要：
-  - 通用决策：`5 项已预填推荐值`
-  - 问题清单：`阻塞 X / 重要 Y / 建议 Z`（每条以 checkbox `[ ]` 起始）
-- **检测器输出**（来自 `pg-auto-refine-check.py`）：
-  - 若 `should_auto_apply=true` → 提示"已自动应用 5 项决策，可直接进入 build"
-  - 若 `should_auto_apply=false` → 展示 `reason` 字段，告诉用户哪条不满足
+- 机械校验结果：
+  - `pg-validate-proposal.py manifest <change>` 返回 `OK: all manifest checks passed`（含 v0.8.3 三条规则）
+  - 任何 WARN 项应记录到 LLM context 但不阻塞
 
 告知用户：
 
-- 如希望调整决策项，直接编辑 `.pg/changes/<change-name>/1-propose-review/review-notes.md`：
-  - 通用决策：修改表格的"当前"列
-  - 问题清单：把 `[ ]` 改为 `[x]`（已修复）或 `[~]` + 加 `> SKIP：理由`（豁免）
-  - **scenario track(s) 决策**：修改 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段（不建议，需重跑三个生成脚本）
-- 编辑后调用 `/2.1-pg-propose-refine {change-name}` 应用决策
+- 5 项 common decisions 已通过 `pg-gen-tasks-skeleton.py` 常量块固化（不再提供用户改动的接口）
+- 如需调整 track 启用决策，修改 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段（不建议，需重跑三个生成脚本）
 - 下一步可执行 `/3-pg-build {change-name}` 开始实现
-- 如希望修复 review-notes.md 中的"阻塞/重要"问题后再 build，回复"修复 review-notes 中的问题"，由本会话继续处理
 
 ---
 
@@ -555,7 +483,6 @@ python3 .opencode/skills/pg-propose/scripts/pg-auto-refine-check.py <change>
 | `tasks.md` | `.pg/changes/<change>/tasks.md` | 阶段 2d（pg-gen-tasks-skeleton.py 生成，含 scenario 章节当且仅当至少一个 scenario track 启用） | ✅ 必填 |
 | `execution-manifest.yaml` | `.pg/changes/<change>/execution-manifest.yaml` | 阶段 2e（pg-gen-manifest.py 生成，含 scenario track 当且仅当对应 track 启用） | ✅ 必填 |
 | `on-conditions-eval.md` | `.pg/changes/<change>/1-propose-review/on-conditions-eval.md` | 阶段 2d（pg-gen-tasks-skeleton.py 生成，含 `scenario_tracks_decision` SSOT 段） | ✅ 必填 |
-| `review-notes.md` | `.pg/changes/<change>/1-propose-review/review-notes.md` | 阶段 3（LLM 自审） | ✅ 必填 |
 | `scenario-<track>.yaml` | `.pg/changes/<change>/scenario-<track>.yaml` | 阶段 2f（pg-gen-scenario.py 生成，**每个启用**的 scenario track 一个文件） | ⚠️ 条件必填 |
 
 ### 三产物一致性约束（v3.6）
@@ -569,7 +496,7 @@ python3 .opencode/skills/pg-propose/scripts/pg-auto-refine-check.py <change>
 ### scenario.yaml 生成指引（v3.6+，仅当 scenario track 启用）
 
 **SSOT**：scenario-<track>.yaml 是 scenario-execute agent 的唯一输入，**禁止** scenario-execute agent 重写或修改。
-修改走 `pg-propose-refine` 流程回到 propose 阶段。
+修改需重跑 `pg-gen-scenario.py` 重新生成 skeleton。
 
 **生成路径**：阶段 2f 调用 `pg-gen-scenario.py` 自动写盘 `.pg/changes/<change>/scenario-<track>.yaml` skeleton（LLM 必填 Scenario 内容）。每个启用的 scenario track 生成一个独立文件。
 
@@ -614,7 +541,7 @@ scenarios:
    - **cross-module**：跨模块联调（backend + frontend + agent 联合）
    - **ui-smoke**：浏览器冒烟（type=browser，验证 DOM/Network/console）
 6. **类型维度**：当 design.md 包含 frontend track 的 V-* 时，scenario 集合须同时含 ≥1 个 `type=api` 与 ≥1 个 `type=browser` 的 Scenario；纯 backend 改动不强制
-7. **`covers` 追溯字段**：每个 Scenario 推荐含 `covers: [V-xxx-N, ...]` 列表，引用 design.md 中至少 1 条 V-* 验证项；`covers` 字段缺失或空数组 → review-notes 警告（不阻塞）
+7. **`covers` 追溯字段**：每个 Scenario 推荐含 `covers: [V-xxx-N, ...]` 列表，引用 design.md 中至少 1 条 V-* 验证项；`covers` 字段缺失或空数组 → `pg-validate-proposal.py` 警告（不阻塞）
 8. **生成时优先级**：先写 happy → 再补 negative → 再补 permission / cross-module → 最后补 ui-smoke；`critical: true` 限 1-3 个（happy + 1 个 negative）
 
 **严禁生成**以下文件（v1 遗留物，pg-build 不再读取）：
@@ -636,6 +563,16 @@ scenarios:
 ---
 
 ## 文档变更记录
+
+- **v0.8.3（2026-07-27）**：删除 review-notes 自审 + pg-propose-refine 流程。
+  - 删除阶段三 6 类自审清单 + 4a/4b 智能分流 + review-notes.md 产物
+  - 删除 `pg-propose-refine/` SKILL 目录、命令文件、`.opencode/` 软链接
+  - 5 项 common decisions 固化为 `pg-gen-tasks-skeleton.py` 常量块
+  - `pg-validate-proposal.py` 新增 3 条机械校验规则（V-* 映射 / scenario 引用防护 / 章节编号连续性）
+  - `pg-gen-tasks-skeleton.py` 新增 `COMMON_DECISIONS` 常量块
+  - 同步清理 `pg-build/SKILL.md`、`fix-review.yaml`、`scenario-fix.yaml`、`scenario-execute.yaml`、`reducer.py`、`bootstrap.py` 中对 `pg-propose-refine` 的硬编码提示文案（指向 `/2-pg-propose`）
+  - 同步清理 `pg-quick-build/SKILL.md` 中"无 review-notes"说明
+  - 旧 `.pg/changes/archive/*/review-notes.md` 不删，作为历史决策记录保留
 
 - **v3.8（2026-07-26）**：删除 `.pg/context/summary.yaml` 中间缓存 + 扩展 `find AGENTS.md` 排除目录。
   - 删除 `summary.yaml` 缓存层：1d 阶段改为直接通读所有 AGENTS.md 提取 context，不再生成 / 读取 `.pg/context/summary.yaml`。联动删除 `scripts/check-review-cache.sh`、`src/runtime/bin/pg` 中 summary.yaml 检查项（doctor 编号重排 1-7）。`references/review-notes-format.md` / `references/design-templates.md` / `references/config-fields.md` 中"summary.yaml"字面替换为"AGENTS.md"。`docs/index.html` 描述同步更新。

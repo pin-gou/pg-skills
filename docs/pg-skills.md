@@ -320,11 +320,9 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 
 ```
 /1-pg-define   →  探索 / 设计 / 定界（要做什么、约束是什么）
-        ↓
+         ↓
 /2-pg-propose  →  产出 proposal.md（变更设计 + tasks.md 任务拆分）
-        ↓
-/2.1-pg-propose-refine  →  按评审意见迭代
-        ↓
+         ↓
 /3-pg-build    →  按 tasks.md 一步步执行构建（每步都有 hook 审计）
         ↓
 pg-verify-and-merge  →  验证 + 合并

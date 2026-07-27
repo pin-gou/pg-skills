@@ -895,7 +895,7 @@ def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
                 if "enabled" not in track:
                     print(
                         f"[bootstrap] WARN: track {tid!r} in stage {name!r} "
-                        f"manifest 缺 enabled 字段，默认禁用（建议重跑 pg-propose-refine）",
+                        f"manifest 缺 enabled 字段，默认禁用（建议重跑 /2-pg-propose）",
                         file=sys.stderr,
                     )
                     continue

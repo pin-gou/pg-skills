@@ -23,7 +23,7 @@ prompt: |
       - `design_md_fault: true`
       - `design_md_fault_location: "<file>:<line>"`（精确指向错误位置）
       - `summary` 描述根因
-    - reducer 会立即终止 workflow，由人工运行 pg-propose-refine 修正 design.md
+    - reducer 会立即终止 workflow，由人工重跑 `/2-pg-propose` 修正 design.md
 
   - 若根因在代码层 → 正常走以下修复流程
 

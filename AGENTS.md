@@ -60,9 +60,9 @@ pg-skills 仓库（独立远程）               您的项目仓库
 
 ```
 /1-pg-define → /2-pg-propose → /3-pg-build → pg-verify-and-merge
-                            ↕
-                    /2.1-pg-propose-refine
 ```
+
+> **v0.8.4 起**：`/2.1-pg-propose-refine` 已删除。5 项 common decisions 固化为 `pg-gen-tasks-skeleton.py` 常量块；产物生成后直接进入 `/3-pg-build`。
 
 快捷流：`/2b-pg-quick-build` → `pg-verify-and-merge`
 回归流：`/4-pg-regression`
@@ -82,24 +82,22 @@ pg-skills/
 │
 ├── src/
 │   ├── opencode/                 # Skill & Agent 层（opencode 集成）
-│   │   ├── commands/             # 8 个 slash command 定义
+│   │   ├── commands/             # 7 个 slash command 定义
 │   │   │   ├── pg-1-define.md          # 探索/设计/定界
 │   │   │   ├── pg-2-propose.md          # 提出变更
-│   │   │   ├── pg-2.1-propose-refine.md # 按评审意见精炼
 │   │   │   ├── pg-2b-quick-build.md     # 跳过 proposal 直接实施
 │   │   │   ├── pg-3-build.md            # 执行 tasks.md 构建代码
 │   │   │   ├── pg-4-regression.md       # 回归测试
 │   │   │   ├── pg-5-fix-issue.md        # 修复问题
 │   │   │   └── pg-6-archive.md          # 手动归档
 │   │   │
-│   │   ├── skills/               # 11 个 SKILL.md 定义
+│   │   ├── skills/               # 10 个 SKILL.md 定义
 │   │   │   ├── pg-archive/               # 变更归档
 │   │   │   ├── pg-browser-testing-with-devtools/  # 浏览器 E2E 测试
 │   │   │   ├── pg-build/                 # 事件溯源 pipeline 引擎（最大 skill）
 │   │   │   ├── pg-fix-issue/             # Bug 修复工作流
 │   │   │   ├── pg-init-project/          # 首次项目初始化
 │   │   │   ├── pg-propose/               # 设计提案生成
-│   │   │   ├── pg-propose-refine/        # 提案精炼
 │   │   │   ├── pg-quick-build/           # 快速构建
 │   │   │   ├── pg-regression/            # 回归测试与修复
 │   │   │   ├── pg-systematic-diagnosing/ # 系统诊断调试

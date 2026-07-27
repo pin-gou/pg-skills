@@ -65,6 +65,16 @@ from pg_pipeline_common import (
 # Constants
 # ============================================================
 
+# v0.8.4: 5 项 common decisions 固化为代码常量（替代 review-notes.md 决策表）
+# 修改时只需改此常量块，无需走 LLM refine 流程。
+COMMON_DECISIONS = {
+    "error_response_strategy": "A",        # ApiResponse 全局统一格式
+    "auth_scope": "project",               # /tenants/{t}/projects/{p}/ scope
+    "data_migration_strategy": "C",        # 默认无 schema 变更
+    "transaction_boundary": "A",          # 默认单 service @Transactional
+    "frontend_interaction_style": "A",    # 默认 el-dialog 弹窗
+}
+
 STANDARD_SUBS = [
     ("test",  lambda stage_name: f"{stage_name} 测试先行"),
     ("dev",   lambda stage_name: "实现开发"),

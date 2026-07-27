@@ -112,14 +112,14 @@ standard track 各 sub 的 body 内容参照下方「各子章节模板」段填
 
 ### 与 v3.1 的差异总结
 
-| 维度 | v3.1（已废弃） | v3.2（当前） |
+| 维度 | v3.1（已废弃） | v3.2 / v0.8.3（当前） |
 |------|---------------|-------------|
 | 骨架生成 | LLM 手写 heading | `pg-gen-tasks-skeleton.py` 脚本生成 |
 | 章节编号维护 | LLM 维护 N 计数器 | 脚本自动维护 |
 | simple/standard 分流 | LLM 判断 | 脚本分流 |
 | on_conditions 跳过 effect | 该 track heading 不生成 | heading 保留，body = `- 无` |
-| on_conditions 评估时机 | LLM 在阶段二推理 | 脚本机械评估 + LLM 阶段三复核 |
-| on_conditions 留痕位置 | review-notes.md 段落 | tasks.md HTML 注释 + on-conditions-eval.md + review-notes.md 合并 |
+| on_conditions 评估时机 | LLM 在阶段二推理 | 脚本机械评估 + LLM 阶段三复核（v0.8.3 起不再生成 review-notes） |
+| on_conditions 留痕位置 | review-notes.md 段落 | tasks.md HTML 注释 + on-conditions-eval.md（v0.8.3 删除 review-notes 合并） |
 
 ### v3.0/v3.1 历史说明（保留作对比）
 
@@ -545,7 +545,7 @@ tasks.md 生成后，pg-propose 阶段 2e.5 自动执行可消费性验证。
 
 验证范围：章节存在性、heading 格式、sub 命名、编号连续性——纯结构验证，不检查内容语义。
 
-循环最多重试 2 次，第 3 次仍失败时将残留 error 记录到 review-notes「阻塞」段。
+循环最多重试 2 次，第 3 次仍失败时 workflow_failed，提示用户重跑 pg-propose 重新生成产物（v0.8.3 起不再记录到 review-notes）。
 
 ---
 

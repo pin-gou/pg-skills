@@ -12,6 +12,7 @@ Exit code: 0 = valid, 1 = invalid (with error messages to stderr).
 
 import json
 import os
+import re
 import sys
 import traceback
 
@@ -728,6 +729,194 @@ def cmd_manifest(change):
     for code, msg in consistency_issues:
         print(f"  [{code}] {msg}", file=sys.stderr)
         all_issues.append(code)
+
+    # 7.4 v0.8.3: 简化版机械校验（替代 review-notes 主观自审）
+    extra_warnings: list[tuple[str, str]] = []
+
+    # 规则 1: V-* ↔ verify 任务映射检查
+    try:
+        design_path = os.path.join(CHANGES_DIR, change, "design.md")
+        if os.path.isfile(design_path):
+            with open(design_path, encoding="utf-8") as _f:
+                _design_text = _f.read()
+            v_track_re = re.compile(r"V-([a-zA-Z0-9_-]+)-(\d+)")
+            v_in_design = set(v_track_re.findall(_design_text))
+
+            verify_v_re = re.compile(r"验证\s*V-([a-zA-Z0-9_-]+)-(\d+)")
+            v_in_verify: set[tuple[str, str]] = set()
+            for sec in tasks_sections:
+                if sec.get("sub") != "verify":
+                    continue
+                for m in verify_v_re.finditer(sec.get("body", "")):
+                    v_in_verify.add((m.group(1), m.group(2)))
+
+            track_total: dict[str, int] = {}
+            track_covered: dict[str, int] = {}
+            for (track, _) in v_in_design:
+                track_total[track] = track_total.get(track, 0) + 1
+            for (track, _) in v_in_verify:
+                if track in v_in_design:
+                    track_covered[track] = track_covered.get(track, 0) + 1
+
+            for track in sorted(track_total.keys()):
+                total = track_total[track]
+                covered = track_covered.get(track, 0)
+                if total > 0 and covered < total:
+                    extra_warnings.append((
+                        "v_identifier_uncovered",
+                        f"track={track}: {covered}/{total} V-* 标识符被 verify 任务覆盖",
+                    ))
+    except Exception as _e:
+        extra_warnings.append((
+            "v_identifier_check_failed",
+            f"V-* 映射检查异常: {_e}",
+        ))
+
+    # 规则 2: scenario-*.yaml 引用防护（防御 build 阶段任务描述误改 scenario）
+    try:
+        scenario_ref_re = re.compile(r"scenario-[a-zA-Z0-9_-]*\.yaml")
+        for sec in tasks_sections:
+            body = sec.get("body", "")
+            for m in scenario_ref_re.finditer(body):
+                ref = m.group(0)
+                if "禁止" in body or "SSOT" in body or "如需修改" in body:
+                    continue
+                extra_warnings.append((
+                    "scenario_yaml_referenced",
+                    f"section {sec.get('section_key')!r} 引用 {ref} (scenario-*.yaml 必须通过 pg-gen-scenario.py 重新生成, 禁止任务代码修改)",
+                ))
+    except Exception as _e:
+        extra_warnings.append((
+            "scenario_reference_check_failed",
+            f"scenario 引用检查异常: {_e}",
+        ))
+
+    # 规则 3: tasks.md 章节编号连续性
+    try:
+        heading_re = re.compile(r"^##\s+(\d+)\.\s+")
+        nums: list[int] = []
+        with open(tasks_path, encoding="utf-8") as _f:
+            for _line in _f:
+                m = heading_re.match(_line)
+                if m:
+                    nums.append(int(m.group(1)))
+        if nums:
+            expected = list(range(1, len(nums) + 1))
+            if nums != expected:
+                seen = set()
+                dup = [n for n in nums if n in seen or seen.add(n)]
+                skipped = [n for n in expected if n not in nums]
+                if dup:
+                    extra_warnings.append((
+                        "tasks_md_section_duplicate",
+                        f"tasks.md 章节编号重号: {sorted(set(dup))}",
+                    ))
+                if skipped:
+                    extra_warnings.append((
+                        "tasks_md_section_skipped",
+                        f"tasks.md 章节编号跳号: 缺失 {skipped}",
+                    ))
+    except Exception as _e:
+        extra_warnings.append((
+            "tasks_md_section_check_failed",
+            f"章节编号检查异常: {_e}",
+        ))
+
+    coverage_warnings.extend(extra_warnings)
+
+    # 7.4 v0.8.4: 简化版机械校验（替代 review-notes 主观自审）
+    extra_warnings: list[tuple[str, str]] = []
+
+    # 规则 1: V-* ↔ verify 任务映射检查
+    try:
+        design_path = os.path.join(CHANGES_DIR, change, "design.md")
+        if os.path.isfile(design_path):
+            with open(design_path, encoding="utf-8") as _f:
+                _design_text = _f.read()
+            v_track_re = re.compile(r"V-([a-zA-Z0-9_-]+)-(\d+)")
+            v_in_design = set(v_track_re.findall(_design_text))
+
+            verify_v_re = re.compile(r"验证\s*V-([a-zA-Z0-9_-]+)-(\d+)")
+            v_in_verify: set[tuple[str, str]] = set()
+            for sec in tasks_sections:
+                if sec.get("sub") != "verify":
+                    continue
+                for m in verify_v_re.finditer(sec.get("body", "")):
+                    v_in_verify.add((m.group(1), m.group(2)))
+
+            track_total: dict[str, int] = {}
+            track_covered: dict[str, int] = {}
+            for (track, _) in v_in_design:
+                track_total[track] = track_total.get(track, 0) + 1
+            for (track, _) in v_in_verify:
+                if track in v_in_design:
+                    track_covered[track] = track_covered.get(track, 0) + 1
+
+            for track in sorted(track_total.keys()):
+                total = track_total[track]
+                covered = track_covered.get(track, 0)
+                if total > 0 and covered < total:
+                    extra_warnings.append((
+                        "v_identifier_uncovered",
+                        f"track={track}: {covered}/{total} V-* 标识符被 verify 任务覆盖",
+                    ))
+    except Exception as _e:
+        extra_warnings.append((
+            "v_identifier_check_failed",
+            f"V-* 映射检查异常: {_e}",
+        ))
+
+    # 规则 2: scenario-*.yaml 引用防护（防御 build 阶段任务描述误改 scenario）
+    try:
+        scenario_ref_re = re.compile(r"scenario-[a-zA-Z0-9_-]*\.yaml")
+        for sec in tasks_sections:
+            body = sec.get("body", "")
+            for m in scenario_ref_re.finditer(body):
+                ref = m.group(0)
+                if "禁止" in body or "SSOT" in body or "如需修改" in body:
+                    continue
+                extra_warnings.append((
+                    "scenario_yaml_referenced",
+                    f"section {sec.get('section_key')!r} 引用 {ref} (scenario-*.yaml 必须通过 pg-gen-scenario.py 重新生成, 禁止任务代码修改)",
+                ))
+    except Exception as _e:
+        extra_warnings.append((
+            "scenario_reference_check_failed",
+            f"scenario 引用检查异常: {_e}",
+        ))
+
+    # 规则 3: tasks.md 章节编号连续性
+    try:
+        heading_re = re.compile(r"^##\s+(\d+)\.\s+")
+        nums: list[int] = []
+        with open(tasks_path, encoding="utf-8") as _f:
+            for _line in _f:
+                m = heading_re.match(_line)
+                if m:
+                    nums.append(int(m.group(1)))
+        if nums:
+            expected = list(range(1, len(nums) + 1))
+            if nums != expected:
+                seen = set()
+                dup = [n for n in nums if n in seen or seen.add(n)]
+                skipped = [n for n in expected if n not in nums]
+                if dup:
+                    extra_warnings.append((
+                        "tasks_md_section_duplicate",
+                        f"tasks.md 章节编号重号: {sorted(set(dup))}",
+                    ))
+                if skipped:
+                    extra_warnings.append((
+                        "tasks_md_section_skipped",
+                        f"tasks.md 章节编号跳号: 缺失 {skipped}",
+                    ))
+    except Exception as _e:
+        extra_warnings.append((
+            "tasks_md_section_check_failed",
+            f"章节编号检查异常: {_e}",
+        ))
+
+    coverage_warnings.extend(extra_warnings)
 
     # 7.5 v3.10: scenario 覆盖度校验（warning 级, 不阻塞）
     if (_pg_gen_scenario is not None

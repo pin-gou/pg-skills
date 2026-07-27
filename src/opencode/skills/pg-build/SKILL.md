@@ -376,7 +376,7 @@ reducer 返回 `kind="error"` 时：
 | pipeline 已 `status=completed`（所有 track 都 done） | `python3 ... progress <change>` 看 status | 正常！直接触发 pg-verify-and-merge，不要尝试 record |
 | 上一个 dispatch 还在 `attempt=N` 重试中 | 等 `max_fail_retries` 耗尽或 sub-agent 成功 | 继续调用 `next` 等 dispatch 回来 |
 | snapshot 损坏 / `current_track` 为空字符串 | `cat .pg/changes/<change>/2-build/pipeline.snapshot.json \| jq .state.current_track` | 不要直接 patch — 调用 `pg-archive move` 归档后重新触发 pg-build |
-| track 已 completed 但想补一个 sub-phase | 设计错误：track 完成应触发下一 phase dispatch | 走 `pg-propose-refine` 修改 design.md |
+| track 已 completed 但想补一个 sub-phase | 设计错误：track 完成应触发下一 phase dispatch | 重跑 `/2-pg-propose` 修改 design.md |
 
 **关键**: 收到此 error **不要**调用 `python3 ... record --result-json ...`，因为 record 会再次因 `current_track` 为空失败。
 
@@ -685,7 +685,7 @@ completed → track.status=completed → final-gate 豁免
 ### SSOT：scenario.yaml
 
 `{change-dir}/scenario.yaml` 由 pg-propose 阶段生成，是 scenario-execute 的唯一输入。**禁止重写或修改**。
-如需修改场景，须走 `pg-propose-refine` 流程回到 propose 阶段。
+如需修改场景，重跑 `pg-gen-scenario.py` 重新生成 skeleton。
 
 ### final-gate 交互（v3.6 修复）
 
@@ -751,7 +751,7 @@ final-gate dispatch 之前，runner 强制检查所有非 simple、非 scenario 
 | 某 standard track 确实漏跑 gate | 用 `pg-build/gate` agent 重跑该 track 的 gate phase |
 | 某 track 是 simple/scenario（不该有 gate） | **不应发生**——v3.6 起 bootstrap 自动 gate_enabled=False |
 | 报告文件被误删 | 重新跑该 track 的 gate phase |
-| design 漏定义 gate phase | 走 pg-propose-refine 修改 design.md |
+| design 漏定义 gate phase | 重跑 `/2-pg-propose` 修改 design.md |
 
 ### 禁止绕过
 
@@ -967,7 +967,7 @@ fix-review agent 在 source review 报告中识别到 R-* 项的根因位于 **�
 3. **编排器响应**
    - 收到 `action: workflow_failed, fatal: true`
    - 展示 reason 给用户
-   - 提示运行 `pg-propose-refine` 修复 design.md
+   - 提示重跑 `/2-pg-propose` 修复 design.md
    - 用户修正后重新触发 pg-build
 
 ### 与 review-fix 循环的关系
@@ -977,7 +977,7 @@ fix-review agent 在 source review 报告中识别到 R-* 项的根因位于 **�
 
 ### 重置方式
 
-修正 design.md 后，用户重跑 `pg-propose-refine` → `pg-build`，无需手动重置 pipeline state。
+修正 design.md 后，用户重跑 `/2-pg-propose` → `pg-build`，无需手动重置 pipeline state。
 
 ### 相关代码位置
 

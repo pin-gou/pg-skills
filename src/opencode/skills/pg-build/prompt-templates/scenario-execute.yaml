@@ -16,7 +16,7 @@ prompt: |
   ### SSOT：scenario-<track>.yaml
 
   **禁止重写或修改 scenario-<track>.yaml**。scenario-<track>.yaml 由 pg-propose 阶段生成，是本 phase 的唯一输入。
-  如需修改场景，须通过 `pg-propose-refine` 流程回到 propose 阶段。
+  如需修改场景，重跑 `pg-gen-scenario.py` 重新生成 skeleton。
 
   ### 必读源（每次启动顺序）
 

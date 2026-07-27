@@ -221,7 +221,7 @@ class TestValidatorAcceptsSubset(_ProjectMixin, unittest.TestCase):
             "--proposal-md", self.proposal_path,
             "--affected-tracks", "backend",
             "--environment", "dev→dev-local",
-            "--scenario-decisions", "scenario-test=false",
+            "--scenario-decisions", "scenario-test=false,scr=false",
         ])
         if r1.returncode != 0:
             return r1.returncode, r1.stdout, r1.stderr

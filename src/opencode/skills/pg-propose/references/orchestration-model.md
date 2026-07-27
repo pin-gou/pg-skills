@@ -138,7 +138,7 @@ affected_tracks 为空时（如纯文档变更），整个 verify 章节标 `无
 | 章节编号 N | 受 on_conditions 跳过影响（连续递增） | 全量展开，编号稳定不变 |
 | 评估执行者 | LLM 在阶段二手工推理 | `pg-gen-tasks-skeleton.py` 脚本机械评估 |
 | LLM 决策时机 | 阶段二生成 tasks.md 前 | 阶段三 review 时复核机械评估 |
-| 留痕位置 | review-notes.md 段落 | `on-conditions-eval.md` + review-notes.md 合并 |
+| 留痕位置 | review-notes.md 段落（v0.8.3 已删除） | `on-conditions-eval.md` 唯一留痕位置 |
 
 **核心好处**：
 
@@ -177,11 +177,11 @@ def evaluate_on_conditions(rule, affected_paths, proposal_text):
 | 2 | "本变更包含 fixtures 修改" | ❌ | ✅ | 命中 | [ ] |  |
 | **结论** | | | | | [ ] |  |
 
-LLM 在阶段三 review 时：
+LLM 在阶段三 review 时（v0.8.3 起）：
 
-1. 对每条规则勾选「最终决策」：同意 → `[x]`；覆盖 → `[~]` + 写依据
-2. 把整个表格内容**合并到** `review-notes.md` 的「on_conditions 评估记录」段
-3. 若某 stage/track 决策翻转为"启用"，需在 review-notes 标注"建议启用"，由用户在 review 阶段决定
+1. 决策由 `on-conditions-eval.md` 的机械评估直接采纳，无需 review-notes 合并
+2. 若 stage/track 决策需翻转，直接修改 `on-conditions-eval.md` 表格的「最终决策」列（`[x]` / `[~]` + 依据）
+3. 5 项 common decisions 已固化为 `pg-gen-tasks-skeleton.py` 常量块，不再需要 LLM 决策
 
 ### 与 runner / validator 的契约
 

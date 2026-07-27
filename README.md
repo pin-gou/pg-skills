@@ -69,7 +69,7 @@ python3 .pg/skills/src/runtime/bin/pg init
 ├── commands/ <── symlinks: pg-1-define.md, pg-2-propose.md, pg-2.1-propose-refine.md, pg-2b-quick-build.md,
 │                          pg-3-build.md, pg-4-regression.md, pg-5-fix-issue.md, pg-6-archive.md
 ├── skills/   <── symlinks: pg-archive/, pg-browser-testing-with-devtools/, pg-build/, pg-fix-issue/,
-│                          pg-init-project/, pg-propose/, pg-propose-refine/, pg-quick-build/,
+│                          pg-init-project/, pg-propose/, pg-quick-build/,
 │                          pg-regression/, pg-systematic-diagnosing/, pg-verify-and-merge/
 └── (无 scripts/ —— pg-skills 的 scripts/ 不通过 symlink 暴露)
 ```
@@ -104,8 +104,8 @@ pg-skills/
 ├── README.md                     # 本文件
 ├── src/
 │   ├── opencode/
-│   │   ├── commands/             # 8 个 slash 命令（/1-pg-define, /2-pg-propose, ...）
-│   │   ├── skills/               # 11 个活跃 SKILL.md（pg-archive, pg-browser-testing-with-devtools, pg-build, pg-fix-issue, pg-init-project, pg-propose, pg-propose-refine, pg-quick-build, pg-regression, pg-systematic-diagnosing, pg-verify-and-merge）
+│   │   ├── commands/             # 7 个 slash 命令（/1-pg-define, /2-pg-propose, /2b-pg-quick-build, ...）
+│   │   ├── skills/               # 10 个活跃 SKILL.md（pg-archive, pg-browser-testing-with-devtools, pg-build, pg-fix-issue, pg-init-project, pg-propose, pg-quick-build, pg-regression, pg-systematic-diagnosing, pg-verify-and-merge）
 │   │   └── agents/               # 子 agent（explore, pg-manager, ...）
 │   └── runtime/                  # 运行时层
 │       ├── bin/                  # CLI 入口（pg, pg-invoke-hook.py, ...）
@@ -169,11 +169,7 @@ pg-skills/
 |------|-------------|------|
 | 手动归档 | `/6-pg-archive` | `pg-build` 成功时自动归档；此项用于脚本失败后或主动放弃时手动归档 |
 
-### 设计精炼
-
-| 步骤 | 命令 / skill | 说明 |
-|------|-------------|------|
-| 按评审意见修改 | `/2.1-pg-propose-refine` | 读 review-notes.md 决策，按 scope 精准修改 proposal/design/tasks |
+> **v0.8.4 起**：`/2.1-pg-propose-refine` 已删除。5 项 common decisions 固化为 `pg-gen-tasks-skeleton.py` 常量块；产物生成后直接进入 `/3-pg-build`。
 
 ---
 
@@ -202,7 +198,7 @@ pg-skills/
 pg upgrade
 
 # 升级到指定版本
-pg upgrade v0.8.3
+pg upgrade v0.8.4
 
 # 查看远程可用版本
 pg upgrade --list

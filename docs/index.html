@@ -461,8 +461,8 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <tr>
     <td><strong>提案</strong> <code>/2-pg-propose</code></td>
     <td><span class="tag tag-blue">被规训的"出图员"</span>：填 proposal / design / tasks 骨架 + 出 execution-manifest.yaml</td>
-    <td>AI 全程写；产物必含 <code>review-notes.md</code></td>
-    <td>人审 review-notes 圈 checkbox；调过才 build</td>
+    <td>AI 全程写；产物必含 <code>proposal / design / tasks / execution-manifest.yaml</code>（v0.8.4 起删除 review-notes）</td>
+    <td>5 项 common decisions 已固化；产物生成后直接进入 build</td>
   </tr>
   <tr>
     <td><strong>构建</strong> <code>/3-pg-build</code></td>
@@ -1136,10 +1136,9 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <table>
   <tr><th>阶段</th><th>入口</th><th>输入</th><th>输出</th></tr>
   <tr><td>1. 定界</td><td><code>/1-pg-define</code></td><td>模糊需求</td><td>边界清单 + scope summary</td></tr>
-  <tr><td>2. 提案</td><td><code>/2-pg-propose</code></td><td>边界 + project.yaml + .pg/code-review/</td><td>proposal + design + tasks + <strong>execution-manifest.yaml</strong> + review-notes</td></tr>
-  <tr><td>3. 评审</td><td><code>/2.1-pg-propose-refine</code></td><td>review-notes 评审意见</td><td>修改后的 proposal/design/tasks（manifest 自动重新生成）</td></tr>
-  <tr><td>4. 构建</td><td><code>/3-pg-build</code></td><td>设计文档 + execution-manifest.yaml + project.yaml</td><td>代码 + 测试 + 报告（含 review 阶段产物）+ 自动归档</td></tr>
-  <tr><td>5. 合并</td><td><code>pg-verify-and-merge</code></td><td>feature branch</td><td>合入 master</td></tr>
+  <tr><td>2. 提案</td><td><code>/2-pg-propose</code></td><td>边界 + project.yaml + .pg/code-review/</td><td>proposal + design + tasks + <strong>execution-manifest.yaml</strong>（v0.8.4 起删除 review-notes）</td></tr>
+  <tr><td>3. 构建</td><td><code>/3-pg-build</code></td><td>设计文档 + execution-manifest.yaml + project.yaml</td><td>代码 + 测试 + 报告（含 review 阶段产物）+ 自动归档</td></tr>
+  <tr><td>4. 合并</td><td><code>pg-verify-and-merge</code></td><td>feature branch</td><td>合入 master</td></tr>
 </table>
 </div>
 
@@ -2182,8 +2181,7 @@ pg doctor
 <table>
   <tr><th>命令</th><th>功能</th></tr>
   <tr><td><code>/1-pg-define</code></td><td>定界——扫描边界</td></tr>
-  <tr><td><code>/2-pg-propose</code></td><td>提案——生成设计文档</td></tr>
-  <tr><td><code>/2.1-pg-propose-refine</code></td><td>按评审意见修设计</td></tr>
+  <tr><td><code>/2-pg-propose</code></td><td>提案——生成设计文档（v0.8.4 起直接 build，无需 refine）</td></tr>
   <tr><td><code>/2b-pg-quick-build</code></td><td>小改动直接编码</td></tr>
   <tr><td><code>/3-pg-build</code></td><td>构建——pipeline 实现（事件溯源引擎）</td></tr>
   <tr><td><code>/4-pg-regression</code></td><td>回归——跑全量测试</td></tr>

@@ -656,7 +656,7 @@ def _handle_fix_review(
             reason = (
                 f"design.md / tasks.md 文档层缺陷 (at {location})："
                 f"fix-review 检测到根因无法由代码修复。"
-                f"请运行 pg-propose-refine 修正 design.md 后重跑 pipeline。"
+                f"请重跑 /2-pg-propose 修正 design.md 后重跑 pipeline。"
             )
             t = _update_phase(
                 t, "review", status="failed",

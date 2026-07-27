@@ -6,7 +6,34 @@
 版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
 
 <!-- 下一版本在此累积 -->
-<!-- 将 VERSION 推进到 0.8.3，分析 git log / git diff，更新 CHANGELOG.md README.md -->
+<!-- 将 VERSION 推进到 0.9.0，分析 git log / git diff，更新 CHANGELOG.md README.md -->
+
+## [0.8.4] - 2026-07-27
+
+### 移除（破坏性）
+
+- **pg-propose-refine 流程删除（v0.8.4）**：
+  - 删除 `pg-propose-refine/` SKILL 目录（三处：`.opencode/skills/`、`.pg/skills/src/opencode/skills/`、命令文件 `pg-2.1-propose-refine.md`）
+  - 删除产物 `1-propose-review/review-notes.md`，不再生成
+  - 6 类 LLM 自审清单（3.5.1-3.5.7）+ 4a/4b 智能分流全部删除
+  - `pg-auto-refine-check.py` 随 SKILL 目录一并删除
+  - **迁移路径**：5 项 common decisions 固化为 `pg-gen-tasks-skeleton.py` 顶部 `COMMON_DECISIONS` 常量块；6 类自审问题改由 `pg-validate-proposal.py` 的 3 条新规则（V-* 映射 / scenario 引用防护 / 章节编号连续性）机械校验
+  - 旧 `.pg/changes/archive/*/review-notes.md` 保留作为历史决策记录，不删
+  - pg-build `reducer.py` / `bootstrap.py` / `SKILL.md` / prompt 模板中对 `pg-propose-refine` 的硬编码提示文案同步指向 `/2-pg-propose`
+
+### 新增
+
+- **`pg-validate-proposal.py` 3 条新规则**（WARN 级，不阻塞 build）：
+  - `v_identifier_uncovered`：design.md V-{track}-N 未被 tasks.md verify 章节引用时 WARN
+  - `scenario_yaml_referenced`：tasks.md body 引用 `scenario-*.yaml` 路径时 WARN（防御误改 SSOT）
+  - `tasks_md_section_duplicate` / `tasks_md_section_skipped`：章节编号重号 / 跳号 WARN
+- **`pg-gen-tasks-skeleton.py` COMMON_DECISIONS 常量块**：5 项 common decisions 固化为代码常量，修改路径：改 `pg-gen-tasks-skeleton.py` 顶部 `COMMON_DECISIONS` 字典 → 重跑 `pg-gen-tasks-skeleton.py` 生效
+
+### 变更
+
+- **slash 命令 8 → 7**：删除 `/2.1-pg-propose-refine`
+- **SKILL 数量 11 → 10**：删除 `pg-propose-refine`
+- **AGENTS.md / README.md / docs/pg-skills.md / docs/index.html 同步**：标准工作流图、命令速查、目录结构表全部更新
 
 ## [0.8.3] - 2026-07-19
 

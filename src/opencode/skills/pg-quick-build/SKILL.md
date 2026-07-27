@@ -380,7 +380,7 @@ assert isinstance(result["self_check"], dict)
 - 查看改动: `git status` / `git diff`
 - 提交暂存: `git add -A && git commit --amend` (合并到上一个 commit) 或 `git reset --soft HEAD~N` 后重整
 - 如需正式 proposal 化以备归档: 走 `/2-pg-propose <slug>`
-- 如需合并到 master: 走 `/4-pg-verify-and-merge <slug>`（注意：微变更无 review-notes，pg-verify-and-merge 可能要求走 pg-propose 后再触发）
+- 如需合并到 master: 走 `/4-pg-verify-and-merge <slug>`（微变更无 review-notes 流程，pg-verify-and-merge 直接接收）
 ```
 
 #### 步骤 2.2：FAILED / ABORTED 路径
@@ -449,7 +449,7 @@ git log --oneline -10
 | 上游 | `pg-define` (command) | pg-quick-build 可在 pg-define 探索后接管, 不强制 |
 | 同级 | `pg-propose` | pg-propose 生成完整 proposal/design/tasks 落盘; pg-quick-build 不落盘 |
 | 同级 | `pg-fix-issue` | bug 修复场景优选 pg-fix-issue; pg-quick-build 不适合修复 bug |
-| 下游（可选）| `pg-verify-and-merge` | 微变更可直接推送+pr+merge; 但 pg-verify-and-merge 可能要求 review-notes，建议重要变更先走 pg-propose |
+| 下游（可选）| `pg-verify-and-merge` | 微变更可直接推送+pr+merge; 重要变更建议先走 pg-propose 生成完整产物 |
 
 ---
 

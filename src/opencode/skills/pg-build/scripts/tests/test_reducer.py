@@ -840,7 +840,7 @@ class TestFixReviewPhase(unittest.TestCase):
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "workflow_failed")
         self.assertIn("design.md:183", action.detail["reason"])
-        self.assertIn("pg-propose-refine", action.detail["reason"])
+        self.assertIn("/2-pg-propose", action.detail["reason"])
         # review_fix_cycles 不应递增（直接终止）
         cv = new_state.tracks["dev.backend"].phases["review"]
         self.assertEqual(len(cv.review_fix_cycles), 1)  # 保持 cycle 1 pending 状态
