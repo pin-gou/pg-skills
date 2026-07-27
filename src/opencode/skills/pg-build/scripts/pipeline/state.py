@@ -257,7 +257,8 @@ class PipelineState:
     current_track: str = ""
     current_phase: str = ""
     last_dispatch_file: str = ""       # P3: 上次 dispatch 的文件路径（重跑检测用）
-    retry_count: int = 0               # P3: 当前 dispatch 的 retry 计数
+    retry_count: int = 0               # P3: 当前 dispatch 的 retry 计数（legacy，保留兼容，不再由 P3 递增）
+    idle_next_count: int = 0           # B3: 编排器空转 next 计数（未 record 就再调 next）
     # stage 生命周期管理
     stage_order: tuple[str, ...] = ()               # ["dev", "integration"]
     stage_env_map: dict[str, str] = field(default_factory=dict)  # {"dev": "dev-local", "integration": "dev-3tier"}
@@ -283,6 +284,7 @@ class PipelineState:
             "current_phase": self.current_phase,
             "last_dispatch_file": self.last_dispatch_file,
             "retry_count": self.retry_count,
+            "idle_next_count": self.idle_next_count,
             "stage_order": list(self.stage_order),
             "stage_env_map": dict(self.stage_env_map),
             "stage_env_timeout": dict(self.stage_env_timeout),
@@ -328,6 +330,7 @@ class PipelineState:
             current_phase=d.get("current_phase", ""),
             last_dispatch_file=d.get("last_dispatch_file", ""),
             retry_count=d.get("retry_count", 0),
+            idle_next_count=d.get("idle_next_count", 0),
             stage_order=tuple(d.get("stage_order", ())),
             stage_env_map=d.get("stage_env_map", {}),
             stage_env_timeout=d.get("stage_env_timeout", {}),

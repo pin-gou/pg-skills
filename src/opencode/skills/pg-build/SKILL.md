@@ -98,6 +98,28 @@ $RUNNER reset <change> --resume              # 手动恢复（保留 snapshot，
         "workflow_failed"   → 终止
 ```
 
+> ⚠️ **禁止空转 `next`**：收到 `dispatch` 或 `retry` action 后，**必须先派遣 sub-agent + record 结果**，然后才能再次调 `next`。
+> 每次在未 record 的情况下调 `next`，runner 会递增空转计数（`idle_next_count`）。超过阈值（默认 10）后 pipeline 终止（`workflow_failed`）。
+>
+> `dispatch`/`retry` 后必须完成两步才能再调 `next`：
+> 1. `task(subagent_type=<action.agent>, prompt="读取 <dispatch_file> 并执行任务...")`
+> 2. `$RUNNER record <change> --result-json <expected_result_path>`
+
+### 编排器自检清单
+
+每次调 `$RUNNER next <change>` **之前**，编排器必须自问：
+
+| # | 检查项 | 不满足时的动作 |
+|---|--------|---------------|
+| 1 | 上一次 `next` 返回的 action 是否已处理完毕？ | 先处理（派遣/record/env-action），再调 next |
+| 2 | 如果上一次是 `dispatch`/`retry`，sub-agent 是否已派遣？ | 先派遣，等返回 |
+| 3 | 如果 sub-agent 已返回，`expected_result_path` 是否已落盘？ | 检查文件存在性 |
+| 4 | 如果已落盘，是否已调 `record --result-json`？ | 先 record |
+
+**只有 4 项全部满足，才能调 `next`。**
+
+违反此清单 → P3 空转检测触发 → `idle_next_count++` → 超过 10 次 → `workflow_failed`。
+
 ### 人工介入场景
 
 编排器（LLM agent）**必须**在以下场景终止 pipeline 并交由人工处理（不可自动修复）：
@@ -293,6 +315,15 @@ sub-agent 返回 `status: "failed"` 时，runner 不会立即终止——会按 
 | standard | 3 | `tracks.<t>.max_fail_retries` |
 | simple | 3 | 默认（无配置项） |
 | scenario | 3 | 默认（scenario-prepare 与 scenario-execute 各自独立计数） |
+
+#### ⚠️ `idle_next_count`（P3 空转）与 `max_fail_retries`（sub-agent 失败）是两套独立机制
+
+| 机制 | 跟踪字段 | 触发条件 | 阈值 |
+|------|---------|---------|------|
+| P3 空转检测 | `PipelineState.idle_next_count` | 编排器在未 record 的情况下反复调 `next` | 10（硬编码） |
+| sub-agent 失败重试 | `PhaseState.attempt` | sub-agent 返回 `status: failed` | `max_fail_retries`（默认 3） |
+
+**编排器不需要感知 P3 空转计数**——只要每次收到 `dispatch`/`retry` 后正确派遣 + record，P3 永远不会触发。
 
 #### 与 final-gate / gate 子 pipeline 的关系
 
