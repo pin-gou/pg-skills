@@ -5,7 +5,7 @@ license: MIT
 compatibility: 需要 `.pg/changes/` 目录结构和 `.pg/project.yaml` 统一配置文件。
 metadata:
   author: pg
-  version: "0.9.0"
+  version: "1.0.0"
 ---
 
 # pg-propose
@@ -18,24 +18,36 @@ metadata:
 - `execution-manifest.yaml`（按 tasks.md 结构化生成的 pipeline 编排清单）
 - `1-propose-review/on-conditions-eval.md`（机械评估记录 + scenario_tracks_decision SSOT）
 
-**v0.9.0 起**：
-- ✅ 阶段 2f 新增"环境能力摘要"强制步骤，scenario given 必须与 `env-capability.yaml` 一致
-- ✅ `pg-gen-scenario.py` 新增 `--env-summary` 参数，写入 `_meta.env_constraint` 字段
-- ✅ `pg-validate-proposal.py` 新增 2 条 env-capability 交叉校验规则（`scenario_given_exceeds_env_capacity` / `scenario_given_unknown_host_id`）
-- ✅ `design-templates.md` 新增"环境限制与验证策略"段模板
+**v1.0.0（2026-07-29 大重构）**：
 
-**v1.0.0 (v6 hook 协议) 起**：
-- 🔄 **删除** 旧 env-capability.yaml / fingerprint 机制，由 `describe_env` 脚本 + `.pg/changes/<change-id>/env-description.yaml` 取代
-- 🔄 **删除** `pg-gen-env-fingerprint.py` / `check-env-capability.sh` / `--env-summary` 参数 / `_meta.env_constraint` 字段
-- ✅ `pg-invoke-hook.py` 新增 `--action describe_env`，自动注入 `PG_CHANGE_ID` / `PG_OUTPUT_PATH`
-- ✅ `pg-propose` 阶段 1d.5 改为：调用 describe_env → 读 `.pg/changes/<id>/env-description.yaml` → 直接喂给 LLM 编写 design/tasks/scenario
-- ✅ `pg-build scenario-execute` 直接消费 `.pg/changes/<id>/env-description.yaml`，**移除** dynamic_values / ${VAR} 占位符机制
+- 🔄 **编号体系重构**：旧 `1a / 1b / ... / 2a / 2b / ... / 阶段三 / 阶段四` 字母后缀编号 → 体系 A 纯数字编号 `阶段 1-4` + `附录 A-E`。消除 1d.5 补丁型编号与 5.5 幽灵编号。
+- ✅ TodoWrite 从 10 项扩为 **12 项**，与阶段编号一一对应（旧"13 项宣称 / 10 项列出"对齐失败已修复）。
+- ✅ 阶段 2 拆分子步骤：2.4.2（LLM 填充 tasks.md body）、2.6.2（LLM 填充 scenario body），独立于脚本调用，避免占位符漏填被校验器拦截。
+- ✅ 阶段 3 强化"**唯一**校验点"语义：删除旧 2.5/2.6 内冗余 `ls` 步骤，全部并入 `pg-validate-proposal.py`。
+- ✅ `--scenario-decisions` 与 `--scenario-reason` **强必填**，删除"空字符串默认启用"隐式行为。
+- ✅ 阶段 1.5（环境描述）段首强化"Context 注入契约"，明示 env-description.yaml 进入阶段 2 全产物写作。
+- ✅ SKILL.md 主版本号 `0.9.0 → 1.0.0`；内部子版本号 v3.x 仅在附录 E 保留。
+
+**v0.9.0 历史要点**（2026-07-27，scenario 环境一致性强化，已被 v1.0.0 取代）：
+- 阶段 2f 新增"环境能力摘要"强制步骤（被 v1.0.0 阶段 1.5 取代）
+- `pg-gen-scenario.py` 新增 `--env-summary` 参数（已被删除）
+- `pg-validate-proposal.py` 新增 env-capability 交叉校验规则（已被 env-description.yaml 校验取代）
+
+**v0.8.4 历史要点**（2026-07-27，删除 review-notes 自审 + pg-propose-refine 流程，仍生效）：
+- 阶段三 6 类自审清单 + 4a/4b 智能分流 + review-notes.md 产物已删除
+- 5 项 common decisions 固化为 `pg-gen-tasks-skeleton.py` 常量块
+- `pg-validate-proposal.py` 新增 3 条机械校验规则（V-* 映射 / scenario 引用防护 / 章节编号连续性）
 
 ## 文档导航
 
 | 关心的问题 | 看哪里 |
 |------------|--------|
 | pg-propose 总流程 / 阶段划分 / 黑名单 | 本文件 |
+| 附录 A：TodoWrite 12 项清单 | [附录 A](#附录-atodowrite-12-项清单) |
+| 附录 B：产物清单（硬约束）+ 三产物一致性约束 | [附录 B](#附录-b产物清单硬约束--三产物一致性约束) |
+| 附录 C：scenario.yaml 生成指引 | [附录 C](#附录-cscenarioyaml-生成指引) |
+| 附录 D：⛔ 禁令 | [附录 D](#附录-d-禁令) |
+| 附录 E：文档变更记录 | [附录 E](#附录-e文档变更记录) |
 | proposal.md 模板 / proposal_rules 注入 | [references/proposal-templates.md](./references/proposal-templates.md) |
 | design.md 模板 / V-* 编号规则 | [references/design-templates.md](./references/design-templates.md) |
 | tasks.md 模板 / 章节生成算法 / 各子章节模板 | [references/tasks-templates.md](./references/tasks-templates.md) |
@@ -56,42 +68,30 @@ metadata:
 
 ---
 
-## 阶段一：创建目录与配置
+## 阶段 1：上下文加载与目录准备
 
-### 1a. TodoWrite
+> **本阶段目标**：把所有「设计时假设」转化为「运行时事实」，喂给阶段 2 全产物写作。
 
-立即创建 13 项 TodoWrite：
+### 1.1 TodoWrite 初始化
 
-```
-1.  [待开始] 创建变更目录
-2.  [待开始] 加载项目上下文（读取所有 AGENTS.md）
-3.  [待开始] 生成 proposal.md
-4.  [待开始] 生成 design.md
-5.  [待开始] 判定 affected_tracks & **scenario track(s) 启用决策**（核心：影响后续三个产物一致性）
-6.  [待开始] 调用 pg-gen-tasks-skeleton.py 生成 tasks.md 骨架 + on-conditions-eval.md
-         （必传 --scenario-decisions "track1=true,track2=auto,..." + --scenario-reason）
-7.  [待开始] LLM 填充 tasks.md body
-8.  [待开始] 调用 pg-gen-manifest.py 生成 execution-manifest.yaml
-9.  [待开始] （条件）调用 pg-gen-scenario.py 生成 scenario.yaml
-10. [待开始] 调用 pg-validate-proposal.py 三产物一致性校验（含 v0.8.3 三条新规则 + placeholder 校验）
-```
+**TodoWrite 12 项清单详见 [附录 A](#附录-atodowrite-12-项清单)**。本步骤仅在对话开始时执行一次，创建结构化待办，后续每完成一个阶段动作立刻更新对应项状态。
 
-### 1b. 确认变更名称
+### 1.2 确认变更名称
 
 从用户输入或探索上下文获取变更名称（kebab-case）。如果用户未提供，直接根据语义生成一个（kebab-case）。
 
 **约束**：变更名称必须为纯语义化的 kebab-case，**禁止**以日期或数字开头（如 `2026-07-16-xxx`）。
 日期前缀仅在归档时由归档工具自动添加，新建的变更名称必须是纯语义描述。
 
-### 1c. 创建变更目录
+### 1.3 创建变更目录
 
 ```bash
 mkdir -p ".pg/changes/<change-name>/1-propose-review"
 ```
 
-验证目录已创建。更新 TodoWrite 第 1 项。
+验证目录已创建。更新附录 A 第 1 项。
 
-### 1d. 加载项目上下文（直接读取所有 AGENTS.md）
+### 1.4 加载项目上下文（直接读取所有 AGENTS.md）
 
 直接通读项目内所有 AGENTS.md，提取约束作为 LLM 的 context（无需中间缓存）。通过 `find` 列出所有 AGENTS.md 路径：
 
@@ -150,9 +150,11 @@ LLM 通读这些文件，提取：
 - `context`（tech_stack / package / database_conventions / coding_conventions / design_patterns / domain）
 - `rules`（review 检查条目列表）
 
-更新 TodoWrite 第 2 项。
+更新附录 A 第 2 项。
 
-### 1d.5 生成环境描述（env-description.yaml，per-change）
+### 1.5 生成环境描述（env-description.yaml，per-change）
+
+> **Context 注入契约**：本步骤完成后，env-description.yaml 作为强制 context 进入阶段 2 全产物（proposal.md / design.md / tasks.md / scenario-*.yaml）写作。LLM 必须在每个产物中显式引用 6 段中已声明的具体资源（不允许"环境未就绪"类兜底措辞）。
 
 **职责**：让 LLM 知道当前 change 在目标 environment 上的真实状态（不是 design-time 假设），作为 design.md / tasks.md / scenario-*.yaml 的输入。这是 v6 新流程，与旧 env-capability.yaml 机制不兼容：旧机制是 LLM 看 prepare 脚本猜能力，新机制是项目自带 describe_env 脚本真实探测。
 
@@ -233,9 +235,9 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 
 完整 env-description.yaml 示例见 `examples/env-description.example.yaml`（K8s + DB + Cache + 业务系统场景）。
 
-更新 TodoWrite 第 2 项（拆分为 "加载项目上下文" + "生成环境描述" 两个子项）。
+更新附录 A 第 3 项。
 
-### 1e. 获取管线配置（从 config.yaml 读取）
+### 1.6 获取管线配置（从 config.yaml 读取）
 
 ```bash
 python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
@@ -251,33 +253,35 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
 - 需切换目录的命令在配置中显式写 `cd <dir> && <cmd>`（如 `test: cd <module-name> && mvn test`）
 - `rebuild_and_restart` / `verify` 脚本应自包含 cwd 处理
 
-### 1f. 加载 propose.injections.proposal（结构化规则注入）
+### 1.7 加载 propose.injections.proposal（结构化规则注入）
 
 `.pg/project.yaml` 的 `propose.injections.proposal` 段是结构化规则列表，按 `after_section` 字段注入到 `proposal.md` 模板。字段约定与注入算法见 [references/proposal-templates.md](./references/proposal-templates.md)「proposal_rules 注入机制」段。
 
+更新附录 A 第 4 项。
+
 ---
 
-## 阶段二：生成产物
+## 阶段 2：产物生成
 
-按顺序生成：proposal.md → design.md → 判定类型 → tasks.md → execution-manifest.yaml。每个产物依赖前一个产物的内容。
+按顺序生成：proposal.md → design.md → 判定类型 → tasks.md → execution-manifest.yaml → scenario-*.yaml（条件）。每个产物依赖前一个产物的内容。
 
-每生成一个产物后，更新 TodoWrite 对应项。
+每生成一个产物后，更新附录 A 对应项。
 
-### 2a. proposal.md
+### 2.1 proposal.md
 
 路径：`.pg/changes/<change-name>/proposal.md`
 
-**模板 + propose.injections.proposal 注入**见 [references/proposal-templates.md](./references/proposal-templates.md)。更新 TodoWrite 第 3 项。
+**模板 + propose.injections.proposal 注入**见 [references/proposal-templates.md](./references/proposal-templates.md)。更新附录 A 第 5 项。
 
-### 2b. design.md
+### 2.2 design.md
 
 路径：`.pg/changes/<change-name>/design.md`
 
-**模板 + V-* 编号规则**见 [references/design-templates.md](./references/design-templates.md)。更新 TodoWrite 第 4 项。
+**模板 + V-* 编号规则**见 [references/design-templates.md](./references/design-templates.md)。更新附录 A 第 6 项。
 
-**v0.9.0 新增**：design.md 必须包含"环境限制与验证策略"段（在"错误码与编号段"之后、"可观测性"之前），依据 `.pg/context/env-capability.yaml` 判断每个 V-* 在目标 env 是否可验证。该段是阶段 2f scenario 编写的直接输入。
+**v0.9.0 新增**：design.md 必须包含"环境限制与验证策略"段（在"错误码与编号段"之后、"可观测性"之前），依据 `.pg/changes/<change-id>/env-description.yaml`（阶段 1.5 产出）判断每个 V-* 在目标 env 是否可验证。该段是阶段 2.6 scenario 编写的直接输入。
 
-### 2c. 判定变更类型 & affected_tracks & scenario track(s) 启用决策
+### 2.3 判定变更类型 & affected_tracks & scenario track(s) 启用决策
 
 **affected_tracks 推导算法**见 [references/orchestration-model.md](./references/orchestration-model.md)「affected_tracks 推导」段。
 
@@ -292,14 +296,16 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
      - 改动是否涉及"跨模块联调场景"（不是单模块单测试可覆盖的）？
    - **启用 (`true`)**：上述任一为是 → 后续 tasks.md / manifest / scenario.yaml 都会包含该 scenario track 的章节
    - **禁用 (`false`)**：纯单模块改动（如纯文档、纯 SQL 迁移、纯单 API 增删）→ 三个产物都不含该 scenario track 的章节
-   - `--scenario-decisions` 支持 per-track 决策：`"scenario-e2e=true,scenario-perf=false"`。空字符串 / 未指定时所有 scenario track 默认启用（常驻节点）
+   - `--scenario-decisions` 支持 per-track 决策：`"scenario-e2e=true,scenario-perf=false"`
+   - **`--scenario-decisions` 与 `--scenario-reason` 均为强必填**：禁止空字符串、未指定、隐式默认。空值直接报错退出，避免 scenario 轨道决策走隐式默认。
+   - `--scenario-reason` 必填结构化要求：必须包含「跨 role 协作验证? / 新 API 端点? / 跨模块联调?」三问答复（1-2 句），写入 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段
 4. 把 `affected_tracks` 和 `scenario track(s) 决策 + 依据`写入 design.md 末尾的"变更类型判定"留痕小节
 
-更新 TodoWrite 第 5 项。
+更新附录 A 第 7 项。
 
 **design.md 硬约束**：全部列出在 [references/design-templates.md](./references/design-templates.md) 的"## 约束"段，本文件不重复展开。SKILL.md 只承载流程。
 
-### 2d. 生成 tasks.md（脚本外化）
+### 2.4 生成 tasks.md
 
 > **核心变化（v3.2）**：tasks.md 的章节标题骨架、章节编号 N、simple/standard 分流、
 > environment block quote、final-gate 章节、`on_conditions` 评估记录模板——
@@ -307,9 +313,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
 
 **完整生成算法 + 各子章节模板**见 [references/tasks-templates.md](./references/tasks-templates.md)。
 
-更新 TodoWrite 第 5.5 + 第 6 项。
-
-#### 骨架脚本调用
+#### 2.4.1 调用 pg-gen-tasks-skeleton.py
 
 ```bash
 python3 .opencode/skills/pg-propose/scripts/pg-gen-tasks-skeleton.py \
@@ -318,21 +322,21 @@ python3 .opencode/skills/pg-propose/scripts/pg-gen-tasks-skeleton.py \
   --affected-tracks "<track1>,<track2>,..." \
   --environment "<stage1>→<env1>,<stage2>→<env2>,..." \
   --selected-stages "<stage1>,<stage2>,..." \
-  --scenario-decisions "track1=true,track2=auto" \
+  --scenario-decisions "track1=true,track2=true" \
   --scenario-reason "<决策依据，1-2 句>"
 ```
 
 参数来源：
 
-| 参数 | 来源 |
-|------|------|
-| `--change` | 阶段 1b 确认的变更名 |
-| `--proposal-md` | 阶段 2a 产物 |
-| `--affected-tracks` | 阶段 2c 判定结果 |
-| `--environment` | LLM 按 `config.stages[i].environment.selection_rules` 选择 |
-| `--selected-stages` | LLM 根据 on_conditions 推导 |
-| `--scenario-decisions` | **必填**：per-track scenario 启用决策，`"track1=true,track2=auto"`（空=全部 auto） |
-| `--scenario-reason` | **必填**：决策依据（1-2 句，写入 eval.md） |
+| 参数 | 来源 | 必填 |
+|------|------|------|
+| `--change` | 阶段 1.2 确认的变更名 | ✅ |
+| `--proposal-md` | 阶段 2.1 产物 | ✅ |
+| `--affected-tracks` | 阶段 2.3 判定结果 | ✅ |
+| `--environment` | LLM 按 `config.stages[i].environment.selection_rules` 选择 | ✅ |
+| `--selected-stages` | LLM 根据 on_conditions 推导 | ✅ |
+| `--scenario-decisions` | per-track scenario 启用决策（**强必填**，禁止空字符串） | ✅ |
+| `--scenario-reason` | 决策依据（**强必填**，结构化 1-2 句） | ✅ |
 
 脚本输出：
 
@@ -342,81 +346,87 @@ python3 .opencode/skills/pg-propose/scripts/pg-gen-tasks-skeleton.py \
 
 LLM 读取 sections JSON 后，按 `references/tasks-templates.md`「各子章节模板」段填充 body。
 
-#### 填充 body 的硬约束（简版）
+更新附录 A 第 8 项。
 
-- **禁止**修改任何 heading 文本、章节编号 N、stage/track/sub 前缀、标签
-- **禁止**调整章节顺序或跳过任何章节
-- **禁止**删除任何章节（包括 on_conditions 未命中的章节，heading 也保留）
-- **禁止**在 verify 章节的命令步骤后追加具体 shell 命令
+#### 2.4.2 LLM 填充 tasks.md body
 
-### 2e. execution-manifest.yaml
+按 `references/tasks-templates.md`「各子章节模板」段填充 body。**禁止**：
 
-更新 TodoWrite 第 8 项。
+- 修改任何 heading 文本、章节编号 N、stage/track/sub 前缀、标签
+- 调整章节顺序或跳过任何章节
+- 删除任何章节（包括 on_conditions 未命中的章节，heading 也保留）
+- 在 verify 章节的命令步骤后追加具体 shell 命令
+
+本子步骤完成后，附录 A 第 8 项整体标记完成（2.4.1 + 2.4.2 共享一项）。
+
+### 2.5 生成 execution-manifest.yaml
 
 LLM **不直接写** execution-manifest.yaml，通过 CLI 工具基于 tasks.md 自动生成。
 
-**步骤**：
-
-1. 生成 manifest：
-   ```bash
-   python3 .opencode/skills/pg-propose/scripts/pg-gen-manifest.py CHANGE_NAME
-   ```
-2. （文件存在性快速检查，仅 `ls` 级别，**不调用 pg-validate-proposal.py**）：
-   - 确认 `execution-manifest.yaml` 已被第 1 步生成
-3. 校验统一推迟到阶段 2g 三产物一致性校验。
+```bash
+python3 .opencode/skills/pg-propose/scripts/pg-gen-manifest.py CHANGE_NAME
+```
 
 **产物依赖关系**：
-- manifest 依赖 tasks.md（heading 格式 + 章节完整性），在 2e 完成后方可调用
+- manifest 依赖 tasks.md（heading 格式 + 章节完整性），在 2.4 完成后方可调用
 - manifest 的 `scenario-<track>.enabled` 由 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段决定（SSOT，禁用时不进入 manifest）
 
-### 2f. 条件生成 scenario.yaml
+更新附录 A 第 9 项。
 
-更新 TodoWrite 第 9 项。
+### 2.6 条件生成 scenario-<track>.yaml
 
 **触发条件**：仅当 `on-conditions-eval.md` 中 `scenario_tracks_decision` 段有至少一个 track 的 `enabled = true` 时执行。
 
-**步骤**：
+#### 2.6.1 调用 pg-gen-scenario.py 生成 skeleton
 
-1. **读取 env-description.yaml 作为 scenario 编写输入**：
+**v6 不再需要 `--env-summary` 参数**，env-description.yaml 已包含全部信息：
 
-   v6 新流程：从阶段 1d.5 生成的 `.pg/changes/<change-id>/env-description.yaml` 中，针对 `--environment` 指定的目标 env，提取以下信息并写入 LLM 工作记忆：
+```bash
+python3 .opencode/skills/pg-propose/scripts/pg-gen-scenario.py CHANGE_NAME
+```
 
-   - **infra_services**：可用基础设施（DB / Cache / MQ / K8s 等），包括 `instances[].id` / `endpoint` / `version` / `reachable`
-   - **business_systems**：业务系统（上下游 / mock），包括 `endpoints[].url` / `auth`
-   - **data_resources**：数据资源状态（重点关注 `state.status` = empty/seeded/configured/partial）
-   - **config_resources**：配置 / 凭证 / TLS 证书的位置与编码
-   - **runtime_environment**：OS / DNS / 网络配置
-   - **external_dependencies**：外部依赖与 fallback 策略
-   - **relations**：资源间依赖关系
+脚本自动：
+- 读 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段（SSOT）
+- 遍历每个 enabled=true 的 track，写 `scenario-<track-id>.yaml` skeleton（LLM 必填 Scenario 内容）
+- 无 enabled track → no-op（不写文件）
 
-   scenario given 必须**直接引用** env-description.yaml 中已声明的具体资源路径，例如：
-   - `infra_services[name=kubernetes].instances[0].id` 为 `kuboard-dev-1-15`
-   - `data_resources[name=kb_helm_chart_repo].state.status` 为 `empty`（scenario 必须显式声明由前置 scenario 创建）
+#### 2.6.2 LLM 填充 scenario body
 
-2. 调用脚本（**v6 不再需要 `--env-summary` 参数**，env-description.yaml 已包含全部信息）：
+读取 env-description.yaml 作为 scenario 编写输入：
 
-   ```bash
-   python3 .opencode/skills/pg-propose/scripts/pg-gen-scenario.py CHANGE_NAME
-   ```
-   脚本自动：
-   - 读 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段（SSOT）
-   - 遍历每个 enabled=true 的 track，写 `scenario-<track-id>.yaml` skeleton（LLM 必填 Scenario 内容）
-   - 无 enabled track → no-op（不写文件）
+从阶段 1.5 生成的 `.pg/changes/<change-id>/env-description.yaml` 中，针对 `--environment` 指定的目标 env，提取以下信息并写入 LLM 工作记忆：
 
-3. LLM 填充 scenario.yaml：将 skeleton 中的 S-example 替换为真实 Scenario（**given/then 必须引用 env-description.yaml 中的具体资源**）
-4. （文件存在性快速检查，仅 `ls` 级别，**不调用 pg-validate-proposal.py**）：
-   - 确认所有 `scenario-<track>.yaml` 已生成
-5. 校验统一推迟到阶段 2g。
+- **infra_services**：可用基础设施（DB / Cache / MQ / K8s 等），包括 `instances[].id` / `endpoint` / `version` / `reachable`
+- **business_systems**：业务系统（上下游 / mock），包括 `endpoints[].url` / `auth`
+- **data_resources**：数据资源状态（重点关注 `state.status` = empty/seeded/configured/partial）
+- **config_resources**：配置 / 凭证 / TLS 证书的位置与编码
+- **runtime_environment**：OS / DNS / 网络配置
+- **external_dependencies**：外部依赖与 fallback 策略
+- **relations**：资源间依赖关系
 
-### 2g. 三产物一致性校验（**唯一**校验点）
+scenario given 必须**直接引用** env-description.yaml 中已声明的具体资源路径，例如：
+- `infra_services[name=kubernetes].instances[0].id` 为 `kuboard-dev-1-15`
+- `data_resources[name=kb_helm_chart_repo].state.status` 为 `empty`（scenario 必须显式声明由前置 scenario 创建）
 
-更新 TodoWrite 第 10 项。
+**scenario 占位符硬约束**：将 skeleton 中的 S-example 替换为真实 Scenario（**given/then 必须引用 env-description.yaml 中的具体资源**）。若 2.6.2 未完成（占位符未替换），阶段 3 校验器会报 `scenario_placeholder_unfilled` 错误。
+
+详见 [附录 C](#附录-cscenarioyaml-生成指引)。
+
+更新附录 A 第 10 项。
+
+---
+
+## 阶段 3：校验（**唯一**校验点）
+
+> **本阶段是 propose 阶段**唯一**的文件存在性 + 占位符 + 三产物一致性校验点。** 阶段 2 内不再做 ls / 占位符预校验，全部推迟到此。
+
+### 3.1 三产物一致性校验
 
 ```bash
 python3 .opencode/skills/pg-propose/scripts/pg-validate-proposal.py manifest CHANGE_NAME
 ```
 
-**v3.5+ 起**：本步骤是 propose 阶段**唯一**的产物校验点，原 2e/2f 内的两次校验已合并到此。
+**v3.5+ 起**：本步骤是 propose 阶段**唯一**的产物校验点，原阶段 2 内 2.5/2.6 的两次校验已合并到此。
 
 校验覆盖：
 - tasks.md ↔ manifest section 引用一致性
@@ -424,24 +434,37 @@ python3 .opencode/skills/pg-propose/scripts/pg-validate-proposal.py manifest CHA
 - manifest ⟷ project.yaml environments 引用
 - tasks.md / manifest / scenario-<track>.yaml 三产物与 `on-conditions-eval.md` 的 `scenario_tracks_decision` SSOT 一致
 - scenario-<track>.yaml 占位符是否已被 LLM 填充（v3.7 新增，详见 [references/scenario-format.md] 中的 placeholder 协议）
+- 所有 scenario track 启用的产物文件存在性 + scenario track 禁用的产物文件不存在性
 
-**失败处理（最多 2 轮）**：
+更新附录 A 第 11 项。
+
+### 3.2 校验失败处理（最多 2 轮）
+
 - `manifest_section_missing` → 修正 tasks.md 章节 heading
 - `manifest_track_no_phases` → 补充 standard track 缺少的 phase 章节
 - `manifest_track_type_mismatch` → 确认 project.yaml 中 track type 正确
 - `manifest_environment_invalid` → 确认环境名在 project.yaml environments 中
 - `scenario_yaml_missing` → 跑 pg-gen-scenario.py 生成（scenario track 启用时）
 - `scenario_yaml_should_not_exist` → 删除 scenario-<track>.yaml（scenario track 禁用时）
-- `scenario_yaml_orphan` → 删除 scenario-<track>.yaml 或重新跑 2d-2f
-- `scenario_placeholder_unfilled` → LLM 必填段未替换
+- `scenario_yaml_orphan` → 删除 scenario-<track>.yaml 或重新跑 2.4-2.6
+- `scenario_placeholder_unfilled` → 回到 2.6.2 补填 LLM Scenario body
 - 修正后回到对应产物生成步
 - 第 3 轮仍失败 → workflow_failed，提示用户重跑 pg-propose 重新生成产物
 
----
+### 3.3 scenario track 一致性约束（SSOT）
 
-## 阶段三：机械校验（v0.8.3 替代自审）
+scenario track 是常驻 track，但 LLM 仍可在阶段二 2.3 决策为某个 track 设置 `enabled = false`（纯单模块改动）。**但三个产物（tasks.md / manifest / scenario-<track>.yaml）必须一致**：
 
-**v0.8.4 起**：`pg-validate-proposal.py` 已集成 3 条新规则，替代原 6 类 LLM 自审 + review-notes 决策表。`review-notes.md` 不再生成。
+| `scenario_tracks_decision` | tasks.md scenario 章节 | manifest scenario track | scenario-<track>.yaml |
+|---------------------------|------------------------|------------------------|----------------------|
+| track-A: `enabled=true` | ✅ 存在 | ✅ 存在 + `enabled=true` + `scenario_yaml` 字段 | ✅ `scenario-track-A.yaml` 存在 |
+| track-B: `enabled=false` | ❌ 不存在 | ❌ 不存在 | ❌ 不存在 |
+
+违反时 `pg-validate-proposal.py` 会报 `scenario_yaml_missing` / `scenario_yaml_should_not_exist` / `scenario_yaml_orphan` 错误，必须修复。
+
+### 3.4 v0.8.4 机械校验（替代原 review-notes 自审）
+
+`pg-validate-proposal.py` 已集成 3 条新规则，替代原 6 类 LLM 自审 + review-notes 决策表。`review-notes.md` 不再生成。
 
 **校验规则**（详见 `pg-validate-proposal.py` `_validate_v0_8_3_rules` 段）：
 
@@ -451,7 +474,7 @@ python3 .opencode/skills/pg-propose/scripts/pg-validate-proposal.py manifest CHA
 | `scenario_yaml_referenced` | tasks.md body 引用 scenario-*.yaml 路径 | WARN |
 | `tasks_md_section_duplicate` / `tasks_md_section_skipped` | 章节编号重号 / 跳号 | WARN |
 
-WARN 不阻塞 build，但会显著提示 LLM 在阶段 2g 后重点审视。
+WARN 不阻塞 build，但会显著提示 LLM 在阶段 3 校验后重点审视。
 
 **5 项 common decisions 固化**（替代 review-notes.md 决策表）：
 
@@ -465,47 +488,40 @@ WARN 不阻塞 build，但会显著提示 LLM 在阶段 2g 后重点审视。
 
 修改路径：直接改 `pg-gen-tasks-skeleton.py` 顶部 `COMMON_DECISIONS` 常量块，重跑 `pg-gen-tasks-skeleton.py` 生效。
 
-**阶段三行为契约**：
+**阶段 3 行为契约**：
 
 - **禁止**使用 `question` tool 中断流程
 - **禁止**自动修改 proposal/design/tasks 主体内容
 - **禁止**手工修改 `execution-manifest.yaml` 的 `enabled` / `reason` / `on_conditions_eval` 字段
   - 如需变更，**必须重跑** `pg-gen-tasks-skeleton.py` + `pg-gen-manifest.py` + `pg-gen-scenario.py`，让 SSOT 自动同步
 - **禁止**在 scenario track 启用时手工编辑 `tasks.md` 删除 scenario 章节
-   - 必须改 `--scenario-decisions "track=false"` 重跑 2d
+   - 必须改 `--scenario-decisions "track=false"` 重跑 2.4
 - **唯一允许的产物修改**：纯格式问题（markdown 标题层级错乱、代码块语言标记缺失、明显笔误）
-- 校验完成后更新 TodoWrite 第 10 项为完成
-
-### scenario track 一致性约束
-
-scenario track 是常驻 track，但 LLM 仍可在阶段二 2c 决策为某个 track 设置 `enabled = false`（纯单模块改动）。**但三个产物（tasks.md / manifest / scenario-<track>.yaml）必须一致**：
-
-| `scenario_tracks_decision` | tasks.md scenario 章节 | manifest scenario track | scenario-<track>.yaml |
-|---------------------------|------------------------|------------------------|----------------------|
-| track-A: `enabled=true` | ✅ 存在 | ✅ 存在 + `enabled=true` + `scenario_yaml` 字段 | ✅ `scenario-track-A.yaml` 存在 |
-| track-B: `enabled=false` | ❌ 不存在 | ❌ 不存在 | ❌ 不存在 |
-
-违反时 `pg-validate-proposal.py` 会报 `scenario_yaml_missing` / `scenario_yaml_should_not_exist` / `scenario_yaml_orphan` 错误，必须修复。
+- 校验完成后更新附录 A 第 11 项为完成
 
 ---
 
-## 阶段四：最终确认
+## 阶段 4：汇报
 
-更新 TodoWrite 全部标记为完成。直接向用户展示产物摘要：
+### 4.1 展示产物摘要给用户
 
-- 变更名称、产物位置、已创建文件（5+ 个产物）：
+直接向用户展示产物摘要：
+
+- **变更名称、产物位置、已创建文件**（6 个产物）：
   - `.pg/changes/<change>/proposal.md`（必填）
   - `.pg/changes/<change>/design.md`（必填）
   - `.pg/changes/<change>/tasks.md`（必填）
   - `.pg/changes/<change>/execution-manifest.yaml`（必填）
   - `.pg/changes/<change>/scenario-<track>.yaml`（**每个启用**的 scenario track 一个）
   - `.pg/changes/<change>/1-propose-review/on-conditions-eval.md`（必填）
-- 报告 `scenario_tracks_decision` 状态（从 on-conditions-eval.md 读取）：
+
+- **scenario_tracks_decision 状态**（从 on-conditions-eval.md 读取）：
   - 每个 scenario track 的 `enabled` 状态：`{track_id}: {enabled/disabled}`
   - enabled track → tasks.md / manifest / scenario-<track>.yaml 三产物均含对应章节
   - disabled track → 上述三产物均不含该 track（避免冗余）
-- 机械校验结果：
-  - `pg-validate-proposal.py manifest <change>` 返回 `OK: all manifest checks passed`（含 v0.8.3 三条规则）
+
+- **机械校验结果**：
+  - `pg-validate-proposal.py manifest <change>` 返回 `OK: all manifest checks passed`（含 v0.8.4 三条规则）
   - 任何 WARN 项应记录到 LLM context 但不阻塞
 
 告知用户：
@@ -514,9 +530,11 @@ scenario track 是常驻 track，但 LLM 仍可在阶段二 2c 决策为某个 t
 - 如需调整 track 启用决策，修改 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段（不建议，需重跑三个生成脚本）
 - 下一步可执行 `/3-pg-build {change-name}` 开始实现
 
+更新附录 A 第 12 项为完成。
+
 ---
 
-## 产物生成指导原则
+## 附录产物生成指导原则
 
 - `context`（来自所有 AGENTS.md）和 `propose.guidelines`（来自 config.yaml）是给你的约束，不可复制到产物中
 - 每个产物文件写入后验证文件存在
@@ -524,18 +542,45 @@ scenario track 是常驻 track，但 LLM 仍可在阶段二 2c 决策为某个 t
 
 ---
 
-## 产物清单（硬约束）
+## 附录 A：TodoWrite 12 项清单
 
-每个 change 在 `.pg/changes/<change>/` 下生成 5+ 个产物文件（前 4 个 + 1 评审 + N 个条件性 scenario-<track>.yaml，N=启用 scenario track 数）：
+> 本清单与阶段 1-4 编号一一对应。LLM agent 在每个阶段步骤完成后立即更新对应项状态。
+
+```
+ 1. [待开始] 1.3 创建变更目录（含 1-propose-review 子目录）
+ 2. [待开始] 1.4 加载项目上下文（find AGENTS.md + 通读提取 context/rules）
+ 3. [待开始] 1.5 生成环境描述（env-description.yaml，describe_env hook）
+ 4. [待开始] 1.7 加载 propose.injections.proposal（结构化规则注入）
+ 5. [待开始] 2.1 生成 proposal.md
+ 6. [待开始] 2.2 生成 design.md（含"环境限制与验证策略"段）
+ 7. [待开始] 2.3 判定 affected_tracks & scenario track(s) 启用决策（--scenario-decisions + --scenario-reason **强必填**）
+ 8. [待开始] 2.4 生成 tasks.md（2.4.1 调用 pg-gen-tasks-skeleton.py + 2.4.2 LLM 填充 body）
+ 9. [待开始] 2.5 生成 execution-manifest.yaml（pg-gen-manifest.py）
+10. [待开始] 2.6 条件生成 scenario-<track>.yaml（2.6.1 调用 pg-gen-scenario.py + 2.6.2 LLM 填充 Scenario body + covers 引用 design.md V-*）
+11. [待开始] 3.1 三产物一致性校验（pg-validate-proposal.py，**唯一**校验点）
+12. [待开始] 4.1 展示产物摘要给用户
+```
+
+> **与正文阶段的映射关系**：
+> - 阶段 1.1（TodoWrite 初始化）本身是创建本清单的动作，不计入 12 项
+> - 阶段 1.2（确认变更名称）属于用户交互，不需要 TodoWrite
+> - 阶段 1.6（获取管线配置）属于过渡步骤，无产物，不计入 12 项
+> - 阶段 2.4 / 2.6 拆分后，每个子步骤共享一个 TodoWrite 项（2.4 → 8, 2.6 → 10），完成时同时更新
+
+---
+
+## 附录 B：产物清单（硬约束）
+
+每个 change 在 `.pg/changes/<change>/` 下生成 6 个产物文件（5 必填 + 1 评审 + N 个条件性 scenario-<track>.yaml，N=启用 scenario track 数）：
 
 | 产物 | 写入位置 | 何时生成 | 必填 |
 |------|---------|---------|------|
-| `proposal.md` | `.pg/changes/<change>/proposal.md` | 阶段 2a | ✅ 必填 |
-| `design.md` | `.pg/changes/<change>/design.md` | 阶段 2b | ✅ 必填 |
-| `tasks.md` | `.pg/changes/<change>/tasks.md` | 阶段 2d（pg-gen-tasks-skeleton.py 生成，含 scenario 章节当且仅当至少一个 scenario track 启用） | ✅ 必填 |
-| `execution-manifest.yaml` | `.pg/changes/<change>/execution-manifest.yaml` | 阶段 2e（pg-gen-manifest.py 生成，含 scenario track 当且仅当对应 track 启用） | ✅ 必填 |
-| `on-conditions-eval.md` | `.pg/changes/<change>/1-propose-review/on-conditions-eval.md` | 阶段 2d（pg-gen-tasks-skeleton.py 生成，含 `scenario_tracks_decision` SSOT 段） | ✅ 必填 |
-| `scenario-<track>.yaml` | `.pg/changes/<change>/scenario-<track>.yaml` | 阶段 2f（pg-gen-scenario.py 生成，**每个启用**的 scenario track 一个文件） | ⚠️ 条件必填 |
+| `proposal.md` | `.pg/changes/<change>/proposal.md` | 阶段 2.1 | ✅ 必填 |
+| `design.md` | `.pg/changes/<change>/design.md` | 阶段 2.2 | ✅ 必填 |
+| `tasks.md` | `.pg/changes/<change>/tasks.md` | 阶段 2.4（pg-gen-tasks-skeleton.py 生成，含 scenario 章节当且仅当至少一个 scenario track 启用） | ✅ 必填 |
+| `execution-manifest.yaml` | `.pg/changes/<change>/execution-manifest.yaml` | 阶段 2.5（pg-gen-manifest.py 生成，含 scenario track 当且仅当对应 track 启用） | ✅ 必填 |
+| `on-conditions-eval.md` | `.pg/changes/<change>/1-propose-review/on-conditions-eval.md` | 阶段 2.4.1（pg-gen-tasks-skeleton.py 生成，含 `scenario_tracks_decision` SSOT 段） | ✅ 必填 |
+| `scenario-<track>.yaml` | `.pg/changes/<change>/scenario-<track>.yaml` | 阶段 2.6（pg-gen-scenario.py 生成，**每个启用**的 scenario track 一个文件） | ⚠️ 条件必填 |
 
 ### 三产物一致性约束（v3.6）
 
@@ -545,12 +590,14 @@ scenario track 是常驻 track，但 LLM 仍可在阶段二 2c 决策为某个 t
 - `pg-gen-tasks-skeleton.py` / `pg-gen-manifest.py` / `pg-gen-scenario.py` 三个脚本都从 SSOT 派生
 - `pg-validate-proposal.py` 校验三产物与 SSOT 一致
 
-### scenario.yaml 生成指引（v3.6+，仅当 scenario track 启用）
+---
 
-**SSOT**：scenario-<track>.yaml 是 scenario-execute agent 的唯一输入，**禁止** scenario-execute agent 重写或修改。
-修改需重跑 `pg-gen-scenario.py` 重新生成 skeleton。
+## 附录 C：scenario.yaml 生成指引（v3.6+，仅当 scenario track 启用）
 
-**生成路径**：阶段 2f 调用 `pg-gen-scenario.py` 自动写盘 `.pg/changes/<change>/scenario-<track>.yaml` skeleton（LLM 必填 Scenario 内容）。每个启用的 scenario track 生成一个独立文件。
+> **SSOT**：scenario-<track>.yaml 是 scenario-execute agent 的唯一输入，**禁止** scenario-execute agent 重写或修改。
+> 修改需重跑 `pg-gen-scenario.py` 重新生成 skeleton。
+
+**生成路径**：阶段 2.6.1 调用 `pg-gen-scenario.py` 自动写盘 `.pg/changes/<change>/scenario-<track>.yaml` skeleton（LLM 必填 Scenario 内容）。每个启用的 scenario track 生成一个独立文件。
 
 **schema**（YAML）：
 
@@ -604,7 +651,7 @@ scenarios:
 
 ---
 
-## ⛔ 禁令
+## 附录 D：⛔ 禁令
 
 下列操作在**整个提案阶段**均被禁止：
 
@@ -614,7 +661,17 @@ scenarios:
 
 ---
 
-## 文档变更记录
+## 附录 E：文档变更记录
+
+- **v1.0.0（2026-07-29）**：大重构——编号体系 + 同步优化。
+  - **编号体系重构**：阶段一 `1a/1b/.../1d.5/1e/1f` + 阶段二 `2a/2b/.../2g` + 阶段三/四 → 体系 A `阶段 1-4` + `附录 A-E`，纯数字编号。消除 1d.5 补丁型编号与 5.5 幽灵编号。
+  - **TodoWrite 扩容**：10 项 → 12 项，与阶段编号一一对应。修复旧"13 项宣称 / 10 项列出"对齐失败。
+  - **阶段 2 子步骤拆分**：2.4 → 2.4.1（脚本调用）+ 2.4.2（LLM body 填充）；2.6 → 2.6.1（脚本调用）+ 2.6.2（LLM body 填充）。避免占位符漏填被校验器拦截。
+  - **阶段 3 强化**：明示"**唯一**校验点"，删除旧 2.5/2.6 内冗余 `ls` 步骤并入 `pg-validate-proposal.py`。
+  - **scenario-decisions 强必填**：删除"空字符串默认启用"隐式行为；`--scenario-decisions` 与 `--scenario-reason` 均为必填，scenario-reason 需含结构化三问答复。
+  - **1.5 段首强化**：明示 env-description.yaml Context 注入契约，约束阶段 2 全产物写作。
+  - **版本号表述统一**：metadata.version 0.9.0 → 1.0.0；内部子版本号 v3.x 仅在变更记录保留。
+  - **章节物理位置**：产物清单 + 三产物一致性约束 + scenario.yaml 生成指引 + 禁令 + 变更记录统一移至附录。
 
 - **v0.9.0（2026-07-27）**：scenario 环境一致性强化。
   - 阶段 2f 新增步骤 2「生成环境能力摘要」（LLM 强制步骤）：从 env-capability.yaml 提取目标 env 的 host/services/缺失能力，输出 `[ENV-SUMMARY]` 作为 scenario given/then 的硬约束
@@ -623,7 +680,7 @@ scenarios:
   - `pg-gen-scenario.py` 新增 `--env-summary` 可选参数：skeleton 中注入 `[ENV-CONSTRAINT]` YAML 注释块
   - `pg-validate-proposal.py` 新增 `scenario_given_exceeds_env_capacity` / `scenario_given_unknown_host_id` 两条 warning 级规则（兜底拦截）
 
-- **v0.8.3（2026-07-27）**：删除 review-notes 自审 + pg-propose-refine 流程。
+- **v0.8.4（2026-07-27）**：删除 review-notes 自审 + pg-propose-refine 流程。
   - 删除阶段三 6 类自审清单 + 4a/4b 智能分流 + review-notes.md 产物
   - 删除 `pg-propose-refine/` SKILL 目录、命令文件、`.opencode/` 软链接
   - 5 项 common decisions 固化为 `pg-gen-tasks-skeleton.py` 常量块
