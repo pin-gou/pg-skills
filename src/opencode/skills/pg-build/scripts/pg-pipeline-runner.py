@@ -100,8 +100,8 @@ def main() -> None:
     if command == "env-action":
         ea_parser = argparse.ArgumentParser(prog="pg-pipeline-runner.py env-action", add_help=False)
         ea_parser.add_argument("change", nargs="?", default=change)
-        ea_parser.add_argument("--phase", required=True, choices=("prepare_env", "clean_env"),
-                               help="环境 hook 阶段 (prepare_env|clean_env)")
+        ea_parser.add_argument("--phase", required=True, choices=("prepare_env", "clean_env", "restart"),
+                               help="环境 hook 阶段 (prepare_env|clean_env|restart)")
         ea_parser.add_argument("--stage", required=True, help="阶段名 (如 dev)")
         ea_parser.add_argument("--env", required=True, help="环境名 (如 dev-local)")
         ea_parser.add_argument("--timeout", type=int, default=None, help="hook 超时秒数")
@@ -117,7 +117,7 @@ def main() -> None:
     if command == "env-action-result":
         ear_parser = argparse.ArgumentParser(prog="pg-pipeline-runner.py env-action-result", add_help=False)
         ear_parser.add_argument("change", nargs="?", default=change)
-        ear_parser.add_argument("--phase", required=True, choices=("prepare_env", "clean_env"),
+        ear_parser.add_argument("--phase", required=True, choices=("prepare_env", "clean_env", "restart"),
                                 help="环境 hook 阶段")
         ear_parser.add_argument("--stage", required=True, help="阶段名 (如 dev)")
         ear_parser.add_argument("--env", required=True, help="环境名 (如 dev-local)")
