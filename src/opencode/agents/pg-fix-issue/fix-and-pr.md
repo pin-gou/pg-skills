@@ -65,12 +65,12 @@ git checkout -b "$BRANCH_NAME" "$DEFAULT_BRANCH" || { echo ">>>EARLY_EXIT status
 skill: pg-fix-issue
 ```
 
-按 SKILL 执行 Phase 0-6，但注意**非交互约束**：
+按 SKILL 工作流程执行，**非交互覆盖**：
 
-- ❌ 禁止 question 工具 — 自动选 config.yaml 第一个 env
+- ❌ 跳过工作流程步骤 2「展示方案」— 直接修复，不等用户确认
+- ❌ 禁止 question 工具 — 自动选 environments 第一个 env
 - ❌ 不询问 prepare/clean
-- ❌ 不询问复现步骤确认
-- ❌ ESCALATE 不询问"再给一次机会"，直接放弃
+- ❌ 验证失败不询问"再给一次机会"，直接放弃
 
 **修复完成后**，输出 RESULT 块：
 

@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://pg-skills.local/spec/project.schema.json",
   "title": "pg-skills project.yaml",
-  "description": "项目级 SSOT 配置. v3.0: 4 段结构 (modules / environments / tracks / stages) + fix_issue + regression. environments 下每个 role 带 lifecycle actions (start/stop), environment 级带 cross-role orchestration actions (health/verify). 任何 per-change 信息(verify 任务)都应写到 tasks.md, 不写到这里. dev-isolated stage 通过 environment.required:false 跳过部署, 仅跑 modules.<m>.test.unit. regression 段定义 pg-regression 跑的测试套件, 完全显式声明, 与 tracks/stages 解耦.",
+  "description": "项目级 SSOT 配置. v3.0: 4 段结构 (modules / environments / tracks / stages) + regression. environments 下每个 role 带 lifecycle actions (start/stop), environment 级带 cross-role orchestration actions (health/verify). 任何 per-change 信息(verify 任务)都应写到 tasks.md, 不写到这里. dev-isolated stage 通过 environment.required:false 跳过部署, 仅跑 modules.<m>.test.unit. regression 段定义 pg-regression 跑的测试套件, 完全显式声明, 与 tracks/stages 解耦.",
   "type": "object",
   "required": ["schema", "modules", "environments", "tracks", "stages"],
   "additionalProperties": false,
@@ -108,7 +108,6 @@
       },
       "additionalProperties": false
     },
-    "fix_issue": { "$ref": "#/definitions/fix_issue" },
     "regression": { "$ref": "#/definitions/regression" }
   },
 
@@ -407,126 +406,9 @@
       }
     },
 
-    "fix_issue": {
-      "type": "object",
-      "description": "pg-fix-issue SKILL 专用配置. 与 tracks.<id>.max_fix_retries 区分: 后者描述 subagent 重试, 本段描述主 agent 整体迭代.",
-      "additionalProperties": false,
-      "properties": {
-        "max_iteration_count": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 5,
-          "description": "主 agent 整体修复迭代上限. 每轮: 跑 Phase 1 调用链路分析 + Phase 2 规划 + Phase 4 修复 + Phase 5 验证. 超限进入 ESCALATE 3 选项 menu."
-        },
-        "partial_success_threshold": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0.7,
-          "description": "success_criteria 通过率低于此值算修复失败 (即使无 failure_criteria 触发). 0=禁用此阈值 (允许任何部分成功)."
-        },
-        "ask_environment_choice": {
-          "type": "boolean",
-          "default": true,
-          "description": "Phase 3 是否用 question 询问用户选择 environment. environment 列表从 config.yaml 顶层 environments 动态读取, 不预置."
-        },
-        "ask_prepare_env": {
-          "type": "boolean",
-          "default": true,
-          "description": "Phase 3 是否询问用户在修复前执行 environments.<env>.prepare_env. 重置 services + db + agent."
-        },
-        "ask_clean_env": {
-          "type": "boolean",
-          "default": true,
-          "description": "Phase 3 是否询问用户在修复后执行 environments.<env>.clean_env. 停止 services + 清理 db 状态."
-        },
-        "allow_manual_verification": {
-          "type": "boolean",
-          "default": true,
-          "description": "executor 全部失败时是否允许用户手动验证 (curl / virsh / 浏览器). 开启则 ESCALATE menu 增加'手动验证后回报'选项."
-        },
-        "escalation_artifacts": {
-          "type": "array",
-          "items": {
-            "type": "string",
-            "enum": ["diag_logs", "call_chain_analysis", "phase2_output", "executor_json_history", "git_diff_state"]
-          },
-          "description": "ESCALATE 时保留的诊断产物清单, 切人工修复时输出."
-        },
-        "default_verify_level": {
-          "type": "string",
-          "default": "L1",
-          "description": "Phase 3 默认 verify_level (e.g. L0=单元 / L1=集成 / L2=E2E). Phase 3 默认读取此字段, 用户可覆盖. 配置值需与 pg-fix-issue 接受的 level 名一致."
-        },
-        "default_completion_threshold": {
-          "type": "number",
-          "minimum": 0,
-          "maximum": 1,
-          "default": 0.8,
-          "description": "默认达成度阈值. 修复迭代用此阈值判断 success_criteria 通过率. 0~1, 推荐 0.7~0.9."
-        },
-        "default_sub_problem_strategy": {
-          "type": "string",
-          "default": "auto_split",
-          "description": "子问题处理策略. 常见值: auto_split=自动拆分子问题; defer=延后到下个迭代; abort=中止. Phase 6 解释此值."
-        },
-        "sub_problem_split_trigger": {
-          "type": "object",
-          "description": "子问题分拆触发条件. Phase 6 读取此字段判断是否分拆.",
-          "additionalProperties": false,
-          "properties": {
-            "min_exposed_problems": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 3,
-              "description": "暴露问题数达到此阈值触发分拆."
-            },
-            "max_completion_rate": {
-              "type": "number",
-              "minimum": 0,
-              "maximum": 1,
-              "default": 0.5,
-              "description": "完成率低于此值时触发分拆."
-            }
-          }
-        },
-        "termination_conditions": {
-          "type": "object",
-          "description": "强制终止条件. Phase 6 读取此字段决定是否中止迭代.",
-          "additionalProperties": false,
-          "properties": {
-            "rate_stagnant_iterations": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 2,
-              "description": "连续 N 轮达成度无提升则终止."
-            },
-            "net_regression_max": {
-              "type": "integer",
-              "minimum": 0,
-              "default": 0,
-              "description": "净回归 (新引入失败数) 超过此值则终止."
-            },
-            "problem_explosion_threshold": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 10,
-              "description": "暴露问题数超过此值则终止."
-            },
-            "same_root_cause_threshold": {
-              "type": "integer",
-              "minimum": 1,
-              "default": 3,
-              "description": "同一根因反复出现 N 次则终止."
-            }
-          }
-        }
-      }
-    },
-
     "regression": {
       "type": "object",
-      "description": "pg-regression SKILL 专用配置. 完全显式声明 (无全局默认), 每个 suite 独立声明 env / required_roles / module / test_keys. 与 tracks / stages / fix_issue 解耦.",
+      "description": "pg-regression SKILL 专用配置. 完全显式声明 (无全局默认), 每个 suite 独立声明 env / required_roles / module / test_keys. 与 tracks / stages 解耦.",
       "additionalProperties": false,
       "properties": {
         "suite": {

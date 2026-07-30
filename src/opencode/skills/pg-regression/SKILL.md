@@ -15,7 +15,7 @@ metadata:
 
 ### 1. .pg/project.yaml 配置
 
-`pg-regression` 只依赖 `modules` / `environments` / `regression` 三段，与 `tracks` / `stages` / `fix_issue` **完全解耦**。
+`pg-regression` 只依赖 `modules` / `environments` / `regression` 三段，与 `tracks` / `stages` **完全解耦**。
 
 ```yaml
 regression:

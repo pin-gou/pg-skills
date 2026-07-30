@@ -233,9 +233,6 @@ stages:
     environment:
       required: false
     description: "Placeholder stage; replace after defining real modules."
-
-fix_issue:
-  max_iteration_count: 5
 """
 
 

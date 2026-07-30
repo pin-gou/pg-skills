@@ -55,11 +55,10 @@ CONFIG_PATH = _resolve_config_path()
 
 # Each workflow only gets the top-level config keys it needs.
 # Add new entries when creating pg-* SKILLs.
-# v3.0: 4 段新结构 (modules / environments / tracks / stages) + fix_issue.
+# v3.0: 4 段新结构 (modules / environments / tracks / stages).
 # deployments 已合并到 environments.actions per-role + cross-role 中.
 # pipeline / testSuites / port / rebuild_and_restart / health_check 已废弃,
 # 不再列入任何 workflow.
-# fix_issue 段仅 pg-fix-issue 工作流可见, 描述主 agent 整体修复迭代 (与 tracks.max_fix_retries 区分).
 WORKFLOW_KEYS = {
     "pg-build": ["modules", "environments", "tracks", "stages",
                           "git", "build"],
@@ -70,11 +69,11 @@ WORKFLOW_KEYS = {
     # pg-invoke-hook.py invoke-hook 渲染, parser 不再预渲染.
     # v3.2: 渲染从 pg-pipeline-runner.py invoke-hook 抽到 runtime 层独立 CLI
     # pg-invoke-hook.py (pg-pipeline-runner.py 保留 thin wrapper 兼容).
-    "pg-fix-issue": ["modules", "environments", "tracks", "stages", "fix_issue"],
+    "pg-fix-issue": ["modules", "environments", "tracks", "stages"],
     "pg-quick-build": ["modules", "environments", "tracks", "stages", "git"],
     "pg-regression": ["modules", "environments", "regression"],
     # pg-agent: LLM agent 通用的 SSOT 查询入口. 只暴露 modules + environments,
-    # 不暴露 tracks / stages / fix_issue 等 skill 内部状态. agent 走 --resolve-* /
+    # 不暴露 tracks / stages 等 skill 内部状态. agent 走 --resolve-* /
     # --key / --prefix 取细粒度值, 不要用带 skill 名的 workflow (那是给 skill
     # 编排器用的, agent 用会被迫看到噪声).
     "pg-agent": ["modules", "environments"],

@@ -56,11 +56,11 @@ echo "当前分支: $CURRENT"
 skill: pg-fix-issue
 ```
 
-按 SKILL 执行 Phase 0-6，**非交互约束**：
-- ❌ 禁止 question 工具 — 自动选 config.yaml 第一个 env
+按 SKILL 工作流程执行，**非交互覆盖**：
+- ❌ 跳过工作流程步骤 2「展示方案」— 直接修复，不等用户确认
+- ❌ 禁止 question 工具 — 自动选 environments 第一个 env
 - ❌ 不询问 prepare/clean
-- ❌ 不询问复现步骤确认
-- ❌ ESCALATE 不询问"再给一次机会"
+- ❌ 验证失败不询问"再给一次机会"，直接放弃
 
 ### 3. commit
 
