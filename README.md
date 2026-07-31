@@ -148,7 +148,7 @@ pg-skills/
 
 | 步骤 | 命令 / skill | 说明 |
 |------|-------------|------|
-| 直接编码 | `/2b-pg-quick-build` | 不生成 proposal/design/tasks，直接构建代码与测试 |
+| 直接编码 | `/2b-pg-quick-build` | 不生成 proposal/design/tasks，直接构建代码与测试。v2.1 起可选调 `describe_env` 做 V-* 可达性过滤（白名单触发） |
 | 验证 | `pg-verify-and-merge` skill | 同上 |
 
 ### 回归流

@@ -26,7 +26,7 @@ always_injected:
   - name: PG_RUN_CALLER
     type: enum
     source: "$PG_RUNNER_ORIGIN -> 'ad-hoc' (历史 alias, 仍兼容读取)"
-    enum: [pg-build, pg-regression, pg-fix-issue, pg-propose, ad-hoc]
+    enum: [pg-build, pg-regression, pg-fix-issue, pg-propose, pg-quick-build, ad-hoc]
     description: 调用方身份
 
 # spec 注入: pg-run-hook.py:_PG_ENV_MAP 由 spec.<key> 注入
@@ -80,8 +80,9 @@ spec_injected:
     spec_key: output_path
     description: |
       describe_env 输出文件绝对路径 (v6 新增). describe_env 必填, 其他 action 不注入.
-      pg-invoke-hook.py 按 caller 路由: pg-propose → .pg/changes/<change-id>/, 
-      pg-fix-issue → .pg/fix-issue/<change-id>/, pg-regression → .pg/regression/<session>/.
+      pg-invoke-hook.py 按 caller 路由: pg-propose → .pg/changes/<change-id>/,
+      pg-fix-issue → .pg/fix-issue/<change-id>/, pg-regression → .pg/regression/<session>/,
+      pg-quick-build → .pg/quick-build/<session>/ (v2.1 新增, 独立命名空间, 不与 .pg/changes/ 混).
 
 # 已废弃, 不再注入 (旧 hook 必须改为新名)
 removed:

@@ -115,7 +115,7 @@ def build_env(spec):
     Always-injected (project-controlled):
         PG_PROJECT_ROOT — project root (find_project_root)
         PG_SKILLS_PATH  — pg-skills subtree path (computed from __file__)
-        PG_RUN_CALLER   — caller identity (pg-build / pg-regression / pg-fix-issue / ad-hoc)
+        PG_RUN_CALLER   — caller identity (pg-build / pg-regression / pg-fix-issue / pg-quick-build / ad-hoc)
                           resolved from $PG_RUNNER_ORIGIN (legacy alias 仍兼容) or "ad-hoc".
 
     Spec-injected (caller-controlled):

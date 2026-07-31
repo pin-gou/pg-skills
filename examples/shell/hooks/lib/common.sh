@@ -10,6 +10,7 @@
 # SSOT 规则:
 #   - 本文件是 hook 协议的一部分, 不要改 PG_* env var 名
 #   - pg_resolve_paths 的路由表与 .pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill
+#     与 .pg/skills/src/runtime/spec/hook-env-vars.yaml
 #     三处必须保持同步
 #   - 改动本文件前先看上述两处是否需要同步更新
 #   - **优先信任 PG_HOOK_LOG_DIR** (由 pg-invoke-hook.py 预拼的绝对路径); 自拼逻辑作为
@@ -35,10 +36,11 @@ AGENT_PORT=9082
 #
 # 优先：直接信任 pg-invoke-hook.py 预拼的 PG_HOOK_LOG_DIR（权威路径）
 # Fallback（老式手工调用 / 未走 pg-invoke-hook.py）：
-#   路由规则（与 .pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill 同步）：
+# 路由规则（与 .pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill 同步）：
 #     pg-build       -> .pg/changes/<session>/2-build/<env>/logs|pids
 #     pg-regression  -> .pg/regression/<session>/<env>/logs|pids   (session = <suite>-<date>-<seq>)
 #     pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs|pids    (session 含 fix- 前缀)
+#     pg-quick-build -> .pg/quick-build/<session>/<env>/logs|pids  (v2.1 新增, 独立命名空间, 不与 .pg/changes/ 混)
 #     pg-agent       -> .pg/agent/<session>/<env>/logs|pids        (LLM agent 通用入口, session = <iso-date>-<keyword>)
 #     ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs|pids       (新顶级目录, 不与 SKILL 命名空间混)
 #
@@ -71,6 +73,11 @@ pg_resolve_paths() {
             pg-fix-issue)
                 LOG_DIR="$project_root/.pg/fix-issue/${session}/${env}/logs"
                 PID_DIR="$project_root/.pg/fix-issue/${session}/${env}/pids"
+                ;;
+            pg-quick-build)
+                [[ -z "$session" ]] && session="manual"
+                LOG_DIR="$project_root/.pg/quick-build/${session}/${env}/logs"
+                PID_DIR="$project_root/.pg/quick-build/${session}/${env}/pids"
                 ;;
             pg-agent)
                 [[ -z "$session" ]] && session="manual"

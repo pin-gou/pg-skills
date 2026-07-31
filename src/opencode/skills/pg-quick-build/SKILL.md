@@ -5,7 +5,7 @@ license: MIT
 compatibility: 需要 `.pg/project.yaml`（schema：modules / environments / tracks / stages）
 metadata:
   author: pg
-  version: "2.0"
+  version: "2.1"
 ---
 
 # pg-quick-build
@@ -126,9 +126,19 @@ design = {
     ...
   ],
   "verification": [
-    {"id": "V-1", "check": "<可验证的描述>", "evidence": "<curl/日志/jq 形式>"},
+    {"id": "V-1", "check": "<可验证的描述>", "evidence": "<curl/日志/jq 形式>",
+     "verifiable": True},   # 步骤 0.5 填充; True=在目标 env 可达, False=资源缺失
     ...
   ],
+  "context": {
+    # 步骤 0.5 填充（仅当触发 env 探测时存在）
+    "environment": {<describe_env 6 段资源拓扑>},
+    "env_capability": {
+      "source": "describe_env" | "skip",
+      "verifiable_v": ["V-1"],
+      "unverifiable_v": ["V-2"],
+    },
+  },
 }
 ```
 
@@ -154,7 +164,8 @@ tasks = [
 - `len(design.files) <= 8`
 - `target_module` 全部相同（即只 1 个 module）
 - 至少 1 个 `sub=="verify"` task
-- 所有 `verify` task 的 `covers_v` 合并 = `design.verification` 的 id 集合
+- 所有 `verify` task 的 `covers_v` 合并 ⊆ `design.verification` 中 `verifiable=True` 的子集（步骤 0.5 后判定）
+- 当步骤 0.5 跳过（`source = "skip"`）时，`covers_v` 合并 = `design.verification` 的 id 集合（v2.0 行为）
 
 #### 步骤 0.4：上下文预估 + 强停判断
 
@@ -186,7 +197,90 @@ if estimate > 0.5 * MODEL_CTX:
 | 用户需求涉及 DB migration / K8s 资源 | 走 pg-propose |
 | 用户需求涉及多 track 联调 | 走 pg-propose |
 
-#### 步骤 0.5：question 确认 + TodoWrite
+#### 步骤 0.5：env-description 真实探测 + V-* 可达性过滤（v2.1 新增，可选）
+
+> **目标**：在派遣 worker 之前，对 design.verification 每条 V-* 做"目标 env 是否真实可达"判定，避免 worker 收到"看起来合理但跑不通"的验证任务，显著降低 worker 失败重试次数。
+>
+> **白名单触发**：仅当满足以下任一条件时执行，否则跳过（`source = "skip"`），保持 v2.0 行为：
+> - 用户需求涉及多环境（staging / prod）
+> - 涉及 K8s namespace / DB / Cache / MQ / 外部服务
+> - 用户在 pg-define 阶段明确要求 env 探测
+>
+> **零产物承诺**：本步骤的 env-description 输出写 `.pg/quick-build/<session>/env-description.yaml`（**不写 `.pg/changes/`**，不污染 change 目录）。`source = "describe_env"` 时该文件存在；`source = "skip"` 时不存在。
+
+#### 步骤 0.5.1：调用 describe_env
+
+```bash
+SESSION_ID="<iso-date>-<keyword>"   # 与 AGENTS.md §7.2 格式一致
+
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
+  --caller pg-quick-build \
+  --session "$SESSION_ID" \
+  --env <env_name> \
+  --action describe_env
+```
+
+> caller `pg-quick-build` 是 v2.1 新注册的合法 caller（详见 `src/runtime/spec/hook-env-vars.yaml` v6 + `pg-invoke-hook.py:KNOWN_CALLERS`），日志路由到 `.pg/quick-build/<session>/<env>-logs/`。
+
+**读取输出**：env-description.yaml 落到 `${PG_OUTPUT_PATH}`（caller 注入到 hook），主 agent 提取 6 段（infra_services / business_systems / data_resources / config_resources / runtime_environment / external_dependencies）注入到 `design.context.environment`。
+
+#### 步骤 0.5.2：V-* 可达性判定
+
+调用 `pg-quick-build-env-capability.py`（新增脚本，纯函数）：
+
+```bash
+python3 .pg/skills/src/opencode/skills/pg-quick-build/scripts/pg-quick-build-env-capability.py <<EOF
+{
+  "env_description": $(jq . < .pg/quick-build/<session>/env-description.yaml),
+  "verifications": ${design_verifications_json}
+}
+EOF
+```
+
+脚本输出：
+
+```json
+{
+  "verifiable_v": ["V-1", "V-3"],
+  "unverifiable_v": ["V-2"],
+  "issues": [
+    {"v_id": "V-2", "reason": "state_missing", "resource_ref": "infra_services[name=postgres]"}
+  ]
+}
+```
+
+**判定规则**（与 pg-propose v0.9.0 同步）：
+
+- V-* check / evidence 字段引用形如 `infra_services[name=postgres].instances[0].id` 的资源 ID
+- 该资源存在于 env-description 且 `state.status ∈ {ready, configured, seeded, running, available}` → `verifiable`
+- 否则 → `unverifiable`，进入 `design.context.env_capability.unverifiable_v` 留痕
+- 资源命名严格使用 env-description 中的具体 ID（禁止以"环境未就绪" / "OSS 未配置"为兜底）
+- 未引用任何资源 ID 的 V-*（纯单元测试 / 静态分析）默认 `verifiable`
+
+#### 步骤 0.5.3：过滤 tasks.covers_v
+
+调用脚本同文件的 `filter_covers_v(tasks, verifiable_v)`，从 verify task 的 `covers_v` 中剔除 unverifiable V-*。
+
+**强停条件新增**（任一命中即停）：
+
+| 条件 | 建议 |
+|---|---|
+| `len(unverifiable_v) > len(verifiable_v)` | V-* 多数不可达（>=50%），建议走 pg-propose 完整产物路径 |
+| describe_env hook 调用失败（含 timeout / exit 非 0） | 整个流程 abort + 建议走 pg-propose（环境探测失败不该让 worker 盲目跑） |
+
+#### 步骤 0.5.4：Phase 0.5 自核查
+
+```
+- [ ] describe_env 调用成功（或 source 显式标记 skip）
+- [ ] design.context.environment 已填充 6 段资源拓扑（skip 时为空对象）
+- [ ] design.context.env_capability.{verifiable_v, unverifiable_v, issues} 三段已填充
+- [ ] tasks 中所有 verify task 的 covers_v 已过滤（无 unverifiable V 残留）
+- [ ] 强停条件两项全部通过
+```
+
+未通过 → 修正后再进入步骤 0.6（question 确认）。
+
+#### 步骤 0.6：question 确认 + TodoWrite
 
 **展示计划**：
 
@@ -239,15 +333,16 @@ options:
 1. 创建 TodoWrite（9 项：步骤 0.0-0.5 + Phase 1 派遣 + Phase 2 收尾）
 2. 更新 TodoWrite，准备进入 Phase 1
 
-#### 步骤 0.6：Phase 0 自核查
+#### 步骤 0.7：Phase 0 自核查
 
 ```
 - [ ] 步骤 0.0 自检表已填完整
 - [ ] pg-parse-config 已读, modules + env 已取
-- [ ] design 构造完成 (files ≤8, verification 至少 1 条)
-- [ ] tasks 构造完成 (≤8, 单 module, test 在 dev 前, verify 在最后, covers_v 全覆盖)
+- [ ] design 构造完成 (files ≤8, verification 至少 1 条, 含 verifiable 字段)
+- [ ] tasks 构造完成 (≤8, 单 module, test 在 dev 前, verify 在最后)
 - [ ] 上下文预估 ≤ 0.5 * MODEL_CTX
-- [ ] 强停条件全部通过
+- [ ] 步骤 0.5 已执行或显式 skip；covers_v 已过滤
+- [ ] 强停条件全部通过（含 unverifiable_v 占比检查）
 - [ ] question 已确认
 - [ ] TodoWrite 已创建
 ```
@@ -262,8 +357,8 @@ options:
 
 ```python
 ctx = {
-  "design": design,                        # in-memory design dict
-  "tasks": tasks,                          # in-memory tasks list
+  "design": design,                        # in-memory design dict (含 context.{environment, env_capability})
+  "tasks": tasks,                          # in-memory tasks list (covers_v 已过滤)
   "modules": config["modules"],            # 完整 modules 段
   "env": {
     "name": env_name,                      # environments[0] - worker 自行 --resolve-env 取详情
@@ -294,10 +389,20 @@ result = task(
 {design.summary}
 
 ## 2. Design（口述版）
-{yaml.dump(design, allow_unicode=True)}
+{yaml.dump(design_without_context, allow_unicode=True)}
+> 注：design.context.environment 是步骤 0.5 env 真实探测结果，仅作为 dev/verify 阶段的资源引用参考，
+> 不进入覆盖度计算。
 
 ## 3. Tasks（有序列表）
 {yaml.dump(tasks, allow_unicode=True)}
+
+## 3.5 Env 上下文（来自 describe_env，仅当 design.context.environment 非空时存在）
+{yaml.dump(design.context.environment, allow_unicode=True, default_flow_style=False)}
+> 约束：
+> - dev 阶段需要引用外部资源时（如 DB host / K8s namespace），使用本段中的具体 instance id
+> - verify 阶段启动服务 / 探针端口时，使用本段中的 endpoint / port 字段
+> - 禁止假设本段之外的资源存在
+> - 当本段为空（source=skip）时，按 v2.0 行为执行，仅靠 --resolve-env 拿 actions
 
 ## 4. Module 配置
 {yaml.dump(modules_for_tasks, allow_unicode=True)}
@@ -323,6 +428,7 @@ env.name: {env_name}
 - 步骤3: 按 sub 分支执行 (test/dev/verify)
 - 步骤4: 失败时 try_fix 自助修
 - 步骤5: self_check 3 项 (返回前必做)
+  - V-* 覆盖度仅计算 design.verification 中 verifiable=true 的子集（由 ctx 给出）
 
 ## 8. 返回格式
 {yaml.dump(return_schema, allow_unicode=True)}
@@ -369,10 +475,15 @@ assert isinstance(result["self_check"], dict)
 - **V-1**: <evidence 摘要>
 - **V-2**: <evidence 摘要>
 
+### Env 探测（v2.1 新增）
+- 来源: {describe_env | skip}
+- Verifiable V: {verifiable_v 列表}
+- Unverifiable V: {unverifiable_v 列表}（已被步骤 0.5 剔除出 covers_v）
+
 ### Self-check 结果
 | 检查项 | 结果 |
 |--------|------|
-| V-* 覆盖 | ✅ |
+| V-* 覆盖（仅 verifiable 子集） | ✅ |
 | Lint/test 干净 | ✅ |
 | 所有 task SUCCESS | ✅ |
 
@@ -426,6 +537,8 @@ git log --oneline -10
 | `affected_modules.size > 1` | "跨 {N} 个 module，建议走 pg-propose" |
 | `estimate > 0.5 * ctx` | "预估上下文超限，建议走 pg-propose" |
 | 涉及 DB migration / K8s 资源 | "涉及基础设施层变更，建议走 pg-propose" |
+| `len(unverifiable_v) > len(verifiable_v)`（v2.1） | "半数以上 V-* 在目标 env 不可达，建议走 pg-propose 完整路径" |
+| describe_env 调用失败（v2.1） | "env-description 探测失败，建议走 pg-propose 由 v6 完整路径处理" |
 
 ### Worker 失败（Phase 1/2 触发）
 
@@ -462,11 +575,12 @@ git log --oneline -10
 ## ⛔ 禁令
 
 - ❌ **禁止**调用 `pg-pipeline-runner.py`（runner 是 pg-build 专属）
-- ❌ **禁止**在 `.pg/changes/` 下创建任何目录
+- ❌ **禁止**在 `.pg/changes/` 下创建任何目录（v2.1 例外：env-description 输出写 `.pg/quick-build/<session>/`，**不**写 `.pg/changes/`）
 - ❌ **禁止**加载 worker prompt 之外的 `pg-*` SKILL
 - ❌ **禁止**主 agent 自己执行 mvn / curl / 启停服务（这些全部由 worker 完成）
 - ❌ **禁止**主 agent 自己做 self_check（worker 的 3 项检查已足够）
 - ❌ **禁止** git push / gh pr create（推送由用户自行决定）
+- ❌ **禁止**把 env-description 复制到 worker prompt 之外的产物（v2.1 约束：仅注入主 agent context 与 worker prompt §3.5）
 
 ---
 

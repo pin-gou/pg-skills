@@ -3,7 +3,10 @@
 所有对 pg-skills 的重要变更均记录在此文件中。
 
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
-版本号遵循 [语义化版本](https://semver.org/lang/zh-CN/)。
+版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
+
+<!-- 下一版本在此累积 -->
+<!-- 将 VERSION 推进到 0.9.0，分析 git log / git diff，更新 CHANGELOG.md README.md -->
 
 ## [0.9.0] - 2026-07-31
 
@@ -21,6 +24,27 @@
 - **`explore` sub-agent**：新增 `.opencode/agents/explore.md`，代码探索代理优先使用 CodeGraph，不可用时降级到 glob/grep/read
 - **pg-validate-proposal.py 3 条新校验规则**：V-* 映射、scenario 引用防护、章节编号连续性（COMMON_DECISIONS 常量块固化 5 项 common decisions）
 - **pg-build bootstrap 防御性加固**：dirty branch / 重复 bootstrap / idle_next 检测；新增 `test_orchestrator_idle_next.py` 与 `test_describe_env_protocol.py`（26 tests）
+- **pg-quick-build v2.1 — env-description 真实探测 + V-* 可达性过滤**：
+  - SKILL.md 新增 Phase 0.5（白名单触发：用户需求涉及多环境 / K8s / DB / 外部服务 / 用户明确要求时执行）
+  - 调用 `pg-invoke-hook.py --caller pg-quick-build --action describe_env`（caller `pg-quick-build` 为 v2.1 新注册合法 caller）
+  - 6 段资源拓扑注入 `design.context.environment`，**不**写 `.pg/changes/`（pg-quick-build 零产物承诺保留）
+  - 新增 `pg-quick-build-env-capability.py`（纯函数）做 V-* 可达性判定 + `covers_v` 自动过滤
+  - 不可达 V-* 进入 `design.context.env_capability.unverifiable_v` 留痕
+  - 强停条件新增 2 项：`unverifiable_v > verifiable_v` 时建议走 pg-propose；describe_env 调用失败 abort
+- **runtime caller 白名单扩展**：注册 `pg-quick-build` 为合法 caller 标识
+  - `src/runtime/spec/hook-env-vars.yaml` enum 同步加入
+  - `pg-invoke-hook.py:KNOWN_CALLERS` + `DESCRIBE_ENV_CALLERS` 加入
+  - 日志路由：`.pg/quick-build/<session>/<env>-logs/`（独立命名空间，不与 `.pg/changes/` 混）
+  - env-description 输出路径：`.pg/quick-build/<session>/env-description.yaml`
+  - `pg-invoke-hook.py:pg_log_dir_for_skill` + `build_env_level_hook_spec` 路由表同步
+  - `examples/shell/hooks/lib/common.sh:pg_resolve_paths` 同步（pg-init-project 复制路径）
+
+### 变更
+
+- **pg-quick-build worker prompt 模板**：新增 §3.5 "Env 上下文" 段（仅当 `design.context.environment` 非空时存在），worker 在 dev/verify 阶段引用具体资源 ID
+- **pg-quick-build 收尾摘要**：SUCCESS / FAILED 摘要新增 "Env 探测" 字段（source + verifiable_v + unverifiable_v）
+- **pg-quick-build 强停条件表**：新增 2 项（unverifiable 占比 + describe_env 失败）
+- **pg-quick-build ⛔ 禁令**：新增 1 条（禁止把 env-description 复制到 worker prompt 之外的产物）
 
 ### 修复
 
@@ -31,8 +55,10 @@
 ### 备注
 
 - 26 commits，100 文件变更（+6468 / -5361 LOC）
-- 新增：`src/runtime/spec/env-description.schema.json`、`examples/env-description.example.yaml`、`examples/shell/hooks/describe-env.sh`、`.opencode/agents/explore.md`
+- 新增：`src/runtime/spec/env-description.schema.json`、`examples/env-description.example.yaml`、`examples/shell/hooks/describe-env.sh`、`.opencode/agents/explore.md`、`src/opencode/skills/pg-quick-build/scripts/pg-quick-build-env-capability.py` + `tests/test_env_capability.py`（25 tests）
 - 删除：`pg-propose-refine/` SKILL 目录、`pg-gen-env-fingerprint.py`、`check-env-capability.sh`、`check-review-cache.sh`、`scenario-prepare.md` / `scenario-prepare.yaml`
+- pg-quick-build v2.1 向后兼容：`source = "skip"` 时走 v2.0 行为（仅靠 `--resolve-env` 拿 actions），现有项目无破坏；worker.md（pg-quick-build/worker.md）0 行改动——保持 v2.0 自包含协议
+- 不动 pg-propose / pg-build / pg-fix-issue / pg-regression / pg-verify-and-merge / pg-archive 任何代码
 
 ## [0.8.3] - 2026-07-19
 
