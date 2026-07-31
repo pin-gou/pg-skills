@@ -656,6 +656,127 @@ def cmd_design_api(change):
     print("OK: all endpoints have Request/Response Body coverage")
 
 
+_V_ID_RE = re.compile(r"\bV-([a-zA-Z][a-zA-Z0-9]*(?:[-_][a-zA-Z0-9]+)*)\b")
+
+
+def _check_v_identifier_consistency(
+    change: str,
+    design_text: str,
+    scenario_files: list[str],
+) -> list[tuple[str, str]]:
+    """建议 7: V-* 唯一化与对齐校验.
+
+    规则 1 (v_identifier_duplicate): Verification Criteria 段内同一 V-* ID 出现多次 → ERROR
+    规则 2 (v_identifier_covers_not_in_design): scenario covers 引用的 V-*
+        不在 design.md 任何位置 → ERROR
+    规则 3 (v_identifier_naming_inconsistent): design.md 中同时存在
+        下划线描述后缀和连字符描述后缀 → WARN
+
+    Returns: list of (code, msg)
+    """
+    issues: list[tuple[str, str]] = []
+
+    v_ids_in_design = set(_V_ID_RE.findall(design_text))
+
+    vc_match = re.search(
+        r"^## Verification Criteria\s*\n(.*?)(?=^## |\Z)",
+        design_text, re.MULTILINE | re.DOTALL,
+    )
+    if vc_match:
+        from collections import Counter
+        vc_ids = _V_ID_RE.findall(vc_match.group(1))
+        counts = Counter(vc_ids)
+        for vid, cnt in counts.items():
+            if cnt > 1:
+                issues.append((
+                    "v_identifier_duplicate",
+                    f"design.md Verification Criteria 段中 V-{vid} 出现 {cnt} 次（应唯一）",
+                ))
+
+    for sf in scenario_files:
+        try:
+            with open(sf, encoding="utf-8") as f:
+                doc = yaml.safe_load(f)
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        fname = os.path.basename(sf)
+        for sc in doc.get("scenarios") or []:
+            sid = sc.get("scenario_id", "?")
+            for cover in sc.get("covers") or []:
+                m = re.match(r"^V-(.+)$", str(cover))
+                if m and m.group(1) not in v_ids_in_design:
+                    issues.append((
+                        "v_identifier_covers_not_in_design",
+                        f"{fname}: {sid} covers 引用 V-{m.group(1)}，但 design.md 中不存在",
+                    ))
+
+    has_underscore = any("_" in vid for vid in v_ids_in_design)
+    has_hyphen_desc = any(
+        re.search(r"-[a-zA-Z]", vid) for vid in v_ids_in_design
+        if not re.match(r"^[a-z]+-[a-z]+-\d+$", vid)
+    )
+    if has_underscore and has_hyphen_desc:
+        issues.append((
+            "v_identifier_naming_inconsistent",
+            "design.md 中 V-* 描述后缀混用了下划线和连字符，建议统一为连字符",
+        ))
+
+    return issues
+
+
+def _check_risk_criteria_alignment(
+    change: str,
+    proposal_text: str,
+    design_text: str,
+) -> list[tuple[str, str]]:
+    """建议 8: proposal R-* 风险与 design Verification Criteria 交叉校验.
+
+    规则 1 (risk_criteria_missing): proposal R-* 描述中提到的 V-* ID
+        不在 design.md Verification Criteria 表中 → ERROR
+    规则 2 (criteria_no_risk_coverage): design Verification Criteria 表中的 V-*
+        未被任何 proposal R-* 引用 → WARN
+
+    Returns: list of (code, msg)
+    """
+    issues: list[tuple[str, str]] = []
+
+    r_row_re = re.compile(r"^\|\s*(R\d+)\s*\|(.*?)\|", re.MULTILINE)
+    v_in_risks: dict[str, list[str]] = {}
+    for m in r_row_re.finditer(proposal_text):
+        r_id = m.group(1)
+        row_text = m.group(2)
+        for vid in _V_ID_RE.findall(row_text):
+            v_in_risks.setdefault(vid, []).append(r_id)
+
+    vc_match = re.search(
+        r"^## Verification Criteria\s*\n(.*?)(?=^## |\Z)",
+        design_text, re.MULTILINE | re.DOTALL,
+    )
+    v_in_criteria: set[str] = set()
+    if vc_match:
+        v_in_criteria = set(_V_ID_RE.findall(vc_match.group(1)))
+
+    for vid, r_ids in sorted(v_in_risks.items()):
+        if vid not in v_in_criteria:
+            issues.append((
+                "risk_criteria_missing",
+                f"proposal {','.join(r_ids)} 引用 V-{vid}，"
+                f"但 design.md Verification Criteria 表中不存在",
+            ))
+
+    if v_in_criteria:
+        uncovered = sorted(v_in_criteria - set(v_in_risks.keys()))
+        for vid in uncovered:
+            issues.append((
+                "criteria_no_risk_coverage",
+                f"design.md V-{vid} 未被任何 proposal R-* 风险引用（可能漏风险）",
+            ))
+
+    return issues
+
+
 def _check_scenario_env_consistency(change: str, manifest: dict) -> list[tuple[str, str]]:
     """v1.0 (v6 hook 协议): 校验 scenario given 与 env-description.yaml 的一致性 (warning 级).
 
@@ -1045,6 +1166,49 @@ def cmd_manifest(change):
         ))
 
     coverage_warnings.extend(extra_warnings)
+
+    # 7.4b 建议 7+8: V-* 唯一化/对齐 + R-* 交叉校验
+    try:
+        _design_path_7 = os.path.join(CHANGES_DIR, change, "design.md")
+        _proposal_path_7 = os.path.join(CHANGES_DIR, change, "proposal.md")
+        _design_text_7 = ""
+        _proposal_text_7 = ""
+        if os.path.isfile(_design_path_7):
+            with open(_design_path_7, encoding="utf-8") as _f7:
+                _design_text_7 = _f7.read()
+        if os.path.isfile(_proposal_path_7):
+            with open(_proposal_path_7, encoding="utf-8") as _f7:
+                _proposal_text_7 = _f7.read()
+
+        if _design_text_7 and yaml is not None:
+            import glob as _glob7
+            _scenario_files_7 = _glob7.glob(
+                os.path.join(CHANGES_DIR, change, "scenario-*.yaml")
+            )
+            for code, msg in _check_v_identifier_consistency(
+                change, _design_text_7, _scenario_files_7,
+            ):
+                if code == "v_identifier_naming_inconsistent":
+                    coverage_warnings.append((code, msg))
+                else:
+                    print(f"  [{code}] {msg}", file=sys.stderr)
+                    all_issues.append(code)
+                    valid = False
+            if _proposal_text_7:
+                for code, msg in _check_risk_criteria_alignment(
+                    change, _proposal_text_7, _design_text_7,
+                ):
+                    if code == "criteria_no_risk_coverage":
+                        coverage_warnings.append((code, msg))
+                    else:
+                        print(f"  [{code}] {msg}", file=sys.stderr)
+                        all_issues.append(code)
+                        valid = False
+    except Exception as _e7:
+        coverage_warnings.append((
+            "v_identifier_consistency_check_failed",
+            f"V-* 一致性校验异常: {_e7}",
+        ))
 
     # 7.5 v3.10: scenario 覆盖度校验（warning 级, 不阻塞）
     if (_pg_gen_scenario is not None

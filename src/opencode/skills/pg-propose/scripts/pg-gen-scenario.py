@@ -45,6 +45,88 @@ from pg_pipeline_common import CHANGES_DIR
 _DECISION_MARKER = "## scenario_tracks_decision (v3.6)"
 
 
+def _extract_env_resources(env_desc_path: str) -> dict | None:
+    """建议 18: 从 env-description.yaml 提取关键资源引用摘要.
+
+    非侵入设计 (符合 v1.0.0 哲学): 摘要写入 skeleton _meta.env_resources,
+    LLM 填充 given 时直接引用, 而不向 given 段注入 (避免破坏 placeholder 校验).
+
+    Returns:
+        {
+            "data_resources": [{"name", "sample_ids": [...]}],
+            "infra_services": [{"name", "endpoints": [...]}],
+            "config_resources": [{"name", "location"}],
+            "business_systems": [{"name", "endpoints": [...]}],
+        }
+        or None if file missing/invalid.
+    """
+    if not env_desc_path or not os.path.isfile(env_desc_path):
+        return None
+    try:
+        with open(env_desc_path, encoding="utf-8") as f:
+            doc = yaml.safe_load(f)
+    except Exception:
+        return None
+    if not isinstance(doc, dict):
+        return None
+
+    result: dict = {
+        "data_resources": [],
+        "infra_services": [],
+        "config_resources": [],
+        "business_systems": [],
+    }
+
+    for dr in doc.get("data_resources") or []:
+        if not isinstance(dr, dict):
+            continue
+        sample_ids = [
+            s.get("id") for s in (dr.get("sample") or [])
+            if isinstance(s, dict) and s.get("id")
+        ]
+        if sample_ids:
+            result["data_resources"].append({
+                "name": dr.get("name"),
+                "sample_ids": sample_ids[:5],
+            })
+
+    for svc in doc.get("infra_services") or []:
+        if not isinstance(svc, dict):
+            continue
+        endpoints = [
+            inst.get("endpoint")
+            for inst in (svc.get("instances") or [])
+            if isinstance(inst, dict) and inst.get("endpoint")
+        ]
+        if endpoints:
+            result["infra_services"].append({
+                "name": svc.get("name"),
+                "endpoints": endpoints[:3],
+            })
+
+    for cr in doc.get("config_resources") or []:
+        if isinstance(cr, dict) and cr.get("name") and cr.get("location"):
+            result["config_resources"].append({
+                "name": cr.get("name"),
+                "location": cr.get("location"),
+            })
+
+    for bs in doc.get("business_systems") or []:
+        if not isinstance(bs, dict):
+            continue
+        endpoints = [
+            ep for ep in (bs.get("endpoints") or []) if isinstance(ep, str)
+        ]
+        if endpoints:
+            result["business_systems"].append({
+                "name": bs.get("name"),
+                "endpoints": endpoints[:3],
+            })
+
+    has_content = any(result[k] for k in result)
+    return result if has_content else None
+
+
 def _read_scenario_decisions(change: str) -> dict | None:
     """从 on-conditions-eval.md 读取 scenario_tracks_decision 段 (多 track).
 
@@ -192,6 +274,7 @@ def _compute_target_scenario_count(v_count: int) -> int:
 
 def _build_skeleton_yaml(
     change: str, track_id: str, v_count: int = 0, design_mentions_frontend: bool = False,
+    env_resources: dict | None = None,
 ) -> dict:
     """构造 scenario-<track-id>.yaml skeleton —— LLM 在阶段三自审时填充。
 
@@ -203,6 +286,9 @@ def _build_skeleton_yaml(
 
     v3.10: 数量按 design.md V-* 数动态派生 (max(3, ceil(V*0.8)), 上限 7);
     强制含 ≥1 个 type=browser scenario 当 design 含 frontend V-* 时.
+
+    建议 18: env_resources (来自 env-description.yaml) 写入 _meta.env_resources,
+    LLM 填充 given 时引用; 不向 given 注入, 避免破坏 placeholder 校验。
     """
     target_count = _compute_target_scenario_count(v_count)
     covers_placeholder = ["<V-xxx-N>"]

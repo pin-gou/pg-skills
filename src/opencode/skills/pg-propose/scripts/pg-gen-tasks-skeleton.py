@@ -126,6 +126,11 @@ def parse_args():
     parser.add_argument("--scenario-reason", default="",
                          help="scenario 启用/禁用决策依据 (LLM 填写, "
                               "仅作用于显式启用的 scenario track).")
+    parser.add_argument("--update-existing", action="store_true",
+                         help="建议 17: 保留现有 tasks.md 中已填写的 body, "
+                              "只更新 heading 编号和 on_conditions_eval 注释. "
+                              "匹配策略: 按 section stable key (stage.track:sub) 匹配, 不按编号. "
+                              "若现有 body 含 '待 LLM 填充' 占位符, 视为未填写, 用新骨架替换.")
     return parser.parse_args()
 
 
@@ -622,12 +627,98 @@ def format_section_evidence_block(section: dict) -> str:
     )
 
 
+def _section_stable_key(section: dict) -> str:
+    """建议 17: 计算 section 的稳定 key (不含编号, 跨重排稳定)."""
+    if section.get("is_simple"):
+        return f"{section['stage']}.{section['track']}"
+    if section.get("stage") == "final":
+        return "final-gate"
+    return f"{section['stage']}.{section['track']}:{section.get('sub') or ''}"
+
+
+_PLACEHOLDER_BODY_RE = re.compile(
+    r"^\s*-\s*\[\s*\]\s*\d+\.\d+\s*.*?待\s*LLM\s*填充\s*$",
+    re.MULTILINE,
+)
+
+
+def _is_placeholder_body(body: str) -> bool:
+    """建议 17: 判断 body 是否仍是骨架占位 (未被 LLM 填写过).
+
+    判定规则: 含 "待 LLM 填充" 标记 → 占位; 否则视为已填写.
+    """
+    if not body or not body.strip():
+        return True
+    return bool(_PLACEHOLDER_BODY_RE.search(body))
+
+
+def merge_existing_bodies(
+    sections: list[dict],
+    existing_tasks_path: str,
+) -> tuple[dict, dict]:
+    """建议 17: 把现有 tasks.md 中已填写的 body 按 stable key 收集.
+
+    Args:
+        sections: 新生成的 sections (用于计算期望的 key 集合)
+        existing_tasks_path: 现有 tasks.md 路径
+
+    Returns:
+        (preserve_bodies, report)
+        preserve_bodies: {stable_key: body_str} 用于覆盖新骨架 body
+        report: {"preserved": [key,...], "added": [key,...], "removed": [key,...]}
+    """
+    from pg_pipeline_common import parse_tasks_sections
+
+    new_keys = [_section_stable_key(sec) for sec in sections]
+    new_keys_set = set(new_keys)
+
+    preserve: dict[str, str] = {}
+    existing_keys: list[str] = []
+
+    if os.path.isfile(existing_tasks_path):
+        existing_sections = parse_tasks_sections(existing_tasks_path)
+        heading_re = re.compile(
+            r"^##\s+\d+\.\s+(?:(final-gate)|(.+?)\s+-\s+.*)$"
+        )
+        for es in existing_sections:
+            heading = es.get("heading", "")
+            m = heading_re.match(heading)
+            if not m:
+                continue
+            if m.group(1):
+                key = "final-gate"
+            else:
+                tail = m.group(2).strip()
+                key = tail
+            existing_keys.append(key)
+            body = es.get("body", "")
+            if key in new_keys_set and not _is_placeholder_body(body):
+                preserve[key] = body.strip("\n")
+
+    preserved = sorted(preserve.keys())
+    added = sorted(new_keys_set - set(existing_keys))
+    removed = sorted(set(existing_keys) - new_keys_set)
+
+    return preserve, {
+        "preserved": preserved,
+        "added": added,
+        "removed": removed,
+    }
+
+
 def build_tasks_md(sections: list[dict], env_map: dict[str, str],
                    config: dict, affected_paths: list[str],
                    proposal_text: str, change_name: str = "<change>",
-                   affected_tracks: set[str] = set()) -> str:
-    """Generate the full tasks.md skeleton content."""
+                   affected_tracks: set[str] = set(),
+                   preserve_bodies: dict | None = None) -> str:
+    """Generate the full tasks.md skeleton content.
+
+    Args:
+        preserve_bodies: 建议 17 --update-existing 模式传入.
+            {stable_key: body_str} — 对应 section 用此 body 覆盖骨架占位.
+    """
     out_lines = []
+    preserve_bodies = preserve_bodies or {}
 
     env_quote = format_env_block_quote(env_map)
     if env_quote:
@@ -648,7 +739,11 @@ def build_tasks_md(sections: list[dict], env_map: dict[str, str],
         out_lines.append(comment)
         out_lines.append("")
 
-        out_lines.append(format_section_body(sec, change_name))
+        key = _section_stable_key(sec)
+        if key in preserve_bodies:
+            out_lines.append(preserve_bodies[key])
+        else:
+            out_lines.append(format_section_body(sec, change_name))
         out_lines.append("")
 
     return "\n".join(out_lines).rstrip() + "\n"
@@ -846,9 +941,28 @@ def main():
         CHANGES_DIR, args.change, "1-propose-review", "on-conditions-eval.md"
     )
 
+    # 建议 17: --update-existing 模式 — 保留现有 tasks.md 中已填写的 body
+    preserve_bodies: dict[str, str] = {}
+    update_report: dict = {"preserved": [], "added": [], "removed": []}
+    if args.update_existing and os.path.isfile(output_tasks):
+        preserve_bodies, update_report = merge_existing_bodies(sections, output_tasks)
+        print(
+            f"[--update-existing] preserved={len(update_report['preserved'])} "
+            f"added={len(update_report['added'])} "
+            f"removed={len(update_report['removed'])}",
+            file=sys.stderr,
+        )
+        if update_report["removed"]:
+            print(
+                f"  removed (existing but not in new skeleton): "
+                f"{update_report['removed']}",
+                file=sys.stderr,
+            )
+
     tasks_content = build_tasks_md(
         sections, env_map, config, affected_paths, proposal_text,
         change_name=args.change, affected_tracks=affected_tracks,
+        preserve_bodies=preserve_bodies,
     )
     eval_content = build_on_conditions_eval_md(
         config, affected_paths, proposal_text,

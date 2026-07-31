@@ -84,20 +84,30 @@ propose:
 
       **本节为涉及 capability 演进时必填；若本次变更不涉及 capability，可写"无"并附简要说明。**
 
-      - [ ] 本次变更涉及 capability 新增吗？（是 / 否）
-      - [ ] 本次变更涉及 capability 废弃吗？（是 / 否）
-      - [ ] 本次变更涉及 capability 重命名/数值变更吗？（是 / 否）
-      - [ ] 本次变更涉及 backend action 新增吗？（是 / 否）
-      - [ ] 本次变更涉及 action → capability 映射变化吗？（是 / 否）
+      | Capability / Action | 变更类型 | 涉及端（proto / Java / Go / yaml） | 说明 |
+      |---------------------|---------|-----------------------------------|------|
+      | {capability_name}   | 新增 / 废弃 / 修改 | {端列表} | {一句话} |
 
-      如果以上任一为"是"，请在以下表格中列出：
-
-      | Capability / Action | 变更类型 | 涉及端（proto / Java / Go / yaml） |
-      |---------------------|---------|-----------------------------------|
-      | {name}              | 新增/废弃/修改 | {端列表} |
+      - 涉及 capability 新增？{是 / 否}
+      - 涉及 capability 废弃？{是 / 否}
+      - 涉及 capability 修改（重命名/数值变更）？{是 / 否}
+      - 涉及 backend action 新增？{是 / 否}
+      - 涉及 action → capability 映射变化？{是 / 否}
+      - 是否更新了 `webvirt-agent-proto/capabilities.yaml`？{是 / 否 / 不涉及}
 
       **Capability 一致性验证**：本次变更必须在 verify 阶段运行 `python3 <module-dir>/scripts/check-capability-consistency.py`，结果作为 PR 准入条件。
+
+      - [ ] 如本次变更涉及 capability 演进，必须同步更新以下 4 个位置：
+        1. webvirt-agent-proto/compute.proto（AgentCapability 枚举）
+        2. webvirt-backend/.../AgentCapabilities.java（Java 镜像枚举）
+        3. webvirt-agent/internal/agent/version.go（BuiltCapabilities 数组）
+        4. webvirt-agent-proto/capabilities.yaml（描述文件）
 ```
+
+**模板设计要点**：
+- 5 个 `{是 / 否}` 填空项（LLM **必须**替换 `{}` 占位符为实际答案，不得保留模板原文）
+- 表格中 `{capability_name}` 等占位符必须替换为真实 capability 名；若不涉及 capability 变更，整段写"无"
+- 末尾 `- [ ]` checklist 是 action item（保留 checkbox 格式），不是"是否"判断
 
 生成 `proposal.md` 时，模板自动在"## 风险和注意事项"标题后插入该章节，LLM 只需填充内容。
 

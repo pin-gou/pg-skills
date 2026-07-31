@@ -92,6 +92,24 @@
 - "不可验证部分"列：**不能留空**——必须说明降级策略（生产验证 / CI 门禁 / mock）
 - 若某 V-* 在目标 env 完全不可验证且无降级策略，应考虑将该 V-* 从 design 中移除或标注为"未来迭代"
 
+**示例**（dev-local 环境）：
+
+| 功能契约 (V-*) | dev-local 可验证 | 验证方式 | 不可验证部分的处理 |
+|---------------|:---:|------|------|
+| V-backend-1 认领写库 | ✅ | scenario + 单元测试 | n/a |
+| V-agent-proto-1 proto regen | ✅ | `make proto-go` + 编译检查 | n/a |
+| V-frontend-3 状态卡片渲染 | ✅ | Playwright e2e | 多浏览器兼容留待 CI |
+| V-multi-host-multi-vm 多节点 | ❌ | n/a | 生产环境验证 / CI 性能门禁 |
+| V-e2e-end-to-end-demo 全链路 | ✅ | scenario 全链路 | n/a |
+
+**V-* 命名规范**：
+
+- 编号格式：`V-{track_id}-{seq}`（如 `V-backend-1`），seq 从 1 开始递增
+- 若需描述性后缀，用连字符：`V-backend-install-command-token`（**不用下划线**）
+- 同一 design.md 中**不允许**混用连字符和下划线描述后缀
+- 每个 V-* 必须在 `## Verification Criteria` 表中出现且仅出现一次
+- `### 环境限制与验证策略` 段引用的 V-* 必须与 Verification Criteria 表中的 ID **完全一致**
+
 **设计 rationale**：scenario 阶段（2f）会读取本段，仅对"✅ 可验证"的 V-* 编写 scenario covers。避免 scenario given 假设环境不具备的资源（如 "≥2 host CONNECTED" 但 env 只有 1 个 agent）。
 
 ### 可观测性
