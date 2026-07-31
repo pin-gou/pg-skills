@@ -5,7 +5,7 @@ license: MIT
 compatibility: 需要 `.pg/changes/` 目录结构和 `.pg/project.yaml` 统一配置文件。
 metadata:
   author: pg
-  version: "1.0.0"
+  version: "1.0.1"
 ---
 
 # pg-propose
@@ -25,11 +25,11 @@ metadata:
 - ✅ 阶段 2 拆分子步骤：2.4.2（LLM 填充 tasks.md body）、2.6.2（LLM 填充 scenario body），独立于脚本调用，避免占位符漏填被校验器拦截。
 - ✅ 阶段 3 强化"**唯一**校验点"语义：删除旧 2.5/2.6 内冗余 `ls` 步骤，全部并入 `pg-validate-proposal.py`。
 - ✅ `--scenario-decisions` 与 `--scenario-reason` **强必填**，删除"空字符串默认启用"隐式行为。
-- ✅ 阶段 1.5（环境描述）段首强化"Context 注入契约"，明示 env-description.yaml 进入阶段 2 全产物写作。
+- ✅ 阶段 1.6（环境描述）段首强化"Context 注入契约"，明示 env-description.yaml 进入阶段 2 全产物写作。
 - ✅ SKILL.md 主版本号 `0.9.0 → 1.0.0`；内部子版本号 v3.x 仅在附录 E 保留。
 
 **v0.9.0 历史要点**（2026-07-27，scenario 环境一致性强化，已被 v1.0.0 取代）：
-- 阶段 2f 新增"环境能力摘要"强制步骤（被 v1.0.0 阶段 1.5 取代）
+- 阶段 2f 新增"环境能力摘要"强制步骤（被 v1.0.0 阶段 1.6 取代）
 - `pg-gen-scenario.py` 新增 `--env-summary` 参数（已被删除）
 - `pg-validate-proposal.py` 新增 env-capability 交叉校验规则（已被 env-description.yaml 校验取代）
 
@@ -152,7 +152,25 @@ LLM 通读这些文件，提取：
 
 更新附录 A 第 2 项。
 
-### 1.5 生成环境描述（env-description.yaml，per-change）
+### 1.5 获取管线配置（从 config.yaml 读取）
+
+```bash
+python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
+```
+
+从输出 JSON 获取：`propose`（含 `guidelines` 和 `injections`）/ `tracks` / `stages`。
+
+字段详细含义见 [references/config-fields.md](./references/config-fields.md)。
+
+> **下游依赖**：本步骤输出的 `config.stages[i].environment.selection_rules` 是阶段 1.6 `--env` 参数的选择依据，必须在 1.6 之前完成。
+
+**⚠️ 命令执行位置规约**：
+
+- 所有命令从**项目根路径**执行
+- 需切换目录的命令在配置中显式写 `cd <dir> && <cmd>`（如 `test: cd <module-name> && mvn test`）
+- `rebuild_and_restart` / `verify` 脚本应自包含 cwd 处理
+
+### 1.6 生成环境描述（env-description.yaml，per-change）
 
 > **Context 注入契约**：本步骤完成后，env-description.yaml 作为强制 context 进入阶段 2 全产物（proposal.md / design.md / tasks.md / scenario-*.yaml）写作。LLM 必须在每个产物中显式引用 6 段中已声明的具体资源（不允许"环境未就绪"类兜底措辞）。
 
@@ -164,12 +182,14 @@ LLM 通读这些文件，提取：
 - 文件位置：`.pg/changes/<change-id>/env-description.yaml`（per-change 特定，固定路径覆盖，Q1 决策）
 - 失败处理：**中断**调用方（Q2 决策，无 partial / fallback / LLM 推断兜底）
 - 不再有 fingerprint / HIT-MISS 机制（Q4 决策）：每次 propose 都重新执行 describe_env
+- `--env` 参数值从阶段 1.5 获取的 `config.stages[i].environment.selection_rules` 推导
 
 **执行协议**：
 
 ```bash
 # 由 caller (pg-propose) 显式调用, 注入 PG_RUN_CALLER=pg-propose
 # v7 起: 统一用 --session 作为路径派生源, 不再传 --change-id
+# --env 值来自阶段 1.5 的 config.stages[i].environment.selection_rules
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
   --caller pg-propose \
   --session <change-id> \
@@ -237,22 +257,6 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 
 更新附录 A 第 3 项。
 
-### 1.6 获取管线配置（从 config.yaml 读取）
-
-```bash
-python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
-```
-
-从输出 JSON 获取：`propose`（含 `guidelines` 和 `injections`）/ `tracks` / `stages`。
-
-字段详细含义见 [references/config-fields.md](./references/config-fields.md)。
-
-**⚠️ 命令执行位置规约**：
-
-- 所有命令从**项目根路径**执行
-- 需切换目录的命令在配置中显式写 `cd <dir> && <cmd>`（如 `test: cd <module-name> && mvn test`）
-- `rebuild_and_restart` / `verify` 脚本应自包含 cwd 处理
-
 ### 1.7 加载 propose.injections.proposal（结构化规则注入）
 
 `.pg/project.yaml` 的 `propose.injections.proposal` 段是结构化规则列表，按 `after_section` 字段注入到 `proposal.md` 模板。字段约定与注入算法见 [references/proposal-templates.md](./references/proposal-templates.md)「proposal_rules 注入机制」段。
@@ -279,7 +283,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
 
 **模板 + V-* 编号规则**见 [references/design-templates.md](./references/design-templates.md)。更新附录 A 第 6 项。
 
-**v0.9.0 新增**：design.md 必须包含"环境限制与验证策略"段（在"错误码与编号段"之后、"可观测性"之前），依据 `.pg/changes/<change-id>/env-description.yaml`（阶段 1.5 产出）判断每个 V-* 在目标 env 是否可验证。该段是阶段 2.6 scenario 编写的直接输入。
+**v0.9.0 新增**：design.md 必须包含"环境限制与验证策略"段（在"错误码与编号段"之后、"可观测性"之前），依据 `.pg/changes/<change-id>/env-description.yaml`（阶段 1.6 产出）判断每个 V-* 在目标 env 是否可验证。该段是阶段 2.6 scenario 编写的直接输入。
 
 ### 2.3 判定变更类型 & affected_tracks & scenario track(s) 启用决策
 
@@ -394,7 +398,7 @@ python3 .opencode/skills/pg-propose/scripts/pg-gen-scenario.py CHANGE_NAME
 
 读取 env-description.yaml 作为 scenario 编写输入：
 
-从阶段 1.5 生成的 `.pg/changes/<change-id>/env-description.yaml` 中，针对 `--environment` 指定的目标 env，提取以下信息并写入 LLM 工作记忆：
+从阶段 1.6 生成的 `.pg/changes/<change-id>/env-description.yaml` 中，针对 `--environment` 指定的目标 env，提取以下信息并写入 LLM 工作记忆：
 
 - **infra_services**：可用基础设施（DB / Cache / MQ / K8s 等），包括 `instances[].id` / `endpoint` / `version` / `reachable`
 - **business_systems**：业务系统（上下游 / mock），包括 `endpoints[].url` / `auth`
@@ -549,7 +553,7 @@ WARN 不阻塞 build，但会显著提示 LLM 在阶段 3 校验后重点审视�
 ```
  1. [待开始] 1.3 创建变更目录（含 1-propose-review 子目录）
  2. [待开始] 1.4 加载项目上下文（find AGENTS.md + 通读提取 context/rules）
- 3. [待开始] 1.5 生成环境描述（env-description.yaml，describe_env hook）
+ 3. [待开始] 1.6 生成环境描述（env-description.yaml，describe_env hook）
  4. [待开始] 1.7 加载 propose.injections.proposal（结构化规则注入）
  5. [待开始] 2.1 生成 proposal.md
  6. [待开始] 2.2 生成 design.md（含"环境限制与验证策略"段）
@@ -564,7 +568,7 @@ WARN 不阻塞 build，但会显著提示 LLM 在阶段 3 校验后重点审视�
 > **与正文阶段的映射关系**：
 > - 阶段 1.1（TodoWrite 初始化）本身是创建本清单的动作，不计入 12 项
 > - 阶段 1.2（确认变更名称）属于用户交互，不需要 TodoWrite
-> - 阶段 1.6（获取管线配置）属于过渡步骤，无产物，不计入 12 项
+> - 阶段 1.5（获取管线配置）属于过渡步骤，无产物，不计入 12 项
 > - 阶段 2.4 / 2.6 拆分后，每个子步骤共享一个 TodoWrite 项（2.4 → 8, 2.6 → 10），完成时同时更新
 
 ---
@@ -663,13 +667,19 @@ scenarios:
 
 ## 附录 E：文档变更记录
 
+- **v1.0.1（2026-07-31）**：修复阶段 1 依赖倒置——交换 1.5/1.6 顺序。
+  - **问题**：旧 1.5（describe_env）需要 `--env <env-name>`，但环境名的 SSOT（`config.stages[i].environment.selection_rules`）在旧 1.6（管线配置）才加载，导致 LLM 执行 1.5 时无法确定 env name。
+  - **修复**：1.5 → 获取管线配置（原 1.6），1.6 → 生成环境描述（原 1.5）。依赖链变为 `管线配置 → env name → describe_env`，无倒置。
+  - 1.5 新增"下游依赖"注释；1.6 关键约束新增 `--env` 参数来源说明；执行协议 bash 注释补充 env 来源。
+  - 同步更新所有交叉引用（L28/L32/L282/L397/附录 A 第 3 项/附录 A 备注/附录 E v1.0.0 条目）。
+
 - **v1.0.0（2026-07-29）**：大重构——编号体系 + 同步优化。
   - **编号体系重构**：阶段一 `1a/1b/.../1d.5/1e/1f` + 阶段二 `2a/2b/.../2g` + 阶段三/四 → 体系 A `阶段 1-4` + `附录 A-E`，纯数字编号。消除 1d.5 补丁型编号与 5.5 幽灵编号。
   - **TodoWrite 扩容**：10 项 → 12 项，与阶段编号一一对应。修复旧"13 项宣称 / 10 项列出"对齐失败。
   - **阶段 2 子步骤拆分**：2.4 → 2.4.1（脚本调用）+ 2.4.2（LLM body 填充）；2.6 → 2.6.1（脚本调用）+ 2.6.2（LLM body 填充）。避免占位符漏填被校验器拦截。
   - **阶段 3 强化**：明示"**唯一**校验点"，删除旧 2.5/2.6 内冗余 `ls` 步骤并入 `pg-validate-proposal.py`。
   - **scenario-decisions 强必填**：删除"空字符串默认启用"隐式行为；`--scenario-decisions` 与 `--scenario-reason` 均为必填，scenario-reason 需含结构化三问答复。
-  - **1.5 段首强化**：明示 env-description.yaml Context 注入契约，约束阶段 2 全产物写作。
+  - **1.6 段首强化**：明示 env-description.yaml Context 注入契约，约束阶段 2 全产物写作。
   - **版本号表述统一**：metadata.version 0.9.0 → 1.0.0；内部子版本号 v3.x 仅在变更记录保留。
   - **章节物理位置**：产物清单 + 三产物一致性约束 + scenario.yaml 生成指引 + 禁令 + 变更记录统一移至附录。
 
