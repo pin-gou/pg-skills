@@ -370,7 +370,7 @@ AI 编码这件事，到 2026 年已经不再是"能不能写"，而是"能不�
 ---
 
 - 仓库地址：`github.com/pin-gou/pg-skills`
-- 当前版本：v0.8.2
+- 当前版本：v0.9.0
 - 一句话接入：`git subtree add → pg init → pg-init-project`
 - 一行切换环境：`pg-invoke-hook.py --env <dev-local|staging|prod> --role <r> --action <a> --instance <i>`
 - propose 选环境 + build 自动 prep：`/2-pg-propose --environment "test→dev-local,verify→staging,gate→prod"`

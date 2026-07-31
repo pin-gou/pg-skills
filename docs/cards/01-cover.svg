@@ -29,7 +29,7 @@
     <text x="400" y="680" text-anchor="middle" font-size="44" font-weight="700">让 AI 写出</text>
     <text x="400" y="740" text-anchor="middle" font-size="44" font-weight="700" fill="#fbbf24">可托付的代码</text>
   </g>
-  <text x="400" y="820" text-anchor="middle" font-size="20" fill="#94a3b8">pg-skills · v0.8.2 · AI 编码治理能力层</text>
+  <text x="400" y="820" text-anchor="middle" font-size="20" fill="#94a3b8">pg-skills · v0.9.0 · AI 编码治理能力层</text>
   <g transform="translate(400 950)">
     <rect x="-90" y="-26" width="180" height="52" rx="26" fill="#2563eb"/>
     <text x="0" y="6" text-anchor="middle" font-size="20" font-weight="600" fill="#fff">滑动看完整介绍 →</text>
