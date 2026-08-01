@@ -1,6 +1,6 @@
 # Scenario YAML 格式与 placeholder 协议
 
-本文档定义 `scenario-<track>.yaml` 的格式、`pg-gen-scenario.py` 生成的 skeleton 占位符约定，以及 v3.7 起 `pg-validate-proposal.py` 的 placeholder 校验协议。
+本文档定义 `scenario-<track>.yaml` 的格式、`pg-gen-scenario.py` 生成的 skeleton 占位符约定，v3.7 起 `pg-validate-proposal.py` 的 placeholder 校验协议，以及 v1.1.0 起 `pg-validate-proposal.py` 的硬编码 endpoint 校验规则。
 
 v3.9: 新增 `when[].type` 字段（默认 `api`），支持 `type=browser` 的浏览器交互场景。
 browser 场景使用 `pg-browser-testing-with-devtools` SKILL + Chrome DevTools MCP 工具执行。
@@ -131,6 +131,33 @@ skeleton 中的"sentinel"占位符，LLM 编辑时**必须**替换为真实内�
 [scenario_placeholder_unfilled] scenario-test.yaml scenarios[0].scenario_id 含占位符
   'S-<unique-name>', LLM 必须替换为 S-<verb>-<obj>-<result> 风格
 ```
+
+---
+
+## v1.1.0 (P0-1) 硬编码 endpoint 校验协议
+
+scenario `given` / `when` / `then` / `evidence` 段如需引用 sandbox IP / 端口 / ssh 用户，**必须**使用 `{env.<段>.<name>.<字段路径>}` 占位引用 `env-description.yaml` 中真实资源。
+
+**禁止硬编码模式**：
+
+| 模式 | 命中示例 | 豁免 |
+|------|---------|------|
+| IPv4 字面 | `192.168.122.221` | `127.0.0.1` / `0.0.0.0` |
+| ssh 用户 | `ssh://ubuntu@vm-host` | 无（强制占位符） |
+| http(s) 端点 | `http://10.0.0.5:9080/api` | 整串含 `localhost` / `127.0.0.1` / `0.0.0.0` 时豁免 |
+| port 字面 | `port 9082` / `port:9080` | port<1000 豁免（80 / 443 / 3000 等常用） |
+
+**正确写法**（given 引用 sandbox）：
+
+```yaml
+given:
+  - "{env.infra_services[name=sandbox].instances[0].endpoint} 可达"
+  - "实例 {env.data_resources[name=vm_data].seeded_instances[0].id} 已创建"
+```
+
+**校验失败处理**：3.2 修复循环 → 回到阶段 2.6.2 替换为占位符。
+
+**环境变量回滚**：`PG_PROPOSE_V110_HARDCODED=0` 临时关闭新规则。
 
 ---
 

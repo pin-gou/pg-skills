@@ -187,6 +187,11 @@ prompt: |
   按 prompt 模板 sub_agent_contract 块落盘 result.json。
   - escalate 时 `tasks_updated` 必须含失败的 scenario_id 列表
   - completed 时 `outputs` 必须含每个 Scenario 的 JSON 证据路径
+  - **v1.1.0 (P1-2) 结构化清单契约**（reducer 强制校验，违反 → error action）：
+    - `failed_scenarios`：JSON 数组字符串。escalate 时**必须非空**（失败 scenario_id 列表）；completed 时**必须为 `"[]"`**。
+    - `skipped_scenarios`：JSON 数组字符串。无跳过时填 `"[]"`；有跳过时列出被 SKIPPED 的 scenario_id。
+    - 调 `pg-build-result` 时用 `--failed-scenarios '["S-xxx"]' --skipped-scenarios '[]'` 传入。
+    - 这两个字段缺失或 JSON 非法，reducer 直接拒绝该 record（error action），不推进 state。
 
   ### 写盘要求
 

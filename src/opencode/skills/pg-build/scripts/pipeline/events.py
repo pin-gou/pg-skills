@@ -88,6 +88,11 @@ class PipelineRecord:
     design_md_fault: bool = False  # v2.7: fix-review 检测到 design.md 文档层缺陷
     design_md_fault_location: str = ""  # v2.7: 文档缺陷位置 (file:line)
     design_drift: str = ""  # v3.x: scenario-fix 检测到的 design 偏移（JSON 数组，纯 Markdown 累积）
+    # v1.1.0 (P1-2): scenario-execute 结构化失败/跳过清单（JSON 数组）
+    failed_scenarios: str = ""
+    skipped_scenarios: str = ""
+    # v1.1.0 (P1-3): scenario-fix 修复根因分类
+    fix_root_cause: str = ""  # code_bug | env_drift | design_drift
 
 
 @dataclass(frozen=True)

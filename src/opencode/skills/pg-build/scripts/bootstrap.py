@@ -515,12 +515,35 @@ def _detect_failed_state(change: str) -> dict[str, Any]:
     if not reason:
         return {"detected": False, "reason": "no terminal failed state detected"}
 
-    return {
+    result: dict[str, Any] = {
         "detected": True,
         "reason": reason,
         "last_track": last_track,
         "last_phase": last_phase,
     }
+
+    # v1.1.0 (P0-2): 精准暴露 scenario fix_cycle 耗尽场景，
+    # 让编排器在 Reset/Resume 前给用户针对性提示。
+    if last_phase == "scenario-execute" and os.path.isfile(snapshot_path):
+        try:
+            with open(snapshot_path, "r", encoding="utf-8") as fh:
+                snap = json.load(fh)
+            failed_reason = snap.get("failed_reason") or ""
+            if "fix cycles exhausted" in failed_reason:
+                tracks = snap.get("tracks", {})
+                tr = tracks.get(last_track, {})
+                phases = tr.get("phases", {})
+                exec_phase = phases.get("scenario-execute", {})
+                fix_cycles_count = len(exec_phase.get("fix_cycles", []))
+                scenario_max = tr.get("scenario_max_fix_cycles")
+                max_allowed = scenario_max if scenario_max is not None else tr.get("max_fix_retries")
+                result["failure_mode"] = "scenario_fix_cycles_exhausted"
+                result["fix_cycles_count"] = fix_cycles_count
+                result["max_allowed"] = max_allowed
+        except (json.JSONDecodeError, KeyError, TypeError, OSError):
+            pass
+
+    return result
 
 
 def _build_env_hook_plan(
@@ -958,6 +981,9 @@ def _detect_pipeline_config_from_disk(change: str) -> dict[str, Any]:
                 track_configs[tid].setdefault("description", cfg.get("description", ""))
                 track_configs[tid].setdefault("timeout_seconds", cfg.get("timeout_seconds", 1800))
                 track_configs[tid].setdefault("verify_failure_mode", cfg.get("verify_failure_mode", "fail-fast"))
+                # v1.1.0 (P1-4): scenario-execute → scenario-fix 循环独立上限
+                if cfg.get("scenario_max_fix_cycles") is not None:
+                    track_configs[tid].setdefault("scenario_max_fix_cycles", cfg.get("scenario_max_fix_cycles"))
         except Exception:
             pass
 

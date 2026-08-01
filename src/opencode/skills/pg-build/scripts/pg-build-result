@@ -98,6 +98,25 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
         help="v3.x: scenario-fix 检测到的 design 偏移，JSON 格式。"
              "例: '{\"phase\": \"scenario-execute\", \"location\": \"ProjectResponse 缺 network\"}'",
     )
+    # ── v1.1.0 (P1-2) 新增：scenario-execute 结构化结果清单 ──
+    p.add_argument(
+        "--failed-scenarios", default="",
+        help="v1.1.0 (P1-2): scenario-execute 失败 scenario_id 列表，JSON 数组字符串。"
+             "escalate 时必填非空，completed 时必填 '[]'。例: '[\"S-install-vm\"]'",
+    )
+    p.add_argument(
+        "--skipped-scenarios", default="",
+        help="v1.1.0 (P1-2): scenario-execute 跳过 scenario_id 列表，JSON 数组字符串。"
+             "无跳过时填 '[]'。例: '[\"S-upgrade\"]'",
+    )
+    # ── v1.1.0 (P1-3) 新增：scenario-fix 根因分类 ──
+    p.add_argument(
+        "--fix-root-cause", default="",
+        choices=["", "code_bug", "env_drift", "design_drift"],
+        help="v1.1.0 (P1-3): scenario-fix 根因分类。"
+             "code_bug=代码缺陷（走重跑）; env_drift=环境漂移 / design_drift=设计偏移（走 workflow_failed）。"
+             "缺省按 code_bug 处理。",
+    )
     # ── v2.4 新增：强制落盘参数 ──
     p.add_argument(
         "--output-path", default="",
@@ -150,6 +169,20 @@ def _build_result_dict(args: argparse.Namespace) -> dict[str, Any]:
             result["design_drift"] = drift
         except (json.JSONDecodeError, TypeError):
             pass
+    # v1.1.0 (P1-2): scenario-execute 结构化清单
+    if args.failed_scenarios:
+        try:
+            result["failed_scenarios"] = json.loads(args.failed_scenarios)
+        except (json.JSONDecodeError, TypeError):
+            result["failed_scenarios"] = args.failed_scenarios
+    if args.skipped_scenarios:
+        try:
+            result["skipped_scenarios"] = json.loads(args.skipped_scenarios)
+        except (json.JSONDecodeError, TypeError):
+            result["skipped_scenarios"] = args.skipped_scenarios
+    # v1.1.0 (P1-3): scenario-fix 根因分类
+    if args.fix_root_cause:
+        result["fix_root_cause"] = args.fix_root_cause
     return result
 
 

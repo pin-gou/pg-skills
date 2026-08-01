@@ -425,6 +425,11 @@ reducer 返回 `kind="error"` 时：
 | `track_types[tid] = "scenario"` 但 `gate_enabled=True` | 旧 snapshot 未迁移（v3.6 前遗留） | 运行 `python3 ... bootstrap <change>` 重新派生（bootstrap 会覆盖 gate_enabled） |
 | scenario-execute 报告 `failed_scenarios` 非空但 `status=completed` | sub-agent 未正确填写 escalate 协议 | 检查 result.json 的 `status` 字段是否应为 `escalate` 而非 `completed` |
 | scenario-prepare 返回 `failed`（模块已就绪） | scenario-prepare 误判 role 启动失败 | 检查 `invoke-hook --action health_check` 是否返回非 0；重 dispatch 同 dispatch_file |
+| `action: error` + `schema_violation ... failed_scenarios` (v1.1.0/P1-2) | scenario-execute result.json 缺 `failed_scenarios`/`skipped_scenarios` 或 JSON 非法 | sub-agent 调 `pg-build-result --failed-scenarios '[...]' --skipped-scenarios '[...]'`；escalate 必须非空，completed 必须 `"[]"` |
+| `action: error` + `escalate 要求 failed_scenarios 非空` (P1-2) | escalate 时 `failed_scenarios` 为空 | escalate 表示有失败，必须列出失败 scenario_id |
+| `action: workflow_failed` + `fix cycles exhausted` (P0-2) | scenario-fix 循环次数达 `scenario_max_fix_cycles` | 非 bug：循环上限生效。检查为何反复失败（多为环境漂移/设计缺陷），修根因后重跑 |
+| `action: workflow_failed` + `根因为 env_drift` (P1-3) | scenario-fix 判定为环境漂移 | 不改代码；重新 describe_env / 修复环境后重跑 pg-build |
+| `action: workflow_failed` + `根因为 design_drift` (P1-3) | scenario-fix 判定为设计契约偏移 | 重跑 /2-pg-propose 修正 design.md（drift 已累积到 drift.md） |
 
 ## 完整代码参考
 
@@ -738,6 +743,51 @@ final-gate 前置门控 `_collect_missing_gate_assessments` 自动豁免。
 - scenario-fix 的 result.json 必含 `fix_cycle` 字段
 - scenario-execute 多次重试时，`fix_cycle` 独立计数（不与 verify.fix_cycles 共享）
 - scenario track 不参与 final-gate 评分（scenario-execute 通过即视为该 track 质量合格）
+
+### scenario 循环控制（v1.1.0）
+
+针对历史 change 中 scenario-fix 反复循环却无法收敛的问题，v1.1.0 引入三项强化：
+
+#### P0-2：fix 循环硬终止
+
+scenario-fix 循环次数受 `scenario_max_fix_cycles` 限制。达到上限后 reducer 返回
+`workflow_failed (fatal=true)`，`reason` 含 `fix cycles exhausted (N/M)`，**不再继续重跑**。
+
+- `scenario_max_fix_cycles` 在 `.pg/project.yaml` `tracks.<name>.scenario_max_fix_cycles` 配置（缺省回退到 `max_fix_retries`，默认 5）
+- `bootstrap --detect` 会在失败检测输出中暴露 `failure_mode=scenario_fix_cycles_exhausted` / `fix_cycles_count` / `max_allowed`，供编排器精准提示用户
+
+#### P1-2：结构化结果清单契约
+
+scenario-execute 的 result.json 必须含两个 JSON 数组字段（reducer 强制校验，违反 → error action）：
+
+| 字段 | escalate 时 | completed 时 | 说明 |
+|------|------------|-------------|------|
+| `failed_scenarios` | **必须非空**（失败 scenario_id 列表） | **必须为 `"[]"`** | 缺失/JSON 非法 → error |
+| `skipped_scenarios` | 列出被 SKIPPED 的 scenario_id，无则 `"[]"` | 同左 | 缺失/JSON 非法 → error |
+
+sub-agent 调 `pg-build-result --failed-scenarios '[...]' --skipped-scenarios '[...]'` 传入。
+
+#### P1-3：scenario-fix 根因分类与路由
+
+scenario-fix 必须在 result.json 标注 `fix_root_cause`（调 `pg-build-result --fix-root-cause <值>`），reducer 据此路由：
+
+| fix_root_cause | 编排器行为 |
+|----------------|-----------|
+| `code_bug`（或缺省） | fix 完成后**重跑 scenario-execute** |
+| `env_drift` | **workflow_failed 终止**（重跑无意义，需重新 describe_env / 修环境） |
+| `design_drift` | **workflow_failed 终止**（需重跑 /2-pg-propose 修 design.md；附带 `--design-drift` JSON 累积到 drift.md） |
+
+> 历史教训：vm-agent-e2e 的 scenario-fix 循环中混入"环境能力不可验证"的 scenario（WebSocket PTY 流在测试环境无法执行），反复重跑无法收敛，浪费 8 轮 fix。引入根因分类后，此类问题在首轮即被识别为 `env_drift`/`design_drift` 并终止，避免无效循环。
+
+#### P1-4：独立循环上限
+
+`scenario_max_fix_cycles` 独立于 `max_fix_retries`（后者用于 verify→fix 循环）。
+两者解耦后，可为 scenario track 单独设定更宽松/更严格的循环上限，而不影响 standard track。
+
+#### P1-5：attempt 递增与上限
+
+scenario-execute 每次重跑 `attempt` 递增；`attempt > max_fail_retries` 时返回
+`workflow_failed`。防止 scenario-execute 自身无限重跑。
 
 ### 修复历史
 

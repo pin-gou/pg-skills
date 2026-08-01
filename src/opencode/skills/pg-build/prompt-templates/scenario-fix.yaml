@@ -4,7 +4,9 @@ prompt: |
   ### 场景修复（scenario-fix）
 
   本 phase 是 scenario-execute escalate 触发的子 pipeline。
-  你的任务是定位失败根因、修改代码、让单元测试通过；
+  你的任务是**先分类失败根因**，再决定修复动作：
+  - 根因是**代码缺陷** → 修改代码、跑测试、record status=completed/failed
+  - 根因是**环境漂移 / 设计缺陷** → 不改代码，record 并标注根因分类，由编排器终止 pipeline
 
   ### 必读源报告（scenario-execute ESCALATE 派发）
 
@@ -26,13 +28,42 @@ prompt: |
   - 不在 {module_roots} 路径下的文件
   - scenario-*.yaml（SSOT，**禁止修改**；如需修改须重跑 `pg-gen-scenario.py` 重新生成 skeleton）
 
-  ### 修复后必跑流程
+  ### 根因分类契约（v1.1.0 / P1-3，强制）
+
+  修复前**必须**先判定根因类型，调 `pg-build-result` 时用 `--fix-root-cause` 标注。
+  编排器据此路由，分类错误会导致无效重跑或误终止：
+
+  | fix_root_cause | 含义 | 编排器行为 | 你要做的事 |
+  |----------------|------|-----------|-----------|
+  | `code_bug` | 代码缺陷（缺分支/契约错位/迁移漏字段） | fix 完成后**重跑 scenario-execute** | 改代码 → 跑测试 → record status=completed |
+  | `env_drift` | 环境状态漂移（host/端口/资源 id 变了、服务未起） | **workflow_failed 终止**（重跑无意义） | 不改代码，record 标注根因；需人工重新 describe_env / 修环境 |
+  | `design_drift` | design.md 与实现契约不一致 | **workflow_failed 终止** | 不改代码，record 标注根因；需人工重跑 /2-pg-propose 修 design.md |
+
+  **判定要点**：
+  - 失败源于「代码该做的没做对」→ `code_bug`
+  - 失败源于「环境/依赖现状与 scenario 预期不符」且无法靠改本仓代码解决 → `env_drift`
+  - 失败源于「design.md 定义的契约本身有缺陷/与现状矛盾」→ `design_drift`
+  - 缺省（不传 `--fix-root-cause`）按 `code_bug` 处理
+
+  **design_drift 必须附带 `--design-drift` JSON**（累积到 drift.md 供审计）：
+  ```
+  --design-drift '{{"phase":"scenario-fix","scenario_id":"<S-xxx>","location":"<design.md 章节/字段>","reason":"<契约偏移说明>","decision":"ACCEPT"}}'
+  ```
+
+  ### 修复后必跑流程（code_bug 路径）
 
   1. 修改源码
   2. 跑 {test_commands} 单元测试（必须通过）
   3. 跑模块 lint（必须 0 警告）
   4. 写修复报告到 `2-build/{fix_report_filename}`
-  5. 调 `pg-build-result` 落盘 result.json（status=completed 或 failed）
+  5. 调 `pg-build-result` 落盘 result.json：`--fix-root-cause code_bug`（status=completed 或 failed）
+
+  ### 非代码路径必跑流程（env_drift / design_drift）
+
+  1. **不改任何源码**
+  2. 写诊断报告到 `2-build/{fix_report_filename}`，说明根因证据与所需人工动作
+  3. 调 `pg-build-result` 落盘 result.json：`--fix-root-cause env_drift`（或 `design_drift`），design_drift 附带 `--design-drift` JSON
+  4. record status=completed（编排器读到根因分类后自动终止 workflow，而非重跑）
 
   ### 修复策略指引
 

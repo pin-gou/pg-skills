@@ -58,7 +58,8 @@ def _run_record_in_process(args: list[str], change: str = "v25-test"):
         def record(self, status, report_path, summary, outputs, issues,
                    evidence_paths=None, tasks_updated=None,
                    design_md_fault=False, design_md_fault_location="",
-                   design_drift=""):
+                   design_drift="",
+                   failed_scenarios="", skipped_scenarios="", fix_root_cause=""):
             captured["calls"].append({
                 "status": status, "report_path": report_path,
                 "summary": summary, "outputs": outputs, "issues": issues,
@@ -67,6 +68,9 @@ def _run_record_in_process(args: list[str], change: str = "v25-test"):
                 "design_md_fault": design_md_fault,
                 "design_md_fault_location": design_md_fault_location,
                 "design_drift": design_drift,
+                "failed_scenarios": failed_scenarios,
+                "skipped_scenarios": skipped_scenarios,
+                "fix_root_cause": fix_root_cause,
             })
             return {"action": "advance", "captured": True}
 

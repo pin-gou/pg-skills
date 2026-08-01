@@ -174,12 +174,17 @@ def _build_api_skeleton_template(idx: int, covers_placeholder: list | None = Non
 
     idx 用于生成不同 scenario_id 占位（unique）。
     covers_placeholder: 写入 'covers' 字段, LLM 必填替换为真实 V-* ID.
+
+    v1.1.0: given/when/then 中如需引用 sandbox IP / 端口 / 账号,
+    必须使用 {env.<段>.<name>.<field>} 占位引用 env-description.yaml 资源,
+    pg-validate-proposal.py 校验时会拦截硬编码 IPv4 / ssh://user@host / port 字面.
     """
     return {
         "scenario_id": f"S-<unique-name-{idx}>",
         "critical": True,
         "description": "一句话描述此 Scenario 验证目标（LLM 必填）",
         "given": [
+            "# REQUIRED: 前置条件；如引用 sandbox IP/端口/账号，必须用 {env.infra_services[name=<n>].instances[0].endpoint}",
             "<前置条件 1>",
             "<前置条件 2>",
         ],
@@ -209,12 +214,16 @@ def _build_api_skeleton_template(idx: int, covers_placeholder: list | None = Non
 
 
 def _build_browser_skeleton_template(idx: int, covers_placeholder: list | None = None) -> dict:
-    """v3.10: 单个 browser 类型 scenario skeleton 模板."""
+    """v3.10: 单个 browser 类型 scenario skeleton 模板.
+
+    v1.1.0: given 段如需引用 frontend URL / 账号，同样必须用 {env.<段>.<name>.<field>}.
+    """
     return {
         "scenario_id": f"S-<unique-name-{idx}-browser>",
         "critical": False,
         "description": "一句话描述此 Browser Scenario 验证目标（LLM 必填）",
         "given": [
+            "# REQUIRED: 前置条件；URL/账号引用见 {env.*} 占位规范",
             "<前置条件 1>",
         ],
         "covers": covers_placeholder if covers_placeholder is not None else [
@@ -317,6 +326,9 @@ def _build_skeleton_yaml(
                 "若 V-* 不足, 建议补充 scenario 而非合并现有 scenario。"
                 "v1.0 (v6 hook 协议): scenario given 直接引用 .pg/changes/<id>/env-description.yaml 中的资源路径, "
                 "不再使用 _meta.env_constraint 字段."
+                "v1.1.0 (硬约束): given/when/then 中禁止硬编码 IPv4 / ssh://user@host / port 字面, "
+                "必须用 {env.<段>.<name>.<字段路径>} 占位引用 env-description.yaml 中的真实资源。"
+                "pg-validate-proposal.py 校验规则 scenario_given_hardcoded_endpoint 拦截违规。"
             ),
             "change": change,
             "track_id": track_id,

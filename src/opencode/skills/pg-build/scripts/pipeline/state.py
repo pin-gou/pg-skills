@@ -133,6 +133,9 @@ class TrackState:
     # "fail-fast"（默认）：遇到第一个 FAIL 立即 escalate
     # "accumulate"：收集所有 FAIL 后一次性 escalate
     verify_failure_mode: str = "fail-fast"
+    # v1.1.0 (P1-4) 新增：scenario-execute → scenario-fix 循环次数上限
+    # 独立于 max_fix_retries（verify→fix 循环），默认 None 时 fallback 到 max_fix_retries。
+    scenario_max_fix_cycles: int | None = None
 
     # 富化上下文（由 _first_next 从 project.yaml 预填充）
     module_roots: str = ""               # "[webvirt-backend, webvirt-agent-proto]"
@@ -187,6 +190,7 @@ class TrackState:
             "verify_enabled": self.verify_enabled,
             "gate_enabled": self.gate_enabled,
             "verify_failure_mode": self.verify_failure_mode,
+            "scenario_max_fix_cycles": self.scenario_max_fix_cycles,
         }
 
     @classmethod
@@ -230,6 +234,7 @@ class TrackState:
             verify_enabled=d.get("verify_enabled", True),
             gate_enabled=d.get("gate_enabled", True),
             verify_failure_mode=d.get("verify_failure_mode", "fail-fast"),
+            scenario_max_fix_cycles=d.get("scenario_max_fix_cycles"),
         )
 
     def replace(self, **kwargs: Any) -> "TrackState":
@@ -237,6 +242,15 @@ class TrackState:
 
     def get_phase(self, phase: str) -> PhaseState:
         return self.phases.get(phase, PhaseState())
+
+    def effective_scenario_max_fix_cycles(self) -> int:
+        """v1.1.0 (P1-4): 解析 scenario-execute → scenario-fix 循环上限。
+
+        优先使用 scenario_max_fix_cycles（独立配置），缺省 fallback 到 max_fix_retries。
+        """
+        if self.scenario_max_fix_cycles is not None:
+            return self.scenario_max_fix_cycles
+        return self.max_fix_retries
 
 
 @dataclass(frozen=True)

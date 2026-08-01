@@ -386,6 +386,7 @@ class Orchestrator:
                 code_review_languages=resolve_module_languages(project_config, module_names),
                 verify_enabled=cfg.get("verify_enabled", True),
                 gate_enabled=cfg.get("gate_enabled", True),
+                scenario_max_fix_cycles=cfg.get("scenario_max_fix_cycles"),
             )
             is_simple = cfg.get("type") == "simple"
             is_e2e = cfg.get("type") == "e2e"
@@ -600,6 +601,9 @@ class Orchestrator:
         design_md_fault: bool = False,  # v2.7
         design_md_fault_location: str = "",  # v2.7
         design_drift: str = "",  # v3.x: scenario-fix design 偏移记录（JSON 字符串）
+        failed_scenarios: str = "",  # v1.1.0 (P1-2): JSON 数组
+        skipped_scenarios: str = "",  # v1.1.0 (P1-2): JSON 数组
+        fix_root_cause: str = "",  # v1.1.0 (P1-3): code_bug | env_drift | design_drift
     ) -> dict[str, Any]:
         """记录一次 sub-agent 完成事件。
 
@@ -679,6 +683,9 @@ class Orchestrator:
             design_md_fault=design_md_fault,  # v2.7
             design_md_fault_location=design_md_fault_location,  # v2.7
             design_drift=design_drift,  # v3.x
+            failed_scenarios=failed_scenarios,  # v1.1.0 (P1-2)
+            skipped_scenarios=skipped_scenarios,  # v1.1.0 (P1-2)
+            fix_root_cause=fix_root_cause,  # v1.1.0 (P1-3)
         )
 
         # reducer

@@ -805,5 +805,84 @@ environments:
         self.assertGreater(len(pc["stage_order"]), 0)
 
 
+class TestDetectFailedStateScenarioExhaustion(unittest.TestCase):
+    """v1.1.0 (P0-2): _detect_failed_state 暴露 scenario fix_cycle 耗尽细节。"""
+
+    def _setup_change_dir(self, snapshot: dict) -> str:
+        change = f"test-detect-{os.urandom(4).hex()}"
+        build_dir = os.path.join(bootstrap.CHANGES_DIR, change, bootstrap.APPLY_DIR)
+        os.makedirs(build_dir, exist_ok=True)
+        # event log 最后一行是 workflow_failed
+        with open(os.path.join(build_dir, "pipeline.events"), "w", encoding="utf-8") as fh:
+            fh.write(json.dumps({"type": "workflow_failed", "detail": {
+                "track": "int.scr", "phase": "scenario-execute",
+            }}) + "\n")
+        with open(os.path.join(build_dir, "pipeline.snapshot.json"), "w", encoding="utf-8") as fh:
+            json.dump(snapshot, fh)
+        return change
+
+    def test_scenario_exhaustion_surfaced(self):
+        snapshot = {
+            "status": "failed",
+            "failed_reason": "int.scr:scenario-execute fix cycles exhausted (8/8)",
+            "current_track": "int.scr",
+            "current_phase": "scenario-execute",
+            "tracks": {
+                "int.scr": {
+                    "max_fix_retries": 8,
+                    "scenario_max_fix_cycles": 8,
+                    "phases": {
+                        "scenario-execute": {
+                            "fix_cycles": [{"cycle": i, "status": "completed"} for i in range(1, 9)],
+                        },
+                    },
+                },
+            },
+        }
+        change = self._setup_change_dir(snapshot)
+        result = bootstrap._detect_failed_state(change)
+        self.assertTrue(result["detected"])
+        self.assertEqual(result.get("failure_mode"), "scenario_fix_cycles_exhausted")
+        self.assertEqual(result.get("fix_cycles_count"), 8)
+        self.assertEqual(result.get("max_allowed"), 8)
+
+    def test_scenario_fallback_to_max_fix_retries(self):
+        """scenario_max_fix_cycles 未设置时 max_allowed 回退到 max_fix_retries。"""
+        snapshot = {
+            "status": "failed",
+            "failed_reason": "int.scr:scenario-execute fix cycles exhausted (5/5)",
+            "current_track": "int.scr",
+            "current_phase": "scenario-execute",
+            "tracks": {
+                "int.scr": {
+                    "max_fix_retries": 5,
+                    "phases": {
+                        "scenario-execute": {
+                            "fix_cycles": [{"cycle": i, "status": "completed"} for i in range(1, 6)],
+                        },
+                    },
+                },
+            },
+        }
+        change = self._setup_change_dir(snapshot)
+        result = bootstrap._detect_failed_state(change)
+        self.assertEqual(result.get("failure_mode"), "scenario_fix_cycles_exhausted")
+        self.assertEqual(result.get("max_allowed"), 5)
+
+    def test_non_scenario_failure_no_mode(self):
+        """非 scenario-execute 的失败不带 failure_mode。"""
+        snapshot = {
+            "status": "failed",
+            "failed_reason": "dev.backend:dev failed",
+            "current_track": "dev.backend",
+            "current_phase": "dev",
+            "tracks": {},
+        }
+        change = self._setup_change_dir(snapshot)
+        result = bootstrap._detect_failed_state(change)
+        self.assertTrue(result["detected"])
+        self.assertNotIn("failure_mode", result)
+
+
 if __name__ == "__main__":
     unittest.main()

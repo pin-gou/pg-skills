@@ -52,6 +52,23 @@ except Exception as _e:
 MANIFEST_SCHEMA_PATH = os.path.join(_SCRIPT_DIR, "manifest.schema.json")
 
 
+# v1.1.0: scenario given 硬编码 endpoint 校验规则 (P0-1)
+# 黑名单 + 白名单前缀 + 环境开关
+_HARDCODED_IPV4_RE = re.compile(r"\b\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}\b")
+_HARDCODED_SSH_USER_RE = re.compile(r"\bssh://[\w.-]+@")
+_HARDCODED_HTTP_PORT_RE = re.compile(r"\bhttps?://[\w.-]+:\d{2,5}\b")
+_HARDCODED_PORT_LITERAL_RE = re.compile(r"\bport\s*[=:]?\s*\d{4,5}\b", re.IGNORECASE)
+# 本地开发常用豁免
+_HARDCODED_LOCAL_ALLOWLIST = {"127.0.0.1", "localhost", "0.0.0.0"}
+# 占位符 / 注释 / URL scheme 前缀
+_HARDCODED_ALLOW_PREFIXES = ("{env.", "#", "//", "https://{env.", "http://{env.")
+
+# v1.1.0: 通过环境变量可临时关闭新规则 (回滚路径)
+def _hardcoded_rule_enabled() -> bool:
+    """lazy 读取环境变量, 允许测试在 import 后切换开关."""
+    return os.environ.get("PG_PROPOSE_V110_HARDCODED", "1") != "0"
+
+
 def _load_json_schema(path):
     with open(path, encoding="utf-8") as f:
         return json.load(f)
@@ -417,7 +434,123 @@ def _validate_three_product_consistency(manifest, change_or_path) -> list[tuple[
                    f"{os.path.join(change_root, fname)}")
             issues.append((code, msg))
 
+    # v1.1.0: scenario given / when / then 硬编码 endpoint 校验 (P0-1)
+    if _hardcoded_rule_enabled():
+        issues.extend(
+            _validate_scenario_no_hardcoded_endpoint(
+                change_root, existing_scenario_files, expected_from_manifest,
+            )
+        )
+
     return issues
+
+
+def _validate_scenario_no_hardcoded_endpoint(
+    change_root: str,
+    existing_scenario_files: set[str],
+    expected_from_manifest: set[str],
+) -> list[tuple[str, str]]:
+    """v1.1.0 (P0-1): 校验 enabled scenario track 的 yaml 不得含硬编码 IP / ssh 用户 / 端口.
+
+    只检查 expected_from_manifest 中出现的文件 (避免孤儿 yaml 二次报错).
+    豁免: 注释行 / 占位符前缀 / 本地开发 IP.
+    """
+    if not _hardcoded_rule_enabled():
+        return []
+
+    issues: list[tuple[str, str]] = []
+    if yaml is None:
+        return issues
+
+    patterns = (
+        ("ipv4", _HARDCODED_IPV4_RE),
+        ("ssh_user", _HARDCODED_SSH_USER_RE),
+        ("http_endpoint", _HARDCODED_HTTP_PORT_RE),
+        ("port_literal", _HARDCODED_PORT_LITERAL_RE),
+    )
+
+    for filename in sorted(existing_scenario_files & expected_from_manifest):
+        scenario_path = os.path.join(change_root, filename)
+        try:
+            with open(scenario_path, encoding="utf-8") as f:
+                doc = yaml.safe_load(f)
+        except Exception as e:
+            issues.append((
+                "scenario_yaml_invalid",
+                f"{filename}: YAML 解析失败, 跳过硬编码校验: {e}",
+            ))
+            continue
+        if not isinstance(doc, dict):
+            continue
+
+        scenarios = doc.get("scenarios") or []
+        for s_idx, scenario in enumerate(scenarios):
+            if not isinstance(scenario, dict):
+                continue
+            scenario_id = scenario.get("scenario_id", f"<scenario-{s_idx}>")
+
+            # 扫描的字段: given (list), when (list of dict), then (list), evidence (list)
+            scan_fields = [
+                ("given", scenario.get("given") or []),
+                ("when", scenario.get("when") or []),
+                ("then", scenario.get("then") or []),
+                ("evidence", scenario.get("evidence") or []),
+            ]
+            for fname, fval in scan_fields:
+                hits = _scan_value_for_hardcoded(fval, patterns, fname)
+                for hit_kind, hit_str in hits:
+                    code = "scenario_given_hardcoded_endpoint"
+                    msg = (
+                        f"{filename} → scenarios[{s_idx}] ({scenario_id}) → "
+                        f"{fname} 字段含硬编码 {hit_kind}: {hit_str!r}; "
+                        f"必须改用 {{env.<段>.<name>.<field>}} 占位引用 env-description.yaml 资源"
+                    )
+                    issues.append((code, msg))
+
+    return issues
+
+
+def _scan_value_for_hardcoded(value, patterns, field_name: str):
+    """递归扫描 list / dict / str, 返回命中的 (hit_kind, hit_str) 列表."""
+    hits: list[tuple[str, str]] = []
+    if isinstance(value, list):
+        for item in value:
+            hits.extend(_scan_value_for_hardcoded(item, patterns, field_name))
+    elif isinstance(value, dict):
+        for k, v in value.items():
+            hits.extend(_scan_value_for_hardcoded(v, patterns, field_name))
+    elif isinstance(value, str):
+        stripped = value.lstrip()
+        if not stripped:
+            return hits
+        # 注释行豁免
+        if stripped.startswith("#"):
+            return hits
+        # 占位符 / URL scheme 前缀豁免
+        if any(stripped.startswith(p) for p in _HARDCODED_ALLOW_PREFIXES):
+            return hits
+        # 整串只指向本地地址豁免 (含 host:port 形式)
+        if any(host in stripped for host in _HARDCODED_LOCAL_ALLOWLIST):
+            return hits
+        for kind, pattern in patterns:
+            for m in pattern.finditer(value):
+                hit_str = m.group(0)
+                # 本地 IP 豁免
+                if kind == "ipv4" and hit_str in _HARDCODED_LOCAL_ALLOWLIST:
+                    continue
+                # http_endpoint 含 localhost / 127.0.0.1 / 0.0.0.0 时豁免
+                if kind == "http_endpoint":
+                    if any(host in hit_str for host in _HARDCODED_LOCAL_ALLOWLIST):
+                        continue
+                # port_literal 含 port<1000 豁免 (测试常用 80 / 443 / 3000)
+                if kind == "port_literal":
+                    port_match = re.search(r"\b\d{4,5}\b", hit_str)
+                    if port_match:
+                        port_num = int(port_match.group(0))
+                        if port_num < 1000:
+                            continue
+                hits.append((kind, hit_str))
+    return hits
 
 
 def _validate_environment(manifest, config):

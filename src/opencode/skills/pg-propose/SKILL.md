@@ -667,6 +667,14 @@ scenarios:
 
 ## 附录 E：文档变更记录
 
+- **v1.1.0（2026-08-01）**：scenario 硬编码 endpoint 校验（P0-1）。
+  - `pg-gen-scenario.py` skeleton 注释升级：given/when/then 段明确标注"必须用 `{env.<段>.<name>.<字段路径>}` 占位引用 env-description.yaml 资源"。
+  - `pg-validate-proposal.py` 新增规则 `scenario_given_hardcoded_endpoint`：扫描 enabled scenario track 的 yaml 中 `given`/`when`/`then`/`evidence` 字段，命中 IPv4 / `ssh://user@` / `http(s)://host:port` / `port=N(4-5 digits)` 时报 ERROR（与 placeholder 同级）。
+  - 豁免：`{env.*}` 占位符 / `#` 注释行 / `localhost` / `127.0.0.1` / `0.0.0.0` / `port<1000`。
+  - 回滚路径：环境变量 `PG_PROPOSE_V110_HARDCODED=0` 临时关闭新规则。
+  - 新增单测 `tests/test_scenario_hardcoded.py`（10 case）。
+  - 触发：vm-agent-e2e archive 时 scenario-scr.yaml 命中 11 条硬编码错误（`192.168.122.221` / `ssh://ubuntu@` / `http://192.168.122.1:9082`），未来 propose 阶段即可拦截。
+
 - **v1.0.1（2026-07-31）**：修复阶段 1 依赖倒置——交换 1.5/1.6 顺序。
   - **问题**：旧 1.5（describe_env）需要 `--env <env-name>`，但环境名的 SSOT（`config.stages[i].environment.selection_rules`）在旧 1.6（管线配置）才加载，导致 LLM 执行 1.5 时无法确定 env name。
   - **修复**：1.5 → 获取管线配置（原 1.6），1.6 → 生成环境描述（原 1.5）。依赖链变为 `管线配置 → env name → describe_env`，无倒置。

@@ -210,6 +210,18 @@ def main() -> None:
                                 help="v2.7: fix-review 检测到 design.md 文档层缺陷")
         rec_parser.add_argument("--design-md-fault-location", default="",
                                 help="v2.7: 文档缺陷位置 (file:line)")
+        # v1.1.0 (P1-2): scenario-execute 结构化失败/跳过清单（JSON 数组）
+        rec_parser.add_argument("--failed-scenarios", default="",
+                                dest="failed_scenarios",
+                                help="v1.1.0 (P1-2): scenario-execute 失败清单 (JSON 数组字符串)")
+        rec_parser.add_argument("--skipped-scenarios", default="",
+                                dest="skipped_scenarios",
+                                help="v1.1.0 (P1-2): scenario-execute 跳过清单 (JSON 数组字符串)")
+        # v1.1.0 (P1-3): scenario-fix 修复根因分类
+        rec_parser.add_argument("--fix-root-cause", default="",
+                                dest="fix_root_cause",
+                                choices=("", "code_bug", "env_drift", "design_drift"),
+                                help="v1.1.0 (P1-3): scenario-fix 修复根因分类")
         rec_args = rec_parser.parse_args(sys.argv[3:])
 
         # ── v2.5: 加载 --result-json（如指定）──
@@ -314,6 +326,22 @@ def main() -> None:
         design_drift_file = file_values.get("design_drift", "")
         design_drift = json.dumps(design_drift_file) if isinstance(design_drift_file, dict) else str(design_drift_file)
 
+        # ── v1.1.0 (P1-2/P1-3): 结构化字段合并（CLI 非空 > 文件 > 默认空）──
+        def _merge_json_array(key: str, cli_val: str) -> str:
+            """JSON 数组字段：CLI 非空 > 文件（可能 list/dict/str）> 空。"""
+            if cli_val and cli_val.strip():
+                return cli_val
+            v = file_values.get(key)
+            if v is None:
+                return ""
+            if isinstance(v, (list, dict)):
+                return json.dumps(v, ensure_ascii=False)
+            return str(v)
+
+        failed_scenarios = _merge_json_array("failed_scenarios", rec_args.failed_scenarios)
+        skipped_scenarios = _merge_json_array("skipped_scenarios", rec_args.skipped_scenarios)
+        fix_root_cause = rec_args.fix_root_cause or str(file_values.get("fix_root_cause", "") or "")
+
         # ── status 兜底必填（CLI/文件都没有 → fatal）──
         if not status:
             print(json.dumps({
@@ -342,6 +370,9 @@ def main() -> None:
             design_md_fault=design_md_fault,
             design_md_fault_location=design_md_fault_location,
             design_drift=design_drift,
+            failed_scenarios=failed_scenarios,
+            skipped_scenarios=skipped_scenarios,
+            fix_root_cause=fix_root_cause,
         )
 
     elif command == "progress":

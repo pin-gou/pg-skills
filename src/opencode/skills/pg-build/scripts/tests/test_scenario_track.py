@@ -76,6 +76,7 @@ def _make_state(
     stage_order: tuple = (),
     stage_env_map: dict | None = None,
     stage_env_timeout: dict | None = None,
+    scenario_max_fix_cycles: int | None = None,
 ) -> PipelineState:
     """构造一个 PipelineState 含一个 scenario track。
 
@@ -90,6 +91,7 @@ def _make_state(
         max_fix_retries=max_fix_retries,
         max_fail_retries=3,
         env_name=env_name,
+        scenario_max_fix_cycles=scenario_max_fix_cycles,
     )
     return PipelineState(
         change="test-change",
@@ -199,6 +201,8 @@ class TestScenarioExecute(unittest.TestCase):
         record = PipelineRecord(
             track="real-integration.scenario-test",
             phase=SUB_SCENARIO_EXECUTE,
+            failed_scenarios="[]",
+            skipped_scenarios="[]",
             status=STATUS_COMPLETED,
             summary="all scenarios passed",
         )
@@ -228,6 +232,8 @@ class TestScenarioExecute(unittest.TestCase):
         record = PipelineRecord(
             track="real-integration.scenario-test",
             phase=SUB_SCENARIO_EXECUTE,
+            failed_scenarios="[\"S-create-vm\"]",
+            skipped_scenarios="[]",
             status=STATUS_ESCALATE,
             summary="S-create-vm failed",
             tasks_updated=("S-create-vm",),
@@ -262,6 +268,8 @@ class TestScenarioExecute(unittest.TestCase):
         record = PipelineRecord(
             track="real-integration.scenario-test",
             phase=SUB_SCENARIO_EXECUTE,
+            failed_scenarios='["S-x"]',
+            skipped_scenarios="[]",
             status=STATUS_ESCALATE,
             summary="",
             tasks_updated=(),
@@ -269,6 +277,101 @@ class TestScenarioExecute(unittest.TestCase):
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "error")
         self.assertIn("tasks_updated", action.detail["reason"])
+
+    # ── v1.1.0 (P1-2) result 契约测试 ──
+
+    def _execute_state(self) -> PipelineState:
+        state = _make_state()
+        t = state.tracks["real-integration.scenario-test"]
+        t = t.replace(phases={
+            SUB_SCENARIO_EXECUTE: PhaseState(status="running", attempt=1),
+        })
+        return state.replace(
+            tracks={**state.tracks, "real-integration.scenario-test": t},
+            current_phase=SUB_SCENARIO_EXECUTE,
+        )
+
+    def test_p1_2_missing_failed_scenarios_is_error(self):
+        """escalate/completed 缺 failed_scenarios → schema_violation error。"""
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_EXECUTE,
+            status=STATUS_ESCALATE,
+            summary="x",
+            tasks_updated=("S-x",),
+            skipped_scenarios="[]",
+        )
+        _ns, action = reduce_state(self._execute_state(), record)
+        self.assertEqual(action.kind, "error")
+        self.assertIn("failed_scenarios", action.detail["reason"])
+
+    def test_p1_2_missing_skipped_scenarios_is_error(self):
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_EXECUTE,
+            status=STATUS_ESCALATE,
+            summary="x",
+            tasks_updated=("S-x",),
+            failed_scenarios='["S-x"]',
+        )
+        _ns, action = reduce_state(self._execute_state(), record)
+        self.assertEqual(action.kind, "error")
+        self.assertIn("skipped_scenarios", action.detail["reason"])
+
+    def test_p1_2_escalate_empty_failed_scenarios_is_error(self):
+        """escalate 时 failed_scenarios 必须非空。"""
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_EXECUTE,
+            status=STATUS_ESCALATE,
+            summary="x",
+            tasks_updated=("S-x",),
+            failed_scenarios="[]",
+            skipped_scenarios="[]",
+        )
+        _ns, action = reduce_state(self._execute_state(), record)
+        self.assertEqual(action.kind, "error")
+        self.assertIn("failed_scenarios 非空", action.detail["reason"])
+
+    def test_p1_2_completed_with_failed_scenarios_is_error(self):
+        """completed 时 failed_scenarios 必须为空。"""
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_EXECUTE,
+            status=STATUS_COMPLETED,
+            summary="x",
+            failed_scenarios='["S-x"]',
+            skipped_scenarios="[]",
+        )
+        _ns, action = reduce_state(self._execute_state(), record)
+        self.assertEqual(action.kind, "error")
+        self.assertIn("status=completed", action.detail["reason"])
+
+    def test_p1_2_invalid_json_is_error(self):
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_EXECUTE,
+            status=STATUS_ESCALATE,
+            summary="x",
+            tasks_updated=("S-x",),
+            failed_scenarios="not-json",
+            skipped_scenarios="[]",
+        )
+        _ns, action = reduce_state(self._execute_state(), record)
+        self.assertEqual(action.kind, "error")
+        self.assertIn("不是合法 JSON", action.detail["reason"])
+
+    def test_p1_2_failed_status_skips_validation(self):
+        """FAILED (sub-agent 崩溃) 不强制结构化清单，走 attempt 重试。"""
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_EXECUTE,
+            status=STATUS_FAILED,
+            summary="crash",
+        )
+        _ns, action = reduce_state(self._execute_state(), record)
+        self.assertEqual(action.kind, "dispatch")
+        self.assertEqual(action.phase, SUB_SCENARIO_EXECUTE)
 
     def test_execute_escalate_exhausted_workflow_failed(self):
         """max_fix_retries 耗尽 → workflow_failed（不复用 accept_gap）。"""
@@ -292,6 +395,8 @@ class TestScenarioExecute(unittest.TestCase):
         record = PipelineRecord(
             track="real-integration.scenario-test",
             phase=SUB_SCENARIO_EXECUTE,
+            failed_scenarios="[\"S-xyz\"]",
+            skipped_scenarios="[]",
             status=STATUS_ESCALATE,
             summary="S-xyz failed again",
             tasks_updated=("S-xyz",),
@@ -299,6 +404,79 @@ class TestScenarioExecute(unittest.TestCase):
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "workflow_failed")
         self.assertIn("exhausted", action.detail["reason"])
+
+    def _state_with_cycles(self, n_cycles: int, max_fix: int,
+                           scenario_max: int | None) -> PipelineState:
+        """构造含 n_cycles 个已完成 fix cycle 的 state。"""
+        state = _make_state(
+            max_fix_retries=max_fix,
+            scenario_max_fix_cycles=scenario_max,
+        )
+        existing = tuple({"cycle": i, "status": "completed"} for i in range(1, n_cycles + 1))
+        t = state.tracks["real-integration.scenario-test"]
+        t = t.replace(phases={
+            SUB_SCENARIO_EXECUTE: PhaseState(status="running", attempt=1, fix_cycles=existing),
+        })
+        return state.replace(
+            tracks={**state.tracks, "real-integration.scenario-test": t},
+            current_phase=SUB_SCENARIO_EXECUTE,
+        )
+
+    def test_scenario_max_fix_cycles_overrides_max_fix_retries(self):
+        """v1.1.0 (P1-4): scenario_max_fix_cycles 独立于 max_fix_retries。
+
+        max_fix_retries=5 但 scenario_max_fix_cycles=2 → 第 2 次 escalate 即耗尽。
+        """
+        state = self._state_with_cycles(n_cycles=2, max_fix=5, scenario_max=2)
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_EXECUTE,
+            failed_scenarios="[\"S-xyz\"]",
+            skipped_scenarios="[]",
+            status=STATUS_ESCALATE,
+            summary="still failing",
+            tasks_updated=("S-xyz",),
+        )
+        _new_state, action = reduce_state(state, record)
+        self.assertEqual(action.kind, "workflow_failed")
+        self.assertIn("exhausted", action.detail["reason"])
+        self.assertIn("2/2", action.detail["reason"])
+
+    def test_scenario_max_fix_cycles_below_max_allows_more(self):
+        """scenario_max_fix_cycles > max_fix_retries 时放宽 scenario 循环上限。
+
+        max_fix_retries=2 但 scenario_max_fix_cycles=5 → 2 个 cycle 后仍可 escalate。
+        """
+        state = self._state_with_cycles(n_cycles=2, max_fix=2, scenario_max=5)
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_EXECUTE,
+            failed_scenarios="[\"S-xyz\"]",
+            skipped_scenarios="[]",
+            status=STATUS_ESCALATE,
+            summary="still failing",
+            tasks_updated=("S-xyz",),
+        )
+        _new_state, action = reduce_state(state, record)
+        # 未耗尽 → 创建新 scenario-fix 子 pipeline（dispatch）
+        self.assertEqual(action.kind, "dispatch")
+        self.assertEqual(action.phase, SUB_SCENARIO_FIX)
+
+    def test_scenario_max_fix_cycles_fallback_to_max_fix_retries(self):
+        """scenario_max_fix_cycles=None 时 fallback 到 max_fix_retries。"""
+        state = self._state_with_cycles(n_cycles=3, max_fix=3, scenario_max=None)
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_EXECUTE,
+            failed_scenarios="[\"S-xyz\"]",
+            skipped_scenarios="[]",
+            status=STATUS_ESCALATE,
+            summary="still failing",
+            tasks_updated=("S-xyz",),
+        )
+        _new_state, action = reduce_state(state, record)
+        self.assertEqual(action.kind, "workflow_failed")
+        self.assertIn("3/3", action.detail["reason"])
 
     def test_execute_failed_attempt_retry(self):
         state = _make_state()
@@ -329,7 +507,9 @@ class TestScenarioExecute(unittest.TestCase):
 # ============================================================
 
 class TestScenarioFixHandler(unittest.TestCase):
-    def _state_with_fix_subpipeline(self, fix_attempt: int = 1) -> PipelineState:
+    def _state_with_fix_subpipeline(
+        self, fix_attempt: int = 1, exec_attempt: int = 0, max_fail_retries: int = 3,
+    ) -> PipelineState:
         """构造一个活跃 scenario-fix 子 pipeline 的 state。"""
         sp = create_scenario_fix_cycle(
             "real-integration.scenario-test",
@@ -341,9 +521,11 @@ class TestScenarioFixHandler(unittest.TestCase):
             track_id="real-integration.scenario-test",
             bare="scenario-test",
             modules=("backend",),
+            max_fail_retries=max_fail_retries,
             phases={
                 SUB_SCENARIO_EXECUTE: PhaseState(
                     status="running",
+                    attempt=exec_attempt,
                     fix_cycles=(
                         {"cycle": fix_attempt, "status": "pending"},
                     ),
@@ -374,10 +556,15 @@ class TestScenarioFixHandler(unittest.TestCase):
         self.assertEqual(action.kind, "dispatch")
         self.assertEqual(action.phase, SUB_SCENARIO_EXECUTE)
         self.assertIsNone(new_state.current_sub_pipeline)
+        # v1.1.0 (P1-5): attempt 从 0 递增到 1
+        self.assertEqual(action.attempt, 1)
         fix_cycles = new_state.tracks[
             "real-integration.scenario-test"
         ].phases[SUB_SCENARIO_EXECUTE].fix_cycles
         self.assertEqual(fix_cycles[-1]["status"], "completed")
+        self.assertEqual(
+            new_state.tracks["real-integration.scenario-test"].phases[SUB_SCENARIO_EXECUTE].attempt, 1,
+        )
 
     def test_scenario_fix_failed_still_advances_to_execute(self):
         """scenario-fix 失败也回到 execute（由 max_fix_retries 控制循环）。"""
@@ -395,6 +582,34 @@ class TestScenarioFixHandler(unittest.TestCase):
             "real-integration.scenario-test"
         ].phases[SUB_SCENARIO_EXECUTE].fix_cycles
         self.assertEqual(fix_cycles[-1]["status"], "failed")
+
+    def test_attempt_increments_across_fix_cycles(self):
+        """v1.1.0 (P1-5): attempt 跨 fix 循环递增。"""
+        state = self._state_with_fix_subpipeline(exec_attempt=2)
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_FIX,
+            status=STATUS_COMPLETED,
+            summary="fixed",
+            tasks_updated=("S-test",),
+        )
+        _new_state, action = reduce_state(state, record)
+        self.assertEqual(action.kind, "dispatch")
+        self.assertEqual(action.attempt, 3)
+
+    def test_attempt_exceeds_max_fail_retries_workflow_failed(self):
+        """v1.1.0 (P1-5): attempt 超 max_fail_retries → workflow_failed。"""
+        state = self._state_with_fix_subpipeline(exec_attempt=3, max_fail_retries=3)
+        record = PipelineRecord(
+            track="real-integration.scenario-test",
+            phase=SUB_SCENARIO_FIX,
+            status=STATUS_COMPLETED,
+            summary="fixed",
+            tasks_updated=("S-test",),
+        )
+        _new_state, action = reduce_state(state, record)
+        self.assertEqual(action.kind, "workflow_failed")
+        self.assertIn("max_fail_retries", action.detail["reason"])
 
 
 # ============================================================
@@ -545,6 +760,8 @@ class TestScenarioTrackEnd2End(unittest.TestCase):
             PipelineRecord(
                 track="real-integration.scenario-test",
                 phase=SUB_SCENARIO_EXECUTE,
+                failed_scenarios="[]",
+                skipped_scenarios="[]",
                 status=STATUS_COMPLETED,
                 summary="all scenarios passed",
             ),
@@ -565,6 +782,8 @@ class TestScenarioTrackEnd2End(unittest.TestCase):
             PipelineRecord(
                 track="real-integration.scenario-test",
                 phase=SUB_SCENARIO_EXECUTE,
+                failed_scenarios="[\"S-fail\"]",
+                skipped_scenarios="[]",
                 status=STATUS_ESCALATE,
                 tasks_updated=("S-fail",),
                 summary="S-fail failed",
@@ -594,6 +813,8 @@ class TestScenarioTrackEnd2End(unittest.TestCase):
             PipelineRecord(
                 track="real-integration.scenario-test",
                 phase=SUB_SCENARIO_EXECUTE,
+                failed_scenarios="[]",
+                skipped_scenarios="[]",
                 status=STATUS_COMPLETED,
                 summary="all passed after fix",
             ),
@@ -619,6 +840,8 @@ class TestScenarioTrackEnd2End(unittest.TestCase):
             PipelineRecord(
                 track="real-integration.scenario-test",
                 phase=SUB_SCENARIO_EXECUTE,
+                failed_scenarios="[\"S-1\"]",
+                skipped_scenarios="[]",
                 status=STATUS_ESCALATE,
                 tasks_updated=("S-1",),
             ),
@@ -639,6 +862,8 @@ class TestScenarioTrackEnd2End(unittest.TestCase):
             PipelineRecord(
                 track="real-integration.scenario-test",
                 phase=SUB_SCENARIO_EXECUTE,
+                failed_scenarios="[\"S-2\"]",
+                skipped_scenarios="[]",
                 status=STATUS_ESCALATE,
                 tasks_updated=("S-2",),
             ),

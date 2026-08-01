@@ -524,6 +524,8 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
             status=STATUS_COMPLETED,
             summary="all scenarios passed",
             report_path=self._touch("/tmp/exec.md"),
+            failed_scenarios="[]",
+            skipped_scenarios="[]",
         )
         new_state, action = reduce_state(state, record)
         self.assertEqual(action.kind, "advance")
@@ -544,6 +546,8 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
             summary="S-mock failed",
             tasks_updated=["S-mock"],
             report_path=self._touch("/tmp/exec.md"),
+            failed_scenarios='["S-mock"]',
+            skipped_scenarios="[]",
         )
         self.assertEqual(r.get("action"), "dispatch")
         self.assertEqual(r.get("sub"), "scenario-fix")
@@ -559,6 +563,8 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
             summary="S-mock failed",
             tasks_updated=["S-mock"],
             report_path=self._touch("/tmp/exec.md"),
+            failed_scenarios='["S-mock"]',
+            skipped_scenarios="[]",
         )
         sp = self.orch.state.current_sub_pipeline
         self.assertIsNotNone(sp)
@@ -608,6 +614,7 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
         self._record(
             "escalate", summary="S-mock failed",
             tasks_updated=["S-mock"], report_path=self._touch("/tmp/exec1.md"),
+            failed_scenarios='["S-mock"]', skipped_scenarios="[]",
         )
         self._next_dispatch()  # dispatch fix
         self._record(
@@ -619,6 +626,7 @@ class TestIntegrationScenarioTrack(unittest.TestCase):
         r = self._record(
             "escalate", summary="S-mock failed again",
             tasks_updated=["S-mock"], report_path=self._touch("/tmp/exec2.md"),
+            failed_scenarios='["S-mock"]', skipped_scenarios="[]",
         )
         self.assertEqual(r.get("action"), "workflow_failed")
         self.assertIn("exhausted", r.get("reason", ""))
