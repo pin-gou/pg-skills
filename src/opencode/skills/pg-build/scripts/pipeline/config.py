@@ -10,6 +10,26 @@ import os
 from typing import Any
 
 
+def find_project_root() -> str:
+    """从 CWD、PG_PROJECT_ROOT 或脚本位置向上查找 .pg/project.yaml。"""
+    env_root = os.environ.get("PG_PROJECT_ROOT")
+    if env_root and os.path.isfile(os.path.join(env_root, ".pg", "project.yaml")):
+        return env_root
+    start = os.getcwd()
+    cur = os.path.abspath(start)
+    for _ in range(8):
+        if os.path.isfile(os.path.join(cur, ".pg", "project.yaml")):
+            return cur
+        parent = os.path.dirname(cur)
+        if parent == cur:
+            break
+        cur = parent
+    return start
+
+
+CHANGES_DIR = os.path.join(find_project_root(), ".pg", "changes")
+
+
 def load_project_config(root_dir: str) -> dict[str, Any]:
     """读取 .pg/project.yaml 返回 dict，文件不存在则返回空 dict。"""
     path = os.path.join(root_dir, ".pg", "project.yaml")
