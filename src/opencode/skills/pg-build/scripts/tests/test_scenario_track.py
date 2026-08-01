@@ -71,7 +71,7 @@ def _make_state(
     track_type: str = "scenario",
     max_fix_retries: int = 5,
     env_name: str = "dev-local",
-    stage_restarted: tuple = (),
+    scenario_last_restart_attempt: int = -1,
     current_stage: str = "",
     stage_order: tuple = (),
     stage_env_map: dict | None = None,
@@ -80,8 +80,9 @@ def _make_state(
 ) -> PipelineState:
     """构造一个 PipelineState 含一个 scenario track。
 
-    v3.x: 不再含 scenario-prepare phase; stage_restarted / current_stage /
-    stage_order / stage_env_map 用于触发 detect 的 restart env_switch.
+    v3.12: stage_restarted 已移除, 改为 per-track scenario_last_restart_attempt.
+    detect 在 dispatch scenario-execute 前用 (attempt > scenario_last_restart_attempt)
+    判定是否需要 restart.
     """
     t = TrackState(
         track_id=track_id,
@@ -92,6 +93,7 @@ def _make_state(
         max_fail_retries=3,
         env_name=env_name,
         scenario_max_fix_cycles=scenario_max_fix_cycles,
+        scenario_last_restart_attempt=scenario_last_restart_attempt,
     )
     return PipelineState(
         change="test-change",
@@ -105,7 +107,6 @@ def _make_state(
         stage_env_map=stage_env_map or {},
         stage_env_timeout=stage_env_timeout or {},
         current_stage=current_stage,
-        stage_restarted=set(stage_restarted),
     )
 
 
@@ -629,7 +630,7 @@ class TestDetectScenarioAction(unittest.TestCase):
             current_stage="integration",
             stage_env_map={"integration": "dev-3tier"},
             stage_env_timeout={"dev-3tier": 600},
-            stage_restarted=(),
+            scenario_last_restart_attempt=-1,
         )
         # 模拟 prepare_env 已完成 (stage_prepared 含 "integration")
         state = state.replace(stage_prepared={"integration"})
@@ -641,13 +642,13 @@ class TestDetectScenarioAction(unittest.TestCase):
         self.assertEqual(action.detail["env_name"], "dev-3tier")
 
     def test_detect_after_restart_dispatches_execute(self):
-        """v3.x: stage_restarted 含当前 stage 且 stage_prepared 含时, dispatch scenario-execute."""
+        """v3.12: scenario_last_restart_attempt 已对齐 attempt 时, dispatch scenario-execute."""
         state = _make_state(
             track_id="integration.scenario-test",
             stage_order=("integration",),
             current_stage="integration",
             stage_env_map={"integration": "dev-3tier"},
-            stage_restarted=("integration",),
+            scenario_last_restart_attempt=0,
         )
         state = state.replace(stage_prepared={"integration"})
         action = detect_mod.next_pending(state)

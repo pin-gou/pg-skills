@@ -816,6 +816,7 @@ def invoke_hook_main(argv=None) -> int:
     # multi-spec 路径: 顺序 fork-exec 每个子 spec, 任一失败早退
     if "_multi_specs" in spec:
         overall_ok = True
+        sub_results = []
         for sub_spec in spec["_multi_specs"]:
             try:
                 proc = subprocess.run(
@@ -826,9 +827,33 @@ def invoke_hook_main(argv=None) -> int:
                 )
             except KeyboardInterrupt:
                 return 0
+            sub_results.append({
+                "spec_role": sub_spec.get("role", ""),
+                "spec_phase": sub_spec.get("phase", ""),
+                "returncode": proc.returncode,
+            })
             if proc.returncode != 0:
                 overall_ok = False
                 break
+        # v3.12: restart_all_instances 复合 action 完成后, 写聚合 result.json
+        # 与 _build_env_hook_plan (pg-build/bootstrap.py:648-651) 的 result_file 约定对齐。
+        # pg-build 的 _verify_hook_executed 现在也会接受 dev-local-logs/role.* 日志
+        # (即使本聚合文件缺失也能通过), 写此文件只是为了让 _build_env_hook_plan 约定的契约完整。
+        result_file = os.environ.get("PG_RESULT_FILE", "")
+        if result_file:
+            try:
+                aggregate = {
+                    "status": "pass" if overall_ok else "fail",
+                    "exit_code": 0 if overall_ok else 1,
+                    "action": spec.get("action", "restart_all_instances"),
+                    "sub_results": sub_results,
+                    "timestamp": datetime.utcnow().isoformat() + "Z",
+                }
+                os.makedirs(os.path.dirname(result_file), exist_ok=True)
+                with open(result_file, "w", encoding="utf-8") as f:
+                    json.dump(aggregate, f, indent=2, ensure_ascii=False)
+            except OSError as e:
+                sys.stderr.write(f"WARN: failed to write aggregate result to {result_file}: {e}\n")
         return 0 if overall_ok else 1
 
     try:

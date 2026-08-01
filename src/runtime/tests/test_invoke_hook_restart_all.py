@@ -180,5 +180,55 @@ class TestRestartAllInstances(unittest.TestCase):
         self.assertIn("no roles", proc.stderr)
 
 
+    def test_aggregate_result_json_written_on_success(self):
+        """v3.12: 成功时写 PG_RESULT_FILE 聚合 result.json, status=pass."""
+        result_file = self.tmp / "restart-result.json"
+        env = os.environ.copy()
+        env["PG_PROJECT_ROOT"] = str(self.project_root)
+        env["PG_RESULT_FILE"] = str(result_file)
+        proc = subprocess.run(
+            ["python3", str(_PG_INVOKE_HOOK), "invoke-hook",
+             "--session", "test",
+             "--env", "test-env",
+             "--action", "restart_all_instances",
+             "--skill", "pg-build"],
+            capture_output=True, text=True, env=env, timeout=30,
+        )
+        self.assertEqual(proc.returncode, 0, f"stderr={proc.stderr}")
+        self.assertTrue(result_file.exists(), "PG_RESULT_FILE 应被写入")
+        data = json.loads(result_file.read_text())
+        self.assertEqual(data["status"], "pass")
+        self.assertEqual(data["exit_code"], 0)
+        self.assertEqual(data["action"], "restart_all_instances")
+        # 5 个子 spec (2 stop + 2 start + 1 health_check) 的 returncode 全 0
+        self.assertEqual(len(data["sub_results"]), 5)
+        self.assertTrue(all(r["returncode"] == 0 for r in data["sub_results"]))
+
+    def test_aggregate_result_json_written_on_failure(self):
+        """v3.12: 失败时写 PG_RESULT_FILE, status=fail, 含已执行的子 spec."""
+        rc_file = self.tmp / ".pg" / "skills" / "src" / "runtime" / "lib" / "next_rc.txt"
+        rc_file.write_text("1\n")  # 第 1 次 stop 返回 1
+        result_file = self.tmp / "restart-result.json"
+        env = os.environ.copy()
+        env["PG_PROJECT_ROOT"] = str(self.project_root)
+        env["PG_RESULT_FILE"] = str(result_file)
+        proc = subprocess.run(
+            ["python3", str(_PG_INVOKE_HOOK), "invoke-hook",
+             "--session", "test",
+             "--env", "test-env",
+             "--action", "restart_all_instances",
+             "--skill", "pg-build"],
+            capture_output=True, text=True, env=env, timeout=30,
+        )
+        self.assertEqual(proc.returncode, 1)
+        self.assertTrue(result_file.exists(), "失败时 PG_RESULT_FILE 仍应写入")
+        data = json.loads(result_file.read_text())
+        self.assertEqual(data["status"], "fail")
+        self.assertEqual(data["exit_code"], 1)
+        # 早退后只执行了 1 个 spec (失败的 stop)
+        self.assertEqual(len(data["sub_results"]), 1)
+        self.assertEqual(data["sub_results"][0]["returncode"], 1)
+
+
 if __name__ == "__main__":
     unittest.main()

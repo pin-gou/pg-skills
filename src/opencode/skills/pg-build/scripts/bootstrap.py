@@ -1115,12 +1115,38 @@ def cli_bootstrap(change: str, *, resume: bool = False) -> dict[str, Any]:
     try:
         # 检查当前 stage 是否已准备就绪（避免重复执行 prepare_env）
         from pipeline.snapshot import load_snapshot
-        from pipeline.state import PipelineState
+        from pipeline.state import PipelineState, SUB_SCENARIO_EXECUTE
+        from pipeline.events import FINAL_GATE_TRACK
         _snap = load_snapshot(os.path.join(CHANGES_DIR, change))
+        _needs_plan = False
+        _plan_phase = "prepare_env"
+
         if _snap and _snap.current_stage in _snap.stage_prepared:
-            result["env_hook_plan"] = None
+            # v3.12: stage 已 prepare, 但可能 scenario track 需要 restart。
+            # 检查 first_pending_track 是 scenario 且 (attempt > last_restart)，
+            # 是则生成 restart plan (替代旧逻辑：bootstrap 只生成 prepare_env)。
+            first_pending = next(
+                (tid for tid in _snap.pipeline_order
+                 if not _snap.is_track_completed(tid) and tid != FINAL_GATE_TRACK),
+                None,
+            )
+            if (first_pending
+                and _snap.track_types.get(first_pending) == "scenario"):
+                t = _snap.tracks.get(first_pending)
+                ep = t.phases.get(SUB_SCENARIO_EXECUTE) if t else None
+                current_attempt = (ep.attempt or 0) if ep else 0
+                last_restart = (t.scenario_last_restart_attempt if t else -1)
+                if current_attempt > last_restart:
+                    _needs_plan = True
+                    _plan_phase = "restart"
+            if not _needs_plan:
+                result["env_hook_plan"] = None
         else:
-            plan = _build_env_hook_plan(change, "prepare_env")
+            _needs_plan = True
+            _plan_phase = "prepare_env"
+
+        if _needs_plan:
+            plan = _build_env_hook_plan(change, _plan_phase)
             if not plan.get("ok"):
                 result["ok"] = False
                 result["error"] = plan.get("error", "plan build failed")
@@ -1209,7 +1235,10 @@ def _verify_hook_executed(change: str, phase_name: str, log_path: str) -> str | 
     检查逻辑：
       1. 如果编排器传了 --log-path 且文件存在 → 通过
       2. 否则 glob 搜索 build dir 下 {phase_name}-*.log → 存在则通过
-      3. 都不存在 → hook 从未执行，拒绝 success=true
+      3. v3.12: restart phase 额外接受 dev-local-logs/role.*.log
+         (pg-invoke-hook.py invoke-hook --action restart_all_instances 调
+         各 role 的 stop→start→health_check，每个 role 写独立日志)
+      4. 都不存在 → hook 从未执行，拒绝 success=true
     """
     import glob as _glob
 
@@ -1220,6 +1249,17 @@ def _verify_hook_executed(change: str, phase_name: str, log_path: str) -> str | 
     pattern = os.path.join(build_dir, f"{phase_name}-*.log")
     if _glob.glob(pattern):
         return None
+
+    # v3.12: restart 复合 action 通过 role-level 日志验证
+    if phase_name == "restart":
+        role_log_dir = os.path.join(build_dir, "dev-local-logs")
+        if os.path.isdir(role_log_dir):
+            role_pattern = os.path.join(role_log_dir, "role.*.log")
+            if _glob.glob(role_pattern):
+                return None
+            role_result_pattern = os.path.join(role_log_dir, "role.*.result.json")
+            if _glob.glob(role_result_pattern):
+                return None
 
     return (
         f"success=true 但未检测到 hook 执行痕迹：\n"
@@ -1251,7 +1291,7 @@ def cli_env_action_result(
     v2.7 新增：success=true 时验证 hook 实际执行过（log 文件存在性检查）。
     """
     from pipeline.snapshot import load_snapshot, save_snapshot
-    from pipeline.state import PipelineState
+    from pipeline.state import PipelineState, SUB_SCENARIO_EXECUTE
 
     result: dict[str, Any] = {
         "action": "env_action_result",
@@ -1303,8 +1343,8 @@ def cli_env_action_result(
 
     state = load_snapshot(change_root) or PipelineState(change=change)
     new_prepared = set(state.stage_prepared)
-    new_restarted = set(state.stage_restarted)
     new_current = state.current_stage
+    new_tracks = dict(state.tracks)
 
     if phase_name == "prepare_env":
         if stage_name:
@@ -1313,16 +1353,35 @@ def cli_env_action_result(
     elif phase_name == "clean_env":
         if stage_name:
             new_prepared.discard(stage_name)
-            new_restarted.discard(stage_name)
+            # v3.12: clean_env 时重置该 stage 下所有 scenario track 的
+            # scenario_last_restart_attempt 为 -1。下次再 prepare 该 stage 后
+            # 首次进入 scenario track 时 restart 必然触发（attempt=0 > last=-1）。
+            for tid, ttype in state.track_types.items():
+                if ttype == "scenario" and PipelineState.extract_stage(tid) == stage_name:
+                    if tid in new_tracks:
+                        t = new_tracks[tid]
+                        if t.scenario_last_restart_attempt != -1:
+                            t = t.replace(scenario_last_restart_attempt=-1)
+                            new_tracks[tid] = t
     elif phase_name == "restart":
-        # v3.x: restart phase 单独记录 stage_restarted 集合, 不影响 stage_prepared.
-        # 这样 fix 后 scenario-execute 重跑能感知"已 restart"而跳过再次 restart.
+        # v3.12: restart phase 不再使用 stage_restarted 集合。改为按
+        # TrackState.scenario_last_restart_attempt 跟踪。
+        # 找到该 stage 下的 scenario track，把 last_restart 设为该 track 当前
+        # execute_phase.attempt，下次 dispatch 前 detect 检查 attempt > last_restart。
         if stage_name:
-            new_restarted.add(stage_name)
+            for tid, ttype in state.track_types.items():
+                if ttype == "scenario" and PipelineState.extract_stage(tid) == stage_name:
+                    if tid in new_tracks:
+                        t = new_tracks[tid]
+                        exec_phase = t.phases.get(SUB_SCENARIO_EXECUTE)
+                        current_attempt = (exec_phase.attempt or 0) if exec_phase else 0
+                        t = t.replace(scenario_last_restart_attempt=current_attempt)
+                        new_tracks[tid] = t
+                        break
 
     new_state = state.replace(
         stage_prepared=new_prepared,
-        stage_restarted=new_restarted,
+        tracks=new_tracks,
         current_stage=new_current,
     )
     try:
@@ -1333,7 +1392,6 @@ def cli_env_action_result(
 
     result["ok"] = True
     result["stage_prepared"] = sorted(new_prepared)
-    result["stage_restarted"] = sorted(new_restarted)
     result["current_stage"] = new_current
     result["next_action"] = "bootstrap"
     result["next_command"] = f"python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py bootstrap {change}"

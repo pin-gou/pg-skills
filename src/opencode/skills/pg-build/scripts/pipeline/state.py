@@ -136,6 +136,11 @@ class TrackState:
     # v1.1.0 (P1-4) 新增：scenario-execute → scenario-fix 循环次数上限
     # 独立于 max_fix_retries（verify→fix 循环），默认 None 时 fallback 到 max_fix_retries。
     scenario_max_fix_cycles: int | None = None
+    # v3.12 新增：scenario track 最近一次 restart_all_instances 配合的 attempt 值。
+    # detect 在 dispatch scenario-execute 前用 (execute_phase.attempt > scenario_last_restart_attempt)
+    # 判定是否需要 restart。默认 -1 表示从未 restart，首次进入 scenario stage 时
+    # (attempt=0) 必然触发 restart。clean_env 时 reducer 重置为 -1。
+    scenario_last_restart_attempt: int = -1
 
     # 富化上下文（由 _first_next 从 project.yaml 预填充）
     module_roots: str = ""               # "[webvirt-backend, webvirt-agent-proto]"
@@ -191,6 +196,7 @@ class TrackState:
             "gate_enabled": self.gate_enabled,
             "verify_failure_mode": self.verify_failure_mode,
             "scenario_max_fix_cycles": self.scenario_max_fix_cycles,
+            "scenario_last_restart_attempt": self.scenario_last_restart_attempt,
         }
 
     @classmethod
@@ -235,6 +241,7 @@ class TrackState:
             gate_enabled=d.get("gate_enabled", True),
             verify_failure_mode=d.get("verify_failure_mode", "fail-fast"),
             scenario_max_fix_cycles=d.get("scenario_max_fix_cycles"),
+            scenario_last_restart_attempt=d.get("scenario_last_restart_attempt", -1),
         )
 
     def replace(self, **kwargs: Any) -> "TrackState":
@@ -279,8 +286,10 @@ class PipelineState:
     stage_env_timeout: dict[str, int] = field(default_factory=dict)  # {"dev-local": 600} hook timeout
     current_stage: str = ""
     stage_prepared: set[str] = field(default_factory=set)        # 已 prepare 的 stage 集合
-    # v3.x: 已完成 restart_all_instances 的 stage 集合 (scenario-execute 前置)
-    stage_restarted: set[str] = field(default_factory=set)
+    # v3.12 移除：已废弃的 stage 级 restart 标记。restart 状态改为按
+    # TrackState.scenario_last_restart_attempt 跟踪（per-track, per-attempt）。
+    # 旧 snapshot 中的 stage_restarted 字段在 from_dict 中被丢弃（兼容旧文件）。
+    # stage_restarted: set[str] = field(default_factory=set)  # DEPRECATED
 
     def to_dict(self) -> dict[str, Any]:
         out: dict[str, Any] = {
@@ -304,7 +313,6 @@ class PipelineState:
             "stage_env_timeout": dict(self.stage_env_timeout),
             "current_stage": self.current_stage,
             "stage_prepared": list(self.stage_prepared),
-            "stage_restarted": list(self.stage_restarted),
         }
         if self.current_sub_pipeline is not None:
             if hasattr(self.current_sub_pipeline, "to_dict"):
@@ -350,7 +358,6 @@ class PipelineState:
             stage_env_timeout=d.get("stage_env_timeout", {}),
             current_stage=d.get("current_stage", ""),
             stage_prepared=set(d.get("stage_prepared", [])),
-            stage_restarted=set(d.get("stage_restarted", [])),
         )
 
     def replace(self, **kwargs: Any) -> "PipelineState":

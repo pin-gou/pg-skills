@@ -3,7 +3,7 @@
 v3.x: scenario-execute dispatch 前, detect 返回 env_switch[phase=restart].
 bootstrap._build_env_hook_plan 构造 pg-invoke-hook.py --action restart_all_instances
 的 command; cli_env_action_result 写入 EVT_RESTART_ALL_INSTANCES_* 事件并更新
-state.stage_restarted.
+TrackState.scenario_last_restart_attempt (v3.12 起替代旧的 stage_restarted 集合).
 
 核心测试: _build_env_hook_plan 在 phase=restart 时构造调用 pg-invoke-hook.py 的 plan.
 集成路径 (实际 pg-invoke-hook.py 行为) 由 .pg/skills/src/runtime/tests/

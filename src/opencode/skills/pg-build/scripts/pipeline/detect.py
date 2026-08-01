@@ -110,25 +110,34 @@ def next_pending(state: PipelineState) -> PipelineAction:
                 },
             )
 
-        # v3.x: scenario track 当前 stage 已 prepare, 但 scenario-execute dispatch
-        # 前需 restart_all_instances. 类比 prepare_env 的 stage 边界检测, 但用
-        # stage_restarted 单独记录.
+        # v3.12: scenario track 当前 stage 已 prepare, 但 scenario-execute dispatch
+        # 前需 restart_all_instances. 用 TrackState.scenario_last_restart_attempt
+        # 与当前 execute_phase.attempt 对比：
+        #   attempt > last_restart → 需要 restart
+        #   attempt <= last_restart → 刚 restart 完, dispatch execute 即可
+        # 首次进入 scenario stage 时 attempt=0, last_restart=-1 (默认), 0 > -1 必触发。
+        # scenario-fix 子 pipeline 完成后 reducer 在 sub_pipeline_advance 中
+        # 把 attempt 递增 (reducer.py:1597), 因此 fix 后 re-execute 必触发 restart。
         if (
             next_stage
             and state.track_types.get(first_pending_track) == "scenario"
-            and next_stage not in state.stage_restarted
         ):
-            _env_name = state.stage_env_map.get(next_stage, "")
-            return PipelineAction(
-                kind="env_switch",
-                track=first_pending_track,
-                phase="restart",
-                detail={
-                    "stage": next_stage,
-                    "env_name": _env_name,
-                    "hook_timeout_seconds": state.stage_env_timeout.get(_env_name, 600),
-                },
-            )
+            _track = state.tracks.get(first_pending_track)
+            _execute_phase = _track.phases.get(SUB_SCENARIO_EXECUTE) if _track else None
+            _current_attempt = (_execute_phase.attempt or 0) if _execute_phase else 0
+            _last_restart = (_track.scenario_last_restart_attempt if _track else -1)
+            if _current_attempt > _last_restart:
+                _env_name = state.stage_env_map.get(next_stage, "")
+                return PipelineAction(
+                    kind="env_switch",
+                    track=first_pending_track,
+                    phase="restart",
+                    detail={
+                        "stage": next_stage,
+                        "env_name": _env_name,
+                        "hook_timeout_seconds": state.stage_env_timeout.get(_env_name, 600),
+                    },
+                )
 
     # 正常 track 内的 dispatch 逻辑
     for track_id in state.pipeline_order:

@@ -60,8 +60,8 @@ $RUNNER next <change>
 $RUNNER record <change> --status <status> --report <path> --summary "<摘要>" [--outputs <p1>,<p2>] [--issues <i1>,<i2>] [--evidence <e1> [--evidence <e2> ...]] [--tasks-updated <t1> [--tasks-updated <t2> ...]]
   > **注意**：gate/final-gate 阶段的 `--summary` 必须包含 `gate_score: <0-100>`，例：`--summary "8/9 检查通过, gate_score: 91, p0_failures: []"`
 $RUNNER progress <change>
-$RUNNER env-action <change> --phase prepare_env|clean_env --stage <stage> --env <env> [--timeout <seconds>]
-$RUNNER env-action-result <change> --phase prepare_env|clean_env --stage <stage> --env <env> --success true|false [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]
+$RUNNER env-action <change> --phase prepare_env|clean_env|restart --stage <stage> --env <env> [--timeout <seconds>]
+$RUNNER env-action-result <change> --phase prepare_env|clean_env|restart --stage <stage> --env <env> --success true|false [--log-path <path>] [--exit-code <code>] [--started-ts <ts>] [--error <msg>]
   注：--success 是布尔值 true|false，表示 hook 是否成功执行。
       与 record 的 --status 字段（completed/failed/...）含义不同。
 $RUNNER reset <change>                       # 手动清除 terminal failed 状态
@@ -319,7 +319,7 @@ sub-agent 返回 `status: "failed"` 时，runner 不会立即终止——会按 
 |-----------|------|---------|
 | standard | 3 | `tracks.<t>.max_fail_retries` |
 | simple | 3 | 默认（无配置项） |
-| scenario | 3 | 默认（scenario-prepare 与 scenario-execute 各自独立计数） |
+| scenario | 3 | 默认（scenario-execute 重试计数；v3.12 起 scenario-prepare 已删除，由 restart_all_instances env-action 替代） |
 
 #### ⚠️ `idle_next_count`（P3 空转）与 `max_fail_retries`（sub-agent 失败）是两套独立机制
 
@@ -424,7 +424,7 @@ reducer 返回 `kind="error"` 时：
 | `action: dispatch` + `sub: scenario-fix` | scenario-execute escalate 触发子 pipeline | 正常行为，dispatch 路径正确，编排器无需干预 |
 | `track_types[tid] = "scenario"` 但 `gate_enabled=True` | 旧 snapshot 未迁移（v3.6 前遗留） | 运行 `python3 ... bootstrap <change>` 重新派生（bootstrap 会覆盖 gate_enabled） |
 | scenario-execute 报告 `failed_scenarios` 非空但 `status=completed` | sub-agent 未正确填写 escalate 协议 | 检查 result.json 的 `status` 字段是否应为 `escalate` 而非 `completed` |
-| scenario-prepare 返回 `failed`（模块已就绪） | scenario-prepare 误判 role 启动失败 | 检查 `invoke-hook --action health_check` 是否返回非 0；重 dispatch 同 dispatch_file |
+| scenario-execute dispatch 前反复触发 `env_switch restart` 循环 | `scenario_last_restart_attempt` 未被 `cli_env_action_result --phase restart` 写入，detect 每次判定 `attempt > last` 恒真 | 检查 env-action-result 是否以 `--phase restart`（而非 prepare_env）调用；确认 `TrackState.scenario_last_restart_attempt` 已对齐当前 `scenario-execute.attempt` |
 | `action: error` + `schema_violation ... failed_scenarios` (v1.1.0/P1-2) | scenario-execute result.json 缺 `failed_scenarios`/`skipped_scenarios` 或 JSON 非法 | sub-agent 调 `pg-build-result --failed-scenarios '[...]' --skipped-scenarios '[...]'`；escalate 必须非空，completed 必须 `"[]"` |
 | `action: error` + `escalate 要求 failed_scenarios 非空` (P1-2) | escalate 时 `failed_scenarios` 为空 | escalate 表示有失败，必须列出失败 scenario_id |
 | `action: workflow_failed` + `fix cycles exhausted` (P0-2) | scenario-fix 循环次数达 `scenario_max_fix_cycles` | 非 bug：循环上限生效。检查为何反复失败（多为环境漂移/设计缺陷），修根因后重跑 |
@@ -701,27 +701,56 @@ scenario track 用于跨 backend/frontend/agent 的真实环境端到端验证�
 
 | 维度 | standard | scenario |
 |------|----------|----------|
-| 阶段序列 | test → dev → review → verify → gate | scenario-prepare → scenario-execute |
+| 阶段序列 | test → dev → review → verify → gate | restart_all_instances → scenario-execute（循环） |
 | 单元测试 | TDD 红 phase 先写 | 无（场景即测试） |
 | 修复循环 | dev / review / verify 各自有 fix 子 pipeline | 仅 scenario-fix（由 scenario-execute escalate 触发） |
 | 代码审查 | review 阶段静态 review | 无 review phase（scenario 自身带 verify 语义） |
 | 质量门 | gate + final-gate | scenario-execute PASS 即等价（v3.6 起自动 `gate_enabled=False`） |
 | 失败重试 | sub-agent failed → `max_fail_retries` 计数 | sub-agent failed → `max_fail_retries` 计数（独立） |
-| Sub-agent | test / dev / review / verify / gate / fix-* | scenario-prepare / scenario-execute / scenario-fix |
+| Sub-agent | test / dev / review / verify / gate / fix-* | scenario-execute / scenario-fix |
 
 ### 状态机
 
 ```
-pending → scenario-prepare (running) → completed | failed
+pending → restart_all_instances (env-action) → scenario-execute (running)
    ↓
 scenario-execute (running) → completed | escalate | failed
    ↓
 escalate → scenario-fix (子 pipeline) → completed | failed
    ↓
-scenario-execute (重跑) → ...
+restart_all_instances (env-action, 每次 re-execute 前) → scenario-execute (重跑) → ...
    ↓
 completed → track.status=completed → final-gate 豁免
 ```
+
+### restart_all_instances cycle（v3.12）
+
+scenario track 在**每次** scenario-execute dispatch 前都需执行 `restart_all_instances`
+env-action（含首次进入与 scenario-fix 后的 re-execute）。detect 用 per-track 字段
+`TrackState.scenario_last_restart_attempt` 与 `scenario-execute.attempt` 对比判定：
+
+```
+attempt > scenario_last_restart_attempt → 需要 restart（返回 env_switch[phase=restart]）
+attempt <= scenario_last_restart_attempt → 刚 restart 完，直接 dispatch execute
+```
+
+| 时刻 | execute.attempt | scenario_last_restart_attempt | needs_restart | 动作 |
+|------|:---:|:---:|:---:|------|
+| 首次进入 | 0 | -1（默认） | ✅ 0 > -1 | restart |
+| restart 后 | 0 | 0 | ❌ | dispatch execute |
+| escalate → fix 后 | 1（reducer 递增） | 0 | ✅ 1 > 0 | restart |
+| restart 后 | 1 | 1 | ❌ | dispatch execute |
+| 第 N 次 fix 后 | N | N-1 | ✅ | restart |
+
+**状态更新时机**：
+- `cli_env_action_result --phase restart` 成功后，写入 `scenario_last_restart_attempt = scenario-execute.attempt`
+- `cli_env_action_result --phase clean_env` 成功后，重置该 stage 下所有 scenario track 的 `scenario_last_restart_attempt = -1`（下次进入必触发 restart）
+- `scenario-fix` 子 pipeline 完成时，reducer 在 `_sub_pipeline_advance` 中递增 `scenario-execute.attempt`（reducer.py:1597），从而下次 dispatch 前触发 restart
+
+**与旧版差异（v3.x）**：旧版用顶层 `PipelineState.stage_restarted` 集合做 stage 级标记，
+仅首次进入触发一次 restart；v3.12 改为 per-track、per-attempt 跟踪，确保每次 re-execute
+前环境都是最新一次构建版本。`stage_restarted` 字段已移除，旧 snapshot 中的该字段在
+`from_dict` 中被忽略（向后兼容）。
 
 ### SSOT：scenario.yaml
 
