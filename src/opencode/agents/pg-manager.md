@@ -109,6 +109,63 @@ skill: deny
 每个 `type: track` 包含 3 个子阶段：`test`、`dev`、`verify`（含 fix 循环）。
 每个 `type: phase` 由编排器自执行。
 
+### pg-build 的 TODO 列表协议（强制）
+
+执行 `/3-pg-build <change>` 时，**禁止**自行概括为 4 个固定条目（如 "Load SKILL" / "Run bootstrap" 等）。
+TODO 列表必须**机械派生自 `execution-manifest.yaml`** + **每次 record 后从 `pipeline.snapshot.json` 动态刷新**。
+严格按以下协议：
+
+**1. bootstrap 完成后立即初始化 TODO 列表**
+
+```bash
+python3 .opencode/skills/pg-build/scripts/pg-list-phases.py <change>
+```
+
+读取 stdout JSON 中的 `items` 数组，**逐项**调用 todowrite 工具：
+
+```json
+{
+  "items": [
+    {"id": "dev.backend:test", "label": "backend:test - dev 测试先行", "status": "pending", ...},
+    {"id": "dev.backend:dev", "label": "backend:dev - 实现开发", "status": "pending", ...},
+    ...
+    {"id": "final-gate", "label": "final-gate - 最终门控审查", "status": "pending", ...}
+  ]
+}
+```
+
+每项映射为一条 todo：`content` = `<label>`，`status` = `"pending"`。
+**不要修改 label 内容**，不要合并/截断/重命名。
+
+**2. 每次 `record` 完成后刷新 TODO 状态**
+
+```bash
+python3 .opencode/skills/pg-build/scripts/pg-list-phases.py <change> --with-progress
+```
+
+按返回的 `status` 字段更新每个 todo：
+- `"completed"` → `status: "completed"`
+- `"in_progress"` → `status: "in_progress"`
+- `"pending"` → `status: "pending"`
+
+LLM 按 `id` 字段匹配已有 todo，更新 status。
+
+**3. 每次 `next()` 返回后检测 sub-pipeline**
+
+```bash
+python3 .opencode/skills/pg-build/scripts/pg-list-phases.py <change> --detect-sub-pipelines
+```
+
+若返回的 `sub_pipeline_items` 非空：
+- 若 `id` 不在已有 TODO 中 → 追加到列表末尾，`status: "in_progress"`
+- 若 `id` 已在 → 更新其 status
+- sub-pipeline 完成后（即下次 next 返回非 fix/dispatch fix-*）→ 标记其 status 为 `"completed"`
+
+**4. 异常处理**
+
+- 脚本返回 `{"error": "...", "items": []}` → 退化为旧行为（4 项固定条目），并在 stderr 输出错误信息提示用户
+- 任何 `--with-progress` / `--detect-sub-pipelines` 调用失败（exit 非 0 / 超时）→ 保留当前 TODO 状态不刷新，下一次再试
+
 ### 工作流链式调用
 
 `pg-build <change-name>` 执行完毕后，若所有 pipeline item 均通过（无 FAILED），**立即自动触发** `pg-verify-and-merge` 工作流，**无需任何确认步骤**：

@@ -42,8 +42,13 @@ if (!change_name) {
    `python3 .opencode/skills/pg-build/scripts/pg-pipeline-runner.py bootstrap {change_name}`
    - `ok: false` → 直接输出 error 给用户，终止流程（**禁止**自动修复）
    - `env_hook_plan` 非 null → bash 执行 plan.command，然后 `env-action-result` 记录 → 再次 bootstrap
-   - `env_hook_plan=null` → 进入步骤 3
+   - `env_hook_plan=null` → 进入步骤 2.5
+2.5 初始化 TODO 列表（机械派生，不自行概括）：
+   `python3 .opencode/skills/pg-build/scripts/pg-list-phases.py {change_name}`
+   按 stdout JSON 中 `items` 数组的 `label` 字段，逐项调用 todowrite 工具。
 3. 进入主循环：`python3 ... next {change_name}` → 按 action 派送 sub-agent / record 结果 / 循环
+   - **每次 record 完成后**：调 `pg-list-phases.py {change_name} --with-progress` 刷新 TODO 状态
+   - **每次 next 返回后**：调 `pg-list-phases.py {change_name} --detect-sub-pipelines` 检测是否有 fix/review/scenario-fix 子 pipeline 需追加
 4. 循环至 pipeline 完成（`action: done` → 触发 pg-verify-and-merge）
 
 **示例**:

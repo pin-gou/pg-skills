@@ -70,6 +70,107 @@ $RUNNER reset <change> --resume              # 手动恢复（保留 snapshot，
 
 **status**: `completed | failed | escalate | pass | fail`
 
+## 编排器 TODO 列表协议（v3.13）
+
+编排器（pg-manager LLM agent）在执行 pg-build 时的 TODO 列表**禁止自行概括**（如编造 "Load SKILL" / "Run bootstrap" 等固定条目）。
+TODO 列表必须**机械派生自 `execution-manifest.yaml`** + **运行时从 `pipeline.snapshot.json` 动态刷新**。
+
+### 数据源
+
+| 文件 | 角色 |
+|------|------|
+| `execution-manifest.yaml` | 顶层 phase 列表的 SSOT（决定列表长度） |
+| `pipeline.snapshot.json` | 实时 status（completed/in_progress/pending） |
+| `pg-list-phases.py` | 派生脚本（组合以上两者 + runner progress） |
+
+### Helper 脚本
+
+```bash
+# 初始化（bootstrap 完成后立即调）
+python3 .opencode/skills/pg-build/scripts/pg-list-phases.py <change>
+
+# 刷新状态（每次 record 后调）
+python3 .opencode/skills/pg-build/scripts/pg-list-phases.py <change> --with-progress
+
+# 检测子 pipeline（每次 next 后调）
+python3 .opencode/skills/pg-build/scripts/pg-list-phases.py <change> --detect-sub-pipelines
+
+# 组合使用
+python3 .opencode/skills/pg-build/scripts/pg-list-phases.py <change> --with-progress --detect-sub-pipelines
+```
+
+### 输出 schema
+
+```json
+{
+  "change": "<change-name>",
+  "manifest_present": true,
+  "items": [
+    {
+      "id": "dev.backend:test",
+      "track": "backend",
+      "phase": "test",
+      "stage": "dev",
+      "label": "backend:test - dev 测试先行",
+      "status": "pending",
+      "kind": "phase",
+      "track_type": "standard"
+    },
+    ...
+    {
+      "id": "final-gate",
+      "track": "final-gate",
+      "phase": "gate",
+      "stage": "final",
+      "label": "final-gate - 最终门控审查",
+      "status": "pending",
+      "kind": "final-gate",
+      "track_type": "final-gate"
+    }
+  ],
+  "sub_pipeline_items": [
+    {
+      "id": "backend:fix-cycle-1:fix-0",
+      "track": "backend",
+      "phase": "fix",
+      "kind": "fix-cycle",
+      "cycle": 1,
+      "label": "[fix-cycle cycle 1] backend verify → fix",
+      "status": "in_progress",
+      ...
+    }
+  ]
+}
+```
+
+### 编排器侧协议
+
+| 步骤 | 动作 | 时机 |
+|------|------|------|
+| 1 | 调 `pg-list-phases.py <change>` → 用 `items[*].label` 逐项调 todowrite（status=pending） | bootstrap 完成后（`env_hook_plan=null` 后） |
+| 2 | 调 `pg-list-phases.py <change> --with-progress` → 按 `id` 更新每条 todo 的 status | 每次 `record` 完成后 |
+| 3 | 调 `pg-list-phases.py <change> --detect-sub-pipelines` → 追加 `sub_pipeline_items[*]` 到 todo 列表（id 不存在则 append，存在则 update status） | 每次 `next` 返回后 |
+
+### 容错
+
+| 情况 | 行为 |
+|------|------|
+| manifest 缺失 | 脚本 exit 1，stdout `{"error": "...", "items": []}` → 编排器退化为旧 4 项固定行为 |
+| snapshot 缺失 | `--with-progress` / `--detect-sub-pipelines` 静默降级（status 保持 pending，sub_pipeline_items 为空） |
+| runner progress 调用失败 | 同上（snapshot 仍提供兜底数据） |
+
+### 测试覆盖
+
+`scripts/tests/test_list_phases.py`（15 个用例）：
+- section_key 解析（standard / final-gate / 非法）
+- 5-phase standard track 派生
+- enabled=false track 过滤
+- scenario track 派生
+- CLI 基础模式（init / manifest 缺失）
+- sub-pipeline 检测（fix-cycle / 无 / snapshot 缺失）
+- progress 应用（current_phase / workflow_completed / no-op）
+- 组合标志端到端
+
 ## 编排器执行协议
 
 编排器通过 runner CLI 与 pipeline 引擎交互。**编排器不得读取 change 目录下的任何文件**（tasks.md、design.md、proposal.md、2-build/ 等）——所有输入来自 runner stdout JSON，所有文件 I/O 由 runner 和 sub-agent 处理。
@@ -453,6 +554,11 @@ reducer 返回 `kind="error"` 时：
   - `scripts/pipeline/orchestrator.py:_derive_result_path` (dispatch_file → result.json 派生)
   - `scripts/pipeline/dispatch.py` (返回 `expected_result_path` 字段)
   - `prompt-templates/blocks/sub_agent_contract.yaml` (强制落盘指令块)
+- **v3.13 TODO 列表协议**:
+  - `scripts/pg-list-phases.py` (manifest + snapshot → items JSON, 编排器喂给 todowrite)
+  - `scripts/tests/test_list_phases.py` (15 个测试用例)
+  - `.opencode/agents/pg-manager.md` (TODO 协议段)
+  - `.opencode/commands/pg-3-build.md` (步骤 2.5 + 3 内嵌调 pg-list-phases.py)
 
 ## v2.6 Code View 阶段
 
