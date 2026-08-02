@@ -267,6 +267,20 @@ def main() -> None:
                 }, ensure_ascii=False))
                 return
             file_values = _data
+        elif rec_args.report and rec_args.report.endswith("-result.json"):
+            # v3.x: --report 指向 *-result.json 时也自动加载为 file_values。
+            # 场景: 编排器按 SKILL.md 协议用 --report <result.json> 传参
+            # (sub-agent 落盘路径通常以 -result.json 结尾)，
+            # 此时 failed_scenarios/skipped_scenarios 等 scenario 字段
+            # 应从同一文件自动提取，不再要求编排器手动传 --failed-scenarios '[]'。
+            if os.path.isfile(rec_args.report):
+                try:
+                    with open(rec_args.report, "r", encoding="utf-8") as _rf:
+                        _rdata = json.load(_rf)
+                    if isinstance(_rdata, dict):
+                        file_values = _rdata
+                except (OSError, json.JSONDecodeError):
+                    pass  # --report 不是合法 JSON 时静默忽略，走原路径
 
         # ── v2.5: 7 字段合并（CLI 非空 > 文件 > 默认空）──
         def _merge_str(key: str, cli_val: str) -> str:

@@ -1120,6 +1120,10 @@ def cli_bootstrap(change: str, *, resume: bool = False) -> dict[str, Any]:
         _snap = load_snapshot(os.path.join(CHANGES_DIR, change))
         _needs_plan = False
         _plan_phase = "prepare_env"
+        # v3.x fix: 显式 stage_name (scenario track 所在 stage)，
+        # 默认 None 让 _build_env_hook_plan 按 manifest 顺序推导。
+        # 必须在 if/else 块外初始化，否则 else 分支读到未绑定变量。
+        _explicit_stage: str | None = None
 
         if _snap and _snap.current_stage in _snap.stage_prepared:
             # v3.12: stage 已 prepare, 但可能 scenario track 需要 restart。
@@ -1139,6 +1143,11 @@ def cli_bootstrap(change: str, *, resume: bool = False) -> dict[str, Any]:
                 if current_attempt > last_restart:
                     _needs_plan = True
                     _plan_phase = "restart"
+                    # v3.x fix: 从 first_pending track ID 提取正确 stage_name，
+                    # 避免 _build_env_hook_plan 在 explicit_stage_name=None 时
+                    # 取 manifest 第一个 stage（通常是 dev）而非 scenario track
+                    # 实际所在 stage（如 int）。
+                    _explicit_stage = PipelineState.extract_stage(first_pending)
             if not _needs_plan:
                 result["env_hook_plan"] = None
         else:
@@ -1146,7 +1155,10 @@ def cli_bootstrap(change: str, *, resume: bool = False) -> dict[str, Any]:
             _plan_phase = "prepare_env"
 
         if _needs_plan:
-            plan = _build_env_hook_plan(change, _plan_phase)
+            plan = _build_env_hook_plan(
+                change, _plan_phase,
+                explicit_stage_name=_explicit_stage,
+            )
             if not plan.get("ok"):
                 result["ok"] = False
                 result["error"] = plan.get("error", "plan build failed")

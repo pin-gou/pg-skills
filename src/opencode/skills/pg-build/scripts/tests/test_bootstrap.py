@@ -804,6 +804,109 @@ environments:
         self.assertIn("stage_env_map", pc)
         self.assertGreater(len(pc["stage_order"]), 0)
 
+    def test_cli_bootstrap_restart_uses_scenario_track_stage(self):
+        """v3.x fix: scenario track 首次进入需 restart 时, bootstrap 应从
+        first_pending track id 提取正确 stage（如 'int'），而非 manifest
+        第一个 stage（'dev'）。这避免了 restart plan 的 PG_STAGE=dev，
+        导致 env-action-result --stage dev 找不到 int.scr track、
+        scenario_last_restart_attempt 永远不更新、bootstrap 持续返回
+        restart plan 的死循环。
+        """
+        from pipeline.snapshot import save_snapshot
+        from pipeline.state import PipelineState, TrackState, PhaseState
+
+        # dev.backend / dev.frontend 已 completed（只把 int.scr 留在 pending）
+        # 这样 first_pending 直接落到 int.scr, 跳过 standard track 的检查
+        completed_standard = TrackState(
+            track_id="dev.backend", bare="backend", status="completed",
+        )
+        completed_frontend = TrackState(
+            track_id="dev.frontend", bare="frontend", status="completed",
+        )
+        scenario_track = TrackState(
+            track_id="int.scr",
+            bare="scr",
+            status="running",
+            phases={
+                "scenario-execute": PhaseState(
+                    status="running",
+                    attempt=0,
+                ),
+            },
+            scenario_last_restart_attempt=-1,
+        )
+        state = PipelineState(
+            change="test-change",
+            pipeline_order=("dev.backend", "dev.frontend", "int.scr", "final-gate"),
+            stage_order=("dev", "int"),
+            stage_env_map={"dev": "dev-local", "int": "dev-local"},
+            track_types={"dev.backend": "standard", "dev.frontend": "standard",
+                         "int.scr": "scenario", "final-gate": "final-gate"},
+            tracks={
+                "dev.backend": completed_standard,
+                "dev.frontend": completed_frontend,
+                "int.scr": scenario_track,
+            },
+            current_stage="int",
+            stage_prepared={"dev", "int"},
+            status="running",
+        )
+        save_snapshot(self.change_root, state)
+
+        # 写一个 manifest 使第一个 stage 是 'dev'（模拟 bug 场景）
+        manifest_path = os.path.join(self.change_root, "execution-manifest.yaml")
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            f.write(
+                "stages:\n"
+                "  - name: dev\n"
+                "    environment: dev-local\n"
+                "    tracks: [dev.backend, dev.frontend]\n"
+                "  - name: int\n"
+                "    environment: dev-local\n"
+                "    tracks: [int.scr]\n"
+            )
+
+        # 写一个 project.yaml 让 restart plan 能构造出 command
+        # 注意: restart phase 需要 env_cfg["roles"] 非空才返回非 skipped plan
+        project_yaml = os.path.join(self.tmp, ".pg", "project.yaml")
+        with open(project_yaml, "w") as f:
+            f.write(
+                "environments:\n"
+                "  dev-local:\n"
+                "    roles:\n"
+                "      - backend\n"
+                "      - frontend\n"
+            )
+
+        # _build_env_hook_plan 检查 pg-invoke-hook.py 是否存在;
+        # stub 一个空文件让 plan build 继续。
+        invoke_hook = os.path.join(
+            self.tmp, ".pg", "skills", "src", "runtime", "bin",
+            "pg-invoke-hook.py",
+        )
+        os.makedirs(os.path.dirname(invoke_hook), exist_ok=True)
+        with open(invoke_hook, "w") as f:
+            f.write("# stub\n")
+
+        result = bootstrap.cli_bootstrap("test-change")
+        self.assertTrue(result["ok"], f"bootstrap failed: {result.get('error')}")
+        plan = result["env_hook_plan"]
+        # 关键断言: restart plan 应使用 first_pending 的 stage (int)，
+        # 不是 manifest 第一个 stage (dev)
+        self.assertIsNotNone(plan, "expected env_hook_plan, got None")
+        # stage_name == int 表明从 first_pending 正确提取了 stage
+        self.assertEqual(plan["stage_name"], "int",
+                         f"restart plan stage_name 错误: {plan['stage_name']}，"
+                         f"应为 'int'（first_pending=int.scr 的 stage）")
+        # env_name 应等于 manifest 中 int stage 的 environment
+        self.assertEqual(plan["env_name"], "dev-local")
+        # 命令中 PG_STAGE 也应等于 int
+        self.assertIn("PG_STAGE=int", plan["command"],
+                      f"command 中 PG_STAGE 不是 int: {plan['command'][:200]}")
+        # 反向断言: 若 fix 没生效, plan 应使用 dev（manifest 第一个 stage）
+        self.assertNotIn("PG_STAGE=dev ", plan["command"],
+                         f"command 中 PG_STAGE 错误取 dev: {plan['command'][:200]}")
+
 
 class TestDetectFailedStateScenarioExhaustion(unittest.TestCase):
     """v1.1.0 (P0-2): _detect_failed_state 暴露 scenario fix_cycle 耗尽细节。"""

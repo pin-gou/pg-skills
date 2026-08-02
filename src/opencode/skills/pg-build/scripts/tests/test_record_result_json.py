@@ -383,5 +383,89 @@ class TestRecordResultJsonEdgeCases(unittest.TestCase):
             self.assertEqual(calls[0]["summary"], "12345")
 
 
+# ────────────────────────────────────────────────────────────
+# v3.x: --report 指向 *-result.json 时也作为 file_values 来源。
+# 场景: 编排器按 SKILL.md 协议用 --report <result.json> 传参
+# (sub-agent 落盘路径通常以 -result.json 结尾)，
+# 此时 failed_scenarios/skipped_scenarios 等 scenario 字段应从同一文件
+# 自动提取，不再要求编排器手动传 --failed-scenarios '[]'。
+# ────────────────────────────────────────────────────────────
+
+class TestReportAsResultJson(unittest.TestCase):
+    def test_report_pointing_to_result_json_loads_scenario_fields(self):
+        """--report 路径以 -result.json 结尾时, 自动从该文件加载 failed_scenarios
+        等 scenario 专用字段。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            rj = os.path.join(tmp, "013-int.scr-scenario-execute-result.json")
+            with open(rj, "w", encoding="utf-8") as f:
+                json.dump({
+                    "status": "completed",
+                    "summary": "scenario OK",
+                    "report_path": "/tmp/scenario-report.md",
+                    "failed_scenarios": [],
+                    "skipped_scenarios": ["S-ui-export-import-smoke-browser"],
+                }, f)
+            out, calls = _run_record_in_process([
+                "--status", "completed",
+                "--report", rj,  # ← 协议推荐用 --report
+                "--summary", "scenario OK",
+            ])
+            self.assertFalse(out.get("fatal"), out)
+            self.assertEqual(len(calls), 1)
+            c = calls[0]
+            self.assertEqual(c["failed_scenarios"], "[]",
+                             f"failed_scenarios 应从 --report 指向的 result.json 自动加载, "
+                             f"实际得到: {c['failed_scenarios']!r}")
+            self.assertEqual(c["skipped_scenarios"],
+                             '["S-ui-export-import-smoke-browser"]')
+
+    def test_report_pointing_to_non_result_json_falls_back(self):
+        """--report 指向普通 .md 报告（非 -result.json）→ 不触发 JSON 加载,
+        failed_scenarios 留空（与 v2.4 一致）。"""
+        with tempfile.NamedTemporaryFile("w", suffix=".md", delete=False) as f:
+            f.write("# regular report, not result.json")
+            report_path = f.name
+        try:
+            out, calls = _run_record_in_process([
+                "--status", "completed",
+                "--report", report_path,
+                "--summary", "no result.json fallback",
+            ])
+            self.assertFalse(out.get("fatal"), out)
+            c = calls[0]
+            # 普通 .md 不是 -result.json 后缀, 不走 fallback, 字段留空
+            self.assertEqual(c["failed_scenarios"], "")
+            self.assertEqual(c["skipped_scenarios"], "")
+        finally:
+            os.unlink(report_path)
+
+    def test_result_json_flag_takes_priority_over_report(self):
+        """显式传 --result-json 时, 优先使用它; --report 的 fallback 不生效。"""
+        with tempfile.TemporaryDirectory() as tmp:
+            rj_explicit = _write_result_json(tmp, {
+                "status": "completed",
+                "summary": "explicit result.json",
+                "report_path": "",
+                "failed_scenarios": ["X-from-explicit"],
+                "skipped_scenarios": [],
+            })
+            rj_report = os.path.join(tmp, "013-int.scr-scenario-execute-result.json")
+            with open(rj_report, "w") as f:
+                json.dump({
+                    "status": "completed",
+                    "summary": "from --report",
+                    "failed_scenarios": ["X-from-report"],
+                    "skipped_scenarios": [],
+                }, f)
+            out, calls = _run_record_in_process([
+                "--result-json", rj_explicit,
+                "--report", rj_report,
+            ])
+            self.assertFalse(out.get("fatal"), out)
+            c = calls[0]
+            # --result-json 优先级更高
+            self.assertEqual(c["failed_scenarios"], '["X-from-explicit"]')
+
+
 if __name__ == "__main__":
     unittest.main()

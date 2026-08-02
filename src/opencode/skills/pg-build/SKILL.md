@@ -203,6 +203,26 @@ python3 .opencode/skills/pg-build/scripts/pg-list-phases.py <change> --with-prog
         "workflow_failed"   → 终止
 ```
 
+### Stage 转换完整序列（dev → int 示例）
+
+当 `next()` 返回 `env_switch`（或 bootstrap 持续返回 `env_hook_plan`）时，编排器按以下顺序处理 stage 转换：
+
+| 步骤 | 调用 | 返回 | 编排器动作 |
+|:----:|------|------|-----------|
+| 1 | `next()` | `env_switch(phase=clean_env, stage=dev, next_stage=int)` | `env-action clean_env dev` → bash → `env-action-result --phase clean_env --stage dev` |
+| 2 | `bootstrap` | `env_hook_plan(phase=prepare_env, stage_name=int)` | bash → `env-action-result --phase prepare_env --stage int` |
+| 3 | `bootstrap` | `env_hook_plan(phase=restart, stage_name=int)` | bash → `env-action-result --phase restart --stage int` |
+| 4 | `bootstrap` | `env_hook_plan=null` | 进入 `next()` → `dispatch` |
+
+**关键约束**：
+
+- `env-action-result` 的 `--stage` 必须与 `env_hook_plan.stage_name` 字段一致（不是 current_stage，也不是上一个 stage）。bootstrap 返回的 plan 中已包含正确的 stage_name，**直接读取使用，禁止猜测或推导**。
+- restart plan 仅对 scenario track 触发（v3.12 per-track `scenario_last_restart_attempt`）；standard track 的 stage 转换**无此步骤**，第 2 步后直接进 `next()`。
+- 每次 `env-action-result` 后**必须再次调 bootstrap**（不可直接调 `next`），因为 bootstrap 是唯一能确认 env_hook_plan 是否已耗尽的入口。
+- 编排器不能依赖 stage 转换的固定步骤数；如果 `_build_env_hook_plan` 之后又新增了 hook（例如未来的 health_check 校验），编排器必须容忍任意次 bootstrap 循环直到 `env_hook_plan=null`。
+
+**反例**（已踩坑）：本次 `whitelist-excel-import-export` 执行中，由于 `_build_env_hook_plan` 在 `explicit_stage_name=None` 时取 manifest 第一个 stage（dev），导致 restart plan 的 `PG_STAGE=dev`。`env-action-result --phase restart --stage dev` 查找不到 `int.scr`（属于 int stage），`scenario_last_restart_attempt` 永远不更新 → bootstrap 持续返回 restart plan → 编排器陷入死循环。v3.x fix: bootstrap 从 `first_pending` track ID 用 `PipelineState.extract_stage()` 推导正确 stage 后传给 `_build_env_hook_plan`。
+
 > ⚠️ **禁止空转 `next`**：收到 `dispatch` 或 `retry` action 后，**必须先派遣 sub-agent + record 结果**，然后才能再次调 `next`。
 > 每次在未 record 的情况下调 `next`，runner 会递增空转计数（`idle_next_count`）。超过阈值（默认 10）后 pipeline 终止（`workflow_failed`）。
 >
