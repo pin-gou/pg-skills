@@ -1148,6 +1148,22 @@ def cli_bootstrap(change: str, *, resume: bool = False) -> dict[str, Any]:
                     # 取 manifest 第一个 stage（通常是 dev）而非 scenario track
                     # 实际所在 stage（如 int）。
                     _explicit_stage = PipelineState.extract_stage(first_pending)
+            elif first_pending is not None:
+                # A1 fix: current_stage 已 prepared, first_pending 不是 scenario,
+                # 但编排器仍在调 bootstrap。说明 pipeline 状态错乱（典型症状:
+                # clean_env 后 stage_prepared 被空, 但 current_stage 仍指向已
+                # clean 的 stage; 或 stage_prepared 残留但 current_stage 未前进）。
+                # 此场景不应再生成 prepare_env, 否则会无限重复同 stage。
+                # 返回 error 让编排器中止或检视 reducer 状态。
+                result["ok"] = False
+                result["error"] = (
+                    f"A1_violation: current_stage={_snap.current_stage!r} "
+                    f"已 in stage_prepared, 但 first_pending={first_pending!r} "
+                    f"不是 scenario track。bootstrap 不再生成 prepare_env "
+                    f"plan。请检查 pipeline reducer 状态是否一致。"
+                )
+                result["env_hook_plan"] = None
+                return result
             if not _needs_plan:
                 result["env_hook_plan"] = None
         else:
@@ -1291,6 +1307,7 @@ def cli_env_action_result(
     exit_code: int | None = None,
     started_event_ts: str | None = None,
     error: str | None = None,
+    severity: str | None = None,
 ) -> dict[str, Any]:
     """CLI 入口：env hook 执行完毕，编排器汇报结果。
 
@@ -1338,6 +1355,12 @@ def cli_env_action_result(
         "log_path": log_path,
         "ok": success,  # event schema 字段名保留 "ok"（pipeline.events 历史兼容）
     }
+    # C2 fix: 透传 severity 到 event log, 便于 reducer / 审计追溯。
+    # 空值默认 fatal (历史兼容: 旧 hook 不写 severity = 按 fatal 处理)。
+    if severity:
+        completed_data["severity"] = severity
+    elif not success:
+        completed_data["severity"] = "fatal"
     if started_event_ts:
         completed_data["started_ts"] = started_event_ts
     try:
@@ -1346,6 +1369,34 @@ def cli_env_action_result(
         result.setdefault("warnings", []).append(f"event_log complete append failed: {e}")
 
     if not success:
+        # C1 fix: 即使失败也要推进 last_restart, 防止下次 bootstrap 又因
+        # attempt > last_restart 触发重复 restart 死循环。当前只更新 stage_prepared
+        # (discard stage), 不动 last_restart, 失败重启会被反复触发。
+        # 这里用 try/except 包住, snapshot 写失败不影响主流程。
+        try:
+            _state_c1 = load_snapshot(change_root) or PipelineState(change=change)
+            _new_tracks_c1 = dict(_state_c1.tracks)
+            _c1_changed = False
+            for _tid_c1, _ttype_c1 in _state_c1.track_types.items():
+                if _ttype_c1 == "scenario" and PipelineState.extract_stage(_tid_c1) == stage_name:
+                    if _tid_c1 in _new_tracks_c1:
+                        _t_c1 = _new_tracks_c1[_tid_c1]
+                        _ep_c1 = _t_c1.phases.get(SUB_SCENARIO_EXECUTE)
+                        _cur_attempt_c1 = (_ep_c1.attempt or 0) if _ep_c1 else 0
+                        if _t_c1.scenario_last_restart_attempt < _cur_attempt_c1:
+                            _new_tracks_c1[_tid_c1] = _t_c1.replace(
+                                scenario_last_restart_attempt=_cur_attempt_c1
+                            )
+                            _c1_changed = True
+                        break
+            if _c1_changed:
+                _state_c1 = _state_c1.replace(tracks=_new_tracks_c1)
+                save_snapshot(change_root, _state_c1)
+        except Exception as _c1_e:
+            result.setdefault("warnings", []).append(
+                f"C1 snapshot update failed: {_c1_e}"
+            )
+
         result["ok"] = False
         result["error"] = error or f"{phase_name} failed (exit_code={exit_code})"
         result["next_action"] = "bootstrap"

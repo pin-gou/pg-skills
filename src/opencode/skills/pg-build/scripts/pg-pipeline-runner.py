@@ -127,6 +127,11 @@ def main() -> None:
         ear_parser.add_argument("--exit-code", type=int, default=None, help="hook 进程退出码")
         ear_parser.add_argument("--started-ts", default="", help="hook 启动时间戳")
         ear_parser.add_argument("--error", default="", help="hook 错误信息")
+        ear_parser.add_argument("--severity", default="",
+                                choices=("", "fatal", "recoverable"),
+                                help="v3.x (C2): env hook 失败严重程度, fatal=终止 "
+                                     "pipeline, recoverable=WARN 继续。仅在 "
+                                     "--success false 时生效。空值默认按 fatal。")
         ear_args = ear_parser.parse_args(sys.argv[3:])
 
         success_str = ear_args.success.lower()
@@ -148,6 +153,7 @@ def main() -> None:
             exit_code=ear_args.exit_code,
             started_event_ts=ear_args.started_ts or None,
             error=ear_args.error or None,
+            severity=ear_args.severity or None,
         )
         print(json.dumps(result, ensure_ascii=False, indent=2))
         return

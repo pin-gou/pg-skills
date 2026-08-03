@@ -338,7 +338,7 @@ runner 返回 dispatch action 带 `dispatch_file` 和 `agent` 字段。编排器
 所有 sub-agent 必须返回 JSON：
 ```json
 {
-  "summary": "<= 200 字",
+  "summary": "<= 500 字",
   "outputs": ["<产物绝对路径>"],
   "tasks_updated": ["<task_id>"],
   "status": "completed | failed | escalate | pass | fail",
@@ -357,11 +357,13 @@ v2.4 起，sub-agent 不仅要返回 JSON，**还必须把 JSON 落盘到 dispat
 | `2-build/018-dev.frontend-fix-dispatch-2.md` | `2-build/018-dev.frontend-fix-result-2.json` |
 | `2-build/028-final-gate-gate-dispatch.md` | `2-build/028-final-gate-gate-result.json` |
 
-**保护流程**（编排器侧）：
+**保护流程**（编排器侧，A3 v3.x 修订）：
 1. 派遣 sub-agent（dispatch_file 路径传过去）
 2. 检查 `expected_result_path` 是否落盘
-3. **缺失 → 编排器自动重试一次**（重新派送同 dispatch_file，prompt 追加"上次未生成 result.json"）
-4. **重试后仍缺失 → fatal** `result_json_missing_after_retry`，pipeline 停止
+3. **缺失 → 直接 fatal** `result_json_missing_after_retry`，pipeline 停止
+   - v2.4 的"自动重试一次"机制**已废弃**：sub-agent 不落盘是真实错误，重试只会掩盖问题
+   - 修复方法：sub-agent 必须严格执行 `--output-path {result_json_path} --require-output`
+4. fatal 后由人排查 sub-agent 是否执行了 `pg-build-result --output-path` 命令
 
 **sub-agent 必须执行的命令**（从 dispatch prompt 中 `{result_json_path}` 占位符取值）：
 
@@ -369,7 +371,7 @@ v2.4 起，sub-agent 不仅要返回 JSON，**还必须把 JSON 落盘到 dispat
 python3 .opencode/skills/pg-build/scripts/pg-build-result \
     --mode agent \
     --status <status> \
-    --summary "<=200 字>" \
+    --summary "<=500 字>" \
     --track <dev.xxx> --phase <phase> \
     --output-path {result_json_path} \
     --require-output \

@@ -121,7 +121,7 @@ def validate_record_args(
         phase: 当前 phase（test / dev / verify / gate / fix / fix-gate / simple）
         track: 当前 track id（含 stage 前缀，如 dev.backend）
         status: record status
-        summary: 一句话摘要（1-200 字）
+        summary: 一句话摘要（1-500 字，v3.x 上限由 200 提至 500）
         report_path: 验证/审查报告路径
         outputs: 产物文件列表（逗号分隔）
         issues: 问题列表（逗号分隔）
@@ -138,9 +138,9 @@ def validate_record_args(
         return False, (
             "schema_violation: 缺少 summary（sub-agent 必须返回一句话摘要）"
         )
-    if len(summary) > 200:
+    if len(summary) > 500:
         return False, (
-            f"schema_violation: summary 长度 {len(summary)} 超过 200 字上限"
+            f"schema_violation: summary 长度 {len(summary)} 超过 500 字上限"
         )
 
     # ── status 必须合法（v2.1: 从 pipeline.events.STATUSES_ALL 单一来源）──

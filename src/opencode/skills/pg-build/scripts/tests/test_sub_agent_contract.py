@@ -26,9 +26,19 @@ class TestSubAgentContract(unittest.TestCase):
         self.assertIn("summary", reason)
 
     def test_summary_too_long_rejected(self):
-        ok, reason = validate_record_args("test", "dev.backend", "completed", "x" * 201, "", "")
+        ok, reason = validate_record_args("test", "dev.backend", "completed", "x" * 501, "", "")
         self.assertFalse(ok)
-        self.assertIn("200", reason)
+        self.assertIn("500", reason)
+
+    def test_summary_500_chars_accepted(self):
+        # B1: 上限 200→500，500 字应通过 summary 长度校验
+        ok, reason = validate_record_args(
+            "dev", "dev.backend", "completed",
+            "x" * 500, "", "/tmp/output.java",
+            tasks_updated=["2.1"],
+        )
+        self.assertTrue(ok, reason)
+        self.assertNotIn("500 字上限", reason)
 
     def test_invalid_status_rejected(self):
         ok, reason = validate_record_args("test", "dev.backend", "BOGUS", "summary", "", "")

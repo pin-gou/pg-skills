@@ -18,7 +18,7 @@ block: |
   | 字段 | 本阶段要求 |
   |------|-----------|
   | `--status` | 必填（见下方 status 矩阵） |
-  | `--summary` | 必填，<= 200 字 |
+  | `--summary` | 必填，<= 500 字 |
   | `--track` | 必填（如 `dev.backend`） |
   | `--phase` | 必填（当前阶段） |
   | `--report` | {report_policy} |
@@ -36,7 +36,7 @@ block: |
   python3 .opencode/skills/pg-build/scripts/pg-build-result \
       --mode agent \
       --status <status> \
-      --summary "<=200 字>" \
+      --summary "<=500 字>" \
       --track <dev.xxx> \
       --phase {phase} \
       --output-path {result_json_path} \
@@ -49,6 +49,6 @@ block: |
   ```
 
   - `{result_json_path}` 来自本 dispatch 上下文注入，**直接照抄**
-  - **不调用 `--output-path` 或脚本 exit 2** → 编排器先重试一次，仍缺失则 fatal
+  - **A3 修复（v3.x）**：result.json 缺失 = orchestrator 直接 fatal `result_json_missing_after_retry`，**不再自动重试**（v2.4 重试机制会让一次 sub-agent 卡死掩盖整个 track 失败）。必须严格按命令模板执行 `--output-path {result_json_path} --require-output`，不要漏写。
   - 脚本 exit 1 → 字段校验失败，stderr 输出错误信息，照提示修复后重跑
   - **gate / final-gate**：summary 末尾追加 `"gate_score: <0-100>, p0_failures: [...]"`，否则 schema_violation
