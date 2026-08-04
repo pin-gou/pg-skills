@@ -14,13 +14,16 @@
 ### 与本项目的关系
 
 ```text
-pg-skills 仓库（独立远程）               您的项目仓库
-  src/runtime/bin/pg          ── subtree ──→  .pg/skills/
-  src/opencode/skills/        ── subtree ──→  .pg/skills/
-                                           └── pg init 生成 symlink → .opencode/
+pg-skills 仓库（独立远程）                  您的项目仓库
+  src/core/                    ── subtree ──→  .pg/skills/
+  src/integrations/            ── subtree ──→  .pg/skills/
+  src/runtime/bin/pg           ── subtree ──→  .pg/skills/
+                                              └── pg init 安装所选工具适配层
 ```
 
-`pg-skills` 作为 `git subtree` 嵌入到您的项目仓库的 `.pg/skills/` 目录下，通过 `pg init` 将能力以 symlink 形式暴露到 `.opencode/` 中供 opencode 加载。
+`pg-skills` 作为 `git subtree` 嵌入项目的 `.pg/skills/`。核心流程与开发工具无关；`pg init` 负责选择适配器，再由适配器生成 OpenCode、Mobile Coder 等工具所需的目录、命令、Skill 和 Agent 配置。
+
+本次分层参考 GitHub Spec Kit 的 [Core Commands](https://github.github.com/spec-kit/reference/core.html) 与 [Agent Integrations](https://github.github.com/spec-kit/reference/integrations.html) 设计：核心初始化和工作流只维护一份，各开发工具通过独立 adapter 安装自己的命令、Skill、Agent 与配置文件。pg-skills 保留原有 `.pg/skills/src/runtime/` 公共路径作为向后兼容入口。
 
 ---
 
@@ -39,27 +42,55 @@ git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
 git subtree add --prefix=.pg/skills pg-skills master --squash
 
-# 2. 跑 pg init 创建 .pg/ 骨架 + .opencode/ symlink
+# 2a. 交互式终端可直接运行：自动探测，并要求确认或选择
 python3 .pg/skills/src/runtime/bin/pg init
+
+# 2b. 也可以显式指定工具；这会跳过探测
+python3 .pg/skills/src/runtime/bin/pg init --tool opencode
+python3 .pg/skills/src/runtime/bin/pg init --tool mobile-coder
+
+# CI、管道和其他非交互环境必须显式指定
+python3 .pg/skills/src/runtime/bin/pg init --non-interactive --tool opencode
+
+# 查看当前支持的适配器
+python3 .pg/skills/src/runtime/bin/pg init --list-tools
+
+# pg init 的共同职责：
 #   - 生成 .pg/{hooks,context,scripts,changes,runs}/ 目录
 #   - 首次生成 .pg/project.yaml（placeholder）；已存在则不动
-#   - 在 .opencode/agents/ / .opencode/commands/ / .opencode/skills/ 下
-#     为 pg-skills 的每项创建逐项 symlink
 #   - 幂等，可重复跑
 
-# 3. 重启 opencode
-#    opencode 即可加载 pg-* slash commands + pg-* skills + pg-* sub-agents
+# OpenCode 适配器：
+#   - 在 .opencode/{agents,commands,skills}/ 下创建逐项 symlink
 
-# 4. 在 opencode 中输入提示词： 加载并执行 pg-init-project skill
-#    （opencode 自动扫描仓库结构，生成 .pg/context/repo-scan.md + 实打实的 .pg/project.yaml）
+# Mobile Coder 适配器：
+#   - 生成 .mobile-coder/{commands,agents,skills,runtime}/
+#   - 生成 .mobile-coder/commands、agents、skills（不修改 mobile-coder.json）
+#   - 将 Skill tool / Task tool / question tool 语义转换为
+#     Mobile Coder 的原生 Skill、subagent 和用户交互机制
+#   - 不修改 .pg/skills 源码，不依赖 .opencode/
 
-# 5. (可选) 同步 hook 公共库: 仅升级后需要；`pg init` 已自动复制 common.sh。
-#    如 `pg doctor` 报 `pg_resolve_paths` 缺失则手动 cp：
+# 3. 重启所选开发工具
+#    OpenCode 从 .opencode/ 加载；Mobile Coder 从 .mobile-coder/ 加载
+
+# 4. 在所选工具中加载并执行 pg-init-project skill
+#    （工具会扫描仓库结构，生成 .pg/context/repo-scan.md + 实打实的 .pg/project.yaml）
+
+# 5. (可选) 同步 hook 公共库。`pg init` 与旧版保持一致，不负责复制 common.sh。
+#    如 `pg doctor` 报 `pg_resolve_paths` 缺失则手动复制：
 #    cp .pg/skills/examples/shell/hooks/lib/common.sh .pg/hooks/lib/common.sh
 #    默认是 .pg/skills/examples/shell/hooks/lib/common.sh 的副本 (顶部含 SSOT 同步标记).
 #    项目特有工具 (port 探测 / 自定义 health check) 可加在 SSOT 标记之后, 不会被同步覆盖.
 #    pg doctor 会在 .pg/hooks/lib/common.sh 缺失或不含 pg_resolve_paths 时 WARN.
 ```
+
+### 工具选择规则
+
+- 传入 `--tool`：直接安装指定适配器，不做自动选择。
+- 未传 `--tool` 且只检测到一个工具：显示检测依据，并要求用户确认。
+- 未传 `--tool` 且检测到多个工具：列出候选项，由用户选择。
+- 未检测到可靠候选：列出全部受支持工具，由用户选择。
+- CI、管道或其他非交互环境：必须传入 `--tool`，否则命令失败，不静默猜测。
 
 ### 预期 .opencode/ symlink 布局
 
@@ -103,11 +134,21 @@ pg-skills/
 ├── CHANGELOG.md
 ├── README.md                     # 本文件
 ├── src/
-│   ├── opencode/
-│   │   ├── commands/             # 7 个 slash 命令（/1-pg-define, /2-pg-propose, /2b-pg-quick-build, ...）
-│   │   ├── skills/               # 10 个活跃 SKILL.md（pg-archive, pg-browser-testing-with-devtools, pg-build, pg-fix-issue, pg-init-project, pg-propose, pg-quick-build, pg-regression, pg-systematic-diagnosing, pg-verify-and-merge）
-│   │   └── agents/               # 子 agent（explore, pg-manager, ...）
-│   └── runtime/                  # 运行时层
+│   ├── core/                     # 与开发工具无关
+│   │   ├── init.py               # 初始化、探测、选择流程
+│   │   ├── doctor.py             # 项目结构与配置校验
+│   │   ├── runtime/              # 核心运行时边界
+│   │   └── workflows/            # commands / skills / agents 的规范源
+│   ├── integrations/             # 每个开发工具一个自包含适配包
+│   │   ├── base.py               # 适配器契约与探测证据
+│   │   ├── registry.py           # 工具注册、别名、选择状态
+│   │   ├── opencode/
+│   │   │   ├── adapter.py
+│   │   │   └── templates/
+│   │   └── mobile_coder/
+│   │       ├── adapter.py
+│   │       └── templates/
+│   └── runtime/                  # 向后兼容的 CLI 与 pipeline 运行时路径
 │       ├── bin/                  # CLI 入口（pg, pg-invoke-hook.py, ...）
 │       ├── lib/                  # Python 辅助模块（hook_runner.py 等）
 │       └── spec/                 # SSOT 规范（error-categories.yaml 等）
@@ -722,8 +763,13 @@ SSOT 见 `src/runtime/spec/error-categories.yaml`。
 
 | 命令 | 用途 | 典型调用 |
 |------|------|---------|
-| `pg init` | 初始化项目 .pg/ 骨架 + .opencode/ symlink | `python3 .pg/skills/src/runtime/bin/pg init` |
-| `pg init --no-symlinks` | 仅初始化 .pg/ 骨架，不创建 symlink | 已有 .opencode/ 的项目 |
+| `pg init` | 初始化 .pg/；探测一个工具则确认，探测多个则选择 | 仅用于交互式终端 |
+| `pg init --tool opencode` | 跳过探测，显式安装 OpenCode 适配 | 自动化环境推荐 |
+| `pg init --tool mobile-coder` | 安装 Mobile Coder commands/skills/agents/runtime/config | Mobile Coder 项目 |
+| `pg init --non-interactive --tool <id>` | 禁止提示并显式选择工具 | CI/管道必须使用 |
+| `pg init --list-tools` | 列出当前支持的开发工具 | — |
+| `pg init --no-tool-config` | 仅初始化 .pg/ 骨架，不安装工具适配 | 自行管理工具配置的项目 |
+| `pg init --no-symlinks` | `--no-tool-config` 的旧兼容参数 | 旧脚本可继续使用 |
 | `pg upgrade [version]` | 升级 pg-skills 版本 | `pg upgrade v0.3.0` |
 | `pg upgrade --list` | 查看远程可用版本 | — |
 | `pg upgrade --force` | 工作区脏时自动 stash 后升级 | — |
