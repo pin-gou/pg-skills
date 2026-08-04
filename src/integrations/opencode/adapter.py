@@ -9,7 +9,12 @@ from pathlib import Path
 
 from core.rendering import render_workflow_text
 
-from ..base import IntegrationContext, IntegrationResult, ToolIntegration
+from ..base import (
+    IntegrationContext,
+    IntegrationResult,
+    ToolIntegration,
+    _remove_legacy_links,
+)
 
 
 TEXT_EXTENSIONS = {
@@ -27,34 +32,6 @@ MANIFEST_NAME = ".pg-adapter-manifest.json"
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def _is_below(path: Path, root: Path) -> bool:
-    try:
-        path.resolve().relative_to(root.resolve())
-        return True
-    except (OSError, ValueError):
-        return False
-
-
-def _remove_legacy_links(
-    opencode_root: Path,
-    source_root: Path,
-    surfaces: dict[str, str],
-    result: IntegrationResult,
-) -> None:
-    """Replace the old direct links before common files become templates."""
-
-    for subdir in surfaces.values():
-        target_dir = opencode_root / subdir
-        if not target_dir.is_dir():
-            continue
-        for entry in target_dir.iterdir():
-            if entry.is_symlink() and _is_below(entry, source_root):
-                entry.unlink()
-                result.messages.append(
-                    f"migrated legacy .opencode/{subdir}/{entry.name} link"
-                )
 
 
 def _collect_rendered_tree(
@@ -96,7 +73,7 @@ class OpenCodeIntegration(ToolIntegration):
         result = IntegrationResult()
         surfaces = descriptor["surfaces"]
 
-        _remove_legacy_links(opencode_root, source_root, surfaces, result)
+        _remove_legacy_links(opencode_root, source_root, surfaces, result, output_label=".opencode")
 
         generated: dict[Path, tuple[bytes, int]] = {}
         variables = self.template_variables()
@@ -124,6 +101,11 @@ class OpenCodeIntegration(ToolIntegration):
             target = opencode_root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             relative_key = relative.as_posix()
+            # Silently replace any symlink that still shadows a rendered file
+            # (dangling, out-of-tree, or user-created). Rendered surfaces are
+            # owned by pg-skills, so a symlink at this path is always replaced.
+            if target.is_symlink():
+                target.unlink()
             old_hash = previous_files.get(relative_key)
             if target.exists() and old_hash:
                 if _sha256(target.read_bytes()) != old_hash:

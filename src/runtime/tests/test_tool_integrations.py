@@ -355,6 +355,113 @@ class TestMobileCoderIntegration(unittest.TestCase):
             any("preserved modified file" in warning for warning in result.warnings)
         )
 
+    def test_install_replaces_dangling_symlink_without_crash(self):
+        """Dangling symlinks (e.g. from a moved-out pg-skills checkout)
+        must be cleaned up by the legacy sweep, not crash the write loop
+        with FileNotFoundError (Python follows symlinks on open())."""
+        integration = get_integration("mobile-coder")
+        context = IntegrationContext(self.project, REPO_ROOT)
+
+        # Pre-create the mobile root, then plant a dangling symlink at a
+        # rendered surface path. The target does not exist on disk.
+        mobile = self.project / ".mobile-coder"
+        mobile.mkdir()
+        target = mobile / "commands" / "pg-3-build.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to("/nonexistent/path/that/does/not/exist")
+
+        # First install replaces the dangling symlink and writes the file.
+        try:
+            integration.install(context)
+        except (OSError, FileNotFoundError) as exc:  # pragma: no cover
+            self.fail(f"install() crashed on dangling symlink: {exc}")
+
+        self.assertFalse(target.is_symlink())
+        self.assertTrue(target.is_file())
+        # Rendered content must not be the user's (non-existent) data.
+        self.assertNotEqual(target.read_text(encoding="utf-8"), "")
+
+        # Re-plant a dangling symlink at a *different* rendered surface
+        # path, then re-install, to capture the migration message in
+        # result.messages.
+        second = mobile / "commands" / "pg-1-define.md"
+        if second.exists() or second.is_symlink():
+            second.unlink()
+        second.symlink_to("/nonexistent/another-dangling-target")
+        result = integration.install(context)
+        self.assertFalse(second.is_symlink())
+        self.assertTrue(
+            any("migrated legacy" in message for message in result.messages),
+            result.messages,
+        )
+
+    def test_install_replaces_out_of_tree_legacy_symlink(self):
+        """Symlinks pointing to a real file outside the current workflow
+        root (an old pg-skills checkout at a sibling absolute path) must
+        be replaced by the legacy sweep instead of being preserved."""
+        integration = get_integration("mobile-coder")
+        context = IntegrationContext(self.project, REPO_ROOT)
+
+        # Build an "old" pg-skills tree outside the workflow root whose
+        # file content would otherwise satisfy the "below source_root" check.
+        old_root = self.project / "_old_pg_skills" / "src" / "core" / "workflows"
+        (old_root / "commands").mkdir(parents=True, exist_ok=True)
+        old_command = old_root / "commands" / "pg-3-build.md"
+        old_command.write_text(
+            "stale content from a removed pg-skills checkout\n",
+            encoding="utf-8",
+        )
+
+        mobile = self.project / ".mobile-coder"
+        mobile.mkdir()
+        target = mobile / "commands" / "pg-3-build.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(old_command)
+
+        try:
+            integration.install(context)
+        except (OSError, FileNotFoundError) as exc:  # pragma: no cover
+            self.fail(f"install() crashed on out-of-tree symlink: {exc}")
+
+        self.assertFalse(target.is_symlink())
+        self.assertNotEqual(
+            target.read_text(encoding="utf-8"),
+            "stale content from a removed pg-skills checkout\n",
+        )
+
+    def test_install_silently_replaces_user_shadow_symlink(self):
+        """User-created symlinks at a rendered surface are silently
+        replaced by the rendered file (rendered surfaces are owned by
+        pg-skills). No warning is emitted for the replacement itself."""
+        integration = get_integration("mobile-coder")
+        context = IntegrationContext(self.project, REPO_ROOT)
+
+        # A real file the user symlinked into the rendered surface.
+        user_file = self.project / "user-content.md"
+        user_file.write_text("# user content\n", encoding="utf-8")
+
+        mobile = self.project / ".mobile-coder"
+        mobile.mkdir()
+        target = mobile / "commands" / "pg-3-build.md"
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.symlink_to(user_file)
+
+        result = integration.install(context)
+
+        self.assertFalse(target.is_symlink())
+        self.assertTrue(target.is_file())
+        # Rendered content wins, user's content is gone (silent overwrite).
+        self.assertNotEqual(target.read_text(encoding="utf-8"), "# user content\n")
+        # No "preserved" warning for this file (silent overwrite contract).
+        self.assertFalse(
+            any(
+                "pg-3-build.md" in warning
+                for warning in result.warnings
+                if "preserved" in warning
+            ),
+            result.warnings,
+        )
+
 
 class TestOpenCodeIntegration(unittest.TestCase):
     def setUp(self):
@@ -475,6 +582,90 @@ class TestOpenCodeIntegration(unittest.TestCase):
         self.assertFalse(stale.is_symlink())
         self.assertTrue(
             any("migrated legacy" in message for message in result.messages)
+        )
+
+    def test_install_replaces_dangling_symlink_without_crash(self):
+        """Dangling symlinks at a rendered surface path (e.g. leftover
+        from a pg-skills checkout that has been moved in-tree) must be
+        unlinked before the write loop, otherwise ``Path.write_bytes``
+        crashes with FileNotFoundError because Python follows symlinks
+        on open()."""
+        self._install()
+        target = self.project / ".opencode" / "commands" / "pg-1-define.md"
+        target.unlink()
+        target.symlink_to("/nonexistent/path/that/does/not/exist")
+
+        try:
+            result = self._install()
+        except (OSError, FileNotFoundError) as exc:  # pragma: no cover
+            self.fail(f"install() crashed on dangling symlink: {exc}")
+
+        self.assertFalse(target.is_symlink())
+        self.assertTrue(target.is_file())
+        self.assertTrue(
+            any("migrated legacy" in message for message in result.messages),
+            result.messages,
+        )
+
+    def test_install_replaces_out_of_tree_legacy_symlink(self):
+        """A symlink that resolves to a real file outside the current
+        workflow root (e.g. an old sibling /home/.../pg-skills checkout)
+        must be replaced by the legacy sweep. Previously the
+        ``_is_below(source_root)`` check missed these and crashed on
+        write."""
+        self._install()
+        target = self.project / ".opencode" / "commands" / "pg-1-define.md"
+
+        old_root = self.project / "_old_pg_skills" / "src" / "core" / "workflows"
+        (old_root / "commands").mkdir(parents=True, exist_ok=True)
+        old_command = old_root / "commands" / "pg-1-define.md"
+        old_command.write_text(
+            "stale content from a removed pg-skills checkout\n",
+            encoding="utf-8",
+        )
+
+        target.unlink()
+        target.symlink_to(old_command)
+
+        try:
+            self._install()
+        except (OSError, FileNotFoundError) as exc:  # pragma: no cover
+            self.fail(f"install() crashed on out-of-tree symlink: {exc}")
+
+        self.assertFalse(target.is_symlink())
+        self.assertNotEqual(
+            target.read_text(encoding="utf-8"),
+            "stale content from a removed pg-skills checkout\n",
+        )
+
+    def test_install_silently_replaces_user_shadow_symlink(self):
+        """User-created symlinks at a rendered surface are silently
+        replaced by the rendered file (rendered surfaces are owned by
+        pg-skills). No ``preserved`` warning is emitted for the
+        replacement itself."""
+        self._install()
+        target = self.project / ".opencode" / "commands" / "pg-1-define.md"
+
+        user_file = self.project / "user-content.md"
+        user_file.write_text("# user content\n", encoding="utf-8")
+
+        target.unlink()
+        target.symlink_to(user_file)
+
+        result = self._install()
+
+        self.assertFalse(target.is_symlink())
+        self.assertTrue(target.is_file())
+        # Rendered content wins.
+        self.assertNotEqual(target.read_text(encoding="utf-8"), "# user content\n")
+        # Silent overwrite contract: no "preserved" warning for this file.
+        self.assertFalse(
+            any(
+                "pg-1-define.md" in warning
+                for warning in result.warnings
+                if "preserved" in warning
+            ),
+            result.warnings,
         )
 
 

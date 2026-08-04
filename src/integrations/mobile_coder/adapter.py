@@ -11,7 +11,12 @@ from pathlib import Path
 
 from core.rendering import render_workflow_text
 
-from ..base import IntegrationContext, IntegrationResult, ToolIntegration
+from ..base import (
+    IntegrationContext,
+    IntegrationResult,
+    ToolIntegration,
+    _remove_legacy_links,
+)
 
 
 TEXT_EXTENSIONS = {
@@ -166,6 +171,14 @@ class MobileCoderIntegration(ToolIntegration):
         mobile_root = context.project_root / descriptor["output_root"]
         result = IntegrationResult()
 
+        _remove_legacy_links(
+            mobile_root,
+            source_root,
+            descriptor["surfaces"],
+            result,
+            output_label=".mobile-coder",
+        )
+
         required = ("commands", "agents", "skills", "scripts")
         missing = [name for name in required if not (source_root / name).exists()]
         if missing or not runtime_root.exists():
@@ -223,6 +236,11 @@ modifies `mobile-coder.json`.
             target = mobile_root / relative
             target.parent.mkdir(parents=True, exist_ok=True)
             relative_key = relative.as_posix()
+            # Silently replace any symlink that still shadows a rendered file
+            # (dangling, out-of-tree, or user-created). Rendered surfaces are
+            # owned by pg-skills, so a symlink at this path is always replaced.
+            if target.is_symlink():
+                target.unlink()
             old_hash = previous_files.get(relative_key)
             if target.exists() and old_hash:
                 current_hash = _sha256(target.read_bytes())

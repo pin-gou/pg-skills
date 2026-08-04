@@ -117,3 +117,59 @@ class ToolIntegration:
 
     def next_steps(self) -> list[str]:
         return []
+
+
+def _is_legacy_link(entry: Path, source_root: Path) -> bool:
+    """Detect a symlink an adapter must replace before writing rendered files.
+
+    Returns True when ``entry`` is a symlink that either:
+
+    - is dangling (``exists()`` is False because the target was removed, e.g.
+      a pg-skills checkout that has been moved in-tree), or
+    - resolves to a path outside the current workflow root (an out-of-tree
+      link left over from an older pg-skills layout).
+
+    Both forms crash the naive ``Path.exists()`` / ``Path.write_bytes()``
+    pattern with ``FileNotFoundError`` because Python follows symlinks on
+    open. Adapters must unlink these before writing the rendered file.
+    """
+
+    if not entry.is_symlink():
+        return False
+    if not entry.exists():
+        return True
+    try:
+        entry.resolve(strict=True).relative_to(source_root.resolve())
+    except (OSError, ValueError):
+        return True
+    return False
+
+
+def _remove_legacy_links(
+    output_root: Path,
+    source_root: Path,
+    surfaces: dict[str, str],
+    result: IntegrationResult,
+    *,
+    output_label: str,
+) -> None:
+    """Replace stale symlinks in every rendered surface before writes.
+
+    Sweeps each ``surfaces`` subdirectory under ``output_root`` and removes
+    entries that ``is_legacy_link`` flags (dangling or out-of-tree). Used by
+    every adapter that renders a managed surface from the canonical
+    workflow pack. User-created symlinks that shadow a generated file are
+    removed silently per the adapter contract: rendered surfaces are owned
+    by pg-skills.
+    """
+
+    for subdir in surfaces.values():
+        target_dir = output_root / subdir
+        if not target_dir.is_dir():
+            continue
+        for entry in target_dir.iterdir():
+            if _is_legacy_link(entry, source_root):
+                entry.unlink()
+                result.messages.append(
+                    f"migrated legacy {output_label}/{subdir}/{entry.name} link"
+                )
