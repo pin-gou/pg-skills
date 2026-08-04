@@ -1142,14 +1142,20 @@ def _handle_scenario_fix(
       - completed / failed + fix_root_cause=code_bug（或缺省）
           → 通过 _sub_pipeline_advance 触发 scenario-execute 重跑
             （即使 fix 自身失败也允许重跑，让 execute 重新判定）
-      - completed / failed + fix_root_cause=env_drift|design_drift
+      - completed / failed + fix_root_cause=env_drift + env_fix_applied=true
+          → v3.14 (修复 2): agent 已执行环境修复动作（restart/rebuild/deploy），
+            环境漂移已消除，等同 code_bug 走重跑
+      - completed / failed + fix_root_cause=env_drift + env_fix_applied=false（缺省）
           → workflow_failed (fatal)，不重跑（重跑无意义），drift 由 orchestrator 累积
+      - completed / failed + fix_root_cause=design_drift
+          → workflow_failed (fatal)，env_fix_applied 不影响此分支
 
     与 _handle_fix 区别：scenario-fix 没有 max_retries 概念（max_fix_retries 由
     主 pipeline 的 scenario-execute 处理器限制），fix 失败直接回到 execute。
 
     v1.1.0 (P1-3): 按 record.fix_root_cause 路由。code_bug 走重跑；
     env_drift / design_drift 走 workflow_failed 终止。
+    v3.14 (修复 2): env_drift + env_fix_applied=true 走重跑（环境已修复）。
     """
     track = record.track
     if track not in state.tracks:
@@ -1164,8 +1170,11 @@ def _handle_scenario_fix(
         return _error_action(state, f"invalid {SUB_SCENARIO_FIX} status: {record.status!r}")
 
     # v1.1.0 (P1-3): 非 code_bug 根因 → 终止 workflow（重跑无法解决）
+    # v3.14 (修复 2): env_drift + env_fix_applied=true 例外 → 走重跑路径
     root_cause = (record.fix_root_cause or "code_bug").strip().lower()
-    if root_cause in ("env_drift", "design_drift"):
+    if root_cause == "design_drift":
+        return _route_scenario_fix_non_code(state, track, record, phase_status, root_cause)
+    if root_cause == "env_drift" and not record.env_fix_applied:
         return _route_scenario_fix_non_code(state, track, record, phase_status, root_cause)
 
     # code_bug（或缺省）→ 标记 fix_cycle 状态后回到 scenario-execute 重跑

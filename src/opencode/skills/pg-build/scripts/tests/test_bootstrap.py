@@ -660,7 +660,7 @@ environments:
         self.assertNotIn("dev", state_after.stage_prepared)
 
     def test_cli_env_action_result_clean_env(self):
-        """clean_env 成功: stage_prepared 移除 stage, current_stage 不变。"""
+        """clean_env 成功: stage_prepared 移除 stage, current_stage 推进到下一 stage (v3.14 修复 1a)。"""
         from pipeline.snapshot import save_snapshot
         state = PipelineState(
             change="test-change",
@@ -678,7 +678,49 @@ environments:
         )
         self.assertTrue(result["ok"])
         self.assertNotIn("dev", result["stage_prepared"])
-        # current_stage 不变 (由下一 prepare_env 成功才会更新)
+        # v3.14 (修复 1a): clean_env 推进 current_stage 到下一 stage
+        self.assertEqual(result["current_stage"], "integration")
+
+    def test_cli_env_action_result_clean_env_last_stage_no_advance(self):
+        """v3.14 (修复 1a): 最后一个 stage clean 后 current_stage 不推进。"""
+        from pipeline.snapshot import save_snapshot
+        state = PipelineState(
+            change="test-change",
+            stage_order=("dev", "integration"),
+            stage_env_map={"integration": "dev-3tier"},
+            current_stage="integration",
+            stage_prepared={"integration"},
+        )
+        save_snapshot(self.change_root, state)
+        log_path = self._create_fake_log("clean_env")
+
+        result = bootstrap.cli_env_action_result(
+            "test-change", "clean_env", "integration", "dev-3tier",
+            success=True, log_path=log_path, exit_code=0,
+        )
+        self.assertTrue(result["ok"])
+        self.assertNotIn("integration", result["stage_prepared"])
+        self.assertEqual(result["current_stage"], "integration")
+
+    def test_cli_env_action_result_clean_env_stage_mismatch_no_advance(self):
+        """v3.14 (修复 1a): clean 的 stage 与 current_stage 不一致时不推进（防御性）。"""
+        from pipeline.snapshot import save_snapshot
+        state = PipelineState(
+            change="test-change",
+            stage_order=("env", "dev", "integration"),
+            stage_env_map={"dev": "dev-local"},
+            current_stage="dev",
+            stage_prepared={"dev"},
+        )
+        save_snapshot(self.change_root, state)
+        log_path = self._create_fake_log("clean_env")
+
+        result = bootstrap.cli_env_action_result(
+            "test-change", "clean_env", "env", "dev-local",
+            success=True, log_path=log_path, exit_code=0,
+        )
+        self.assertTrue(result["ok"])
+        # env != current_stage(dev) → 不推进
         self.assertEqual(result["current_stage"], "dev")
 
     def test_cli_env_action_result_failed_does_not_update_state(self):
@@ -736,7 +778,8 @@ environments:
         )
         self.assertTrue(r2["ok"])
         self.assertEqual(r2["stage_prepared"], [])
-        self.assertEqual(r2["current_stage"], "dev")  # current_stage 不变
+        # v3.14 (修复 1a): clean_env 推进 current_stage 到下一 stage
+        self.assertEqual(r2["current_stage"], "integration")
 
         # 3) prepare_env integration
         log3 = self._create_fake_log("prepare_env")

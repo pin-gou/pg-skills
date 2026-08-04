@@ -604,6 +604,7 @@ class Orchestrator:
         failed_scenarios: str = "",  # v1.1.0 (P1-2): JSON 数组
         skipped_scenarios: str = "",  # v1.1.0 (P1-2): JSON 数组
         fix_root_cause: str = "",  # v1.1.0 (P1-3): code_bug | env_drift | design_drift
+        env_fix_applied: bool = False,  # v3.14 (修复 2): scenario-fix 已执行环境修复
     ) -> dict[str, Any]:
         """记录一次 sub-agent 完成事件。
 
@@ -686,6 +687,7 @@ class Orchestrator:
             failed_scenarios=failed_scenarios,  # v1.1.0 (P1-2)
             skipped_scenarios=skipped_scenarios,  # v1.1.0 (P1-2)
             fix_root_cause=fix_root_cause,  # v1.1.0 (P1-3)
+            env_fix_applied=env_fix_applied,  # v3.14 (修复 2)
         )
 
         # reducer

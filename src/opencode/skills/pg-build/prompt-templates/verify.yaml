@@ -44,6 +44,11 @@ prompt: |
   格式：Markdown，包含每项验证的结论（PASS / FAIL）及证据。
   **必须**含"实现完整性核查"段，含上面 3 个检查命令的输出与判定。
 
+  原始证据（curl 输出 / psql 查询 / mvn test 日志摘要）若单独落盘，
+  文件名**必须**带 seq 前缀：`2-build/{report_seq}-{bare_track}-verify-evidence.md`
+  （v3.14 修复 4：禁止使用 `{_change}.verify-evidence.md` 等无 seq 命名，
+  多轮 verify（fix cycle 后复测）会互相覆盖导致 gate agent 证据追溯失真）。
+
 {% if verify_failure_mode == "fail-fast" %}
    ### 验证策略：fail-fast（默认）
    遇到第一个 FAIL 的 V-* 验证项时，立即返回 escalate。

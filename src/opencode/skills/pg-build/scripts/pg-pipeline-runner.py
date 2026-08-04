@@ -228,6 +228,12 @@ def main() -> None:
                                 dest="fix_root_cause",
                                 choices=("", "code_bug", "env_drift", "design_drift"),
                                 help="v1.1.0 (P1-3): scenario-fix 修复根因分类")
+        # v3.14 (修复 2): scenario-fix 已执行环境修复动作
+        rec_parser.add_argument("--env-fix-applied", action="store_true", default=False,
+                                dest="env_fix_applied",
+                                help="v3.14: scenario-fix 已执行环境修复（restart/rebuild/deploy）。"
+                                     "与 --fix-root-cause env_drift 配合：true → 重跑 scenario-execute；"
+                                     "false（缺省）→ workflow_failed（现有行为）")
         rec_args = rec_parser.parse_args(sys.argv[3:])
 
         # ── v2.5: 加载 --result-json（如指定）──
@@ -361,6 +367,8 @@ def main() -> None:
         failed_scenarios = _merge_json_array("failed_scenarios", rec_args.failed_scenarios)
         skipped_scenarios = _merge_json_array("skipped_scenarios", rec_args.skipped_scenarios)
         fix_root_cause = rec_args.fix_root_cause or str(file_values.get("fix_root_cause", "") or "")
+        # v3.14 (修复 2): CLI flag 为 true 优先，否则读 result.json 布尔字段
+        env_fix_applied = bool(rec_args.env_fix_applied or file_values.get("env_fix_applied", False))
 
         # ── status 兜底必填（CLI/文件都没有 → fatal）──
         if not status:
@@ -393,6 +401,7 @@ def main() -> None:
             failed_scenarios=failed_scenarios,
             skipped_scenarios=skipped_scenarios,
             fix_root_cause=fix_root_cause,
+            env_fix_applied=env_fix_applied,
         )
 
     elif command == "progress":

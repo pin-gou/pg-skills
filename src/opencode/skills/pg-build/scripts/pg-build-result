@@ -117,6 +117,13 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
              "code_bug=代码缺陷（走重跑）; env_drift=环境漂移 / design_drift=设计偏移（走 workflow_failed）。"
              "缺省按 code_bug 处理。",
     )
+    # ── v3.14 (修复 2) 新增：scenario-fix 环境修复标记 ──
+    p.add_argument(
+        "--env-fix-applied", action="store_true", default=False,
+        help="v3.14 (修复 2): scenario-fix 已执行环境修复动作（restart/rebuild/deploy）。"
+             "与 --fix-root-cause env_drift 配合：设置后 reducer 走重跑 scenario-execute，"
+             "不再触发 workflow_failed。仅在确实执行了环境修复动作时设置。",
+    )
     # ── v2.4 新增：强制落盘参数 ──
     p.add_argument(
         "--output-path", default="",
@@ -132,7 +139,25 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
 
 
 def _validate(args: argparse.Namespace) -> tuple[bool, str]:
-    """委托 sub_agent_contract 校验。"""
+    """委托 sub_agent_contract 校验 + scenario-execute 结构化清单强制（v3.14 修复 3）。"""
+    # v3.14 (修复 3): scenario-execute 的 result.json 必须显式携带
+    # failed_scenarios / skipped_scenarios（即使为 '[]'）。reducer 端
+    # (P1-2) 本来就会拒绝缺失字段，但校验发生在 orchestrator.record 阶段，
+    # 编排器被迫手动补字段后重试 record。把校验前移到 pg-build-result
+    # 落盘阶段（exit 2），sub-agent 一次就能收到明确的错误信息。
+    if args.phase == "scenario-execute":
+        if not args.failed_scenarios:
+            return False, (
+                "scenario-execute 必须提供 --failed-scenarios"
+                "（即使无失败也传 '[]'）。"
+                "用法: --failed-scenarios '[]' 或 --failed-scenarios '[\"S-xxx\"]'"
+            )
+        if not args.skipped_scenarios:
+            return False, (
+                "scenario-execute 必须提供 --skipped-scenarios"
+                "（即使无跳过也传 '[]'）。"
+                "用法: --skipped-scenarios '[]' 或 --skipped-scenarios '[\"S-xxx\"]'"
+            )
     return validate_record_args(
         phase=args.phase,
         track=args.track,
@@ -183,6 +208,9 @@ def _build_result_dict(args: argparse.Namespace) -> dict[str, Any]:
     # v1.1.0 (P1-3): scenario-fix 根因分类
     if args.fix_root_cause:
         result["fix_root_cause"] = args.fix_root_cause
+    # v3.14 (修复 2): scenario-fix 环境修复标记
+    if args.env_fix_applied:
+        result["env_fix_applied"] = True
     return result
 
 

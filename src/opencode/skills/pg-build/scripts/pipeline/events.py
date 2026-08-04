@@ -93,6 +93,10 @@ class PipelineRecord:
     skipped_scenarios: str = ""
     # v1.1.0 (P1-3): scenario-fix 修复根因分类
     fix_root_cause: str = ""  # code_bug | env_drift | design_drift
+    # v3.14 (修复 2): scenario-fix 已执行环境修复动作（restart/rebuild/deploy）。
+    # env_drift + env_fix_applied=true → 重跑 scenario-execute（agent 已修环境）；
+    # env_drift + env_fix_applied=false（缺省）→ workflow_failed（现有行为）。
+    env_fix_applied: bool = False
 
 
 @dataclass(frozen=True)

@@ -1149,26 +1149,40 @@ def cli_bootstrap(change: str, *, resume: bool = False) -> dict[str, Any]:
                     # 实际所在 stage（如 int）。
                     _explicit_stage = PipelineState.extract_stage(first_pending)
             elif first_pending is not None:
-                # A1 fix: current_stage 已 prepared, first_pending 不是 scenario,
-                # 但编排器仍在调 bootstrap。说明 pipeline 状态错乱（典型症状:
-                # clean_env 后 stage_prepared 被空, 但 current_stage 仍指向已
-                # clean 的 stage; 或 stage_prepared 残留但 current_stage 未前进）。
-                # 此场景不应再生成 prepare_env, 否则会无限重复同 stage。
-                # 返回 error 让编排器中止或检视 reducer 状态。
-                result["ok"] = False
-                result["error"] = (
-                    f"A1_violation: current_stage={_snap.current_stage!r} "
-                    f"已 in stage_prepared, 但 first_pending={first_pending!r} "
-                    f"不是 scenario track。bootstrap 不再生成 prepare_env "
-                    f"plan。请检查 pipeline reducer 状态是否一致。"
-                )
-                result["env_hook_plan"] = None
-                return result
+                # v3.14 (修复 1c): stage 已 prepared + first_pending 非 scenario。
+                # 旧行为返回 A1_violation error，但修复 1a/1b 后：
+                #   - clean_env 已推进 current_stage（1a）
+                #   - prepare_env 分支从 current_stage 推导 explicit_stage（1b）
+                # 同 stage prepare 死循环的根因已消除，此分支命中的是正常流程：
+                # 编排器按协议在 prepare_env 完成后调 bootstrap 确认
+                # env_hook_plan 已耗尽 → 返回 env_hook_plan=null（ok=true），
+                # 让编排器继续调 next()。
+                # 即使 current_stage 与 first_pending 所在 stage 不同（残留
+                # 脏状态），next() 的 detect 逻辑会生成正确的 env_switch
+                # (clean_env/prepare_env) 兜底，无需在此报错阻断。
+                if PipelineState.extract_stage(first_pending) != _snap.current_stage:
+                    result.setdefault("warnings", []).append(
+                        f"stage_mismatch: current_stage={_snap.current_stage!r} "
+                        f"but first_pending={first_pending!r} is in stage "
+                        f"{PipelineState.extract_stage(first_pending)!r}; "
+                        f"delegating to next() env_switch."
+                    )
+                _needs_plan = False
             if not _needs_plan:
                 result["env_hook_plan"] = None
         else:
             _needs_plan = True
             _plan_phase = "prepare_env"
+            # v3.14 (修复 1b): current_stage ∉ stage_prepared 分支（含
+            # clean_env 刚清空 stage_prepared 的场景）。从 current_stage
+            # 推导 explicit_stage，避免 _build_env_hook_plan 在
+            # explicit_stage_name=None 时取 manifest 第一个 stage（通常是
+            # env）而非 pipeline 实际要 prepare 的目标 stage。
+            # 修复 1a 让 clean_env 已把 current_stage 推进到 next_stage，
+            # 此处直接复用；current_stage 为空（首次 bootstrap）时保持
+            # None 走 manifest 兜底（取第一个 stage），行为不变。
+            if _snap and _snap.current_stage:
+                _explicit_stage = _snap.current_stage
 
         if _needs_plan:
             plan = _build_env_hook_plan(
@@ -1426,6 +1440,20 @@ def cli_env_action_result(
                         if t.scenario_last_restart_attempt != -1:
                             t = t.replace(scenario_last_restart_attempt=-1)
                             new_tracks[tid] = t
+            # v3.14 (修复 1a): clean_env 成功后推进 current_stage 到
+            # stage_order 中的下一个 stage。env_switch(clean_env, stage=X,
+            # next_stage=Y) 的语义即"清掉 X 以便进入 Y"。旧行为不推进
+            # current_stage，导致 bootstrap 在 current_stage ∉ stage_prepared
+            # 分支用 explicit_stage_name=None 调 _build_env_hook_plan，
+            # 后者取 manifest 第一个 stage（永远是已 clean 的 stage）→
+            # prepare 同 stage 死循环 → 再次 bootstrap 报 A1_violation。
+            # 边界：最后一个 stage clean 后不推进（保持原值）；
+            # stage_name 与 current_stage 不一致时不推进（防御性）。
+            if stage_name == new_current and stage_name in state.stage_order:
+                _order = list(state.stage_order)
+                _idx = _order.index(stage_name)
+                if _idx + 1 < len(_order):
+                    new_current = _order[_idx + 1]
     elif phase_name == "restart":
         # v3.12: restart phase 不再使用 stage_restarted 集合。改为按
         # TrackState.scenario_last_restart_attempt 跟踪。
