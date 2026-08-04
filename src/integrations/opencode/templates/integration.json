@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "tool": "opencode",
+  "output_root": ".opencode",
+  "install_mode": "render",
+  "surfaces": {
+    "commands": "commands",
+    "agents": "agents",
+    "skills": "skills"
+  },
+  "template_variables": {
+    "tool.name": "OpenCode",
+    "tool.config_file": "opencode.json",
+    "tool.chrome_path_reference": "{env:CHROME_PATH}",
+    "action.skill_loader": "Skill tool",
+    "action.subagent_dispatcher": "Task tool",
+    "action.subagent_call": "task",
+    "action.subagent_agent_parameter": "subagent_type",
+    "action.user_question": "question tool",
+    "action.user_question_call": "question",
+    "action.task_tracker": "TodoWrite",
+    "action.agent_cli": "opencode run --agent",
+    "action.agent_cli_argv_json": "[\"opencode\", \"run\", \"--agent\"]",
+    "permission.subagent": "task",
+    "model.associate": "pg-router/pg-associate",
+    "model.expert": "pg-router/pg-expert",
+    "model.master": "pg-router/pg-master"
+  }
+}

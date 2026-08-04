@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "tool": "mobile-coder",
+  "output_root": ".mobile-coder",
+  "install_mode": "render",
+  "surfaces": {
+    "commands": "commands",
+    "agents": "agents",
+    "skills": "skills"
+  },
+  "template_variables": {
+    "tool.name": "Mobile Coder",
+    "tool.config_file": "mobile-coder.json",
+    "tool.chrome_path_reference": "${CHROME_PATH}",
+    "action.skill_loader": "Mobile Coder native Skill loader",
+    "action.subagent_dispatcher": "Mobile Coder subagent dispatcher",
+    "action.subagent_call": "subagent",
+    "action.subagent_agent_parameter": "agent",
+    "action.user_question": "Mobile Coder user-question mechanism",
+    "action.user_question_call": "question",
+    "action.task_tracker": "Mobile Coder task list",
+    "action.agent_cli": "mobile run --agent",
+    "action.agent_cli_argv_json": "[\"mobile\", \"run\", \"--agent\"]",
+    "permission.subagent": "subagent",
+    "model.associate": "current",
+    "model.expert": "current",
+    "model.master": "current"
+  }
+}

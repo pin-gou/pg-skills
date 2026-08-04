@@ -9,12 +9,12 @@ LLM agent **必须**通过 `pg-parse-config.py pg-agent` workflow 拿 SSOT——
 
 | 想做的事 | 命令 |
 |---|---|
-| 拿全部 modules + environments | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-agent` |
-| 拿单个模块的 build 命令 | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-build <module>` |
-| 拿单个模块的某 test_key | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test <module> <test_key>` |
-| 拿环境的 start/stop/logs | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-env <env>` |
-| 拿单值（如 backend port） | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --key environments.<env>.roles.backend.instances.0.port` |
-| 拿子树（如所有 tracks） | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --prefix tracks` |
+| 拿全部 modules + environments | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-agent` |
+| 拿单个模块的 build 命令 | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-module-build <module>` |
+| 拿单个模块的某 test_key | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-module-test <module> <test_key>` |
+| 拿环境的 start/stop/logs | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-env <env>` |
+| 拿单值（如 backend port） | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --key environments.<env>.roles.backend.instances.0.port` |
+| 拿子树（如所有 tracks） | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --prefix tracks` |
 
 ⚠️ **不要**用 `pg-parse-config.py pg-fix-issue` / `pg-build` / `pg-quick-build` / `pg-regression` 等带 skill 名的调用——那些是给 skill 编排器用的, agent 用会被迫看到噪声（如 `fix_issue.escalation_artifacts`）。
 

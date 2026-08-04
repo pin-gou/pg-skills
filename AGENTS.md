@@ -12,13 +12,13 @@ pg-skills 是一个**共享运行时 + 技能框架**，嵌入到消费项目仓
 | 层 | 路径 | 职责 |
 |----|------|------|
 | **Runtime 层** | `src/runtime/` | CLI 入口（`pg`、`pg-invoke-hook.py`、`pg-run`）、hook 执行引擎、TUI、SSOT 规范 |
-| **Skill 层** | `src/opencode/` | opencode 集成：8 个 slash command、11 个 SKILL.md、子 agent、配置解析脚本 |
+| **Workflow 核心层** | `src/core/workflows/` | 与开发工具无关的 command、SKILL.md、agent 规范和配置解析脚本；由 `src/integrations/` 转换为各工具格式 |
 
 **嵌入模型**：
 ```
 pg-skills 仓库（独立远程）               您的项目仓库
   src/runtime/bin/pg          ── subtree ──→  .pg/skills/
-  src/opencode/skills/        ── subtree ──→  .pg/skills/
+  src/core/workflows/skills/        ── subtree ──→  .pg/skills/
                                            └── pg init 生成 symlink → .opencode/
 ```
 
@@ -30,7 +30,7 @@ pg-skills 仓库（独立远程）               您的项目仓库
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│                    Skill 层 (src/opencode/)                   │
+│                    Skill 层 (src/core/workflows/)                   │
 │  ┌──────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐  │
 │  │ commands │  │  skills   │  │  agents   │  │  scripts  │  │
 │  │ (8 个)   │  │ (11 个)   │  │ (sub-     │  │ (config/  │  │
@@ -198,8 +198,8 @@ pg-skills/
 
 | 文件 | 职责 |
 |------|------|
-| `src/opencode/scripts/pg-parse-config.py` | **SSOT 查询工具**。agent 通过此工具读取 project.yaml，禁止直接读 YAML |
-| `src/opencode/agents/explore.md` | 代码探索子 agent（优先使用 CodeGraph） |
+| `src/core/workflows/scripts/pg-parse-config.py` | **SSOT 查询工具**。agent 通过此工具读取 project.yaml，禁止直接读 YAML |
+| `src/core/workflows/agents/explore.md` | 代码探索子 agent（优先使用 CodeGraph） |
 
 ### 4.4 文档
 
@@ -246,13 +246,13 @@ pg-skills/
 pytest src/runtime/tests/
 
 # pg-build pipeline 测试（30+ 测试文件）
-pytest src/opencode/skills/pg-build/scripts/tests/
+pytest src/core/workflows/skills/pg-build/scripts/tests/
 
 # pg-propose 测试
-pytest src/opencode/skills/pg-propose/scripts/tests/
+pytest src/core/workflows/skills/pg-propose/scripts/tests/
 
 # 配置解析测试
-pytest src/opencode/scripts/tests/
+pytest src/core/workflows/scripts/tests/
 
 # Hook 模板测试
 pytest examples/shell/hooks/tests/
@@ -293,12 +293,12 @@ cd tools/project-editor && pnpm build                   # 生产构建
 
 | 目的 | 命令 |
 |------|------|
-| 拿全部 modules + environments | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-agent` |
-| 拿单个模块 build 命令 | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-build <module>` |
-| 拿单个模块 test_key | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-module-test <module> <test_key>` |
-| 拿环境的 role 信息 | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --resolve-env <env>` |
-| 拿单值 | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --key <dotted.path>` |
-| 拿子树 | `python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --prefix <top-level-key>` |
+| 拿全部 modules + environments | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-agent` |
+| 拿单个模块 build 命令 | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-module-build <module>` |
+| 拿单个模块 test_key | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-module-test <module> <test_key>` |
+| 拿环境的 role 信息 | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-env <env>` |
+| 拿单值 | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --key <dotted.path>` |
+| 拿子树 | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --prefix <top-level-key>` |
 
 **禁止**：直接读 `.pg/project.yaml`、使用 `pg-parse-config.py pg-build` 等 skill 模式（有噪声）。
 

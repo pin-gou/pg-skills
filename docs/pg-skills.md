@@ -139,7 +139,7 @@ modules:                      # 怎么编译 / 测 / 静态检查
 你需要做的事就两件：**改这个文件 + 重启 agent**。agent 想要任何配置，**唯一合法路径**是查工具：
 
 ```bash
-python3 .pg/skills/src/opencode/scripts/pg-parse-config.py --key <dotted.path>
+python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --key <dotted.path>
 ```
 
 禁止凭记忆取上一次的值。禁止"差不多就行"。带来的好处是直白的：今天换个人换台机器换个 agent，行为一致；下个季度升级 pg-skills 到 v0.9.x，老项目里 agent 拿到的字段还是同一个 schema，不会悄悄漂移。
@@ -304,7 +304,7 @@ git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
 git subtree add --prefix=.pg/skills pg-skills master --squash
 
-# 2. 初始化 .pg/ 骨架 + .opencode/ symlink
+# 2. 初始化 .pg/ 骨架，并探测或选择开发工具适配器
 python3 .pg/skills/src/runtime/bin/pg init
 
 # 3. 重启 opencode，加载 pg-* slash commands 和 skills
