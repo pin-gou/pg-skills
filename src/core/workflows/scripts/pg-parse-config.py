@@ -36,20 +36,34 @@ except ImportError:
     sys.exit(1)
 
 CONFIG_PATH_CANDIDATES = [
-    # Modern: .pg/project.yaml (Phase 2+)
-    lambda script_dir: os.path.normpath(os.path.join(script_dir, "../../../../project.yaml")),
-    # Legacy: .pg/project.yaml (Phase 1 双轨期)
-    lambda script_dir: os.path.normpath(os.path.join(script_dir, "../../.pg/project.yaml")),
+    # Phase 2+: 从脚本位置 / cwd 向上查找 .pg/project.yaml (与
+    # pg_pipeline_common.find_project_root 同策略, 不依赖脚本嵌套深度)
+    lambda script_dir: _find_project_yaml_upward(script_dir),
+    lambda _script_dir: _find_project_yaml_upward(os.getcwd()),
 ]
+
+
+def _find_project_yaml_upward(start_dir):
+    """向上遍历目录树查找 .pg/project.yaml, 找到返回路径, 否则返回 None."""
+    current = os.path.abspath(start_dir)
+    while True:
+        candidate = os.path.join(current, ".pg", "project.yaml")
+        if os.path.isfile(candidate):
+            return candidate
+        parent = os.path.dirname(current)
+        if parent == current:
+            return None
+        current = parent
+
 
 def _resolve_config_path():
     script_dir = os.path.dirname(os.path.abspath(__file__))
     for candidate_fn in CONFIG_PATH_CANDIDATES:
         path = candidate_fn(script_dir)
-        if os.path.exists(path):
+        if path and os.path.exists(path):
             return path
-    # Fallback to first candidate (will raise FileNotFoundError downstream)
-    return CONFIG_PATH_CANDIDATES[0](script_dir)
+    # Fallback: 显式报错路径 (load() 处抛 FileNotFoundError, 与旧行为一致)
+    return os.path.join(script_dir, "project.yaml")
 
 CONFIG_PATH = _resolve_config_path()
 

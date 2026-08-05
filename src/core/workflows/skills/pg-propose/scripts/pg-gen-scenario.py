@@ -699,13 +699,15 @@ def check_scenario_coverage(
             f"建议至少 3 个 (happy/negative/permission/cross-module/ui-smoke)",
         ))
 
-    # 数量下限: max(2, ceil(V*0.8))
+    # 数量下限: max(2, min(7, ceil(V*0.8))) — 与 SKILL 附录 C 对齐:
+    # "建议数 = max(3, ceil(V-* × 0.8)); 上限软化为 7; 下限 2"
+    # 旧实现未 cap 上限, V-* 较多时 (如 20) 建议下限 16 > 上限 7, 产生不可满足的 WARN
     if v_count > 0:
-        min_count = max(2, (v_count * 8 + 9) // 10)
+        min_count = min(7, max(2, (v_count * 8 + 9) // 10))
         if len(scenarios) < min_count:
             issues.append((
                 "scenario_coverage_count_below_min",
-                f"scenarios 数={len(scenarios)} < 建议下限 {min_count} (由 V-*={v_count} 派生). "
+                f"scenarios 数={len(scenarios)} < 建议下限 {min_count} (由 V-*={v_count} 派生, 上限 7). "
                 f"建议补充覆盖更多 V-* 验证项, 未覆盖 V-*: 数量提示 — 重新审视 V-* 列表",
             ))
 

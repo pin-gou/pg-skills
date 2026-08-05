@@ -86,6 +86,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import shlex
 import subprocess
 import sys
@@ -197,7 +198,7 @@ def pg_log_dir_for_skill(caller: str, session: str, env: str, project_root: Path
       pg-build       -> .pg/changes/<session>/2-build/<env>-logs
       pg-regression  -> .pg/regression/<session>/<env>-logs   (session = <suite>-<date>-<seq>)
       pg-fix-issue   -> .pg/fix-issue/<session>/<env>-logs    (session 已含 fix- 前缀)
-      pg-propose     -> .pg/changes/<session>/2-propose/<env>-logs
+      pg-propose     -> .pg/changes/<change-id>/2-propose/<env>-logs
       pg-quick-build -> .pg/quick-build/<session>/<env>-logs  (独立命名空间, 不与 .pg/changes/ 混)
       pg-agent       -> .pg/agent/<session>/<env>-logs        (LLM agent 通用入口, session = <iso-date>-<keyword>)
       ad-hoc         -> .pg/ad-hoc/<session>/<env>-logs       (独立顶级目录, 不与 SKILL 命名空间混)
@@ -211,7 +212,12 @@ def pg_log_dir_for_skill(caller: str, session: str, env: str, project_root: Path
     if caller == CALLER_PG_FIX_ISSUE:
         return base / "fix-issue" / session / dir_name
     if caller == CALLER_PG_PROPOSE:
-        return base / "changes" / session / "2-propose" / dir_name
+        # v1.1: 与产物目录对齐 — 剥离 session 的 ISO 日期前缀 (<date>-<change-id> →
+        # <change-id>), 日志落在 .pg/changes/<change-id>/2-propose/, 避免产物与
+        # 日志分裂到两个目录. 日志文件名含日期时间戳, 不会与归档日期目录冲突.
+        _m = re.match(r"^\d{4}-\d{2}-\d{2}-(.+)$", session)
+        _change = _m.group(1) if _m else session
+        return base / "changes" / _change / "2-propose" / dir_name
     if caller == CALLER_PG_QUICK_BUILD:
         return base / "quick-build" / session / dir_name
     if caller == CALLER_PG_AGENT:
@@ -302,16 +308,22 @@ def build_describe_env_spec(
     log_path = str(hook_log_dir / "env.describe_env.log")
     result_path = str(hook_log_dir / "env.describe_env.result.json")
 
+    # 从 session 中剥离 ISO 日期前缀 (YYYY-MM-DD-) 得到 change_id,
+    # 用于产物路径 (正常目录名, 不含日期前缀).
+    # 若 session 无日期前缀则保持原样.
+    _match = re.match(r"^\d{4}-\d{2}-\d{2}-(.+)$", session)
+    change_id = _match.group(1) if _match else session
+
     if caller == CALLER_PG_PROPOSE:
-        output_path = str(project_root / ".pg" / "changes" / session / "env-description.yaml")
+        output_path = str(project_root / ".pg" / "changes" / change_id / "env-description.yaml")
     elif caller == CALLER_PG_FIX_ISSUE:
-        output_path = str(project_root / ".pg" / "fix-issue" / session / "env-description.yaml")
+        output_path = str(project_root / ".pg" / "fix-issue" / change_id / "env-description.yaml")
     elif caller == CALLER_PG_REGRESSION:
-        output_path = str(project_root / ".pg" / "regression" / session / "env-description.yaml")
+        output_path = str(project_root / ".pg" / "regression" / change_id / "env-description.yaml")
     elif caller == CALLER_PG_QUICK_BUILD:
-        output_path = str(project_root / ".pg" / "quick-build" / session / "env-description.yaml")
+        output_path = str(project_root / ".pg" / "quick-build" / change_id / "env-description.yaml")
     elif caller == CALLER_AD_HOC:
-        output_path = str(project_root / ".pg" / "ad-hoc" / session / "env-description.yaml")
+        output_path = str(project_root / ".pg" / "ad-hoc" / change_id / "env-description.yaml")
     else:
         sys.stderr.write(
             f"Error: --action describe_env requires caller in {DESCRIBE_ENV_CALLERS}, got '{caller}'\n"
@@ -333,7 +345,7 @@ def build_describe_env_spec(
         "hook_log_dir": str(hook_log_dir),
         "hook_result_path": result_path,
         "caller": caller,
-        "change_id": session,
+        "change_id": change_id,
         "output_path": output_path,
         "wait_for_completion": True,
     }

@@ -864,12 +864,17 @@ def _check_risk_criteria_alignment(
     proposal_text: str,
     design_text: str,
 ) -> list[tuple[str, str]]:
-    """建议 8: proposal R-* 风险与 design Verification Criteria 交叉校验.
+    r"""建议 8: proposal R-* 风险与 design Verification Criteria 交叉校验.
 
     规则 1 (risk_criteria_missing): proposal R-* 描述中提到的 V-* ID
         不在 design.md Verification Criteria 表中 → ERROR
     规则 2 (criteria_no_risk_coverage): design Verification Criteria 表中的 V-*
         未被任何 proposal R-* 引用 → WARN
+
+        v1.1 降噪: 旧实现按每个未覆盖 V-* 逐条 WARN (20 个 V-* → 20 条噪声).
+        新实现聚合为单条 summary WARN; 且当 proposal R-* 风险表本身未使用
+        R\d+ 编号格式时 (无法建立交叉引用), 整条规则跳过 — 交叉引用是可选
+        实践, 不应因格式差异产生逐条误报.
 
     Returns: list of (code, msg)
     """
@@ -899,12 +904,16 @@ def _check_risk_criteria_alignment(
                 f"但 design.md Verification Criteria 表中不存在",
             ))
 
-    if v_in_criteria:
+    # 规则 2: 仅当 proposal 存在 R\d+ 编号风险表时才做反向覆盖检查
+    has_numbered_risks = bool(r_row_re.search(proposal_text))
+    if v_in_criteria and has_numbered_risks:
         uncovered = sorted(v_in_criteria - set(v_in_risks.keys()))
-        for vid in uncovered:
+        if uncovered:
             issues.append((
                 "criteria_no_risk_coverage",
-                f"design.md V-{vid} 未被任何 proposal R-* 风险引用（可能漏风险）",
+                f"design.md 中 {len(uncovered)}/{len(v_in_criteria)} 个 V-* "
+                f"未被任何 proposal R-* 风险引用（建议核对风险覆盖, "
+                f"未覆盖示例: {', '.join(uncovered[:5])}）",
             ))
 
     return issues
@@ -1112,101 +1121,8 @@ def cmd_manifest(change):
         print(f"  [{code}] {msg}", file=sys.stderr)
         all_issues.append(code)
 
-    # 7.4 v0.8.3: 简化版机械校验（替代 review-notes 主观自审）
-    extra_warnings: list[tuple[str, str]] = []
-
-    # 规则 1: V-* ↔ verify 任务映射检查
-    try:
-        design_path = os.path.join(CHANGES_DIR, change, "design.md")
-        if os.path.isfile(design_path):
-            with open(design_path, encoding="utf-8") as _f:
-                _design_text = _f.read()
-            v_track_re = re.compile(r"V-([a-zA-Z0-9_-]+)-(\d+)")
-            v_in_design = set(v_track_re.findall(_design_text))
-
-            verify_v_re = re.compile(r"验证\s*V-([a-zA-Z0-9_-]+)-(\d+)")
-            v_in_verify: set[tuple[str, str]] = set()
-            for sec in tasks_sections:
-                if sec.get("sub") != "verify":
-                    continue
-                for m in verify_v_re.finditer(sec.get("body", "")):
-                    v_in_verify.add((m.group(1), m.group(2)))
-
-            track_total: dict[str, int] = {}
-            track_covered: dict[str, int] = {}
-            for (track, _) in v_in_design:
-                track_total[track] = track_total.get(track, 0) + 1
-            for (track, _) in v_in_verify:
-                if track in v_in_design:
-                    track_covered[track] = track_covered.get(track, 0) + 1
-
-            for track in sorted(track_total.keys()):
-                total = track_total[track]
-                covered = track_covered.get(track, 0)
-                if total > 0 and covered < total:
-                    extra_warnings.append((
-                        "v_identifier_uncovered",
-                        f"track={track}: {covered}/{total} V-* 标识符被 verify 任务覆盖",
-                    ))
-    except Exception as _e:
-        extra_warnings.append((
-            "v_identifier_check_failed",
-            f"V-* 映射检查异常: {_e}",
-        ))
-
-    # 规则 2: scenario-*.yaml 引用防护（防御 build 阶段任务描述误改 scenario）
-    try:
-        scenario_ref_re = re.compile(r"scenario-[a-zA-Z0-9_-]*\.yaml")
-        for sec in tasks_sections:
-            body = sec.get("body", "")
-            for m in scenario_ref_re.finditer(body):
-                ref = m.group(0)
-                if "禁止" in body or "SSOT" in body or "如需修改" in body:
-                    continue
-                extra_warnings.append((
-                    "scenario_yaml_referenced",
-                    f"section {sec.get('section_key')!r} 引用 {ref} (scenario-*.yaml 必须通过 pg-gen-scenario.py 重新生成, 禁止任务代码修改)",
-                ))
-    except Exception as _e:
-        extra_warnings.append((
-            "scenario_reference_check_failed",
-            f"scenario 引用检查异常: {_e}",
-        ))
-
-    # 规则 3: tasks.md 章节编号连续性
-    try:
-        heading_re = re.compile(r"^##\s+(\d+)\.\s+")
-        nums: list[int] = []
-        with open(tasks_path, encoding="utf-8") as _f:
-            for _line in _f:
-                m = heading_re.match(_line)
-                if m:
-                    nums.append(int(m.group(1)))
-        if nums:
-            expected = list(range(1, len(nums) + 1))
-            if nums != expected:
-                seen = set()
-                dup = [n for n in nums if n in seen or seen.add(n)]
-                skipped = [n for n in expected if n not in nums]
-                if dup:
-                    extra_warnings.append((
-                        "tasks_md_section_duplicate",
-                        f"tasks.md 章节编号重号: {sorted(set(dup))}",
-                    ))
-                if skipped:
-                    extra_warnings.append((
-                        "tasks_md_section_skipped",
-                        f"tasks.md 章节编号跳号: 缺失 {skipped}",
-                    ))
-    except Exception as _e:
-        extra_warnings.append((
-            "tasks_md_section_check_failed",
-            f"章节编号检查异常: {_e}",
-        ))
-
-    coverage_warnings.extend(extra_warnings)
-
     # 7.4 v0.8.4: 简化版机械校验（替代 review-notes 主观自审）
+    # (v1.1: 合并原 v0.8.3/v0.8.4 两个重复块为单一实现, 消除 WARN 双报)
     extra_warnings: list[tuple[str, str]] = []
 
     # 规则 1: V-* ↔ verify 任务映射检查
@@ -1219,12 +1135,26 @@ def cmd_manifest(change):
             v_in_design = set(v_track_re.findall(_design_text))
 
             verify_v_re = re.compile(r"验证\s*V-([a-zA-Z0-9_-]+)-(\d+)")
+            # 模板占位符: pg-gen-tasks-skeleton.py 生成的 verify 章节标准形式是
+            # "验证 V-{track}-N：来自 design.md（N 由 design.md 决定，非章节号）",
+            # 由 runner 在执行时解析 design.md 展开为具体 V-* — 该占位符视为
+            # 整 track 已覆盖, 不报 v_identifier_uncovered.
+            placeholder_re = re.compile(r"验证\s*V-([a-zA-Z0-9_-]+)-N")
+            # section 无结构化 sub 字段, 从 heading "<stage>.<track>:<sub> - ..." 解析
+            verify_prefix_re = re.compile(
+                r"^##\s+\d+\.\s+[a-zA-Z0-9_.-]+:([a-zA-Z0-9_-]+)\s*-"
+            )
             v_in_verify: set[tuple[str, str]] = set()
+            placeholder_tracks: set[str] = set()
             for sec in tasks_sections:
-                if sec.get("sub") != "verify":
+                hm = verify_prefix_re.match(sec.get("heading", ""))
+                if not hm or hm.group(1) != "verify":
                     continue
-                for m in verify_v_re.finditer(sec.get("body", "")):
+                body = sec.get("body", "")
+                for m in verify_v_re.finditer(body):
                     v_in_verify.add((m.group(1), m.group(2)))
+                for m in placeholder_re.finditer(body):
+                    placeholder_tracks.add(m.group(1))
 
             track_total: dict[str, int] = {}
             track_covered: dict[str, int] = {}
@@ -1235,6 +1165,8 @@ def cmd_manifest(change):
                     track_covered[track] = track_covered.get(track, 0) + 1
 
             for track in sorted(track_total.keys()):
+                if track in placeholder_tracks:
+                    continue  # 模板占位符 = runner 运行时展开, 视为已覆盖
                 total = track_total[track]
                 covered = track_covered.get(track, 0)
                 if total > 0 and covered < total:
