@@ -5,7 +5,7 @@ license: MIT
 compatibility: 需要 `.pg/changes/` 目录结构和 `.pg/project.yaml` 统一配置文件。
 metadata:
   author: pg
-  version: "1.0.1"
+  version: "1.2.0"
 ---
 
 # pg-propose
@@ -43,7 +43,7 @@ metadata:
 | 关心的问题 | 看哪里 |
 |------------|--------|
 | pg-propose 总流程 / 阶段划分 / 黑名单 | 本文件 |
-| 附录 A：{{pg:action.task_tracker}} 12 项清单 | [附录 A](#附录-atodowrite-12-项清单) |
+| 附录 A：{{pg:action.task_tracker}} 13 项清单 | [附录 A](#附录-atodowrite-13-项清单) |
 | 附录 B：产物清单（硬约束）+ 三产物一致性约束 | [附录 B](#附录-b产物清单硬约束--三产物一致性约束) |
 | 附录 C：scenario.yaml 生成指引 | [附录 C](#附录-cscenarioyaml-生成指引) |
 | 附录 D：⛔ 禁令 | [附录 D](#附录-d-禁令) |
@@ -54,6 +54,7 @@ metadata:
 | on_conditions / stages × tracks × modules 三层编排模型 | [references/orchestration-model.md](./references/orchestration-model.md) |
 | `.pg/project.yaml` 字段索引 | [references/config-fields.md](./references/config-fields.md) |
 | scenario 格式 + placeholder 校验协议 | [references/scenario-format.md](./references/scenario-format.md) |
+| define-summary.yaml 模板 / 字段定义 / env_resource_refs 占位约定 | [references/define-summary-templates.md](./references/define-summary-templates.md) |
 
 > **本文件职责**：只承载「流程编排 + 阶段契约 + 黑/白名单」。所有模板字符串、字段定义、规则清单一律下放到 references/ 单一 SSOT。
 
@@ -74,7 +75,7 @@ metadata:
 
 ### 1.1 {{pg:action.task_tracker}} 初始化
 
-**{{pg:action.task_tracker}} 12 项清单详见 [附录 A](#附录-atodowrite-12-项清单)**。本步骤仅在对话开始时执行一次，创建结构化待办，后续每完成一个阶段动作立刻更新对应项状态。
+**{{pg:action.task_tracker}} 13 项清单详见 [附录 A](#附录-atodowrite-13-项清单)**。本步骤仅在对话开始时执行一次，创建结构化待办，后续每完成一个阶段动作立刻更新对应项状态。
 
 ### 1.2 确认变更名称
 
@@ -263,6 +264,48 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 
 更新附录 A 第 4 项。
 
+### 1.8 加载 define-summary.yaml（条件性，pg-1-define 定界产物）
+
+**触发条件**：`.pg/changes/<change-id>/0-define/define-summary.yaml` 存在（由 pg-1-define 的「定界后环境验证」环节落盘）。不存在 → 跳过本步骤（向后兼容：define-summary 是可选前置产物，旧流程不受影响）。
+
+**职责**：把 define 阶段基于真实 env-description 讨论产出的 V-* 状态（`verifiable` / `degraded` / `skipped`）作为阶段 2 全产物写作的输入。**本阶段只加载 + 校验，不做「假设 vs 事实」对账**——对账在 pg-1-define 定界环节已完成，define-summary 中的 `post_discussion_status` 是最终结论。
+
+**执行协议**：
+
+```bash
+# 机械校验（唯一校验点）
+python3 .pg/skills/src/core/workflows/skills/pg-propose/scripts/pg-validate-proposal.py define-summary <change-id>
+```
+
+校验内容（见 `pg-validate-proposal.py` 的 `cmd_define_summary`）：
+
+1. 文件存在性 + YAML 可解析性
+2. 结构校验（对照 `.pg/skills/src/runtime/spec/define-summary.schema.json`）
+3. `change_id` 与目录名一致性
+4. `target_environment` 与 env-description.yaml 的 `described_for.environment` 一致性
+5. `env_resource_refs` ↔ env-description.yaml 交叉校验（verifiable 必填且引用的段/资源名真实存在；non-verifiable 必须为空）
+
+**失败处理**：校验非 0 退出 → 中断，提示用户回到 pg-1-define 定界环节修复（典型原因：阶段 1.6 重跑 describe_env 后环境漂移导致 `env_resource_refs` 引用失效）。
+
+**Context 注入契约**（校验通过后）：define-summary.yaml 作为强制 context 进入阶段 2 全产物写作：
+
+```
+## 定界结论（来自 .pg/changes/<change-id>/0-define/define-summary.yaml）
+
+### V-* 状态
+{ verification_needs 全文：id / name / what / post_discussion_status / env_resource_refs / downgrade_when_missing }
+
+⚠️ 写 proposal.md / design.md / tasks.md / scenario-*.yaml 时：
+  - post_discussion_status=verifiable 的 V-*：scenario given/then 必须直接复用 env_resource_refs 的 {env.…} 占位引用
+  - post_discussion_status=degraded 的 V-*：design.md「环境限制与验证策略」段记录降级路径，scenario 加 @skip 标记
+  - post_discussion_status=skipped 的 V-*：proposal.md「未做」段必须列出，scenario 不写该 V-*
+  - define-summary 的 V-* id 编号必须与 design.md / tasks.md / scenario 的 V-* 保持一致
+```
+
+**字段定义与模板**见 [references/define-summary-templates.md](./references/define-summary-templates.md)。
+
+更新附录 A 第 5 项。
+
 ---
 
 ## 阶段 2：产物生成
@@ -275,13 +318,13 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 
 路径：`.pg/changes/<change-name>/proposal.md`
 
-**模板 + propose.injections.proposal 注入**见 [references/proposal-templates.md](./references/proposal-templates.md)。更新附录 A 第 5 项。
+**模板 + propose.injections.proposal 注入**见 [references/proposal-templates.md](./references/proposal-templates.md)。更新附录 A 第 6 项。
 
 ### 2.2 design.md
 
 路径：`.pg/changes/<change-name>/design.md`
 
-**模板 + V-* 编号规则**见 [references/design-templates.md](./references/design-templates.md)。更新附录 A 第 6 项。
+**模板 + V-* 编号规则**见 [references/design-templates.md](./references/design-templates.md)。更新附录 A 第 7 项。
 
 **v0.9.0 新增**：design.md 必须包含"环境限制与验证策略"段（在"错误码与编号段"之后、"可观测性"之前），依据 `.pg/changes/<change-id>/env-description.yaml`（阶段 1.6 产出）判断每个 V-* 在目标 env 是否可验证。该段是阶段 2.6 scenario 编写的直接输入。
 
@@ -305,7 +348,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
    - `--scenario-reason` 必填结构化要求：必须包含「跨 role 协作验证? / 新 API 端点? / 跨模块联调?」三问答复（1-2 句），写入 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段
 4. 把 `affected_tracks` 和 `scenario track(s) 决策 + 依据`写入 design.md 末尾的"变更类型判定"留痕小节
 
-更新附录 A 第 7 项。
+更新附录 A 第 8 项。
 
 **design.md 硬约束**：全部列出在 [references/design-templates.md](./references/design-templates.md) 的"## 约束"段，本文件不重复展开。SKILL.md 只承载流程。
 
@@ -350,7 +393,7 @@ python3 .pg/skills/src/core/workflows/skills/pg-propose/scripts/pg-gen-tasks-ske
 
 LLM 读取 sections JSON 后，按 `references/tasks-templates.md`「各子章节模板」段填充 body。
 
-更新附录 A 第 8 项。
+更新附录 A 第 9 项。
 
 #### 2.4.2 LLM 填充 tasks.md body
 
@@ -361,7 +404,7 @@ LLM 读取 sections JSON 后，按 `references/tasks-templates.md`「各子章�
 - 删除任何章节（包括 on_conditions 未命中的章节，heading 也保留）
 - 在 verify 章节的命令步骤后追加具体 shell 命令
 
-本子步骤完成后，附录 A 第 8 项整体标记完成（2.4.1 + 2.4.2 共享一项）。
+本子步骤完成后，附录 A 第 9 项整体标记完成（2.4.1 + 2.4.2 共享一项）。
 
 ### 2.5 生成 execution-manifest.yaml
 
@@ -375,7 +418,7 @@ python3 .pg/skills/src/core/workflows/skills/pg-propose/scripts/pg-gen-manifest.
 - manifest 依赖 tasks.md（heading 格式 + 章节完整性），在 2.4 完成后方可调用
 - manifest 的 `scenario-<track>.enabled` 由 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段决定（SSOT，禁用时不进入 manifest）
 
-更新附录 A 第 9 项。
+更新附录 A 第 10 项。
 
 ### 2.6 条件生成 scenario-<track>.yaml
 
@@ -416,7 +459,7 @@ scenario given 必须**直接引用** env-description.yaml 中已声明的具体
 
 详见 [附录 C](#附录-cscenarioyaml-生成指引)。
 
-更新附录 A 第 10 项。
+更新附录 A 第 11 项。
 
 ---
 
@@ -440,7 +483,7 @@ python3 .pg/skills/src/core/workflows/skills/pg-propose/scripts/pg-validate-prop
 - scenario-<track>.yaml 占位符是否已被 LLM 填充（v3.7 新增，详见 [references/scenario-format.md] 中的 placeholder 协议）
 - 所有 scenario track 启用的产物文件存在性 + scenario track 禁用的产物文件不存在性
 
-更新附录 A 第 11 项。
+更新附录 A 第 12 项。
 
 ### 3.2 校验失败处理（最多 2 轮）
 
@@ -501,7 +544,7 @@ WARN 不阻塞 build，但会显著提示 LLM 在阶段 3 校验后重点审视�
 - **禁止**在 scenario track 启用时手工编辑 `tasks.md` 删除 scenario 章节
    - 必须改 `--scenario-decisions "track=false"` 重跑 2.4
 - **唯一允许的产物修改**：纯格式问题（markdown 标题层级错乱、代码块语言标记缺失、明显笔误）
-- 校验完成后更新附录 A 第 11 项为完成
+- 校验完成后更新附录 A 第 12 项为完成
 
 ---
 
@@ -534,7 +577,7 @@ WARN 不阻塞 build，但会显著提示 LLM 在阶段 3 校验后重点审视�
 - 如需调整 track 启用决策，修改 `on-conditions-eval.md` 的 `scenario_tracks_decision` 段（不建议，需重跑三个生成脚本）
 - 下一步可执行 `/3-pg-build {change-name}` 开始实现
 
-更新附录 A 第 12 项为完成。
+更新附录 A 第 13 项为完成。
 
 ---
 
@@ -546,7 +589,7 @@ WARN 不阻塞 build，但会显著提示 LLM 在阶段 3 校验后重点审视�
 
 ---
 
-## 附录 A：{{pg:action.task_tracker}} 12 项清单
+## 附录 A：{{pg:action.task_tracker}} 13 项清单
 
 > 本清单与阶段 1-4 编号一一对应。LLM agent 在每个阶段步骤完成后立即更新对应项状态。
 
@@ -555,27 +598,29 @@ WARN 不阻塞 build，但会显著提示 LLM 在阶段 3 校验后重点审视�
  2. [待开始] 1.4 加载项目上下文（find AGENTS.md + 通读提取 context/rules）
  3. [待开始] 1.6 生成环境描述（env-description.yaml，describe_env hook）
  4. [待开始] 1.7 加载 propose.injections.proposal（结构化规则注入）
- 5. [待开始] 2.1 生成 proposal.md
- 6. [待开始] 2.2 生成 design.md（含"环境限制与验证策略"段）
- 7. [待开始] 2.3 判定 affected_tracks & scenario track(s) 启用决策（--scenario-decisions + --scenario-reason **强必填**）
- 8. [待开始] 2.4 生成 tasks.md（2.4.1 调用 pg-gen-tasks-skeleton.py + 2.4.2 LLM 填充 body）
- 9. [待开始] 2.5 生成 execution-manifest.yaml（pg-gen-manifest.py）
-10. [待开始] 2.6 条件生成 scenario-<track>.yaml（2.6.1 调用 pg-gen-scenario.py + 2.6.2 LLM 填充 Scenario body + covers 引用 design.md V-*）
-11. [待开始] 3.1 三产物一致性校验（pg-validate-proposal.py，**唯一**校验点）
-12. [待开始] 4.1 展示产物摘要给用户
+ 5. [待开始] 1.8 加载 define-summary.yaml（pg-1-define 定界产物，条件性）
+ 6. [待开始] 2.1 生成 proposal.md
+ 7. [待开始] 2.2 生成 design.md（含"环境限制与验证策略"段）
+ 8. [待开始] 2.3 判定 affected_tracks & scenario track(s) 启用决策（--scenario-decisions + --scenario-reason **强必填**）
+ 9. [待开始] 2.4 生成 tasks.md（2.4.1 调用 pg-gen-tasks-skeleton.py + 2.4.2 LLM 填充 body）
+10. [待开始] 2.5 生成 execution-manifest.yaml（pg-gen-manifest.py）
+11. [待开始] 2.6 条件生成 scenario-<track>.yaml（2.6.1 调用 pg-gen-scenario.py + 2.6.2 LLM 填充 Scenario body + covers 引用 design.md V-*）
+12. [待开始] 3.1 三产物一致性校验（pg-validate-proposal.py，**唯一**校验点）
+13. [待开始] 4.1 展示产物摘要给用户
 ```
 
 > **与正文阶段的映射关系**：
-> - 阶段 1.1（{{pg:action.task_tracker}} 初始化）本身是创建本清单的动作，不计入 12 项
+> - 阶段 1.1（{{pg:action.task_tracker}} 初始化）本身是创建本清单的动作，不计入 13 项
 > - 阶段 1.2（确认变更名称）属于用户交互，不需要 {{pg:action.task_tracker}}
-> - 阶段 1.5（获取管线配置）属于过渡步骤，无产物，不计入 12 项
-> - 阶段 2.4 / 2.6 拆分后，每个子步骤共享一个 {{pg:action.task_tracker}} 项（2.4 → 8, 2.6 → 10），完成时同时更新
+> - 阶段 1.5（获取管线配置）属于过渡步骤，无产物，不计入 13 项
+> - 阶段 1.8（加载 define-summary.yaml）为条件性步骤（仅当 define-summary.yaml 存在时执行），仍占一项
+> - 阶段 2.4 / 2.6 拆分后，每个子步骤共享一个 {{pg:action.task_tracker}} 项（2.4 → 9, 2.6 → 11），完成时同时更新
 
 ---
 
 ## 附录 B：产物清单（硬约束）
 
-每个 change 在 `.pg/changes/<change>/` 下生成 6 个产物文件（5 必填 + 1 评审 + N 个条件性 scenario-<track>.yaml，N=启用 scenario track 数）：
+每个 change 在 `.pg/changes/<change>/` 下生成 6 个产物文件（5 必填 + 1 评审 + N 个条件性 scenario-<track>.yaml，N=启用 scenario track 数）；另有 1 个条件性前置输入（define-summary.yaml，由 pg-1-define 生成）：
 
 | 产物 | 写入位置 | 何时生成 | 必填 |
 |------|---------|---------|------|
@@ -585,6 +630,7 @@ WARN 不阻塞 build，但会显著提示 LLM 在阶段 3 校验后重点审视�
 | `execution-manifest.yaml` | `.pg/changes/<change>/execution-manifest.yaml` | 阶段 2.5（pg-gen-manifest.py 生成，含 scenario track 当且仅当对应 track 启用） | ✅ 必填 |
 | `on-conditions-eval.md` | `.pg/changes/<change>/1-propose-review/on-conditions-eval.md` | 阶段 2.4.1（pg-gen-tasks-skeleton.py 生成，含 `scenario_tracks_decision` SSOT 段） | ✅ 必填 |
 | `scenario-<track>.yaml` | `.pg/changes/<change>/scenario-<track>.yaml` | 阶段 2.6（pg-gen-scenario.py 生成，**每个启用**的 scenario track 一个文件） | ⚠️ 条件必填 |
+| `0-define/define-summary.yaml` | `.pg/changes/<change>/0-define/define-summary.yaml` | pg-1-define「定界后环境验证」环节落盘（非 pg-propose 生成），阶段 1.8 加载 + 校验 | ⚠️ 条件性前置输入 |
 
 ### 三产物一致性约束（v3.6）
 
@@ -662,10 +708,23 @@ scenarios:
 - ❌ 严禁修改任何业务代码文件
 - ❌ 严禁执行 lint、typecheck、test 等验证命令
 - ❌ 严禁启动任何服务（backend/frontend）
+- ❌ 严禁修改 `0-define/define-summary.yaml`（pg-1-define 产物，propose 阶段只读；校验失败应回到 pg-1-define 修复）
+- ❌ 严禁把 env-description.yaml / define-summary.yaml 内容复制到 proposal/design/tasks/scenario 产物中（只是约束看的）
 
 ---
 
 ## 附录 E：文档变更记录
+
+- **v1.2.0（2026-08-05）**：pg-1-define「定界后环境验证」产物接入（define-summary.yaml）。
+  - **新增阶段 1.8**：条件性加载 `.pg/changes/<change-id>/0-define/define-summary.yaml`（pg-1-define 定界环节落盘），只加载 + 校验，不做「假设 vs 事实」对账（对账在 pg-1-define 已完成）。
+  - **新增 schema**：`.pg/skills/src/runtime/spec/define-summary.schema.json`；示例 `.pg/skills/examples/define-summary.example.yaml`。
+  - **新增校验子命令**：`pg-validate-proposal.py define-summary <change-id>`（阶段 1.8 唯一校验点）：结构校验 + change_id 一致性 + target_environment 一致性 + env_resource_refs ↔ env-description 交叉校验。
+  - **`env_resource_refs` 占位约定**：`{env.<段>[name=<资源名>]…}`，与 scenario given 的 `{env.…}` 占位一致，禁止硬编码 IP/hostname/端口。
+  - **{{pg:action.task_tracker}} 12 项 → 13 项**：插入第 5 项（阶段 1.8），后续项编号顺延 +1。
+  - **附录 B** 产物清单新增条件性前置输入 `0-define/define-summary.yaml`；**附录 D** 禁令新增"严禁修改 define-summary.yaml"+"严禁复制 define-summary/env-description 内容到产物"。
+  - **pg-1-define.md** 同步：新增「定界后环境验证」可选环节（唯一允许落盘 + 调 describe_env 的环节，需用户明确授权）+ 「不要自动记录」护栏明文例外。
+  - **设计动机**：把"发现环境无法提供测试依赖"的时机从 propose（非互动，无法要求人工介入）提前到 define（可互动，可当场与用户讨论降级路径）。
+  - 单测：`tests/test_define_summary.py`（12 case，全通过）；存量 `test_review_section.py` 3 失败为本变更前既有问题，与本变更无关。
 
 - **v1.1.0（2026-08-01）**：scenario 硬编码 endpoint 校验（P0-1）。
   - `pg-gen-scenario.py` skeleton 注释升级：given/when/then 段明确标注"必须用 `{env.<段>.<name>.<字段路径>}` 占位引用 env-description.yaml 资源"。

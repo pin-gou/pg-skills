@@ -2,10 +2,12 @@
 """pg-validate-proposal.py — Validate proposal artifacts for pipeline consumption.
 
 Subcommands:
-    manifest <change>  — Validate execution-manifest.yaml ↔ tasks.md consistency
+    manifest <change>        — Validate execution-manifest.yaml ↔ tasks.md consistency
+    define-summary <change>  — Validate 0-define/define-summary.yaml (pg-1-define 产物, 阶段 1.8)
 
 Usage:
     python3 pg-validate-proposal.py manifest <change>
+    python3 pg-validate-proposal.py define-summary <change>
 
 Exit code: 0 = valid, 1 = invalid (with error messages to stderr).
 """
@@ -1047,6 +1049,318 @@ def _check_scenario_env_consistency(change: str, manifest: dict) -> list[tuple[s
     return issues
 
 
+# ---------------------------------------------------------------------------
+# define-summary.yaml 校验 (pg-1-define 产物, pg-propose 阶段 1.8 消费)
+# ---------------------------------------------------------------------------
+
+DEFINE_SUMMARY_REL_PATH = os.path.join("0-define", "define-summary.yaml")
+# 候选路径: (1) PROJECT_ROOT 锚定 (渲染到 .opencode/ 的副本也能命中);
+#           (2) 源码树相对路径 (单元测试 PG_PROJECT_ROOT 指向临时目录时命中).
+DEFINE_SUMMARY_SCHEMA_CANDIDATES = [
+    os.path.join(PROJECT_ROOT, ".pg", "skills", "src", "runtime", "spec",
+                 "define-summary.schema.json"),
+    os.path.join(
+        os.path.dirname(_SCRIPT_DIR),  # skills/pg-propose/
+        "..", "..", "..", "..", "..",  # → .pg/skills/ (workflows→core→src→skills)
+        "src", "runtime", "spec", "define-summary.schema.json",
+    ),
+]
+ENV_REF_RE = re.compile(
+    r"^\{env\.(infra_services|business_systems|data_resources|config_resources|runtime_environment|external_dependencies)\[([^\]]+)\](.*)\}$"
+)
+
+
+def _load_define_summary_schema():
+    """Load define-summary.schema.json; returns None on failure (caller degrades)."""
+    for candidate in DEFINE_SUMMARY_SCHEMA_CANDIDATES:
+        try:
+            path = os.path.normpath(candidate)
+            if not os.path.isfile(path):
+                continue
+            return _load_json_schema(path)
+        except Exception:
+            continue
+    return None
+
+
+def _validate_define_summary_structure(ds: dict, schema) -> list:
+    """Structural checks for define-summary.yaml (no external lib dependency).
+
+    ``schema`` may be None (schema load failed) — in that case no checks run.
+    Returns list of (code, message).
+    """
+    issues = []
+
+    if schema is None:
+        return issues
+
+    props = schema.get("properties", {})
+
+    # 顶层必填字段
+    for field in schema.get("required", []):
+        if field not in ds:
+            issues.append((
+                "define_summary_missing_" + field,
+                "缺少必填字段: " + field,
+            ))
+
+    # schema_version const
+    if "schema_version" in ds:
+        const_val = props.get("schema_version", {}).get("const")
+        if const_val is not None and ds["schema_version"] != const_val:
+            issues.append((
+                "define_summary_schema_version_mismatch",
+                "schema_version 必须为 {}, 实际: {!r}".format(
+                    const_val, ds["schema_version"]),
+            ))
+
+    # defined_by const
+    if "defined_by" in ds:
+        const_val = props.get("defined_by", {}).get("const")
+        if const_val is not None and ds["defined_by"] != const_val:
+            issues.append((
+                "define_summary_defined_by_mismatch",
+                "defined_by 必须为 {!r}, 实际: {!r}".format(
+                    const_val, ds["defined_by"]),
+            ))
+
+    # change_id pattern
+    cid = ds.get("change_id")
+    if cid is not None and not isinstance(cid, str):
+        issues.append(("define_summary_change_id_not_string",
+                       "change_id 必须是字符串"))
+    elif isinstance(cid, str):
+        pat = props.get("change_id", {}).get("pattern")
+        if pat and not re.match(pat, cid):
+            issues.append((
+                "define_summary_change_id_bad_pattern",
+                "change_id {!r} 不匹配 pattern {!r}".format(cid, pat),
+            ))
+
+    # verification_needs 数组
+    vn = ds.get("verification_needs")
+    if vn is not None:
+        if not isinstance(vn, list):
+            issues.append((
+                "define_summary_verification_needs_not_array",
+                "verification_needs 必须是数组",
+            ))
+        else:
+            vn_schema = props.get("verification_needs", {}).get("items", {})
+            vn_required = vn_schema.get("required", [])
+            seen_ids = set()
+            for i, item in enumerate(vn):
+                if not isinstance(item, dict):
+                    issues.append((
+                        "define_summary_vn_item_not_object",
+                        "verification_needs[{}] 必须是对象".format(i),
+                    ))
+                    continue
+                for field in vn_required:
+                    if field not in item:
+                        issues.append((
+                            "define_summary_vn_missing_" + field,
+                            "verification_needs[{}] 缺少必填字段: {}".format(i, field),
+                        ))
+                # id 唯一性 + pattern
+                vid = item.get("id")
+                if isinstance(vid, str):
+                    if vid in seen_ids:
+                        issues.append((
+                            "define_summary_vn_duplicate_id",
+                            "verification_needs 存在重复 id: {}".format(vid),
+                        ))
+                    seen_ids.add(vid)
+                    id_pat = (vn_schema.get("properties", {})
+                              .get("id", {}).get("pattern"))
+                    if id_pat and not re.match(id_pat, vid):
+                        issues.append((
+                            "define_summary_vn_id_bad_pattern",
+                            "verification_needs[{}].id {!r} 不匹配 pattern {!r}".format(
+                                i, vid, id_pat),
+                        ))
+    return issues
+
+
+def _validate_define_summary_env_refs(ds: dict, env_desc: dict) -> list:
+    """Cross-check env_resource_refs against env-description.yaml.
+
+    规则:
+      - post_discussion_status=verifiable 且 env_resource_refs 为空 → error
+      - env_resource_refs 引用的 <段>/<name> 不在 env-description 中 → error
+      - post_discussion_status != verifiable 且 env_resource_refs 非空 → error
+    """
+    issues = []
+    target_env = ds.get("target_environment")
+    if not target_env:
+        return issues
+
+    env_block = (env_desc.get("environments") or {}).get(target_env)
+    if not isinstance(env_block, dict):
+        # env 不存在于 env-description → 上层已报 env_description_env_missing
+        return issues
+
+    # 收集 env-description 中各段已声明的资源名
+    known_names = {}
+    for seg in ("infra_services", "business_systems", "data_resources",
+                "config_resources", "runtime_environment", "external_dependencies"):
+        names = set()
+        for res in env_block.get(seg, []) or []:
+            if isinstance(res, dict) and res.get("name"):
+                names.add(str(res["name"]))
+        known_names[seg] = names
+
+    for vn in ds.get("verification_needs", []) or []:
+        if not isinstance(vn, dict):
+            continue
+        vid = vn.get("id", "<unknown>")
+        status = vn.get("post_discussion_status")
+        refs = vn.get("env_resource_refs") or []
+        if refs is not None and not isinstance(refs, list):
+            issues.append((
+                "define_summary_refs_not_array",
+                "{}: env_resource_refs 必须是数组".format(vid),
+            ))
+            continue
+        refs = refs or []
+
+        if status == "verifiable" and not refs:
+            issues.append((
+                "define_summary_verifiable_missing_refs",
+                "{}: post_discussion_status=verifiable 时 env_resource_refs 不能为空".format(vid),
+            ))
+            continue
+        if status != "verifiable" and refs:
+            issues.append((
+                "define_summary_non_verifiable_has_refs",
+                "{}: post_discussion_status={} 时 env_resource_refs 必须为空".format(
+                    vid, status),
+            ))
+            continue
+
+        for ref in refs:
+            m = ENV_REF_RE.match(ref) if isinstance(ref, str) else None
+            if not m:
+                issues.append((
+                    "define_summary_ref_bad_format",
+                    "{}: env_resource_refs 元素 {!r} 不匹配 {{env.<段>[name=<资源名>]…}} 格式".format(
+                        vid, ref),
+                ))
+                continue
+            seg, bracket, _rest = m.group(1), m.group(2), m.group(3)
+            # bracket 形如 name=object-storage
+            name_m = re.match(r"name=([^,\]]+)", bracket)
+            if not name_m:
+                issues.append((
+                    "define_summary_ref_missing_name",
+                    "{}: env_resource_refs 元素 {!r} 的括号内必须含 name=<资源名>".format(
+                        vid, ref),
+                ))
+                continue
+            rname = name_m.group(1).strip()
+            if rname not in known_names.get(seg, set()):
+                issues.append((
+                    "define_summary_ref_unknown_resource",
+                    "{}: env_resource_refs 引用 {}[name={}], 但 env-description.yaml "
+                    "environments.{} 未声明该资源".format(vid, seg, rname, target_env),
+                ))
+    return issues
+
+
+def cmd_define_summary(change):
+    """Validate .pg/changes/<change>/0-define/define-summary.yaml (阶段 1.8 产物校验).
+
+    校验维度:
+      1. 文件存在性 (不存在 → error, 提示用户先在 pg-1-define 定界环节落盘)
+      2. YAML 可解析性
+      3. 结构校验 (对照 define-summary.schema.json, 无外部库)
+      4. env_resource_refs ↔ env-description.yaml 交叉校验
+      5. target_environment 与 env-description described_for.environment 一致性
+
+    Exit 0 = valid, 1 = invalid.
+    """
+    if yaml is None:
+        print("ERROR: PyYAML 未安装, 无法校验 define-summary.yaml", file=sys.stderr)
+        sys.exit(1)
+
+    ds_path = os.path.join(CHANGES_DIR, change, DEFINE_SUMMARY_REL_PATH)
+    all_issues = []
+
+    # 1. 存在性
+    if not os.path.isfile(ds_path):
+        print("ERROR: define-summary.yaml 不存在: {}".format(ds_path), file=sys.stderr)
+        print("  请先在 pg-1-define 定界环节落盘 (用户授权后调 describe_env 并生成)", file=sys.stderr)
+        sys.exit(1)
+
+    # 2. 解析
+    try:
+        with open(ds_path, encoding="utf-8") as f:
+            ds = yaml.safe_load(f)
+    except Exception as e:
+        print("ERROR: define-summary.yaml 解析失败: {}".format(e), file=sys.stderr)
+        sys.exit(1)
+    if not isinstance(ds, dict):
+        print("ERROR: define-summary.yaml 顶层必须是 object", file=sys.stderr)
+        sys.exit(1)
+
+    # 3. 结构校验
+    schema = _load_define_summary_schema()
+    if schema is None:
+        print("WARN: define-summary.schema.json 加载失败 (跳过结构校验)", file=sys.stderr)
+    struct_issues = _validate_define_summary_structure(ds, schema)
+    for code, msg in struct_issues:
+        print("  [{}] {}".format(code, msg), file=sys.stderr)
+        all_issues.append(code)
+
+    # 4. change_id 与实际 change 目录一致性
+    if ds.get("change_id") and ds["change_id"] != change:
+        code = "define_summary_change_id_dir_mismatch"
+        print("  [{}] change_id={!r} 与目录名 {!r} 不一致".format(
+            code, ds["change_id"], change), file=sys.stderr)
+        all_issues.append(code)
+
+    # 5. env-description 交叉校验
+    env_desc_path = os.path.join(CHANGES_DIR, change, "env-description.yaml")
+    if os.path.isfile(env_desc_path):
+        try:
+            with open(env_desc_path, encoding="utf-8") as f:
+                env_desc = yaml.safe_load(f) or {}
+        except Exception as e:
+            print("  [env_description_invalid_yaml] env-description.yaml 解析失败: {}".format(e),
+                  file=sys.stderr)
+            all_issues.append("env_description_invalid_yaml")
+            env_desc = {}
+
+        # 5a. target_environment 一致性
+        described_env = ((env_desc.get("described_for") or {}).get("environment"))
+        target_env = ds.get("target_environment")
+        if described_env and target_env and described_env != target_env:
+            code = "define_summary_env_mismatch"
+            print("  [{}] define-summary target_environment={!r} 与 env-description "
+                  "described_for.environment={!r} 不一致".format(
+                      code, target_env, described_env), file=sys.stderr)
+            all_issues.append(code)
+
+        # 5b. env_resource_refs 交叉校验
+        ref_issues = _validate_define_summary_env_refs(ds, env_desc)
+        for code, msg in ref_issues:
+            print("  [{}] {}".format(code, msg), file=sys.stderr)
+            all_issues.append(code)
+    else:
+        print("  [env_description_missing] env-description.yaml 不存在, "
+              "跳过 env_resource_refs 交叉校验 (请先跑 pg-1-define 定界环节的 describe_env)",
+              file=sys.stderr)
+        all_issues.append("env_description_missing")
+
+    if all_issues:
+        print("\nERROR: define-summary.yaml 校验失败, 共 {} 个问题: {}".format(
+            len(all_issues), ", ".join(all_issues)), file=sys.stderr)
+        sys.exit(1)
+
+    print("OK: define-summary.yaml 校验通过 (change={})".format(change))
+    sys.exit(0)
+
+
 def cmd_manifest(change):
     """Validate execution-manifest.yaml consistency."""
     manifest_path = os.path.join(CHANGES_DIR, change, "execution-manifest.yaml")
@@ -1343,7 +1657,7 @@ def cmd_manifest(change):
 def main():
     if len(sys.argv) < 3:
         print(
-            "Usage: python3 pg-validate-proposal.py {manifest|design-api} <change>",
+            "Usage: python3 pg-validate-proposal.py {manifest|design-api|define-summary} <change>",
             file=sys.stderr,
         )
         sys.exit(1)
@@ -1355,9 +1669,11 @@ def main():
         cmd_manifest(change)
     elif subcmd == "design-api":
         cmd_design_api(change)
+    elif subcmd == "define-summary":
+        cmd_define_summary(change)
     else:
         print(f"未知子命令: {subcmd}", file=sys.stderr)
-        print("支持: manifest, design-api", file=sys.stderr)
+        print("支持: manifest, design-api, define-summary", file=sys.stderr)
         sys.exit(1)
 
 

@@ -1,0 +1,272 @@
+#!/usr/bin/env python3
+"""v1.2: pg-validate-proposal.py define-summary 子命令单测。
+
+覆盖 pg-1-define 阶段产物 .pg/changes/<change>/0-define/define-summary.yaml
+（pg-propose 阶段 1.8 消费）的校验：
+
+- 文件缺失 → FAIL（提示先在 pg-1-define 定界环节落盘）
+- 完整合法（含 env-description 交叉校验）→ PASS
+- env-description.yaml 缺失 → FAIL（env_description_missing）
+- change_id 与目录名不一致 → FAIL
+- change_id pattern 非法 → FAIL
+- verification_needs id 重复 → FAIL
+- verifiable 但 env_resource_refs 为空 → FAIL
+- non-verifiable 但 env_resource_refs 非空 → FAIL
+- env_resource_refs 引用未知资源 → FAIL
+- env_resource_refs 格式非法 → FAIL
+- target_environment 与 env-description described_for.environment 不一致 → FAIL
+"""
+
+import os
+import shutil
+import subprocess
+import sys
+import tempfile
+import unittest
+
+try:
+    import yaml
+except ImportError:
+    yaml = None
+
+_SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
+_SCRIPTS_DIR = os.path.dirname(_SCRIPT_DIR)
+
+
+def _run(script_args, cwd=None, env_extra=None):
+    env = os.environ.copy()
+    if env_extra:
+        env.update(env_extra)
+    return subprocess.run(
+        [sys.executable, os.path.join(_SCRIPTS_DIR, "pg-validate-proposal.py")]
+        + script_args,
+        capture_output=True, text=True, env=env, cwd=cwd,
+    )
+
+
+def _valid_define_summary(change_id="demo-change", target_env="dev-local"):
+    return {
+        "schema_version": 1,
+        "change_id": change_id,
+        "defined_at": "2026-08-05T10:00:00Z",
+        "defined_by": "define",
+        "target_environment": target_env,
+        "problem": "demo problem",
+        "solution": "demo solution",
+        "boundary": {
+            "in_scope": ["a"],
+            "out_of_scope": ["b"],
+        },
+        "verification_needs": [
+            {
+                "id": "V-001",
+                "name": "happy",
+                "what": "validate happy path",
+                "requires_capabilities": [
+                    {"capability": "postgresql", "min_quantity": 1},
+                ],
+                "post_discussion_status": "verifiable",
+                "env_resource_refs": [
+                    "{env.infra_services[name=object-storage]}",
+                    "{env.data_resources[name=bucket-catalog]}",
+                ],
+            },
+            {
+                "id": "V-002",
+                "name": "degraded",
+                "what": "validate degraded path",
+                "requires_capabilities": [
+                    {"capability": "multi_tenant_data", "min_quantity": 2},
+                ],
+                "downgrade_when_missing": "mock",
+                "post_discussion_status": "degraded",
+            },
+        ],
+    }
+
+
+def _env_description(change_id="demo-change", target_env="dev-local"):
+    return {
+        "schema_version": 1,
+        "described_by": "env-describe.sh",
+        "described_at": "2026-08-05T10:00:00Z",
+        "described_for": {
+            "caller": "pg-propose",
+            "change": change_id,
+            "environment": target_env,
+        },
+        "environments": {
+            target_env: {
+                "infra_services": [
+                    {
+                        "name": "object-storage",
+                        "type": "seaweedfs",
+                        "category": "object_storage",
+                        "instances": [{"id": "object-storage-1", "reachable": True}],
+                    },
+                ],
+                "data_resources": [
+                    {"name": "bucket-catalog", "state": {"status": "seeded"}},
+                ],
+            },
+        },
+    }
+
+
+@unittest.skipIf(yaml is None, "PyYAML required")
+class TestDefineSummaryValidation(unittest.TestCase):
+    """pg-validate-proposal.py define-summary 子命令。"""
+
+    def setUp(self):
+        self.tmp = tempfile.mkdtemp(prefix="pg-test-define-summary-")
+        self.project_yaml = os.path.join(self.tmp, ".pg", "project.yaml")
+        os.makedirs(os.path.dirname(self.project_yaml), exist_ok=True)
+        with open(self.project_yaml, "w") as f:
+            f.write("schema: spec-driven\n")
+        self.changes_dir = os.path.join(self.tmp, ".pg", "changes")
+        os.makedirs(self.changes_dir, exist_ok=True)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp, ignore_errors=True)
+
+    def _write_define_summary(self, change, doc):
+        change_dir = os.path.join(self.changes_dir, change, "0-define")
+        os.makedirs(change_dir, exist_ok=True)
+        with open(os.path.join(change_dir, "define-summary.yaml"), "w") as f:
+            yaml.safe_dump(doc, f, allow_unicode=True)
+
+    def _write_env_description(self, change, doc):
+        change_dir = os.path.join(self.changes_dir, change)
+        os.makedirs(change_dir, exist_ok=True)
+        with open(os.path.join(change_dir, "env-description.yaml"), "w") as f:
+            yaml.safe_dump(doc, f, allow_unicode=True)
+
+    def _run_validate(self, change):
+        return _run(
+            ["define-summary", change],
+            cwd=self.tmp,
+            env_extra={"PG_PROJECT_ROOT": self.tmp},
+        )
+
+    # ---------- 正例 ----------
+
+    def test_valid_pass(self):
+        change = "demo-change"
+        self._write_define_summary(change, _valid_define_summary(change))
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("OK: define-summary.yaml", result.stdout)
+
+    # ---------- 反例 ----------
+
+    def test_missing_file_fail(self):
+        result = self._run_validate("no-such-change")
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define-summary.yaml 不存在", result.stderr)
+
+    def test_missing_env_description_fail(self):
+        change = "demo-change"
+        self._write_define_summary(change, _valid_define_summary(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1, msg=result.stdout)
+        self.assertIn("env_description_missing", result.stderr)
+
+    def test_change_id_dir_mismatch_fail(self):
+        change = "demo-change"
+        doc = _valid_define_summary(change_id="other-change")
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change_id="other-change"))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_change_id_dir_mismatch", result.stderr)
+
+    def test_change_id_bad_pattern_fail(self):
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["change_id"] = "Demo_Change!"
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_change_id_bad_pattern", result.stderr)
+
+    def test_duplicate_v_id_fail(self):
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][1]["id"] = "V-001"
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_vn_duplicate_id", result.stderr)
+
+    def test_verifiable_missing_refs_fail(self):
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["env_resource_refs"] = []
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_verifiable_missing_refs", result.stderr)
+
+    def test_non_verifiable_has_refs_fail(self):
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][1]["env_resource_refs"] = [
+            "{env.data_resources[name=bucket-catalog]}",
+        ]
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_non_verifiable_has_refs", result.stderr)
+
+    def test_unknown_resource_ref_fail(self):
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["env_resource_refs"] = [
+            "{env.infra_services[name=nonexistent]}",
+        ]
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_ref_unknown_resource", result.stderr)
+
+    def test_bad_ref_format_fail(self):
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["env_resource_refs"] = [
+            "infra_services[name=object-storage]",  # 缺 {env. 前缀
+        ]
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_ref_bad_format", result.stderr)
+
+    def test_env_mismatch_fail(self):
+        change = "demo-change"
+        doc = _valid_define_summary(change, target_env="dev-local")
+        self._write_define_summary(change, doc)
+        # env-description 声明 environment 为 multi-tier → 不一致
+        self._write_env_description(change, _env_description(change, target_env="multi-tier"))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_env_mismatch", result.stderr)
+
+    def test_missing_required_field_fail(self):
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        del doc["boundary"]
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_missing_boundary", result.stderr)
+
+
+if __name__ == "__main__":
+    unittest.main()

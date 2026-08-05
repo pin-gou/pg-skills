@@ -1,0 +1,157 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://pg-skills.local/spec/define-summary.schema.json",
+  "title": "define-summary",
+  "description": "pg-1-define 阶段产出的定界结论（含验证方法）。用户在定界后授权调 describe_env 看真实环境，然后与 agent 共同讨论 V-* 在该环境下的可验证性 / 降级 / 跳过，最后落盘此文件。文件位置: .pg/changes/<change-id>/0-define/define-summary.yaml。pg-propose 阶段 1.8 加载此文件并校验，阶段 2 写作时引用其中已对账过的 V-* 状态。",
+  "type": "object",
+  "required": [
+    "schema_version",
+    "change_id",
+    "defined_at",
+    "defined_by",
+    "target_environment",
+    "problem",
+    "solution",
+    "boundary",
+    "verification_needs"
+  ],
+  "additionalProperties": false,
+  "properties": {
+    "schema_version": {
+      "type": "integer",
+      "const": 1,
+      "description": "schema 版本, 当前固定为 1"
+    },
+    "change_id": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9-]*$",
+      "description": "change-id (kebab-case, 与 .pg/changes/<change-id>/ 对应)"
+    },
+    "defined_at": {
+      "type": "string",
+      "format": "date-time",
+      "description": "定界完成时间, ISO8601 UTC"
+    },
+    "defined_by": {
+      "const": "define",
+      "description": "产出方固定为 define (区别于 propose / build)"
+    },
+    "target_environment": {
+      "type": "string",
+      "pattern": "^[a-z][a-z0-9-]*$",
+      "description": "目标 environment 名 (与 .pg/project.yaml environments.<name> 对应). 必须与同目录下 env-description.yaml 的 described_for.environment 一致."
+    },
+    "problem": {
+      "type": "string",
+      "minLength": 1,
+      "description": "要解决的问题 (1-3 句话)"
+    },
+    "solution": {
+      "type": "string",
+      "minLength": 1,
+      "description": "拟采用的方案 (1-3 段)"
+    },
+    "boundary": {
+      "type": "object",
+      "required": ["in_scope", "out_of_scope"],
+      "additionalProperties": false,
+      "properties": {
+        "in_scope": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "本次变更 in-of-scope 的功能 / 模块 / API"
+        },
+        "out_of_scope": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "明确排除的功能 / 模块 / API (避免范围蔓延)"
+        }
+      }
+    },
+    "verification_needs": {
+      "type": "array",
+      "minItems": 1,
+      "description": "定界阶段产出的 V-* 列表. 每个 V-* 必含业务语义级的能力需求 + 降级路径, 不嵌资源 ID.",
+      "items": {
+        "type": "object",
+        "required": [
+          "id",
+          "name",
+          "what",
+          "requires_capabilities",
+          "post_discussion_status"
+        ],
+        "additionalProperties": false,
+        "properties": {
+          "id": {
+            "type": "string",
+            "pattern": "^V-[0-9]{3,}$",
+            "description": "V-* 编号, 与 design.md / tasks.md / scenario-*.yaml 保持一致"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "description": "验收点名称 (一句话)"
+          },
+          "what": {
+            "type": "string",
+            "minLength": 1,
+            "description": "要验证什么 (业务语义, 不写具体实现)"
+          },
+          "requires_capabilities": {
+            "type": "array",
+            "minItems": 1,
+            "description": "业务语义级能力需求清单. 描述'需要什么样的能力', 不绑死资源 ID. capability 为开放枚举, 由项目自行约定 (与 env-description.yaml 能力语义对应).",
+            "items": {
+              "type": "object",
+              "required": ["capability", "min_quantity"],
+              "additionalProperties": false,
+              "properties": {
+                "capability": {
+                  "type": "string",
+                  "description": "业务语义级能力名 (与具体资源 ID 解耦). 开放枚举, 由项目自行约定 (如 postgresql|redis_cache|object_storage|k8s_cluster|libvirt_local|multi_tenant_data|agent_grpc|iam_rbac|external_http). 必须与 env-description.yaml 中可探测的能力语义对应, 以便 propose 1.7 对账."
+                },
+                "min_quantity": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "最小数量要求 (如 '至少 2 个 tenant')"
+                },
+                "description": {
+                  "type": "string",
+                  "description": "能力的额外说明 (如 '可写的 storage pool + 1 个模板镜像')"
+                }
+              }
+            }
+          },
+          "downgrade_when_missing": {
+            "type": "string",
+            "description": "能力缺失时的降级路径 (如 'libvirt 不可用 → mock agent 响应, scenario 加 @skip')"
+          },
+          "post_discussion_status": {
+            "type": "string",
+            "enum": ["verifiable", "degraded", "skipped"],
+            "description": "define 阶段与用户讨论后, 在真实 env-description 基础上得出的最终状态.\n- verifiable: 能力满足, propose 阶段 scenario 必须用具体资源 ID 写 given/then\n- degraded: 能力不满足, 按 downgrade_when_missing 降级, scenario 加 @skip 标记\n- skipped: 能力不满足且无降级路径, scenario 不写该 V-*, proposal.md '未做' 段必须列出"
+          },
+          "env_resource_refs": {
+            "type": "array",
+            "description": "post_discussion_status=verifiable 时必填: 引用 env-description.yaml 中具体资源的占位路径, 格式与 scenario given 的 `{env.<段>.<name>.<字段路径>}` 占位约定一致 (propose 阶段 2.6.2 会把这些引用直接映射到 scenario given/then). 其他状态必须为空数组或不填. propose 1.8 阶段校验: 引用的 <段>/<name> 必须真实存在于 env-description.yaml.",
+            "items": {
+              "type": "string",
+              "pattern": "^\\{env\\.(infra_services|business_systems|data_resources|config_resources|runtime_environment|external_dependencies)\\[[^\\]]+\\]([^}]*)\\}$"
+            }
+          }
+        }
+      }
+    },
+    "risks": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "已知风险 (破坏性变更 / 兼容性 / 边界情况)"
+    },
+    "open_questions": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "定界阶段尚未解决的开放问题 (供 propose 阶段继续澄清)"
+    }
+  }
+}

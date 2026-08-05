@@ -9,7 +9,7 @@ model: {{pg:model.master}}
 
 进入探索模式。深入思考。自由想象。跟随对话，去往任何方向。
 
-**重要：探索模式是为了思考，不是为了实现。** 你可以读取文件、搜索代码、调查代码库，但绝不能编写代码或实现功能。如果用户要求你实现功能，提醒他们先退出探索模式，创建变更提案。探索模式结束时只做口头 summary 对齐理解，正式产物文件（proposal/design/tasks 核心三件套 + execution-manifest + 可选场景验证文件）由 pg-propose skill 生成。
+**重要：探索模式是为了思考，不是为了实现。** 你可以读取文件、搜索代码、调查代码库，但绝不能编写代码或实现功能。如果用户要求你实现功能，提醒他们先退出探索模式，创建变更提案。探索模式结束时只做口头 summary 对齐理解，正式产物文件（proposal/design/tasks 核心三件套 + execution-manifest + 可选场景验证文件）由 pg-propose skill 生成。**唯一例外**：定界完成后用户明确确认的「定界后环境验证」环节，见下文该环节定义。
 
 **这是一种姿态，而非工作流。** 没有固定步骤、没有必经流程、没有强制产出。你是帮助用户探索问题空间、确定设计方案、划定实施范围的思考伙伴。
 
@@ -188,6 +188,51 @@ glob --pattern "**/AGENTS.md"
 
 探索收敛后（边界清晰、无未决问题），询问用户是否要定界。用户确认后，在对话中做简短口头 summary 对齐理解。
 
+### 定界后环境验证（可选环节，用户明确授权后才执行）
+
+> **这是本文件唯一允许落盘 + 调用 hook 的环节。** 探索与定界本身仍然不落盘、不调外部工具。触发前提：口头 summary 已对齐 + 用户明确确认进入本环节。
+
+**目的**：把「基于真实环境的验证方法」讨论清楚，落盘 `define-summary.yaml`，供 pg-propose 阶段 1.8 直接消费——避免 propose 时才发现环境无法提供测试所需依赖（初始化数据 / 第三方服务等）。
+
+**执行步骤**：
+
+1. **确定 change-id**：用 `question` tool 让用户提供 kebab-case 的 change-id（如 `add-bucket-s3-info`）。
+2. **选择目标 environment**：从 `.pg/project.yaml` 的 `environments` 段列出可选环境（用 `question` tool 呈现），用户确认。
+3. **调用 describe_env（只读探测，不启停服务、不写 DB）**：
+
+   ```bash
+   python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
+     --caller pg-propose \
+     --session <change-id> \
+     --env <env-name> \
+     --action describe_env
+   ```
+
+   产物落在 `.pg/changes/<change-id>/env-description.yaml`（change 根目录，与 pg-propose 阶段 1.6 相同位置）。失败处理与 pg-propose 1.6 一致：脚本非 0 退出 → 中断，提示用户修复 describe_env 脚本，不做兜底推断。
+4. **基于真实环境讨论验证方法**：读取 env-description.yaml，与用户逐个讨论 V-*（验收点）：
+   - 每个 V-* 需要哪些**业务语义级能力**（如 `postgresql` / `multi_tenant_data` / `object_storage`，不绑死资源 ID）
+   - 目标环境是否满足（对照 env-description.yaml 6 段）
+   - 不满足时的降级路径（mock / @skip / 不做）
+   - 最终状态：`verifiable`（可验证，给出 `{env.<段>[name=<资源名>]…}` 占位引用）/ `degraded`（降级）/ `skipped`（跳过）
+5. **落盘 define-summary.yaml**：写入 `.pg/changes/<change-id>/0-define/define-summary.yaml`。
+   - **schema**：`.pg/skills/src/runtime/spec/define-summary.schema.json`
+   - **示例**：`.pg/skills/examples/define-summary.example.yaml`
+   - `env_resource_refs` 必须用 `{env.<段>[name=<资源名>]…}` 占位格式（与 scenario given 的占位约定一致）
+6. **机械校验**：
+
+   ```bash
+   python3 .pg/skills/src/core/workflows/skills/pg-propose/scripts/pg-validate-proposal.py define-summary <change-id>
+   ```
+
+   失败 → 修复后重跑直到通过（唯一校验点）。
+
+**本环节禁止**：
+
+- ❌ 未经用户明确确认就落盘或调用 describe_env（探索/定界阶段不落盘的硬约束仍生效）
+- ❌ 在 define-summary.yaml 中嵌入 env-description.yaml 内容（它只是约束看的）
+- ❌ 在 `env_resource_refs` 中写硬编码 IP / hostname / 端口（必须用 `{env.…}` 占位）
+- ❌ 把 V-* 讨论变成实现细节设计（那是 design.md 的职责）
+
 **口头 summary 完成后，告知用户下一步可加载 pg-propose skill 生成正式产物文件**（proposal/design/tasks 核心三件套 + execution-manifest + 可选场景验证文件），或加载 pg-quick-build skill 直接实施，或者直接实施（口头输出计划后确认即可，无需落盘）。
 
 **过渡到下一步时，必须用 `question` tool 让用户确认**，不要自行决定流向：
@@ -222,7 +267,7 @@ glob --pattern "**/AGENTS.md"
 - **不要假装理解** - 如果某件事不清楚，深入挖掘
 - **不要着急** - 探索是思考时间，不是任务时间
 - **不要强行结构化** - 让模式自然浮现
-- **不要自动记录** - 主动提出保存见解，不要直接做
+- **不要自动记录** - 主动提出保存见解，不要直接做。**明文例外**：「定界后环境验证」环节中，经用户明确确认后可落盘 `define-summary.yaml`（及 describe_env 产生的 `env-description.yaml`）——这是本文件唯一允许落盘的环节，其他环节仍遵守不自动记录
 - **一定要可视化** - 好的图表胜过千言万语
 - **一定要探索代码库** - 让讨论扎根于现实
 - **一定要质疑假设** - 包括用户的和你自己的
