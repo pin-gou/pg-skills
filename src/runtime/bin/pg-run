@@ -464,6 +464,7 @@ def _run_env_start_all(
     print(_c("1;36", "=" * 60))
     print(f"  总计: {overall_elapsed:.1f}s")
     print(_c("1", f"  成功: {succeeded}") + f" | 失败: {failed}")
+    print(_c("2", "  启动顺序: 按 project.yaml 书写顺序启动"))
     if results:
         print("  " + "-" * 40)
         if output_prep:
@@ -571,6 +572,7 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path, suppress_sta
         print(_c("1;36", "=" * 60))
         print(f"  总计: {overall_elapsed:.1f}s")
         print(_c("1", f"  成功: {succeeded}") + f" | 失败: {failed}")
+        print(_c("2", "  停止顺序: 按 project.yaml 书写顺序逆序停止"))
         if results:
             print("  " + "-" * 40)
             for r in results:
