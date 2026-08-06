@@ -381,7 +381,7 @@ def env_items(config: dict) -> dict:
 def _run_env_start_all(
     env_name: str, cfg: dict, project_root: Path, prep_duration: float = 0
 ):
-    roles = cfg.get("roles", {})
+    roles = cfg.get("roles", [])
     if not roles:
         print(f"  {env_name} 没有定义 roles，没有实例可启动")
         return
@@ -392,7 +392,9 @@ def _run_env_start_all(
     action_label = "启动"
     output_prep = prep_duration > 0
 
-    for role_name, role_cfg in roles.items():
+    for role in roles:
+        role_name = role.get("name", "")
+        role_cfg = role
         instances = role_cfg.get("instances", [])
         actions = role_cfg.get("actions", {})
         start_cfg = actions.get("start")
@@ -489,7 +491,7 @@ def _run_env_start_all(
 
 
 def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path, suppress_stats: bool = False):
-    roles = cfg.get("roles", {})
+    roles = cfg.get("roles", [])
     if not roles:
         print(f"  {env_name} 没有定义 roles，没有实例可停止")
         return [], 0
@@ -499,7 +501,9 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path, suppress_sta
     results = []
     action_label = "停止"
 
-    for role_name, role_cfg in reversed(list(roles.items())):
+    for role in reversed(roles):
+        role_name = role.get("name", "")
+        role_cfg = role
         instances = role_cfg.get("instances", [])
         actions = role_cfg.get("actions", {})
         stop_cfg = actions.get("stop")
@@ -657,10 +661,13 @@ def _build_instance_items(
     env_name: str, config: dict, role_selected: str | None, inst_selected: str | None
 ) -> list:
     cfg = config.get("environments", {}).get(env_name, {})
-    roles = cfg.get("roles", {})
+    roles = cfg.get("roles", [])
     if role_selected is None:
-        return [(n, "") for n in sorted(roles.keys())]
-    role_cfg = roles[role_selected]
+        # 源码顺序保留 (array 是有序的), 不再 sorted() — 排序已被 yaml sort 工具污染
+        return [(r.get("name", ""), "") for r in roles]
+    role_cfg = next((r for r in roles if r.get("name") == role_selected), None)
+    if role_cfg is None:
+        return []
     instances = role_cfg.get("instances", [])
     actions = role_cfg.get("actions", {})
     if inst_selected is None and len(instances) <= 3:
@@ -889,10 +896,12 @@ def _exec_instance_action(
     inst_selected: str | None,
 ):
     cfg = config.get("environments", {}).get(env_name, {})
-    roles = cfg.get("roles", {})
+    roles = cfg.get("roles", [])
     if role_selected is None:
         return
-    role_cfg = roles[role_selected]
+    role_cfg = next((r for r in roles if r.get("name") == role_selected), None)
+    if role_cfg is None:
+        return
     instances = role_cfg.get("instances", [])
     actions = role_cfg.get("actions", {})
 
@@ -1082,17 +1091,23 @@ def tabbed_main_menu(config: dict, project_root: Path):
                     t.flush()
                     executed_action = True
                 elif current_tab == 2:
-                    roles = sorted(
+                    # 源码顺序保留 (array 是有序的), 不再 sorted() — 排序已被 yaml sort 工具污染
+                    roles = [
+                        r.get("name", "") for r in
                         config.get("environments", {})
                         .get(env_name, {})
-                        .get("roles", {})
-                        .keys()
-                    )
+                        .get("roles", [])
+                    ]
                     if role_selected is None:
                         role_selected = roles[val]
                     else:
                         cfg = config["environments"][env_name]
-                        role_cfg = cfg["roles"][role_selected]
+                        role_cfg = next(
+                            (r for r in (cfg.get("roles") or []) if r.get("name") == role_selected),
+                            None,
+                        )
+                        if role_cfg is None:
+                            return
                         instances = role_cfg.get("instances", [])
                         if inst_selected is None and len(instances) > 3:
                             inst_selected = instances[val]["name"]

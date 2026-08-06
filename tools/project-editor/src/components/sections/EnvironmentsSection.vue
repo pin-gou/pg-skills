@@ -44,74 +44,77 @@
           <h4 class="block-title">roles — 运行时角色 (host × instance × actions)</h4>
           <div class="roles-list">
             <details
-              v-for="(role, rname) in (env as any).roles"
-              :key="String(rname)"
+              v-for="(role, ridx) in ((env as any).roles || [])"
+              :key="`role-${ridx}`"
               class="role-card"
               open
             >
               <summary class="role-summary">
-                <span class="r-name">{{ String(rname) }}</span>
+                <span class="r-name">{{ (role as any).name || '(未命名)' }}</span>
                 <span class="r-meta">{{ instanceCount((role as any).instances) }} instance(s)</span>
-                <button class="btn-icon" @click.stop="removeRole(String(name), String(rname))">×</button>
+                <button class="btn-icon" @click.stop="removeRole(String(name), ridx)">×</button>
               </summary>
               <div class="role-form">
+                <FormField name="name" label="role 名 (唯一)" :modelValue="(role as any).name"
+                  :schema="nameSchema" :required="true"
+                  @update:modelValue="v => store.setAt(['environments', String(name), 'roles', ridx, 'name'], v)" />
                 <FormField name="host" label="role 默认 host" :modelValue="(role as any).host"
                   :schema="hostSchema"
-                  @update:modelValue="v => store.setAt(['environments', String(name), 'roles', String(rname), 'host'], v)" />
+                  @update:modelValue="v => store.setAt(['environments', String(name), 'roles', ridx, 'host'], v)" />
 
                 <h5 class="sub-title">instances</h5>
                 <div class="instance-list">
-                  <div v-for="(inst, idx) in (role as any).instances" :key="idx" class="instance-card">
+                  <div v-for="(inst, idx) in ((role as any).instances || [])" :key="idx" class="instance-card">
                     <div class="instance-header">
                       <span class="inst-name">{{ (inst as any).name }}</span>
-                      <button class="btn-icon" @click="removeInstance(String(name), String(rname), idx)">×</button>
+                      <button class="btn-icon" @click="removeInstance(String(name), ridx, idx)">×</button>
                     </div>
                     <div class="instance-fields">
                       <FormField :name="`name-${idx}`" label="name"
                         :modelValue="(inst as any).name"
                         :schema="nameSchema" :required="true"
-                        @update:modelValue="v => store.setAt(['environments', String(name), 'roles', String(rname), 'instances', idx, 'name'], v)" />
+                        @update:modelValue="v => store.setAt(['environments', String(name), 'roles', ridx, 'instances', idx, 'name'], v)" />
                       <FormField :name="`host-${idx}`" label="host"
                         :modelValue="(inst as any).host"
                         :schema="hostSchema" :required="true"
-                        @update:modelValue="v => store.setAt(['environments', String(name), 'roles', String(rname), 'instances', idx, 'host'], v)" />
+                        @update:modelValue="v => store.setAt(['environments', String(name), 'roles', ridx, 'instances', idx, 'host'], v)" />
                       <FormField :name="`port-${idx}`" label="port"
                         :modelValue="(inst as any).port"
                         :schema="portSchema"
-                        @update:modelValue="v => store.setAt(['environments', String(name), 'roles', String(rname), 'instances', idx, 'port'], v)" />
+                        @update:modelValue="v => store.setAt(['environments', String(name), 'roles', ridx, 'instances', idx, 'port'], v)" />
                       <FormField :name="`libvirt-${idx}`" label="libvirt_uri"
                         :modelValue="(inst as any).libvirt_uri"
                         :schema="strSchema"
-                        @update:modelValue="v => store.setAt(['environments', String(name), 'roles', String(rname), 'instances', idx, 'libvirt_uri'], v)" />
+                        @update:modelValue="v => store.setAt(['environments', String(name), 'roles', ridx, 'instances', idx, 'libvirt_uri'], v)" />
                       <FormField :name="`desc-${idx}`" label="description"
                         :modelValue="(inst as any).description"
                         :schema="descSchema"
-                        @update:modelValue="v => store.setAt(['environments', String(name), 'roles', String(rname), 'instances', idx, 'description'], v)" />
+                        @update:modelValue="v => store.setAt(['environments', String(name), 'roles', ridx, 'instances', idx, 'description'], v)" />
                     </div>
                   </div>
                 </div>
-                <button class="btn-sm" @click="addInstance(String(name), String(rname))">+ 新增 instance</button>
+                <button class="btn-sm" @click="addInstance(String(name), ridx)">+ 新增 instance</button>
 
                 <h5 class="sub-title">actions (per-role lifecycle)</h5>
                 <div class="action-list">
-                  <div v-for="(act, aname) in (role as any).actions" :key="String(aname)" class="action-card">
+                  <div v-for="(act, aname) in ((role as any).actions || {})" :key="String(aname)" class="action-card">
                     <div class="action-header">
                       <span class="a-name">{{ String(aname) }}</span>
-                      <button class="btn-icon" @click="removeAction(String(name), String(rname), String(aname))">×</button>
+                      <button class="btn-icon" @click="removeAction(String(name), ridx, String(aname))">×</button>
                     </div>
                     <ActionEditor
                       :modelValue="act"
                       :label="String(aname)"
-                      @update:modelValue="v => store.setAt(['environments', String(name), 'roles', String(rname), 'actions', String(aname)], v)"
+                      @update:modelValue="v => store.setAt(['environments', String(name), 'roles', ridx, 'actions', String(aname)], v)"
                     />
                   </div>
                 </div>
                 <div class="add-action-row">
-                  <input v-model="newActionName[name + '/' + rname]" class="action-input"
+                  <input v-model="newActionName[name + '/' + (role as any).name]" class="action-input"
                     placeholder="action 名 (start/stop/restart/deploy)" />
                   <button class="btn-sm"
-                    :disabled="!newActionName[name + '/' + rname]"
-                    @click="addAction(String(name), String(rname))">+ 新增 action</button>
+                    :disabled="!newActionName[name + '/' + (role as any).name]"
+                    @click="addAction(String(name), ridx)">+ 新增 action</button>
                 </div>
               </div>
             </details>
@@ -175,7 +178,8 @@ const newCrossActionName = reactive<Record<string, string>>({})
 
 function rolesList(env: any): string {
   if (!env?.roles) return ''
-  return Object.keys(env.roles).join(', ')
+  // roles 是 array of {name, ...}, 按 array 顺序拼接 name (保留源码顺序)
+  return ((env.roles as any[]) || []).map(r => r?.name ?? '(未命名)').join(', ')
 }
 
 function instanceCount(arr: unknown[] | undefined): number {
@@ -191,10 +195,11 @@ function onToggle(e: Event, name: string) {
 function addEnvironment() {
   const name = prompt('environment 名称 (如: dev-local):')
   if (!name) return
+  // roles 改为 array of {name, ...}; 初始给一个 backend role
   store.setAt(['environments', name], {
-    roles: {
-      backend: { instances: [{ name: 'backend-1', host: 'localhost' }] },
-    },
+    roles: [
+      { name: 'backend', instances: [{ name: 'backend-1', host: 'localhost' }] },
+    ],
   })
   store.selectEnv(name)
 }
@@ -207,43 +212,51 @@ function removeEnvironment(name: string) {
 function addRole(envName: string) {
   const rname = prompt('role 名称 (如: backend/frontend/agent):')
   if (!rname) return
-  store.setAt(['environments', envName, 'roles', rname], {
+  // appendAt 在 roles array 末尾追加 (保留源码顺序)
+  store.appendAt(['environments', envName, 'roles'], {
+    name: rname,
     instances: [{ name: `${rname}-1`, host: 'localhost' }],
   })
 }
 
-function removeRole(envName: string, rname: string) {
-  if (!confirm(`删除 role "${rname}"?`)) return
-  store.deleteAt(['environments', envName, 'roles', rname])
+function removeRole(envName: string, idx: number) {
+  if (!confirm(`删除 role 第 ${idx} 项?`)) return
+  store.deleteAt(['environments', envName, 'roles', idx])
 }
 
-function addInstance(envName: string, rname: string) {
-  const cur = store.getAt(['environments', envName, 'roles', rname, 'instances']) as unknown[] || []
-  store.setAt(['environments', envName, 'roles', rname, 'instances'], [
+function addInstance(envName: string, ridx: number) {
+  const cur = store.getAt(['environments', envName, 'roles', ridx, 'instances']) as unknown[] || []
+  // 推导默认 name 时优先用 role.name (新字段)
+  const roleObj = (store.getAt(['environments', envName, 'roles', ridx]) as any) || {}
+  const rname = roleObj.name || 'role'
+  store.setAt(['environments', envName, 'roles', ridx, 'instances'], [
     ...cur,
     { name: `${rname}-${cur.length + 1}`, host: 'localhost' },
   ])
 }
 
-function removeInstance(envName: string, rname: string, idx: number) {
+function removeInstance(envName: string, ridx: number, idx: number) {
   if (!confirm('删除 instance?')) return
-  store.deleteAt(['environments', envName, 'roles', rname, 'instances', idx])
+  store.deleteAt(['environments', envName, 'roles', ridx, 'instances', idx])
 }
 
-function addAction(envName: string, rname: string) {
+function addAction(envName: string, ridx: number) {
+  // key 用 envName + role.name (避免同名 role 索引冲突)
+  const roleObj = (store.getAt(['environments', envName, 'roles', ridx]) as any) || {}
+  const rname = roleObj.name || String(ridx)
   const key = `${envName}/${rname}`
   const aname = (newActionName[key] || '').trim()
   if (!aname) return
-  store.setAt(['environments', envName, 'roles', rname, 'actions', aname], {
+  store.setAt(['environments', envName, 'roles', ridx, 'actions', aname], {
     host: 'localhost',
     script: '',
   })
   newActionName[key] = ''
 }
 
-function removeAction(envName: string, rname: string, aname: string) {
+function removeAction(envName: string, ridx: number, aname: string) {
   if (!confirm(`删除 action "${aname}"?`)) return
-  store.deleteAt(['environments', envName, 'roles', rname, 'actions', aname])
+  store.deleteAt(['environments', envName, 'roles', ridx, 'actions', aname])
 }
 
 function addCrossAction(envName: string) {

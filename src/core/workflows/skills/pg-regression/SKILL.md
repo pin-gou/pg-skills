@@ -168,7 +168,8 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 #
 #   1. ROLES = suite.environment.required_roles (从 pg-parse-config 输出读)
 #   2. 对每个 role, 从 .pg/project.yaml 读 instances[] (或由 SKILL 提示 LLM 调
-#      python3 -c "import yaml; print([i['name'] for i in yaml.safe_load(open('.pg/project.yaml'))['environments']['<env>']['roles']['<role>']['instances']])")
+#      python3 -c "import yaml; roles=next(r for r in yaml.safe_load(open('.pg/project.yaml'))['environments']['<env>']['roles'] if r['name']=='<role>'); print([i['name'] for i in roles['instances']])")
+#      (v3.7+ roles 是 array of {name, ...}; 需先按 name 找 role, 再读 instances)
 #   3. 串行循环调 pg-invoke-hook.py
 #
 # 示例: backend suite 跑 dev-local, required_roles=[backend]:
@@ -176,7 +177,8 @@ ENV=<env-name>
 for ROLE in ${ROLES[@]}; do
   for INSTANCE in $(python3 -c "
 import yaml
-for i in yaml.safe_load(open('.pg/project.yaml'))['environments']['${ENV}']['roles']['${ROLE}']['instances']:
+roles = next(r for r in yaml.safe_load(open('.pg/project.yaml'))['environments']['${ENV}']['roles'] if r['name'] == '${ROLE}')
+for i in roles['instances']:
     print(i['name'])
 "); do
     python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \

@@ -363,18 +363,20 @@ def build_restart_all_specs(
     """构建 restart_all_instances 的三阶段 spec list.
 
     行为:
-      Phase 1 — 逆序停止所有 instance (reversed(roles.items()) × reversed(instances)).
+      Phase 1 — 逆序停止所有 instance (reversed(roles) × reversed(instances)).
       Phase 2 — 正序启动所有 instance (YAML 顺序, 沿用 per-role start wait_for_completion).
       Phase 3 — 正序 health_check (仅当 role.actions.health_check 已声明).
 
     返回 list[dict], 每个元素是 build_role_hook_spec 生成的 spec. 调用方负责
     按顺序 fork-exec pg-run-hook.py 并聚合整体退出码.
     """
-    roles = env_cfg.get("roles") or {}
+    roles = env_cfg.get("roles") or []
     specs: list = []
 
     # Phase 1: 逆序停止所有 instance
-    for role_name, role_cfg in reversed(list(roles.items())):
+    for role in reversed(roles):
+        role_name = role.get("name", "")
+        role_cfg = role
         stop_cfg = (role_cfg.get("actions") or {}).get("stop")
         if not stop_cfg:
             continue
@@ -390,7 +392,9 @@ def build_restart_all_specs(
             ))
 
     # Phase 2: 正序启动所有 instance
-    for role_name, role_cfg in roles.items():
+    for role in roles:
+        role_name = role.get("name", "")
+        role_cfg = role
         start_cfg = (role_cfg.get("actions") or {}).get("start")
         if not start_cfg:
             continue
@@ -408,7 +412,9 @@ def build_restart_all_specs(
             ))
 
     # Phase 3: 正序 health_check (仅当 role.actions.health_check 已声明)
-    for role_name, role_cfg in roles.items():
+    for role in roles:
+        role_name = role.get("name", "")
+        role_cfg = role
         hc_cfg = (role_cfg.get("actions") or {}).get("health_check")
         if not hc_cfg:
             continue
@@ -424,6 +430,18 @@ def build_restart_all_specs(
             ))
 
     return specs
+
+
+def _find_role(env_cfg: dict, role_name: str) -> dict | None:
+    """在 environments.<env>.roles 数组中按 name 字段查找 role_cfg.
+
+    project.yaml 的 roles 是 array of {name, ...}, 不是 dict (v3.7+ 设计).
+    源码顺序保留, 但查找必须显式遍历. 未找到返回 None.
+    """
+    for role in (env_cfg.get("roles") or []):
+        if isinstance(role, dict) and role.get("name") == role_name:
+            return role
+    return None
 
 
 def build_role_hook_spec(
@@ -749,12 +767,12 @@ def invoke_hook_main(argv=None) -> int:
             )
     else:
         # Per-role lifecycle action (start / stop / restart / logs / tail / health_check).
-        if args.role not in (env_cfg.get("roles") or {}):
+        role_cfg = _find_role(env_cfg, args.role)
+        if role_cfg is None:
             sys.stderr.write(
                 f"Error: role '{args.role}' not defined in environments.{args.env}.roles\n"
             )
             return 1
-        role_cfg = env_cfg["roles"][args.role]
         if args.action not in (role_cfg.get("actions") or {}):
             sys.stderr.write(
                 f"Error: action '{args.action}' not defined in "

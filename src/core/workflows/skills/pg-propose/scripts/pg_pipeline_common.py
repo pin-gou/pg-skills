@@ -813,7 +813,7 @@ def _resolve_default_env(state) -> str:
 
 
 def _persist_environment_summary(state, env_name: str, log_path: str,
-                                  instances: dict) -> None:
+                                  instances: list) -> None:
     """Persist environment summary into state for first-dispatch挂载.
 
     Writes into state.context.environment_summary so subsequent cmd_next_v2
@@ -823,7 +823,8 @@ def _persist_environment_summary(state, env_name: str, log_path: str,
         state: v1 state dict OR v2 PipelineState.
         env_name: resolved environment name (e.g. "dev-local").
         log_path: absolute path to the prepare_env log.
-        instances: dict of {role: [{name, host, port?}, ...]}.
+        instances: list of {"name": role_name, "instances": [{name, host, port?}, ...]}
+                   (按源码顺序; v3.7+ roles 改 array 后的新格式).
     """
     summary = {
         "name": env_name,
@@ -846,14 +847,15 @@ def _persist_environment_summary(state, env_name: str, log_path: str,
         return
 
 
-def _extract_instances_summary(config: dict) -> dict:
+def _extract_instances_summary(config: dict) -> list:
     """Build the精简 instances summary from environments.<env>.roles.
 
-    Returns a dict like:
-        {"backend": [{"name": "backend-1", "host": "localhost", "port": 9080}],
-         "frontend": [{"name": "frontend-1", "host": "localhost", "port": 3008}],
-         "agent": [{"name": "agent-1", "host": "localhost"}]}
+    Returns a list of {"name": role_name, "instances": [...]} (按源码顺序):
+        [{"name": "backend", "instances": [{"name": "backend-1", "host": "localhost", "port": 9080}]},
+         {"name": "agent",   "instances": [{"name": "agent-1",   "host": "localhost"}]},
+         ...]
 
+    v3.7+ roles 是 array of {name, ...}, 返回结构同步改成 array 形式以保留源码顺序.
     Only includes roles/instances that are actually configured. Used to
     populate ctx.environment for the first dispatch after prepare_env.
     """
@@ -866,16 +868,18 @@ def _extract_instances_summary(config: dict) -> dict:
             if cfg.get("roles"):
                 env_cfg = cfg
                 break
-    roles_cfg = env_cfg.get("roles") or {}
-    summary = {}
-    for role_name, role_cfg in roles_cfg.items():
+    roles_cfg = env_cfg.get("roles") or []
+    summary: list = []
+    for role in roles_cfg:
+        role_name = role.get("name", "")
+        role_cfg = role
         inst_list = []
         for inst in (role_cfg.get("instances") or []):
             entry = {"name": inst.get("name"), "host": inst.get("host")}
             if "port" in inst:
                 entry["port"] = inst["port"]
             inst_list.append(entry)
-        summary[role_name] = inst_list
+        summary.append({"name": role_name, "instances": inst_list})
     return summary
 
 

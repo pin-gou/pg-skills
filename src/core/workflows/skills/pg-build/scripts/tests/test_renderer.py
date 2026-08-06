@@ -204,31 +204,28 @@ class TestBuildCtx(unittest.TestCase):
             },
             "environments": {
                 "dev-local": {
-                    "roles": {
-                        "backend": {
-                            "instances": [
-                                {"name": "backend-1", "host": "localhost", "port": 9080},
-                            ],
-                            "actions": {
-                                "start": {
-                                    "host": "localhost",
-                                    "script": ".pg/hooks/role-backend-start.sh",
-                                    "timeout_seconds": 300,
-                                    "description": "Start backend service",
-                                },
-                                "stop": {
-                                    "host": "localhost",
-                                    "script": ".pg/hooks/role-backend-stop.sh",
-                                    "timeout_seconds": 30,
-                                },
-                                "logs": {
-                                    "host": "localhost",
-                                    "script": ".pg/hooks/role-backend-logs.sh",
-                                    "timeout_seconds": 30,
-                                },
+                    "roles": [
+                        {"name": "backend", "instances": [
+                            {"name": "backend-1", "host": "localhost", "port": 9080},
+                        ], "actions": {
+                            "start": {
+                                "host": "localhost",
+                                "script": ".pg/hooks/role-backend-start.sh",
+                                "timeout_seconds": 300,
+                                "description": "Start backend service",
                             },
-                        },
-                    },
+                            "stop": {
+                                "host": "localhost",
+                                "script": ".pg/hooks/role-backend-stop.sh",
+                                "timeout_seconds": 30,
+                            },
+                            "logs": {
+                                "host": "localhost",
+                                "script": ".pg/hooks/role-backend-logs.sh",
+                                "timeout_seconds": 30,
+                            },
+                        }},
+                    ],
                 },
             },
         }

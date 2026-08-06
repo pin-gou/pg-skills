@@ -137,16 +137,19 @@ def resolve_env_instances(config: dict[str, Any], env_name: str) -> str:
 
     role 顺序保留 environments.<env>.roles 的源码书写顺序（与
     `.pg/skills/src/runtime/bin/pg-run` 的 `_run_env_start_all()` 一致）。
-    PyYAML 默认 sort_keys=True 会按字母序输出 dict key，导致 dispatch 与
-    pg-run 看到相反的 role 顺序——必须显式 sort_keys=False。
+    v3.7+ roles 是 array of {name, ...}, array 元素本身就有序, 渲染时
+    按数组遍历顺序输出, 不再依赖 sort_keys=False (但仍保留以防 dict 内
+    字段顺序被 sort_keys 重排).
     """
     env = config.get("environments", {}).get(env_name, {})
-    roles = env.get("roles", {})
+    roles = env.get("roles", [])
     if not roles:
         return ""
     import yaml as _yaml
     instance_map: dict[str, list[dict[str, Any]]] = {}
-    for role_name, role_cfg in roles.items():
+    for role in roles:
+        role_name = role.get("name", "")
+        role_cfg = role
         insts = role_cfg.get("instances", [])
         if insts:
             instance_map[role_name] = [
@@ -176,15 +179,18 @@ def resolve_hooks(config: dict[str, Any], env_name: str) -> str:
           ...
 
     role 顺序保留 environments.<env>.roles 的源码书写顺序（与
-    `pg-run._run_env_start_all()` 一致）——必须显式 sort_keys=False。
+    `pg-run._run_env_start_all()` 一致）——v3.7+ roles 是 array,
+    array 元素顺序即源码顺序.
     """
     env = config.get("environments", {}).get(env_name, {})
-    roles = env.get("roles", {})
+    roles = env.get("roles", [])
     if not roles:
         return ""
     import yaml as _yaml
     action_map: dict[str, dict[str, Any]] = {}
-    for role_name, role_cfg in roles.items():
+    for role in roles:
+        role_name = role.get("name", "")
+        role_cfg = role
         actions = role_cfg.get("actions", {})
         if actions:
             simplified: dict[str, Any] = {}

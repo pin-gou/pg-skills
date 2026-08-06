@@ -108,15 +108,61 @@ BASH_SCRIPT_RE = re.compile(r"\bbash\s+([^\s|&;]+\.sh)\b")
 
 def load():
     with open(CONFIG_PATH, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        data = yaml.safe_load(f)
+    _validate_roles_uniqueness(data)
+    return data
+
+
+def _validate_roles_uniqueness(data):
+    """校验 environments.<env>.roles 数组内 name 字段唯一.
+
+    roles 改为 array 形态后, 重复的 role 名不再被 YAML key 唯一性自动拒绝,
+    必须在 reader 入口加运行时检查. 失败抛 ValueError (上游 doctor 捕获).
+    """
+    environments = (data or {}).get("environments") or {}
+    for env_name, env_cfg in environments.items():
+        roles = (env_cfg or {}).get("roles") or []
+        if not isinstance(roles, list):
+            raise ValueError(
+                f"environments.{env_name}.roles must be an array (got {type(roles).__name__})"
+            )
+        seen = set()
+        for r in roles:
+            if not isinstance(r, dict):
+                raise ValueError(
+                    f"environments.{env_name}.roles[*] must be a mapping "
+                    f"(got {type(r).__name__})"
+                )
+            name = r.get("name", "")
+            if not name:
+                raise ValueError(
+                    f"environments.{env_name}.roles[*].name is required (each role must declare name)"
+                )
+            if name in seen:
+                raise ValueError(
+                    f"environments.{env_name}.roles: duplicate role name {name!r}"
+                )
+            seen.add(name)
 
 
 def get_by_path(data, path):
     parts = path.split(".")
     current = data
     for p in parts:
-        if isinstance(current, dict) and p in current:
-            current = current[p]
+        if isinstance(current, dict):
+            if p in current:
+                current = current[p]
+            else:
+                return None
+        elif isinstance(current, list):
+            try:
+                idx = int(p)
+            except ValueError:
+                return None
+            if 0 <= idx < len(current):
+                current = current[idx]
+            else:
+                return None
         else:
             return None
     return current
@@ -135,8 +181,10 @@ def compute_resolved_actions(environments):
     if not environments:
         return resolved
     for env_name, env_cfg in environments.items():
-        roles = env_cfg.get("roles") or {}
-        for role_name, role_cfg in roles.items():
+        roles = env_cfg.get("roles") or []
+        for role in roles:
+            role_name = role.get("name", "")
+            role_cfg = role
             instances = role_cfg.get("instances") or []
             actions = role_cfg.get("actions") or {}
             for instance in instances:
@@ -433,16 +481,19 @@ def validate_regression(data):
                         "reason": f"not found in environments: {list(environments.keys())}",
                     })
                 else:
-                    # Rule 6: required_roles ⊆ env.roles
+                    # Rule 6: required_roles ⊆ env.roles (按 name 字段查找)
                     required_roles = env_cfg.get("required_roles")
                     if isinstance(required_roles, list):
-                        env_roles = (environments[env_name].get("roles") or {})
+                        env_role_names = {
+                            r.get("name", "") for r in
+                            (environments[env_name].get("roles") or [])
+                        }
                         for role in required_roles:
-                            if role not in env_roles:
+                            if role not in env_role_names:
                                 errors.append({
                                     "field": f"regression.suite.{suite_name}.environment.required_roles",
                                     "value": role,
-                                    "reason": f"not found in environments.{env_name}.roles: {list(env_roles.keys())}",
+                                    "reason": f"not found in environments.{env_name}.roles: {sorted(env_role_names)}",
                                 })
                     elif required_roles is not None:
                         errors.append({
@@ -677,9 +728,9 @@ def _derive_verify_setup(env_cfg, required_roles):
         script = cross["script"]
         args = cross.get("args") or []
         return "bash " + " ".join([script] + [str(a) for a in args])
-    roles = env_cfg.get("roles") or {}
+    roles_map = {r.get("name", ""): r for r in (env_cfg.get("roles") or [])}
     for role in required_roles:
-        role_cfg = roles.get(role) or {}
+        role_cfg = roles_map.get(role) or {}
         acts = (role_cfg.get("actions") or {}).get("start")
         if isinstance(acts, dict) and acts.get("script"):
             return "bash " + acts["script"]  # best-effort; orchestrator can override

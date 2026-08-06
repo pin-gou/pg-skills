@@ -189,15 +189,15 @@ modules:
 environments:
   dev-local:
     roles:
-      backend:
+      - name: backend
         instances: [{name: backend-1, host: localhost}]
-      frontend:
+      - name: frontend
         instances: [{name: frontend-1, host: localhost}]
   dev-3tier:
     roles:
-      backend:
+      - name: backend
         instances: [{name: backend-1, host: localhost}]
-      agent:
+      - name: agent
         instances: [{name: source-agent, host: box-1}]
 """
 
@@ -391,8 +391,8 @@ class RegressionSuiteFilterTest(unittest.TestCase):
                 "agent": {"root": "ag", "language": "go"},
             },
             "environments": {
-                "dev-local": {"roles": {"backend": {}, "frontend": {}}},
-                "dev-3tier": {"roles": {"backend": {}, "agent": {}}},
+                "dev-local": {"roles": [{"name": "backend"}, {"name": "frontend"}]},
+                "dev-3tier": {"roles": [{"name": "backend"}, {"name": "agent"}]},
             },
             "regression": {
                 "suite": {
