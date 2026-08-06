@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>品构 pg-skills · 让 AI 写出可托付的代码</title>
+<title>品构 pg-skills · 品质，长在结构里</title>
 <style>
 :root {
   --bg: #f8f9fa;
@@ -262,7 +262,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
       GitHub
     </a>
   </h2>
-  <p style="padding:0 16px;margin:-6px 0 8px;font-size:12px;color:var(--muted);font-style:italic">让 AI 写出可托付的代码</p>
+  <p style="padding:0 16px;margin:-6px 0 8px;font-size:12px;color:var(--muted);font-style:italic">品质，长在结构里</p>
 
   <span class="section-group">基础概念</span>
   <a href="#sec1" class="active">1. 为什么需要</a>
@@ -280,16 +280,6 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <a href="#sec4-define">4.2 定界</a>
   <a href="#sec4-propose">4.3 提案</a>
   <a href="#sec4-build">4.4 构建</a>
-  <a href="#sec4-4-1" class="sub">4.4.1 概述</a>
-  <a href="#sec4-4-2" class="sub">4.4.2 track 类型一览</a>
-  <a href="#sec4-4-3" class="sub">4.4.3 standard track</a>
-  <a href="#sec4-4-4" class="sub">4.4.4 simple track</a>
-  <a href="#sec4-4-5" class="sub">4.4.5 scenario track</a>
-  <a href="#sec4-4-6" class="sub">4.4.6 产物与目录</a>
-  <a href="#sec4-4-7" class="sub">4.4.7 中断恢复</a>
-  <a href="#sec4-4-8" class="sub">4.4.8 环境准备</a>
-  <a href="#sec4-4-9" class="sub">4.4.9 manifest 速查</a>
-  <a href="#sec4-4-10" class="sub">4.4.10 gate-score</a>
   <a href="#sec5">5. Bug 修复</a>
   <a href="#sec6">6. 回归测试</a>
   <a href="#sec7">7. 动手实操</a>
@@ -301,139 +291,89 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 <!-- ============================================================ -->
 <div id="sec1" class="section active">
 <h1>1. 为什么需要品构</h1>
-<p class="muted" style="font-size:14px">为大模型补全"代码扫描读不到的项目元信息"，让无人值守的端到端交付成为可能</p>
 
 <div class="card" style="border-left:4px solid var(--primary); font-size:16px; line-height:2; margin-top:8px; padding:18px 22px">
-  <div><span class="tag tag-purple" style="font-size:13px">品构</span> = <strong>品</strong>质 × <strong>构</strong>造。</div>
-  <div style="margin-top:6px">大模型能读懂代码，却读不出"这个项目长什么样、怎么构建它"。品构用一份 <code>project.yaml</code> 把这些<strong>结构元信息</strong>显式描述出来，让 AI 在明确的结构里工作——生成可信的提案、无人值守地构建、交付经过真实环境验证的结果。</div>
-  <div style="font-size:13px; color:var(--muted); margin-top:6px">
-    故名「品构」：品质，长在结构里。
-  </div>
+  <p style="margin:0 0 8px">AI 写代码不可怕，可怕的是——<strong>写完没人敢合</strong>。</p>
+  <p style="margin:0">大模型扫得懂整个代码库，却答不上来四个问题：项目怎么构建？在哪个环境验证？什么算"改对了"？每一步谁复核过？</p>
+  <p style="margin:8px 0 0">这些答案代码里没有，但都写在一份文件里：<code>project.yaml</code>。</p>
 </div>
 
-<h2>1.1 大模型的"结构盲区"</h2>
-<p>大模型可以扫描整个代码仓库，读懂语法、调用链甚至业务意图，但有一类信息它<strong>无论怎么扫代码都读不到</strong>——项目的结构元信息：</p>
+<h2>1.1 同一个需求，两种命运</h2>
 
 <div class="compare-row">
   <div class="compare-box compare-box-old">
-    <h4 style="color:var(--danger)">✕ 代码扫描读不到</h4>
-    <ul>
-      <li><strong>项目由哪些模块组成</strong>、各自如何构建 / lint / 测试</li>
-      <li><strong>有哪些环境</strong>、每个环境跑哪些 role、每个 role 有几个 instance</li>
-      <li><strong>环境怎么启停</strong>：start / stop / health_check 各是什么命令、超时多少</li>
-      <li><strong>构建按什么 pipeline 编排</strong>：stage × tracks 如何切分、依赖如何传递</li>
-    </ul>
+    <h4 style="color:var(--danger)">❌ 盲猜模式</h4>
+    <p>AI 读到代码，但猜构建命令、猜环境地址、猜验收标准——猜对了是运气，猜错了是"写完不敢合"。因为没人说得清它改对了没有、验证过没有。</p>
   </div>
   <div class="compare-box compare-box-new">
-    <h4 style="color:var(--success)">✓ project.yaml 显式给出</h4>
-    <ul>
-      <li><strong>结构</strong>：模块 / 环境 / 实例的完整声明</li>
-      <li><strong>操作</strong>：每个模块、环境、实例的构建与生命周期命令</li>
-      <li><strong>构建</strong>：pipeline 的 stage × tracks 编排结构</li>
-      <li><strong>约束</strong>：超时、错误分类、占位符规约等运行时元信息</li>
-    </ul>
+    <h4 style="color:var(--success)">✅ 品构模式</h4>
+    <p>先出图纸（propose）→ 按图施工（build）→ 真实环境验证 → 门控打分 → 合入。每一步都有结构兜底，<strong>系统比人先看见问题</strong>。</p>
   </div>
 </div>
 
-<p>缺了这些，AI 只能"猜"：猜项目结构、猜构建命令、猜环境地址。猜对了是运气，猜错了就是<strong>写完不敢合</strong>——因为没人说得清它改得对不对、验证过没有。</p>
+<h2>1.2 一份户口本 + 无人值守的一天</h2>
 
-<h2>1.2 品构 = 品质 × 结构</h2>
-
-<p>「品构」这个名字藏着全部设计哲学：</p>
+<p><code>project.yaml</code> 就是给 AI 的<strong>户口本</strong>：模块 / 环境 / 实例 / 构建命令 / 验证方式，白纸黑字。故名「品构」——<strong>品质，长在结构里</strong>。AI 不再猜，照章办事。</p>
 
 <div class="svg-container">
-<svg viewBox="0 0 700 240" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 720 100" xmlns="http://www.w3.org/2000/svg">
   <defs>
-    <linearGradient id="gg1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#7c3aed"/><stop offset="100%" stop-color="#a78bfa"/></linearGradient>
-    <linearGradient id="gg2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#2563eb"/><stop offset="100%" stop-color="#60a5fa"/></linearGradient>
+    <marker id="ar-tl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
   </defs>
-
-  <!-- 品 品质 -->
-  <rect x="30" y="40" width="620" height="60" rx="10" fill="url(#gg1)" opacity="0.18"/>
-  <rect x="30" y="40" width="620" height="60" rx="10" stroke="url(#gg1)" stroke-width="2" fill="none"/>
-  <text x="50" y="75" font-size="22" font-weight="700" fill="var(--text)">品</text>
-  <text x="92" y="75" font-size="14" font-weight="700" fill="#6d28d9">品质</text>
-  <text x="92" y="93" font-size="11" fill="#475569">每一行可被 checkpoint · 可被回放 · 可被追责</text>
-
-  <!-- 构 构造 -->
-  <rect x="30" y="120" width="620" height="60" rx="10" fill="url(#gg2)" opacity="0.18"/>
-  <rect x="30" y="120" width="620" height="60" rx="10" stroke="url(#gg2)" stroke-width="2" fill="none"/>
-  <text x="50" y="155" font-size="22" font-weight="700" fill="var(--text)">构</text>
-  <text x="92" y="155" font-size="14" font-weight="700" fill="#1d4ed8">构造</text>
-  <text x="92" y="173" font-size="11" fill="#475569">配置钉死边界，pipeline 钉死流程，task checkbox 钉死交付</text>
-
-  <text x="350" y="210" font-size="11" font-style="italic" fill="#64748b" text-anchor="middle">品质不是流程写在文档里 —— 是流程对每个 commit 都收一次口。</text>
+  <line x1="40" y1="50" x2="680" y2="50" stroke="#cbd5e1" stroke-width="2"/>
+  <circle cx="40" cy="50" r="6" fill="#2563eb"/>
+  <circle cx="200" cy="50" r="6" fill="#7c3aed"/>
+  <circle cx="400" cy="50" r="6" fill="#ef4444"/>
+  <circle cx="560" cy="50" r="6" fill="#059669"/>
+  <circle cx="680" cy="50" r="6" fill="#10b981"/>
+  <text x="40" y="30" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">说需求</text>
+  <text x="40" y="44" font-size="10" fill="#1d4ed8" text-anchor="middle">你描述</text>
+  <text x="200" y="30" font-size="12" font-weight="700" fill="#6d28d9" text-anchor="middle">出图纸</text>
+  <text x="200" y="44" font-size="10" fill="#6d28d9" text-anchor="middle">propose</text>
+  <text x="400" y="30" font-size="12" font-weight="700" fill="#b91c1c" text-anchor="middle">施工</text>
+  <text x="400" y="44" font-size="10" fill="#b91c1c" text-anchor="middle">build 无人值守</text>
+  <text x="560" y="30" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">验证</text>
+  <text x="560" y="44" font-size="10" fill="#065f46" text-anchor="middle">真实环境</text>
+  <text x="680" y="30" font-size="12" font-weight="700" fill="#047857" text-anchor="middle">合入</text>
+  <text x="680" y="44" font-size="10" fill="#047857" text-anchor="middle">master</text>
+  <text x="40" y="78" font-size="10" fill="#64748b" text-anchor="middle">🤝 你说需求</text>
+  <text x="200" y="78" font-size="10" fill="#64748b" text-anchor="middle">🤝 你看图纸点头</text>
+  <text x="400" y="78" font-size="10" fill="#94a3b8" text-anchor="middle">🤖 完全自动</text>
+  <text x="560" y="78" font-size="10" fill="#94a3b8" text-anchor="middle">🤖 完全自动</text>
+  <text x="680" y="78" font-size="10" fill="#64748b" text-anchor="middle">🤝 你点合并</text>
 </svg>
 </div>
 
-<p style="color:var(--muted); margin-top:8px"><strong>命名释义</strong>：质量靠<strong>结构本身</strong>托付——<code>project.yaml</code> 钉死"项目长什么样、怎么构建"，pipeline（<code>stages × tracks × TDRVG</code>）钉死"该怎么走"，每个 sub-agent 落一 checkbox 钉死"做没做完"。AI 在这套结构里写代码，写错了也是系统先看见。</p>
+<p>人只做两件事：<strong>说清需求</strong>、<strong>在关键节点点头</strong>。中间那 1-8 小时的实现 + 验证，全部由 pipeline 引擎自动跑完——你不参与。</p>
 
-<h2>1.3 一份 project.yaml 撑起的交付闭环</h2>
+<h2>1.3 从 SDD 到品构：方案 · 环境 · 验收</h2>
 
-<p>有了 <code>project.yaml</code> 补全的结构元信息，AI 就能跑通一条<strong>从需求到交付</strong>的完整链路——而且大部分环节可以无人值守：</p>
+<p>SDD（Specification-Driven Development）的核心是先写方案再写代码。但传统的 SDD 缺两样东西——它不关心真实环境长什么样，也不告诉你"验证通过"是在真环境跑的还是在 mock 里跑的。</p>
 
-<div class="svg-container">
-<svg viewBox="0 0 720 220" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="m1" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
-  </defs>
-
-  <rect x="230" y="15" width="260" height="46" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
-  <text x="360" y="34" font-size="13" font-weight="700" fill="#6d28d9" text-anchor="middle">project.yaml 结构元信息</text>
-  <text x="360" y="51" font-size="10" fill="#6d28d9" text-anchor="middle">模块 / 环境 / 实例 / 构建命令 / pipeline 编排</text>
-
-  <line x1="300" y1="61" x2="120" y2="92" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m1)"/>
-  <line x1="360" y1="61" x2="360" y2="92" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m1)"/>
-  <line x1="420" y1="61" x2="600" y2="92" stroke="#a78bfa" stroke-width="1.5" marker-end="url(#m1)"/>
-
-  <rect x="20" y="95" width="200" height="58" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
-  <text x="120" y="117" font-size="13" font-weight="700" fill="#1d4ed8" text-anchor="middle">① pg-propose</text>
-  <text x="120" y="135" font-size="10" fill="#1d4ed8" text-anchor="middle">基于结构生成提案产物</text>
-  <text x="120" y="148" font-size="10" fill="#1d4ed8" text-anchor="middle">proposal / design / tasks / manifest</text>
-
-  <rect x="260" y="95" width="200" height="58" rx="8" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
-  <text x="360" y="117" font-size="13" font-weight="700" fill="#b91c1c" text-anchor="middle">② pg-build</text>
-  <text x="360" y="135" font-size="10" fill="#b91c1c" text-anchor="middle">无人值守执行 pipeline</text>
-  <text x="360" y="148" font-size="10" fill="#b91c1c" text-anchor="middle">按 stages × tracks 构建 + 门控</text>
-
-  <rect x="500" y="95" width="200" height="58" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
-  <text x="600" y="117" font-size="13" font-weight="700" fill="#065f46" text-anchor="middle">③ 交付</text>
-  <text x="600" y="135" font-size="10" fill="#065f46" text-anchor="middle">经真实环境验证的最终结果</text>
-
-  <line x1="220" y1="124" x2="258" y2="124" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#m1)"/>
-  <line x1="460" y1="124" x2="498" y2="124" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#m1)"/>
-
-  <rect x="200" y="172" width="320" height="40" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="6,3"/>
-  <text x="360" y="197" font-size="11" font-weight="700" fill="#92400e" text-anchor="middle">质量保障：pg-regression 回归 + pg-fix-issue 自动修复并提交 PR</text>
-
-  <path d="M 600 153 L 600 192 L 522 192" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-dasharray="4,3" marker-end="url(#m1)"/>
-  <path d="M 200 192 L 120 192 L 120 155" stroke="#f59e0b" stroke-width="1.5" fill="none" stroke-dasharray="4,3" marker-end="url(#m1)"/>
-</svg>
-</div>
-
-<p style="color:var(--muted); margin-top:8px">关键点在于：<strong>因为结构是显式的，所以每一环都不需要人盯着猜</strong>。propose 知道"这个项目有哪些模块、该产出哪些工件"；build 知道"按什么顺序构建、在哪做门控、怎么起真实环境验证"；交付的结果因此可被信任，而不是"看起来能跑"。</p>
-
-<h2>1.4 交付之后的质量闭环</h2>
-
-<p>交付不是终点。品构用两条回路持续守住质量，同样基于 <code>project.yaml</code> 声明的结构与环境运行：</p>
+<p>品构在方案之外加了两个同等级别的支柱：</p>
 
 <table>
-  <tr><th>机制</th><th>做什么</th><th>为什么能自动化</th></tr>
-  <tr>
-    <td><strong>pg-regression 回归</strong></td>
-    <td>按声明的 suite 在真实环境跑回归测试，失败自动分类（A/B/C），输出结构化问题清单</td>
-    <td>环境 / 模块 / 测试命令都已在 <code>project.yaml</code> 中声明，回归无需人工指定</td>
-  </tr>
-  <tr>
-    <td><strong>pg-fix-issue 自动修复</strong></td>
-    <td>对回归发现的问题：环境探测 → 诊断根因 → 修复 → 真实环境验证 → 自动提交 PR</td>
-    <td>修复者能读到完整的项目结构与生命周期命令，验证用的是同一套真实环境</td>
-  </tr>
+  <tr><th>支柱</th><th>是什么</th><th>解决什么问题</th></tr>
+  <tr><td><strong>方案</strong></td><td>proposal / design / tasks</td><td>做什么、怎么做、怎么验证</td></tr>
+  <tr><td><strong>环境</strong></td><td>env-description.yaml（describe_env 只读探测）</td><td>真实环境快照——有哪些 DB、版本多少、数据状态如何，不再猜</td></tr>
+  <tr><td><strong>验收</strong></td><td>scenario-*.yaml（Gherkin 场景）</td><td>验收不是在 mock 里跑，而是在真实服务实例上跑 Given / When / Then</td></tr>
 </table>
 
-<div class="tip-card card">
-  <p style="margin:0">两条回路的共同前提都是 §1.1 补全的那份结构元信息：<strong>机器知道项目长什么样、怎么验证它，才能真正接管"发现问题 → 修复 → 再验证"的循环</strong>，而不是把烂摊子留给人。</p>
-</div>
+<p>三根支柱加在一起，才是品构说的"结构"。缺了环境，方案写的是"假设中的环境"；缺了真实验收，验证跑的是"理想中的验证"。只有三者合一，系统才能完整地描述"项目长什么样 → 在哪验证 → 怎么算真通过"。</p>
+
+<p><strong>品质，长在结构里</strong>——就是这个"三合一"的结构。</p>
+
+<h2>1.4 为什么敢合</h2>
+
+<p>三步质检，让"敢合"不是靠感觉：</p>
+
+<ul>
+  <li><strong>每步留痕可回放</strong> —— 每个操作都是不可变事件，随时可以复盘</li>
+  <li><strong>验证在真实环境</strong> —— 启动真实服务、跑真实 API、查真实日志，不是 mock 里跑一跑</li>
+  <li><strong>门控打分 ≥80 才放行</strong> —— 5 维加权评分，没评审就不合入，没验证就不交付</li>
+</ul>
+
+<p>交付不是终点。回归发现问题 → 自动修复 → 提交 PR，闭环兜底。</p>
 
 <div class="subsection-card">
 <h2 style="margin-top:16px">使用 pg-skills 的日常体感</h2>
@@ -487,7 +427,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 
 <h2>1.5 AI 在每一步的角色</h2>
 
-<p>「让 AI 写出可托付的代码」——这里「<strong>写出</strong>」二字要分开看：</p>
+<p>「品质，长在结构里」——这里「<strong>写出</strong>」二字要分开看：</p>
 
 <table>
   <tr><th>流程</th><th>AI 角色</th><th>是否署名</th><th>谁兜底</th></tr>
@@ -524,7 +464,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 </table>
 
 <div class="info-card card">
-  <p style="margin:0"><strong>「可托付」的内在承诺</strong>：每一段被 AI 写出的代码，<strong>都先定了界、有人审了图、跑过了门控、留了回放</strong>。"可托付"不是流程写在文档里——是流程对每个 commit 都收一次口。</p>
+  <p style="margin:0"><strong>「品质，长在结构里」的内在承诺</strong>：每一段被 AI 写出的代码，<strong>都先定了界、有人审了图、跑过了门控、留了回放</strong>。"可托付"不是流程写在文档里——是流程对每个 commit 都收一次口。</p>
 </div>
 
 </div>
@@ -532,7 +472,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 <!-- ============================================================ -->
 <div id="sec2" class="section">
 <h1>2. 架构全景——三层模型</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「让 AI 写出可托付的代码」—— 我们从结构开始建。一个项目对品构是 3 层：共享能力层 / 项目配置层 / 业务代码层。</p>
+<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 我们从结构开始建。一个项目对品构是 3 层：共享能力层 / 项目配置层 / 业务代码层。</p>
 
 <h2>2.1 三层架构</h2>
 <div class="svg-container">
@@ -643,14 +583,50 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <p style="margin:0"><strong>caller × session 双维度路由</strong>：上面 <code>changes/</code> / <code>regression/</code> / <code>fix-issue/</code> / <code>ad-hoc/</code> 四个目录由 <code>PG_RUN_CALLER</code> 决定一级目录，由 <code>PG_RUN_SESSION</code> 决定二级目录。runner 自动按调用方身份把日志、PID、result.json 写到对应路径，无需手动指定。<code>cronjobs/</code> 不属于 hook 协议路由，由项目自管；典型场景是 crontab 触发 <code>pg-regression</code> 或 <code>pg-propose</code> 批量任务。</p>
 </div>
 
-<h2>2.3 AGENTS.md 的角色</h2>
+<h2>2.3 四层结构 —— 品质从哪里来</h2>
+
+<p>1.3 节讲了品构的三大支柱——方案 · 环境 · 验收。那这些支柱是靠什么"钉死"的？靠四层结构，层层收紧：</p>
+
+<table>
+  <tr><th>层</th><th>载体</th><th>收紧什么</th><th>解决什么问题</th></tr>
+  <tr>
+    <td><strong>项目结构</strong></td>
+    <td><code>project.yaml</code></td>
+    <td>模块 / 环境 / 实例 / 构建命令</td>
+    <td>不再猜"项目长什么样"</td>
+  </tr>
+  <tr>
+    <td><strong>流程结构</strong></td>
+    <td>stages × tracks × TDRVG</td>
+    <td>先做什么、再做什么、最后门控</td>
+    <td>不再猜"够不够"</td>
+  </tr>
+  <tr>
+    <td><strong>产物结构</strong></td>
+    <td>schema / template / 校验脚本</td>
+    <td>每个文件该长什么样、该含什么字段</td>
+    <td>不再猜"写没写全"</td>
+  </tr>
+  <tr>
+    <td><strong>证据结构</strong></td>
+    <td>事件溯源 <code>pipeline.events</code></td>
+    <td>每步操作不可变、可回放</td>
+    <td>不再猜"谁干了什么"</td>
+  </tr>
+</table>
+
+<p>每一层都是系统可以自动执行的契约，不是需要人记的规则。四层合在一起，才让"品质"这个抽象词变成可操作、可验证、可回放的具体机制。</p>
+
+<p><strong>品质，长在结构里</strong>——就是"方案 · 环境 · 验收"三大支柱，被四层结构层层收紧的结果。</p>
+
+<h2>2.4 AGENTS.md 的角色</h2>
 <p>AGENTS.md 是 AI 的"入职手册"——包含项目的技术栈、包结构、数据库约定、编码风格、路径规范等。pg-propose 直接通读所有 AGENTS.md 提取上下文作为 LLM 约束，不生成中间缓存文件。</p>
 </div>
 
 <!-- ============================================================ -->
 <div id="sec3-onboard" class="section">
 <h1>3. 新项目接入——Two Pillars</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:4px">「让 AI 写出可托付的代码」—— 我们先把骨架钉死在项目里。骨架对，AI 在里面写代码就是"合结构"的；骨架错，AI 写得越多越危险。</p>
+<p style="color:var(--muted); font-style:italic; margin-bottom:4px">「品质，长在结构里」—— 我们先把骨架钉死在项目里。骨架对，AI 在里面写代码就是"合结构"的；骨架错，AI 写得越多越危险。</p>
 <p class="muted">接入新项目，最重要的三件事：<strong>写对 project.yaml</strong> + <strong>写对 hooks</strong> + <strong>写对 <code>.pg/code-review/</code></strong></p>
 
 <h2>3.1 五步接入</h2>
@@ -751,7 +727,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 
   <rect x="376" y="285" width="290" height="42" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
   <text x="521" y="305" font-size="13" font-weight="600" fill="#065f46" text-anchor="middle">environments</text>
-  <text x="521" y="321" font-size="11" fill="#64748b" text-anchor="middle">运行时拓扑 + role 启停动作</text>
+  <text x="521" y="321" font-size="11" fill="#64748b" text-anchor="middle">运行时拓扑 + describe_env + role 启停动作</text>
 
   <!-- ======== Footer ======== -->
   <text x="36" y="375" font-size="11" fill="#64748b">补充字段：verify_merge / flyway.migration_path / git.default_branch / build_rules</text>
@@ -787,10 +763,11 @@ modules:
 environments:
   dev-local:
     description: "本机全栈开发"
-    prepare_env: { script: .pg/hooks/env-dev-local-prepare.sh, timeout_seconds: 300 }
-    clean_env:   { script: .pg/hooks/env-dev-local-clean.sh, timeout_seconds: 120 }
+    describe_env: { script: .pg/hooks/env-dev-local-describe.sh, timeout_seconds: 120 }
+    prepare_env:  { script: .pg/hooks/env-dev-local-prepare.sh, timeout_seconds: 300 }
+    clean_env:    { script: .pg/hooks/env-dev-local-clean.sh, timeout_seconds: 120 }
     roles:
-      backend:
+      - name: backend
         instances:
           - { name: backend-1, host: localhost, port: 9080 }
         actions:
@@ -1063,7 +1040,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <!-- 4.1 概述 -->
 <div id="sec4-overview" class="section">
 <h1>4. 日常开发工作流</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「让 AI 写出可托付的代码」—— 我们让每一段都先出图再施工。这一章是品构的核心流：定界（Define）→ 提案（Propose）→ 构建（Build）→ 评审（Review）→ 合并（Merge）。</p>
+<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 我们让每一段都先出图再施工。这一章是品构的核心流：定界（Define）→ 提案（Propose）→ 构建（Build）→ 评审（Review）→ 合并（Merge）。</p>
 
 <div class="tip-card card">
 <p><strong>本章结构</strong>：4.1 全景路线图 → 4.2 定界 → 4.3 提案 → 4.4 构建。每节都讲核心机制 + 实操要点。</p>
@@ -1158,7 +1135,7 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <h3>输入/输出对照表</h3>
 <table>
   <tr><th>阶段</th><th>入口</th><th>输入</th><th>输出</th></tr>
-  <tr><td>1. 定界</td><td><code>/1-pg-define</code></td><td>模糊需求</td><td>边界清单 + scope summary</td></tr>
+  <tr><td>1. 定界</td><td><code>/1-pg-define</code></td><td>模糊需求</td><td>边界清单 + scope summary + <strong>define-summary.yaml</strong></td></tr>
   <tr><td>2. 提案</td><td><code>/2-pg-propose</code></td><td>边界 + project.yaml + .pg/code-review/</td><td>proposal + design + tasks + <strong>execution-manifest.yaml</strong></td></tr>
   <tr><td>3. 构建</td><td><code>/3-pg-build</code></td><td>设计文档 + execution-manifest.yaml + project.yaml</td><td>代码 + 测试 + 报告（含 review 阶段产物）+ 自动归档</td></tr>
   <tr><td>4. 合并</td><td><code>pg-verify-and-merge</code></td><td>feature branch</td><td>合入 master</td></tr>
@@ -1170,45 +1147,55 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <div id="sec4-define" class="section">
 <h1>4.2 定界 —— `/1-pg-define`</h1>
 
-<p style="color:var(--muted); font-style:italic"><strong>定界</strong>：由人类通过自然语言对话描述自己对系统的需求，LLM 以需求为锚点，探索当前代码库的已有代码，并通过多轮询问的方式，确定需求边界的过程。</p>
+<p style="color:var(--muted); font-style:italic"><strong>定界</strong>：把用户脑海里的需求，和代码库里的真实代码"撞"在一起，通过多轮对话把方案与实施边界聊清楚的过程。</p>
+
+<p><code>/1-pg-define</code> 是一段自由对话，不是固定流程——没有脚本、没有强制产物。AI 是思考伙伴，陪你把三件事聊明白：</p>
+
+<ol>
+  <li><strong>需求 × 现实代码</strong> —— 不空谈，把想法落到代码库里：相关模块在哪、有没有同类实现、会动到谁</li>
+  <li><strong>方案与边界</strong> —— 做什么 / 不做什么、影响范围多大、怎么算做完（完成标准）</li>
+  <li><strong>真实环境验收</strong> —— 边界聊定后，讨论这个需求将来在真实环境里怎么验收（见下文「环境验证」）</li>
+</ol>
+
+<p>这条探索有红线：<strong>只讨论、不写代码</strong>。AI 不做实现，正式产物由后续 <code>/2-pg-propose</code> 生成。</p>
 
 <h2>输入 → 产出</h2>
 
-<p><strong>输入</strong>：用户的原始需求描述（可能模糊、可能隐含假设）</p>
-<p><strong>产出</strong>：对话中的口头 scope summary（边界清单 + in/out of scope + 完成标准）。<strong>不落盘</strong>——定界不产生文件，正式产物在后续 <code>/2-pg-propose</code> 中生成。</p>
+<p><strong>输入</strong>：用户的原始想法——可以很模糊（"实时协作"）、可以是具体问题、也可以是两个方案的比较，甚至没有参数直接开聊。</p>
+<p><strong>产出</strong>：口头对齐的 scope summary（边界 + 完成标准）。定界本身<strong>不落盘</strong>；唯一例外是结尾的「环境验证」，会落盘一份 <code>define-summary.yaml</code>（+ 只读探测产物 <code>env-description.yaml</code>），直接供 <code>/2-pg-propose</code> 使用。</p>
 
-<h2>探索姿态</h2>
+<h2>定界后的环境验证</h2>
 
-<p><code>/1-pg-define</code> 是一种姿态而非工作流：没有固定步骤、没有必经流程、没有强制产出。AI 作为思考伙伴帮助用户收敛 scope：</p>
+<p>定界收尾时，AI 会带你把「将来怎么验收」讨论清楚——这是唯一会落盘、会调用 hook 的环节，目的是提前确认环境里有没有验收要的依赖（初始化数据、第三方服务等），免得 propose 时才发现缺东西。流程很轻：</p>
 
 <ol>
-  <li><strong>澄清模糊表述</strong> —— 把"太慢"转化为可测量的响应时间指标</li>
-  <li><strong>划定边界</strong> —— 影响范围是单一模块还是跨多个组件？明确 in / out of scope</li>
-  <li><strong>暴露隐式假设</strong> —— 挑战"必须用 X"的前提，打开替代方案空间</li>
-  <li><strong>识别集成点</strong> —— 会触及哪些现有功能？依赖其他系统或团队吗？</li>
-  <li><strong>对标既有模式</strong> —— 检索同类功能，遵循项目既有风格</li>
-  <li><strong>揭示风险</strong> —— 破坏性变更？兼容性？边界情况（并发、权限、空值）？</li>
-  <li><strong>收敛完成标准</strong> —— 怎么算做好了？区分 MVP 和迭代</li>
+  <li><strong>定 change-id + 选环境</strong> —— 给这次变更起个名（如 <code>add-bucket-s3-info</code>），并选一个目标 <code>environment</code></li>
+  <li><strong>只读探测真实环境</strong> —— 通过 describe_env 探测（不启停服务、不写 DB），产出 <code>env-description.yaml</code></li>
+  <li><strong>逐个验收点讨论</strong> —— 每个 V-* 需要环境提供什么能力（DB、对象存储、多租户…）、环境里有没有、缺了怎么降级，最终标记为 <code>verifiable</code>（可验证）/ <code>degraded</code>（降级）/ <code>skipped</code>（跳过）</li>
+  <li><strong>落盘并校验</strong> —— 写入 <code>define-summary.yaml</code>，过一遍机械校验</li>
 </ol>
 
 <div class="danger-card card">
-  <h4 style="margin:0 0 8px">探索中的禁忌</h4>
+  <h4 style="margin:0 0 8px">红线</h4>
   <ul style="margin:0;padding-left:20px">
-    <li>过早解决：跳过对问题的理解就"直接用 X 就行"</li>
-    <li>功能蔓延：用户每说一个想法就延伸 3 个额外功能（YAGNI）</li>
-    <li>过度工程化：设计一个通用框架处理所有场景</li>
-    <li>确认偏误：只在代码库中找支持自己假设的证据</li>
-    <li>写代码冲动：在想"那行代码怎么写"而非"方案是否合理"</li>
+    <li>未经用户确认，不落盘、不调 hook</li>
+    <li>验收讨论不滑向实现细节（那是 design.md 的事）</li>
+    <li>不硬编码 IP / hostname / 端口，一律用 <code>{env.…}</code> 占位</li>
   </ul>
 </div>
 
-<h2>定界后的路径选择</h2>
+<h2>定界之后，去哪？</h2>
 
-<p>边界清晰后，AI 用 <code>question</code> 工具给出三个选项（用户做选择，AI 不替你决定）：</p>
+<p>环境验证通过后，AI 会用两个 <code>question</code> 跟你确认，不替你决定方向：</p>
+
+<ul>
+  <li><strong>Q1</strong> —— 验证方案够了吗？不够就回去继续细化；够了就进入下一步</li>
+  <li><strong>Q2</strong> —— 下一步走哪条路？</li>
+</ul>
 
 <table>
   <tr><th>路径</th><th>适用</th></tr>
-  <tr><td><code>/2-pg-propose</code></td><td>正经功能、跨模块、需要设计评审</td></tr>
+  <tr><td><code>/2-pg-propose</code>（推荐）</td><td>正经功能、跨模块、需要设计评审</td></tr>
   <tr><td><code>/2b-pg-quick-build</code></td><td>明确小改动、≤8 tasks、单 module</td></tr>
   <tr><td>直接实施</td><td>改文案/样式，无需任何 SKILL</td></tr>
 </table>
@@ -1219,125 +1206,47 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <div id="sec4-propose" class="section">
 <h1>4.3 提案 —— `/2-pg-propose`</h1>
 
-<p style="color:var(--muted); font-style:italic"><strong>提案</strong>：基于已定义的需求边界，选择用于测试验证此需求的环境，生成提案文档、设计文档、任务细分文档、构建执行脚本、真实场景验证脚本，提前规划 pg-build 所需的各种细节，以便 pg-build 可以无人值守运行，并最终交付符合要求的产出物。</p>
+<p style="color:var(--muted); font-style:italic"><strong>提案</strong>：把定界聊出来的边界，变成一套"施工图纸"——proposal（做什么 / 为什么）、design（怎么做 / 怎么验证）、tasks（分步施工单）、manifest（执行清单）、scenario（端到端验收脚本）。图纸齐了，pg-build 就能无人值守施工。</p>
+
+<p>这一段 AI 主要在<strong>写文档</strong>：不碰业务代码、不跑测试、不起服务。它把定界对话里的结论整理成一套结构化产物，落到 <code>.pg/changes/&lt;change-id&gt;/</code> 下。</p>
 
 <h2>输入 → 产出</h2>
 
-<p><strong>输入</strong>：定界产物（边界清单 + scope summary）+ <code>.pg/project.yaml</code>（tracks / stages / environments 定义）</p>
-<p><strong>产出</strong>：6-7 个文件，按生成顺序分六组：</p>
+<p><strong>输入</strong>：定界产物（scope summary + define-summary.yaml）+ <code>.pg/project.yaml</code>（模块命令 / stages / environments 定义）</p>
+<p><strong>产出</strong>：5 份必填 + 按需扩展——</p>
 
 <table>
-  <colgroup>
-    <col style="width:100px">
-    <col><col>
-  </colgroup>
-  <tr><th>分组</th><th>文件</th><th>描述</th></tr>
-  <tr>
-    <td><strong>① 环境描述</strong></td>
-    <td><code>env-description.yaml</code></td>
-    <td>目标 environment 的 6 段资源拓扑真实探测结果，作为全产物写作的强制 context。</td>
-  </tr>
-  <tr>
-    <td><strong>② 指导实现</strong></td>
-    <td><code>proposal.md</code> / <code>design.md</code></td>
-    <td>变更范围与理由（proposal）、接口设计与 V-* 验证标准（design），LLM 据此写代码。</td>
-  </tr>
-  <tr>
-    <td><strong>③ 任务蓝图</strong></td>
-    <td><code>tasks.md</code></td>
-    <td>按 stages × tracks 划分的实现步骤与验证描述，含断点恢复 checkbox。</td>
-  </tr>
-  <tr>
-    <td><strong>④ 评估记录</strong></td>
-    <td><code>on-conditions-eval.md</code></td>
-    <td><code>on_conditions</code> 机械评估结果与 scenario_tracks_decision SSOT，manifest 与 scenario 的输入。</td>
-  </tr>
-  <tr>
-    <td><strong>⑤ 驱动编排</strong></td>
-    <td><code>execution-manifest.yaml</code></td>
-    <td>Runner 直接消费的编排清单：stage 顺序、track 列表、phase_prompts、environment 选择。</td>
-  </tr>
-  <tr>
-    <td><strong>⑥ 场景定义</strong></td>
-    <td><code>scenario-&lt;track&gt;.yaml</code></td>
-    <td>scenario track 的 Gherkin 场景定义，含 Given/When/Then/And 步骤与 evidence 规格。</td>
-  </tr>
+  <tr><th>文件</th><th>一句话解释</th></tr>
+  <tr><td><code>proposal.md</code></td><td>做什么、为什么做（变更范围与理由）</td></tr>
+  <tr><td><code>design.md</code></td><td>怎么做、怎么验证（接口设计 + V-* 验收标准）</td></tr>
+  <tr><td><code>tasks.md</code></td><td>分步施工单：按 stage × track 切好的实施步骤，带进度 checkbox，支持断点续做</td></tr>
+  <tr><td><code>execution-manifest.yaml</code></td><td>施工清单：stage 顺序、track 列表、选好的 environment——pg-build 的"总指挥"</td></tr>
+  <tr><td><code>1-propose-review/on-conditions-eval.md</code></td><td>哪些 stage/track 启用、要不要 scenario 的决策记录（SSOT）</td></tr>
+  <tr><td><code>scenario-&lt;track&gt;.yaml</code>（按需）</td><td>端到端验收脚本（Gherkin），在真实环境里跑给需求做最终验收</td></tr>
 </table>
 
-<h2>stage / track 启用决策（on_conditions）</h2>
+<h2>三个关键决策</h2>
 
-<p><code>stages[*].on_conditions</code> 与 <code>tracks[*].on_conditions</code> 是自然语言规则列表，pg-propose 据此判断本次变更是否启用该 stage / track（任一命中即启用，OR 语义；缺省视为常驻）。典型用法：把仅在改特定文件时才需要跑的 stage / track 标上 glob 规则，避免每个变更都跑不必要的步骤。</p>
+<p>写图纸的过程中，AI 要定三件事：</p>
 
-<p><strong>示例</strong>：仅在改 OpenAPI 注解时跑 <code>openapi-gen</code> track；仅在改 hooks 脚本时才跑 <code>prepare-env-scripts</code> stage。</p>
+<ol>
+  <li><strong>哪些步骤要跑</strong> —— 用 <code>on_conditions</code> 规则判断：只改了 OpenAPI 注解，就没必要重跑 hooks 相关步骤。命中就启用、没命中就跳过，避免每个变更都跑全流程</li>
+  <li><strong>在哪个环境跑</strong> —— 按 <code>selection_rules</code> 给每个 stage 选一个 environment（如 dev-local / dev-3tier）写进 manifest。环境选错要等 build 阶段才会暴露，所以这里得想清楚</li>
+  <li><strong>要不要端到端验收</strong> —— 跨模块联调 / 新 API / 多角色协作的变更，启用 scenario track 写 Gherkin 脚本；纯单模块改动（文档、SQL、单个 API）就不需要</li>
+</ol>
 
-<pre>
-stages:
-  - name: prepare-env-scripts
-    tracks: [backend, agent, frontend]
-    on_conditions:
-      - any_change_in: ["\.pg/hooks/.*\.sh$"]
+<h2>一切都基于真实环境</h2>
 
-tracks:
-  openapi-gen:
-    type: simple
-    modules: [backend]
-    on_conditions:
-      - any_change_in: ["webvirt-backend/src/main/java/.*/api/.*\.java$"]
-      - description: "本变更涉及 OpenAPI 注解"
-</pre>
+<p>图纸里的每个验收点（V-*）都锚定真实环境，不靠想象：</p>
 
-<div class="tip-card card">
-  <p style="margin:0"><strong>评估结果落盘</strong>：propose 把每个 stage / track 的命中状态写入 <code>1-propose-review/on-conditions-eval.md</code>，作为 SSOT 驱动后续 manifest 生成与三产物一致性校验。</p>
-</div>
+<ul>
+  <li><strong>env-description.yaml</strong> —— 定界阶段 describe_env 探测出的环境资源清单（有哪些 DB、缓存、第三方服务、数据状态）。所有产物写验收时都要引用它，不允许拿"环境未就绪"当借口跳过</li>
+  <li><strong>define-summary.yaml</strong> —— 定界阶段和用户聊好的每个 V-* 的验收方式（<code>verifiable</code> 可验证 / <code>degraded</code> 降级 / <code>skipped</code> 跳过），这里直接沿用，不再重新讨论</li>
+</ul>
 
-<h2>environment 选择</h2>
+<h2>一次机械校验把关</h2>
 
-<p>对 <code>environment.required: true</code> 的 stage，pg-propose 按 <code>stages[*].environment.selection_rules</code>（自然语言规则列表）为本次变更选定一个 environment 并写入 <code>execution-manifest.yaml.stages[i].environment</code>。选错环境的后果在 build 阶段才会暴露（runner 在错误的 host 上启服务 → 启动失败 / 端口冲突 / 环境变量缺失），缺失则 <code>workflow_failed</code> 硬性终止。</p>
-
-<p><strong>示例</strong>：根据 <code>affected_tracks</code> 与变更范围选择 environment。</p>
-
-<pre>
-stages:
-  - name: dev
-    tracks: [backend, frontend]
-    test_key: unit
-    environment:
-      required: true
-      selection_rules:
-        - 只改 backend + frontend → dev-local（单机能跑）
-        - 改 agent 且需要跨主机通信 → dev-3tier
-        - 默认 dev-local，评审阶段可升级到 staging / prod
-</pre>
-
-<h2>环境描述（env-description.yaml）</h2>
-
-<p>选定 environment 后，propose 通过 <code>describe_env</code> hook 只读探测目标环境，产出 <code>.pg/changes/&lt;change-id&gt;/env-description.yaml</code>，作为后续全部产物写作的强制 context——scenario 的 <code>given</code> 必须引用其中已声明的真实资源。包含 6 段资源拓扑 + relations：</p>
-
-<table>
-  <tr><th>段</th><th>内容</th></tr>
-  <tr><td><code>infra_services</code></td><td>基础设施服务（DB / Cache / MQ / 对象存储 / K8s / 容器运行时 / 服务网格）</td></tr>
-  <tr><td><code>business_systems</code></td><td>业务系统（上下游 / 兄弟服务 / mock / stub）</td></tr>
-  <tr><td><code>data_resources</code></td><td>数据资源（DB schema / 种子数据 / 消息主题 / 文件 / CRD）</td></tr>
-  <tr><td><code>config_resources</code></td><td>配置资源（应用配置 / TLS 证书 / env vars / 密钥）</td></tr>
-  <tr><td><code>runtime_environment</code></td><td>运行时环境（OS / 网络 / DNS / 虚拟设备 / 监控接入 / cron）</td></tr>
-  <tr><td><code>external_dependencies</code></td><td>外部依赖（第三方 SaaS / 跨集群 / 共享基础设施）</td></tr>
-  <tr><td><code>relations</code></td><td>跨段关联（depends_on / owns / reads / writes / references / proxies_to / monitors）</td></tr>
-</table>
-
-<h2>场景定义（scenario-&lt;track&gt;.yaml）</h2>
-
-<p>为每个启用的 scenario track 各产出一个 Gherkin 场景定义文件。用途：在 build 阶段的 scenario track 中，基于真实环境执行场景以验证需求的最终实现情况——执行失败时派遣 sub-agent 修复，循环直至场景验证通过。主要输入信息来源于 <code>proposal.md</code>（变更范围）、<code>design.md</code>（验证标准）与 <code>env-description.yaml</code>（真实资源）。包含字段：</p>
-
-<table>
-  <tr><th>字段</th><th>说明</th></tr>
-  <tr><td><code>id</code></td><td>场景唯一 ID</td></tr>
-  <tr><td><code>description</code></td><td>一句话验证目标</td></tr>
-  <tr><td><code>given[]</code></td><td>前置条件，引用 env-description.yaml 中已声明的真实资源</td></tr>
-  <tr><td><code>when[]</code></td><td>触发动作（API 请求或浏览器操作）</td></tr>
-  <tr><td><code>then[]</code></td><td>断言表达式</td></tr>
-  <tr><td><code>and[]</code></td><td>cleanup 动作</td></tr>
-  <tr><td><code>evidence</code></td><td>证据采集规格（screenshot / response_body / log）</td></tr>
-</table>
+<p>所有产物写完，跑 <code>pg-validate-proposal.py</code> 做唯一校验：文件是否齐全、占位符有没有漏填、tasks / manifest / scenario 三份产物是否对得上。不过就不放行，修复到通过为止。校验通过后，就可以喊 <code>/3-pg-build</code> 开工了。</p>
 </div>
 
 <!-- ============================================================ -->
@@ -1347,467 +1256,70 @@ stages:
 
 <p style="color:var(--muted); font-style:italic">"图纸审完了，Runner 开始施工。<strong>人只做一件事</strong>：执行命令等结果。"</p>
 
-<h2 id="sec4-4-1">4.4.1 概述</h2>
+<h2>一句话理解</h2>
 
-<p><code>/3-pg-build</code> 是品构的<strong>施工阶段</strong>。它读取 propose 阶段产出的蓝图，按 <code>execution-manifest.yaml</code> 定义的 stage/track 顺序，逐一派遣 sub-agent 实现代码、运行测试、执行审查、打分门控。</p>
+<p><code>/3-pg-build</code> 是<strong>施工阶段</strong>。它读取 propose 画好的图纸，按 <code>execution-manifest.yaml</code> 的编排，把「写代码 → 跑测试 → 审查 → 验证 → 打分」全部自动跑完。AI 在过程中反复做一件简单的事：</p>
 
-<p><strong>输入</strong>：<code>execution-manifest.yaml</code>（stage/track 编排）+ <code>tasks.md</code>（任务描述 + checkbox 进度）+ <code>.pg/project.yaml</code>（模块命令与环境配置）</p>
-<p><strong>输出</strong>：代码 + 测试 + <code>pipeline.events</code>（append-only JSONL 事件溯源）+ 各 phase 报告（review / verify / gate 评分等）</p>
-
-<h3>核心循环：4 步一轮</h3>
-
-<p>LLM 编排器每轮执行 4 步，重复直到所有 track 完成或失败：</p>
-
-<div class="svg-container">
-<svg viewBox="0 0 760 110" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arr-loop" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
-  </defs>
-  <rect x="10" y="20" width="150" height="50" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
-  <text x="85" y="44" font-size="12" font-weight="600" fill="#1d4ed8" text-anchor="middle">① 调用 runner</text>
-  <text x="85" y="60" font-size="10" fill="#1d4ed8" text-anchor="middle">next → 返回 action</text>
-  <line x1="160" y1="45" x2="180" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-loop)"/>
-  <rect x="185" y="20" width="150" height="50" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="260" y="44" font-size="12" font-weight="600" fill="#92400e" text-anchor="middle">② 派送 sub-agent</text>
-  <text x="260" y="60" font-size="10" fill="#92400e" text-anchor="middle">Task tool 执行</text>
-  <line x1="335" y1="45" x2="355" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-loop)"/>
-  <rect x="360" y="20" width="150" height="50" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
-  <text x="435" y="44" font-size="12" font-weight="600" fill="#065f46" text-anchor="middle">③ record 结果</text>
-  <text x="435" y="60" font-size="10" fill="#065f46" text-anchor="middle">写 pipeline.events</text>
-  <line x1="510" y1="45" x2="530" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-loop)"/>
-  <rect x="535" y="20" width="150" height="50" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
-  <text x="610" y="44" font-size="12" font-weight="600" fill="#6d28d9" text-anchor="middle">④ 重新 next</text>
-  <text x="610" y="60" font-size="10" fill="#6d28d9" text-anchor="middle">→ done / workflow_failed</text>
-  <text x="380" y="100" font-size="11" fill="#64748b" text-anchor="middle">重复直到 runner 返回 done 或 workflow_failed</text>
-</svg>
-</div>
-
-<div class="tip-card card">
-  <p style="margin:0"><strong>Runner 自动管的事</strong>：切 feature branch、init commit、每 sub 阶段自动 commit、报告编号 <code>{track}-{N}-{kind}.md</code>、final-gate pass 后自动归档到 <code>changes/archive/</code>。你只需执行 <code>/3-pg-build</code> 等结果。</p>
-</div>
-
-<div class="subsection-card">
-  
-
-<h2 id="sec4-4-2">4.4.2 track 类型一览</h2>
-
-<p>pg-build 支持 <strong>4 种 track 类型</strong>，由 <code>project.yaml</code> 的 <code>tracks.&lt;id&gt;.type</code> 字段区分：</p>
-
-<table>
-  <tr><th>类型</th><th>编排模型</th><th>sub-agent</th><th>gate 评估</th><th>适用场景</th></tr>
-  <tr>
-    <td><code>standard</code>（默认）</td>
-    <td>TDRVG 五阶段或 3-5 sub</td>
-    <td>test / dev / review / verify / gate + fix / fix-review / fix-gate</td>
-    <td>5 维加权评分 ≥80</td>
-    <td>跨模块功能开发、需设计评审</td>
-  </tr>
-  <tr>
-    <td><code>simple</code></td>
-    <td>commands 列表直跑</td>
-    <td>无（exit 0 = pass）</td>
-    <td>不参与</td>
-    <td>代码生成、文件同步、模板替换</td>
-  </tr>
-  <tr>
-    <td><code>scenario</code></td>
-    <td>scenario-prepare → scenario-execute → [scenario-fix → scenario-execute]*</td>
-    <td>scenario-prepare / scenario-execute / scenario-fix</td>
-    <td>豁免</td>
-    <td>真实集成场景测试（Gherkin 风格用户旅程）</td>
-  </tr>
-</table>
-
-<div class="tip-card card">
-  <p style="margin:0">下表逐一展开每种类型的详细机制。gate-score 是所有含 gate 阶段 track 的通用评分机制，在最后单独说明。</p>
-</div>
-
-</div>
-
-<div class="subsection-card">
-<h2 id="sec4-4-3">4.4.3 TDRVG 阶段（standard track）</h2>
-
-<p>每个 standard track 默认执行完整的 <strong>5 个阶段</strong>：<code>test</code> → <code>dev</code> → <code>review</code> → <code>verify</code> → <code>gate</code>。其中 review / verify / gate 可在 <code>.pg/project.yaml</code> 的 <code>tracks.&lt;id&gt;</code> 中按需关闭（关闭后 reducer 自动 silent-skip，该阶段标记为 completed 但不执行）：</p>
-
-<table>
-  <tr><th>字段</th><th>默认值</th><th>关闭后影响</th></tr>
-  <tr>
-    <td><code>code_review_enabled</code></td>
-    <td><code>true</code></td>
-    <td>跳过 review 阶段（静态代码审查，pg-build/review agent 不发派遣）</td>
-  </tr>
-  <tr>
-    <td><code>verify_enabled</code></td>
-    <td><code>true</code></td>
-    <td>跳过 verify 阶段（运行时验证，V-* 项不执行，fix 循环不触发）</td>
-  </tr>
-  <tr>
-    <td><code>gate_enabled</code></td>
-    <td><code>true</code></td>
-    <td>跳过 gate 阶段（5 维评分不执行，fix-gate 循环不触发）</td>
-  </tr>
-</table>
-
-<div class="tip-card card">
-  <p style="margin:0"><strong>约束</strong>：verify 和 gate 至少开启其一（<code>pg-validate-proposal.py</code> 强制校验）。test 和 dev 永不禁用。simple / scenario 类型的 track 自动关闭全部三个质量门。</p>
-</div>
-
-<p>关闭后的 phase 沿用 silent-skip 机制：reducer 通用 <code>_phase_enabled()</code> 判断（<code>reducer.py:1458-1473</code>），detect 的 <code>next_pending</code> 同步跳过（<code>detect.py:147-152</code>），状态记录为 completed 但不执行任何 sub-agent 派遣。</p>
-
-<p>配置示例：</p>
-<pre>
-tracks:
-  backend:
-    modules: [backend]
-    max_fix_retries: 5
-    code_review_enabled: false    <span style="color:#94a3b8"># 关闭 review 阶段（不派 pg-build/review agent）</span>
-    verify_enabled: true           <span style="color:#94a3b8"># 保留 verify</span>
-    gate_enabled: true             <span style="color:#94a3b8"># 保留 gate</span>
-</pre>
-
-<ul style="margin-bottom:12px">
-  <li><strong>5 sub（全开，默认）</strong>：<code>test</code> → <code>dev</code> → <code>review</code> → <code>verify</code> → <code>gate</code></li>
-  <li><strong>4 sub（关闭 review）</strong>：<code>test</code> → <code>dev</code> → <code>verify</code> → <code>gate</code>（<code>code_review_enabled: false</code>）</li>
-  <li><strong>3 sub（仅开 verify）</strong>：<code>test</code> → <code>dev</code> → <code>verify</code>（<code>code_review_enabled: false, gate_enabled: false</code>，至少 verify 或 gate 保留其一）</li>
-</ul>
-
-<div class="svg-container">
-<svg viewBox="0 0 800 95" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arr-r4" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
-  </defs>
-
-  <rect x="10" y="15" width="120" height="50" rx="8" fill="#f87171"/>
-  <text x="70" y="40" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">T  Test</text>
-  <text x="70" y="56" font-size="10" fill="#fff" text-anchor="middle">写测试（红 phase）</text>
-
-  <line x1="130" y1="40" x2="160" y2="40" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r4)"/>
-
-  <rect x="165" y="15" width="120" height="50" rx="8" fill="#34d399"/>
-  <text x="225" y="40" font-size="13" font-weight="700" fill="#065f46" text-anchor="middle">D  Dev</text>
-  <text x="225" y="56" font-size="10" fill="#065f46" text-anchor="middle">实现代码（绿 phase）</text>
-
-  <line x1="285" y1="40" x2="315" y2="40" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r4)"/>
-
-  <rect x="320" y="15" width="120" height="50" rx="8" fill="#a78bfa"/>
-  <text x="380" y="40" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">R  Review</text>
-  <text x="380" y="56" font-size="10" fill="#fff" text-anchor="middle">静态代码审查（pg-build/review）</text>
-
-  <line x1="440" y1="40" x2="470" y2="40" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r4)"/>
-
-  <rect x="475" y="15" width="120" height="50" rx="8" fill="#fbbf24"/>
-  <text x="535" y="40" font-size="13" font-weight="700" fill="#92400e" text-anchor="middle">V  Verify</text>
-  <text x="535" y="56" font-size="10" fill="#92400e" text-anchor="middle">运行时验证（V-* 项）</text>
-
-  <line x1="595" y1="40" x2="625" y2="40" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-r4)"/>
-
-  <rect x="630" y="15" width="120" height="50" rx="8" fill="#818cf8"/>
-  <text x="690" y="40" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">G  Gate</text>
-  <text x="690" y="56" font-size="10" fill="#fff" text-anchor="middle">5 维加权评分</text>
-
-  <text x="380" y="88" font-size="10" fill="#64748b" text-anchor="middle">R 阶段：dev 后、verify 前；独立 code-review agent；fail → fix-review 子 pipeline 重试（独立计数 review_fix_cycles，默认 3 次）</text>
-</svg>
-</div>
-
-<div class="info-card card">
-  <p style="margin:0"><strong>review 阶段是干嘛的</strong>：在 verify（集成/E2E）之前先做一轮<strong>静态</strong>代码审查，目的是拦截"实现与设计不一致 / scope creep / 模式不一致 / 测试契约弱"等<strong>静态代码问题</strong>，降低后续 fix cycle 成本。它与 verify 的区别：</p>
-  <ul style="margin:8px 0 0; padding-left:20px">
-    <li><strong>review（静态）</strong>：design 对齐、scope creep、模式一致、文件位置、测试契约；不改代码</li>
-    <li><strong>verify（运行时）</strong>：V-* 验证项；启动服务跑测试</li>
-    <li><strong>触发 fix 的失败项不同</strong>：review 的 R-*（设计/模式）由 <code>pg-build/fix-review</code> agent 修；verify 的 V-*（功能/集成）由 <code>pg-build/fix</code> agent 修。两个 fix 循环<strong>独立计数</strong>，互不干扰。</li>
-  </ul>
-</div>
-
-</div>
-
-<div class="subsection-card">
-<h2 id="sec4-4-4">4.4.4 simple track —— 跳过 sub-agent 的轻量编排</h2>
-
-<p>并非所有 track 都需要完整 TDRVG 四 / 五阶段。对于纯代码生成、文档同步、模板替换这类<strong>无设计决策</strong>的小活，可以用 <code>simple</code> 类型的 track：</p>
-
-<div class="svg-container">
-<svg viewBox="0 0 720 230" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arr-simple" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
-  </defs>
-
-  <!-- standard track -->
-  <rect x="20" y="30" width="320" height="180" rx="10" fill="#f8fafc" stroke="#cbd5e1" stroke-width="1.5"/>
-  <text x="180" y="52" font-size="13" font-weight="700" fill="#1d4ed8" text-anchor="middle">standard track</text>
-  <text x="180" y="70" font-size="10" fill="#64748b" text-anchor="middle">（默认，含 review 可选）</text>
-
-  <rect x="30" y="85" width="48" height="30" rx="4" fill="#fecaca"/>
-  <text x="54" y="104" font-size="11" font-weight="700" fill="#991b1b" text-anchor="middle">T</text>
-  <line x1="78" y1="100" x2="92" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-simple)"/>
-  <rect x="96" y="85" width="48" height="30" rx="4" fill="#bbf7d0"/>
-  <text x="120" y="104" font-size="11" font-weight="700" fill="#065f46" text-anchor="middle">D</text>
-  <line x1="144" y1="100" x2="158" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-simple)"/>
-  <rect x="162" y="85" width="48" height="30" rx="4" fill="#ddd6fe"/>
-  <text x="186" y="104" font-size="11" font-weight="700" fill="#5b21b6" text-anchor="middle">R</text>
-  <text x="186" y="120" font-size="8" fill="#5b21b6" text-anchor="middle">optional</text>
-  <line x1="210" y1="100" x2="224" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-simple)"/>
-  <rect x="228" y="85" width="48" height="30" rx="4" fill="#fde68a"/>
-  <text x="252" y="104" font-size="11" font-weight="700" fill="#92400e" text-anchor="middle">V</text>
-  <line x1="276" y1="100" x2="290" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-simple)"/>
-  <rect x="294" y="85" width="36" height="30" rx="4" fill="#c7d2fe"/>
-  <text x="312" y="104" font-size="11" font-weight="700" fill="#3730a3" text-anchor="middle">G</text>
-
-  <text x="180" y="142" font-size="11" fill="#64748b" text-anchor="middle">4 或 5 个 sub-agent（test / dev / review / verify / gate）</text>
-  <text x="180" y="160" font-size="11" fill="#64748b" text-anchor="middle">适合：跨模块、需设计评审、需审查</text>
-  <text x="180" y="178" font-size="10" fill="#94a3b8" text-anchor="middle">max_fix_retries 生效；fix 循环独立</text>
-  <text x="180" y="194" font-size="10" fill="#94a3b8" text-anchor="middle">（R sub 独立 fix-review 子 pipeline）</text>
-
-  <!-- simple track -->
-  <rect x="380" y="30" width="320" height="180" rx="10" fill="#f0fdf4" stroke="#86efac" stroke-width="1.5"/>
-  <text x="540" y="52" font-size="13" font-weight="700" fill="#059669" text-anchor="middle">simple track</text>
-  <text x="540" y="70" font-size="10" fill="#64748b" text-anchor="middle">（轻量，code_review_enabled 自动 false）</text>
-
-  <rect x="400" y="85" width="60" height="30" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
-  <text x="430" y="104" font-size="11" font-weight="700" fill="#065f46" text-anchor="middle">cmd 1</text>
-  <line x1="460" y1="100" x2="480" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-simple)"/>
-  <rect x="485" y="85" width="60" height="30" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
-  <text x="515" y="104" font-size="11" font-weight="700" fill="#065f46" text-anchor="middle">cmd 2</text>
-  <line x1="545" y1="100" x2="565" y2="100" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-simple)"/>
-  <rect x="570" y="85" width="60" height="30" rx="4" fill="#d1fae5" stroke="#059669" stroke-width="1"/>
-  <text x="600" y="104" font-size="11" font-weight="700" fill="#065f46" text-anchor="middle">cmd 3</text>
-
-  <text x="540" y="142" font-size="11" fill="#64748b" text-anchor="middle">commands 列表直跑（无 sub-agent）</text>
-  <text x="540" y="160" font-size="11" fill="#64748b" text-anchor="middle">适合：代码生成、文件复制、模板替换</text>
-  <text x="540" y="178" font-size="10" fill="#94a3b8" text-anchor="middle">命令 exit 0 即视为通过；按 on_failure 策略处理失败</text>
-  <text x="540" y="194" font-size="10" fill="#94a3b8" text-anchor="middle">manifest.phases.review 不生成 → review 自动 skip</text>
-
-  <text x="360" y="228" font-size="11" fill="#64748b" text-anchor="middle">两种 track 共用同一个 pipeline.events 与 runner 入口，仅 type 字段区分</text>
-</svg>
-</div>
-
-<h3>simple track 配置示例</h3>
-<pre>
-tracks:
-  openapi-gen:
-    type: simple                       <span style="color:#94a3b8"># 关键：跳过 sub-agent；manifest 不含 phases.review</span>
-    modules: [backend]
-    commands:
-      - cd webvirt-backend && mvn -pl webvirt-openapi openapi:generate
-      - cp webvirt-backend/target/openapi.json webvirt-frontend/src/api/
-</pre>
-
-<table>
-  <tr><th>维度</th><th>standard track</th><th>simple track</th></tr>
-  <tr><td>编排模型</td><td>TDRVG 4-5 阶段 sub-agent（T/D/optional-R/V/G）</td><td>commands 列表直跑</td></tr>
-  <tr><td>review phase</td><td>由 <code>code_review_enabled</code> 决定是否派发 <code>pg-build/review</code></td><td>manifest 不生成 review phase → 自动 skip</td></tr>
-  <tr><td>重试策略</td><td><code>max_fix_retries</code>（verify→fix 循环）；review 走 <code>max_review_fix_retries</code>（独立）</td><td>按每条命令的 <code>on_failure</code>（默认 workflow_failed）</td></tr>
-  <tr><td>报告产物</td><td><code>{track}-N-{review,fix-review,verify,verify-fix,gate,gate-fix}.md</code> + <code>gate-assessment.md</code></td><td>runner 自动写 <code>{track}-N-simple.md</code>（stdout/stderr 摘录）</td></tr>
-  <tr><td>适用场景</td><td>跨模块、需设计评审、需静态/运行时审查</td><td>openapi-gen、license header 注入、模板替换、单测命名规范化等</td></tr>
-</table>
-
-<div class="tip-card card">
-  <p style="margin:0"><strong>选择原则</strong>：如果 track 不需要"设计决策 → 代码 → 验证 → 门控"四步走、且失败信号可直接从命令 exit code 读出，就用 <code>simple</code>。否则用 <code>standard</code>。simple track 无 review 阶段（不在 language 自动派发范围内），适合纯机械脚本。</p>
-</div>
-
-</div>
-
-<div class="subsection-card">
-<h2 id="sec4-4-5">4.4.5 scenario track —— 真实集成场景测试</h2>
-
-<p><code>type: scenario</code> track 用于<strong>真实集成场景测试</strong>——启动服务实例，执行 Gherkin 风格的用户旅程场景，跑通过为止。scenario track 绕过标准 TDRVG 五阶段（test/dev/review/verify/gate），走独立的<strong>三阶段生命周期</strong>：</p>
-
-<div class="svg-container">
-<svg viewBox="0 0 720 160" xmlns="http://www.w3.org/2000/svg">
-  <defs><marker id="arr-sc" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
-
-  <rect x="20" y="20" width="180" height="50" rx="8" fill="#f59e0b"/>
-  <text x="110" y="45" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">scenario-prepare</text>
-  <text x="110" y="62" font-size="10" fill="#fff" text-anchor="middle">启动实例 + 健康检查</text>
-
-  <line x1="200" y1="45" x2="230" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-sc)"/>
-
-  <rect x="235" y="20" width="180" height="50" rx="8" fill="#2563eb"/>
-  <text x="325" y="45" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">scenario-execute</text>
-  <text x="325" y="62" font-size="10" fill="#fff" text-anchor="middle">执行 Gherkin 场景</text>
-
-  <line x1="415" y1="45" x2="445" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#arr-sc)"/>
-
-  <rect x="450" y="20" width="180" height="50" rx="8" fill="#ef4444"/>
-  <text x="540" y="45" font-size="13" font-weight="700" fill="#fff" text-anchor="middle">scenario-fix（escalate 时）</text>
-  <text x="540" y="62" font-size="10" fill="#fff" text-anchor="middle">诊断根因 → 修代码 → 重跑</text>
-
-  <path d="M 540 70 L 540 95 L 325 95 L 325 70" stroke="#94a3b8" stroke-width="1.5" fill="none" stroke-dasharray="4,3" marker-end="url(#arr-sc)"/>
-
-  <text x="540" y="115" font-size="10" fill="#ef4444" text-anchor="middle">fix 完成后回到 execute 重新执行</text>
-  <text x="540" y="130" font-size="10" fill="#ef4444" text-anchor="middle">最多 max_fix_retries 次</text>
-
-  <rect x="20" y="125" width="610" height="30" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1" stroke-dasharray="3,2"/>
-  <text x="325" y="145" font-size="10" fill="#92400e" text-anchor="middle">prepare 失败 → workflow_failed | execute 完成 → 本 track 结束 | fix 耗尽 → workflow_failed（无 accept_gap）</text>
-</svg>
-</div>
-
-<table>
-  <tr><th>对比项</th><th>standard track</th><th>scenario track</th></tr>
-  <tr><td>阶段</td><td>test → dev → review → verify → gate</td><td>scenario-prepare → scenario-execute → [scenario-fix → scenario-execute]*</td></tr>
-  <tr><td>fix 循环</td><td>fix → verify 子 pipeline</td><td>scenario-fix 子 pipeline（单阶段）</td></tr>
-  <tr><td>gate 评估</td><td>5 维加权评分 ≥80</td><td><strong>豁免</strong>——不参与 gate</td></tr>
-  <tr><td>失败容忍</td><td>accept_gap 允许</td><td><strong>零容忍</strong>——critical 失败即 escalate</td></tr>
-  <tr><td>环境</td><td>标准构建/测试环境</td><td>真实服务实例（目标 environment）</td></tr>
-  <tr><td>输出</td><td>构建产物、测试报告</td><td>结构化 JSON evidence，HTTP 请求/响应日志</td></tr>
-</table>
-
-<div class="info-card card">
-  <p style="margin:0"><strong>配置示例</strong>：在 <code>.pg/project.yaml</code> 的 <code>tracks</code> 段中声明 <code>type: scenario</code>，并确保 propose 阶段生成 <code>scenario-&lt;track&gt;.yaml</code> 骨架文件（由新脚本 <code>pg-gen-scenario.py</code> 生成）。LLM 必须填充骨架中的 placeholder 后才能进入 build。</p>
-</div>
-
-</div>
-
-<div class="subsection-card">
-<h2 id="sec4-4-6">4.4.6 产物与目录结构</h2>
-
-<p>pg-build 在 <code>.pg/changes/&lt;change&gt;/2-build/</code> 下产出以下过程产物：</p>
-
-<pre>
-.pg/changes/&lt;change&gt;/
-├── proposal.md, design.md, tasks.md   ← pg-propose 产物（不动）
-├── execution-manifest.yaml            ← runner 直接消费的编排清单
-├── 1-propose-review/                  ← 评审归档（build 不读）
-└── 2-build/                           ← pg-build 过程产物
-    ├── pipeline.events                ← append-only JSONL（唯一持久化入口）
-    ├── final-gate-assessment.md       ← 跨 track 门控汇总
-    ├── context-chain.md, known-issues.md
-    └── {track}-{N}-{kind}.md          ← 各 phase 报告（review / verify / gate 等）
-</pre>
-
-<p><strong>pipeline.events</strong> 是 append-only JSONL 文件，记录每次 record 调用的完整事件。它是 pipeline 的<strong>唯一持久化入口</strong>——断点恢复、replay 比对都依赖它。</p>
-
-<p><strong>tasks.md checkbox</strong> 在 build 阶段被 runner 持续更新：每个 sub 完成后，对应的 <code>[ ]</code> 变为 <code>[x]</code>。这是断点恢复时定位恢复起点的依据。</p>
-
-</div>
-
-<div class="subsection-card">
-<h2 id="sec4-4-7">4.4.7 流程中断与恢复</h2>
-
-<table>
-  <tr><th>中断场景</th><th>恢复方式</th></tr>
-  <tr>
-    <td>会话中断（网络/超时）</td>
-    <td>重新执行 <code>/3-pg-build</code>，runner 从断点恢复</td>
-  </tr>
-  <tr>
-    <td>Sub-agent 返回异常</td>
-    <td>编排器自动重试一次；仍失败 → 触发 fix 子 pipeline 或 <code>workflow_failed</code></td>
-  </tr>
-  <tr>
-    <td><strong><code>workflow_failed</code></strong></td>
-    <td>修复根因 → 重新执行 → runner 读取 <code>pipeline.events</code> 重放 + 扫描 tasks.md checkbox，<strong>从第一个 <code>[ ]</code> 章节恢复</strong>，不从头开始</td>
-  </tr>
-</table>
-
-<div class="danger-card card">
-  <p style="margin:0"><strong>关键</strong>：恢复不是从头开始。runner 扫描 tasks.md 的 checkbox，找到第一个未完成的 <code>[ ]</code> 章节作为起点。已完成的 <code>[x]</code> 全部跳过。</p>
-</div>
-
-</div>
-
-<div class="subsection-card">
-<h2 id="sec4-4-8">4.4.8 环境准备与清理</h2>
-
-<p>当 stage 需要环境（<code>environment.required: true</code>），runner 在进入该 stage 前自动执行 <code>prepare_env</code>，离开后自动 <code>clean_env</code>。环境切换由 runner 检测 stage 切换自动插入，无需 LLM 参与。</p>
-
-<p>使用哪个环境？由 <code>execution-manifest.yaml.stages[i].environment</code> 决定（propose 阶段已选定）。幂等：多次执行不会产生副作用。</p>
-
-</div>
-
-<div class="subsection-card">
-<h2 id="sec4-4-9">4.4.9 execution-manifest.yaml 字段速查</h2>
-
-<table>
-  <tr><th>字段</th><th>含义</th></tr>
-  <tr><td><code>stages</code></td><td>stage 列表（顺序执行），每个 stage 含 name / tracks / environment / test_key</td></tr>
-  <tr><td><code>stages[].environment.name</code></td><td>本 stage 选用的 environment 名</td></tr>
-  <tr><td><code>tracks[].id</code></td><td>track 名</td></tr>
-  <tr><td><code>tracks[].type</code></td><td>standard / simple / scenario</td></tr>
-  <tr><td><code>tracks[].enabled</code></td><td>是否启用（由 <code>on_conditions</code> 机械评估派生）</td></tr>
-  <tr><td><code>tracks[].code_review_enabled</code></td><td>是否派发 review sub-agent</td></tr>
-  <tr><td><code>tracks[].phase_prompts</code></td><td>各 sub 阶段的 prompt 模板映射</td></tr>
-</table>
-
-</div>
-
-<div class="subsection-card">
-<h2 id="sec4-4-10">4.4.10 gate-score —— 5 维加权评分</h2>
-
-<p>每个 track 在进入 <code>gate</code> 阶段时，由 <code>pg-build/gate</code> sub-agent 按 5 个维度打分，<strong>总分 ≥ 80 才视为 gate 通过</strong>。相比传统的 bool 通过/失败，gate-score 能区分"差一点点"和"差很多"：</p>
-
-<div class="svg-container">
-<svg viewBox="0 0 720 280" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arr-gate" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
-  </defs>
-
-  <text x="360" y="22" font-size="13" font-weight="700" fill="var(--text)" text-anchor="middle">gate-score 5 维雷达</text>
-
-  <!-- radar: pentagon -->
-  <polygon points="360,60 510,140 445,250 275,250 210,140" fill="none" stroke="#cbd5e1" stroke-width="1"/>
-  <polygon points="360,90 470,140 425,230 295,230 250,140" fill="none" stroke="#e2e8f0" stroke-width="0.5"/>
-  <polygon points="360,120 430,140 405,210 315,210 290,140" fill="none" stroke="#e2e8f0" stroke-width="0.5"/>
-  <polygon points="360,150 390,140 385,190 335,190 330,140" fill="none" stroke="#e2e8f0" stroke-width="0.5"/>
-
-  <!-- 维度轴 -->
-  <line x1="360" y1="140" x2="510" y2="140" stroke="#cbd5e1" stroke-width="0.5"/>
-  <line x1="360" y1="140" x2="445" y2="250" stroke="#cbd5e1" stroke-width="0.5"/>
-  <line x1="360" y1="140" x2="275" y2="250" stroke="#cbd5e1" stroke-width="0.5"/>
-  <line x1="360" y1="140" x2="210" y2="140" stroke="#cbd5e1" stroke-width="0.5"/>
-  <line x1="360" y1="140" x2="360" y2="60" stroke="#cbd5e1" stroke-width="0.5"/>
-
-  <!-- 分数多边形（示例：95/88/82/76/90 → 综合 86） -->
-  <polygon points="360,80 488,140 437,238 295,230 230,140" fill="#dbeafe" fill-opacity="0.4" stroke="#2563eb" stroke-width="2"/>
-  <circle cx="360" cy="80" r="4" fill="#2563eb"/>
-  <circle cx="488" cy="140" r="4" fill="#2563eb"/>
-  <circle cx="437" cy="238" r="4" fill="#2563eb"/>
-  <circle cx="295" cy="230" r="4" fill="#2563eb"/>
-  <circle cx="230" cy="140" r="4" fill="#2563eb"/>
-
-  <!-- 维度标签 -->
-  <text x="525" y="135" font-size="12" font-weight="600" fill="#1d4ed8">correctness</text>
-  <text x="525" y="150" font-size="10" fill="#64748b">权重 35%</text>
-
-  <text x="455" y="262" font-size="12" font-weight="600" fill="#1d4ed8">security</text>
-  <text x="455" y="276" font-size="10" fill="#64748b">权重 25%</text>
-
-  <text x="200" y="262" font-size="12" font-weight="600" fill="#1d4ed8">maintainability</text>
-  <text x="200" y="276" font-size="10" fill="#64748b">权重 15%</text>
-
-  <text x="148" y="135" font-size="12" font-weight="600" fill="#1d4ed8">performance</text>
-  <text x="148" y="150" font-size="10" fill="#64748b">权重 15%</text>
-
-  <text x="325" y="48" font-size="12" font-weight="600" fill="#1d4ed8">spec_coverage</text>
-  <text x="325" y="62" font-size="10" fill="#64748b">权重 10%</text>
-</svg>
-</div>
-
-<table>
-  <tr><th>维度</th><th>权重</th><th>评估内容</th></tr>
-  <tr><td>correctness</td><td>35%</td><td>行为是否符合 proposal.md 描述、单元测试覆盖关键路径</td></tr>
-  <tr><td>security</td><td>25%</td><td>权限校验、敏感字段脱敏、依赖 CVE 扫描</td></tr>
-  <tr><td>maintainability</td><td>15%</td><td>命名规范、模块边界、日志规范、复用度</td></tr>
-  <tr><td>performance</td><td>15%</td><td>关键路径延迟、数据库查询 N+1、资源占用</td></tr>
-  <tr><td>spec_coverage</td><td>10%</td><td>design.md 验收点是否全部被测试或文档覆盖</td></tr>
-</table>
-
-<h3>评分如何驱动 fix-gate 循环</h3>
 <ol>
-  <li>gate agent 输出结构化 JSON（<strong>summary 字段必含 <code>gate_score: &lt;0-100&gt;</code> + <code>p0_failures: [...]</code></strong>）：<code>{"scores": {...}, "total": 86, "threshold": 80, "passed": true, "weak_dims": []}</code></li>
-  <li><code>total ≥ 80</code> → gate pass，pipeline 推进</li>
-  <li><code>total &lt; 80</code> → 进入 fix-gate 子 pipeline（fix-gate → verify → gate），runner 把 <code>weak_dims</code> 传给 <code>pg-build/fix-gate</code> sub-agent 定向修复</li>
-  <li>fix-gate 循环耗尽 <code>max_fix_retries</code>（verify→fix 与 gate→fix-gate 共用同一计数器）→ final-gate 触发人工评审</li>
+  <li><strong>问 Runner 下一步做什么</strong>（next）——Runner 说派哪个 sub-agent，就派哪个</li>
+  <li><strong>派 sub-agent 干活</strong>——写测试、写代码、审查、验证……每个阶段一个专门的 agent</li>
+  <li><strong>记录结果</strong>（record）——写进 <code>pipeline.events</code>（append-only 事件流）</li>
+  <li><strong>回到第 1 步</strong>——直到 Runner 说 <strong>done</strong>（触发合并）或 <strong>workflow_failed</strong>（需要人工介入）</li>
 </ol>
 
-<h3>前置门控：gate-assessment.md</h3>
-<p>final-gate 启动前必须存在 <code>2-build/gate-assessment.md</code>，汇总所有 track 的 gate-score + 弱项清单。缺失则 final-gate <strong>硬阻断</strong>，避免"未评审就合入"。</p>
+<p>这套循环由<strong>事件溯源</strong>驱动：每一步都是一个不可变事件，状态随时从事件流重新推导。好处是——跑挂了能精确恢复到断点，不从头再来。</p>
 
-<div class="danger-card card">
-  <h4 style="margin:0 0 8px">⚠ 分数驱动 ≠ 形式主义</h4>
-  <p style="margin:0">gate-score 不是为了让 AI "凑分数"。<strong>权重和阈值在 pg-skills 上游统一定义</strong>，项目内不可随意调。如发现某维度评分与人类判断长期偏离，应反馈到上游调整 prompt 模板，而非本地 hack。</p>
-</div>
+<h2>三种干活方式（track）</h2>
 
-</div>
+<p>不同性质的活，用不同的 track 类型（propose 阶段已在图纸里标好）：</p>
+
+<table>
+  <tr><th>类型</th><th>怎么干</th><th>适合</th></tr>
+  <tr><td><code>standard</code>（默认）</td><td>sub-agent 按 TDRVG 五阶段走，质量门把关</td><td>正经功能开发、跨模块改动</td></tr>
+  <tr><td><code>simple</code></td><td>按命令列表直接跑，命令 exit 0 即通过</td><td>代码生成、文档同步、模板替换等纯机械活</td></tr>
+  <tr><td><code>scenario</code></td><td>启动真实环境，跑 Gherkin 场景，跑通过为止</td><td>跨模块联调、端到端验收</td></tr>
+</table>
+
+<h2>质量把关：TDRVG 五阶段</h2>
+
+<p>standard track 默认走 5 步，每步一个专门的 sub-agent：</p>
+
+<ol>
+  <li><strong>T · Test（红）</strong> —— 先写测试，让失败先发生</li>
+  <li><strong>D · Dev（绿）</strong> —— 实现代码，让测试变绿</li>
+  <li><strong>R · Review</strong> —— 静态审查：实现和设计对得上吗？有没有范围蔓延？模式一不一致？发现问题 → fix-review 修复后重审</li>
+  <li><strong>V · Verify</strong> —— 运行时验证：启动服务，逐项跑 design.md 里的 V-* 验收点。不过 → fix 修复后重跑</li>
+  <li><strong>G · Gate</strong> —— 5 维加权打分，总分 ≥80 才放行</li>
+</ol>
+
+<p>其中 review / verify / gate 三个质量门可按需关闭（纯文档改动就没必要上全套），但 <strong>verify 和 gate 至少留一个</strong>，免得没有质量把关。修复循环都有次数上限（<code>max_fix_retries</code>），修不动就终止，把问题交给用户，不硬扛。</p>
+
+<h2>打分门（gate-score）</h2>
+
+<p>gate 不看"过 / 不过"这种二值，而是按 5 个维度打分，总分 <strong>≥80 通过</strong>：</p>
+
+<table>
+  <tr><th>维度</th><th>权重</th><th>看什么</th></tr>
+  <tr><td>correctness</td><td>35%</td><td>行为符合提案吗？测试覆盖关键路径吗？</td></tr>
+  <tr><td>security</td><td>25%</td><td>权限校验、敏感信息、依赖漏洞</td></tr>
+  <tr><td>maintainability</td><td>15%</td><td>命名规范、模块边界、日志规范</td></tr>
+  <tr><td>performance</td><td>15%</td><td>关键路径延迟、N+1 查询、资源占用</td></tr>
+  <tr><td>spec_coverage</td><td>10%</td><td>design 的验收点都被覆盖了吗？</td></tr>
+</table>
+
+<p>不够 80 分，就把弱项交给 fix-gate 定向补；补不动就走人工评审。各 track 的评分汇总成 <code>gate-assessment.md</code>——final-gate 没有它就<strong>不放行</strong>，保证"没评审就不合入"。</p>
+
+<h2>真实环境，真实验收</h2>
+
+<p>需要环境的 stage，Runner 进出都会自动 <code>prepare_env</code> / <code>clean_env</code>，不用人插手。scenario 验收更是在<strong>真实服务实例</strong>上跑：先重启实例，再执行 Gherkin 场景（Given / When / Then），失败就派 scenario-fix 诊断修复后重跑，跑通过为止。每个验收点（V-*）早在定界阶段就和用户确认过<strong>可验证 / 降级 / 跳过</strong>，这里照做即可。</p>
+
+<h2>失败与恢复</h2>
+
+<p>跑挂了不慌：Runner 用事件流 + tasks.md 的 checkbox 记住进度，重跑时从<strong>第一个没打勾的章节</strong>接着干，而不是从头再来。只有修到"修不动"（循环次数耗尽、环境漂移 / 设计漂移）才终止，把决定权交回给用户。</p>
+
+<h2>收尾</h2>
+
+<p>所有 track 完成后，final-gate 做跨 track 的最终门控。通过后 Runner 自动收尾：每步提交代码、归档到 <code>changes/archive/</code>，然后触发 <code>pg-verify-and-merge</code> 完成合并。至此一次变更走完「定界 → 提案 → 构建 → 合并」全流程。</p>
 
 <div class="subsection-card">
 <h2>4.5 流程差异速查表</h2>
@@ -1826,9 +1338,12 @@ tracks:
 <!-- ============================================================ -->
 <div id="sec5" class="section">
 <h1>5. Bug 修复工作流</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「让 AI 写出可托付的代码」—— LLM 自主完成：诊断 → 修复 → 真实环境验证。本 SKILL 只提供 LLM 无法自行发现的 pg-* 基础设施协议。</p>
+<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— LLM 自主完成：诊断 → 修复 → 真实环境验证。本 SKILL 只提供 LLM 无法自行发现的 pg-* 基础设施协议。</p>
 
-<h2>5.1 传统 vs pg-skills</h2>
+<h2>5.1 一句话理解</h2>
+
+<p><code>/5-pg-fix-issue</code> 是<strong>修 Bug</strong> 的流程。核心不是"改完交差"，而是<strong>用真实环境证明修好了</strong>。与传统方式最大的区别：</p>
+
 <div class="compare-row">
   <div class="compare-box compare-box-old">
     <h4 style="color:var(--danger)">传统修复</h4>
@@ -1840,70 +1355,39 @@ tracks:
   </div>
 </div>
 
-<h2>5.2 工作流程</h2>
-<p><code>pg-fix-issue</code> 的 5 步工作流程：</p>
-<div class="svg-container">
-<svg viewBox="0 0 720 200" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="a4" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
-  </defs>
+<h2>5.2 五步流程</h2>
 
-  <rect x="10" y="20" width="180" height="60" rx="8" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
-  <text x="100" y="42" font-size="13" font-weight="700" fill="#1d4ed8" text-anchor="middle">① 启动</text>
-  <text x="100" y="60" font-size="10" fill="#1d4ed8" text-anchor="middle">pg-parse-config 加载配置</text>
-  <text x="100" y="74" font-size="10" fill="#1d4ed8" text-anchor="middle">describe_env 环境探测</text>
+<ol>
+  <li><strong>启动准备</strong> —— 加载配置（模块命令、环境定义），并用 describe_env <strong>只读探测</strong>目标环境（不启停服务），拿到环境全貌：有哪些服务、DB 通不通、数据在不在</li>
+  <li><strong>诊断</strong> —— 对照环境信息和代码探索，定位根因</li>
+  <li><strong>展示方案</strong> —— 根因分析 + 修复计划 + 验证方式，<strong>等用户确认后才动手</strong></li>
+  <li><strong>修复</strong> —— 改代码</li>
+  <li><strong>验证（硬性）</strong> —— 启动受影响服务 → 真实 API 调用 → 查服务日志 → 跑单测，修到通过为止</li>
+</ol>
 
-  <line x1="195" y1="50" x2="225" y2="50" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
-
-  <rect x="230" y="20" width="180" height="60" rx="8" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
-  <text x="320" y="42" font-size="13" font-weight="700" fill="#6d28d9" text-anchor="middle">② 诊断</text>
-  <text x="320" y="60" font-size="10" fill="#6d28d9" text-anchor="middle">env-description + 代码探索</text>
-  <text x="320" y="74" font-size="10" fill="#6d28d9" text-anchor="middle">定位根因</text>
-
-  <line x1="415" y1="50" x2="445" y2="50" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
-
-  <rect x="450" y="20" width="260" height="60" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5" stroke-dasharray="6,3"/>
-  <text x="580" y="42" font-size="13" font-weight="700" fill="#92400e" text-anchor="middle">③ 展示方案</text>
-  <text x="580" y="60" font-size="10" fill="#92400e" text-anchor="middle">根因分析 + 修复计划 + 验证命令</text>
-  <text x="580" y="74" font-size="10" fill="#92400e" text-anchor="middle">用户确认后动手</text>
-
-  <line x1="450" y1="85" x2="320" y2="115" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#a4)"/>
-  <text x="370" y="100" font-size="10" fill="#64748b" text-anchor="middle">用户未确认</text>
-
-  <rect x="230" y="120" width="180" height="60" rx="8" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
-  <text x="320" y="142" font-size="13" font-weight="700" fill="#b91c1c" text-anchor="middle">④ 修复</text>
-  <text x="320" y="160" font-size="10" fill="#b91c1c" text-anchor="middle">改代码 → 落 commit</text>
-
-  <line x1="230" y1="150" x2="200" y2="150" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a4)"/>
-
-  <rect x="10" y="120" width="180" height="60" rx="8" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
-  <text x="100" y="142" font-size="13" font-weight="700" fill="#065f46" text-anchor="middle">⑤ 验证</text>
-  <text x="100" y="160" font-size="10" fill="#065f46" text-anchor="middle">invoke-hook → API/日志/单测</text>
-</svg>
+<div class="danger-card card">
+  <h4 style="margin:0 0 8px">验证是硬性要求，不是可选项</h4>
+  <ul style="margin:0;padding-left:20px">
+    <li>环境起不来 → <strong>必须</strong>明说"未做端到端验证"，不糊弄</li>
+    <li>验证命令的输出<strong>原样</strong>给用户看，不润色</li>
+    <li>验证不过 → 继续修，直到通过，或如实报告无法修复</li>
+  </ul>
 </div>
 
-<h2>5.3 验证要求（硬性）</h2>
-<p>修完代码后必须做真实环境验证（未做必须明确告知用户）：</p>
-<pre>
-1. invoke-hook --action start 启动受影响服务
-2. 用真实 API 调用验证修复生效（host/port 从 project.yaml 读）
-3. invoke-hook --action logs 检查服务日志无异常
-4. --resolve-module-test 跑受影响模块单元测试
-5. 验证失败 → 继续修，直到通过或向用户报告无法修复
+<h2>5.3 收尾要求</h2>
 
-环境无法启动时：明确告知用户"未做端到端验证"
-验证命令的输出原样展示给用户
-</pre>
-
-<h2>5.4 收尾要求</h2>
 <ul>
   <li>不留 DIAG / 临时日志 / 临时脚本</li>
-  <li><code>git diff</code> 只含目标文件变更</li>
-  <li>向用户输出：根因 + 改了什么 + 验证证据</li>
+  <li><code>git diff</code> 只含目标文件的变更</li>
+  <li>向用户交代三件事：<strong>根因 + 改了什么 + 验证证据</strong></li>
 </ul>
 
-<h2>5.5 占位符规约</h2>
-<p>host / port / role / instance 一律从 <code>project.yaml</code>（通过 <code>pg-parse-config.py</code>）读取。<strong>禁止</strong>硬编码 <code>localhost:9080</code> 等示例值。</p>
+<h2>5.4 两条红线</h2>
+
+<ul>
+  <li><strong>占位符</strong> —— host / port / role / instance 一律从 <code>project.yaml</code> 读，禁止硬编码 <code>localhost:9080</code> 这类示例值</li>
+  <li><strong>hook 调用</strong> —— 必须走 <code>pg-invoke-hook.py</code> 协议（带审计 / 日志 / 超时），禁止直接 <code>bash .pg/hooks/*.sh</code></li>
+</ul>
 
 <div class="info-card card">
   <strong>触发方式</strong>：在 opencode 中输入 <code>/5-pg-fix-issue</code>，然后描述问题。例如：<br>
@@ -1914,7 +1398,7 @@ tracks:
 <!-- ============================================================ -->
 <div id="sec6" class="section">
 <h1>6. 回归测试与问题闭环</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「让 AI 写出可托付的代码」—— 改动后必须能取证复盘。回归失败自动分类（A/B/C）、边界守门、已知问题留痕，问题清单 + JSON 化全在 <code>.pg/regression/</code>。</p>
+<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 改动后必须能取证复盘。回归失败自动分类（A/B/C）、边界守门、已知问题留痕，问题清单 + JSON 化全在 <code>.pg/regression/</code>。</p>
 
 <h2>6.1 回归流流程</h2>
 <div class="svg-container">
@@ -1995,7 +1479,7 @@ regression:
 <!-- ============================================================ -->
 <div id="sec7" class="section">
 <h1>7. 动手实操</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「让 AI 写出可托付的代码」—— 让我们亲手跑一遍整个闭环。从 pg doctor 到 propose → build → regression → fix-issue，亲身验一遍"可托付"的全套契约。</p>
+<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 让我们亲手跑一遍整个闭环。从 pg doctor 到 propose → build → regression → fix-issue，亲身验一遍"可托付"的全套契约。</p>
 
 <h2>练习 1：环境感知（15min）</h2>
 <div class="card">
@@ -2054,7 +1538,7 @@ ls .opencode/skills/pg-propose/references/
 <!-- ============================================================ -->
 <div id="sec8" class="section">
 <h1>8. 常见问题与排查</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「让 AI 写出可托付的代码」—— 卡壳时不要靠猜。pipeline.events + tasks.md checkbox + journal 都是客观记录，错误分类写在 <code>error-categories.yaml</code> 里。先取证，再动手。</p>
+<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 卡壳时不要靠猜。pipeline.events + tasks.md checkbox + journal 都是客观记录，错误分类写在 <code>error-categories.yaml</code> 里。先取证，再动手。</p>
 
 <h2>Q&A</h2>
 
@@ -2227,7 +1711,7 @@ pg doctor
 </table>
 
 <p style="text-align:center; margin-top:48px; color:var(--muted); font-size:13px">
-  <strong>品构</strong> pg-skills · 「让 AI 写出可托付的代码」 · 更多文档见 <code>.pg/skills/README.md</code>
+  <strong>品构</strong> pg-skills · 「品质，长在结构里」 · 更多文档见 <code>.pg/skills/README.md</code>
 </p>
 
 </div><!-- /section -->
