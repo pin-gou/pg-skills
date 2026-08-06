@@ -131,6 +131,10 @@ def parse_args():
                               "只更新 heading 编号和 on_conditions_eval 注释. "
                               "匹配策略: 按 section stable key (stage.track:sub) 匹配, 不按编号. "
                               "若现有 body 含 '待 LLM 填充' 占位符, 视为未填写, 用新骨架替换.")
+    # v1.3: 从 define-summary.yaml 读取 V-* 状态，自动注入 verify 章节
+    parser.add_argument("--define-summary", default=None,
+                        help=".pg/changes/<change>/0-define/define-summary.yaml 路径; "
+                             "若提供，verify 章节会附加 'V-* 状态声明' 子段.")
     return parser.parse_args()
 
 
@@ -615,6 +619,29 @@ def _format_scenario_body(section: dict, change_name: str) -> str:
     return "- 无"
 
 
+def parse_define_summary_status(path: str | None) -> dict[str, list[str]]:
+    """v1.3: 读取 define-summary.yaml，按 post_discussion_status 分组 V-* id.
+
+    Returns: {"verifiable": [...], "degraded": [...], "skipped": [...]}
+    """
+    result: dict[str, list[str]] = {"verifiable": [], "degraded": [], "skipped": []}
+    if not path or not os.path.isfile(path):
+        return result
+    try:
+        with open(path, encoding="utf-8") as f:
+            doc = yaml.safe_load(f) or {}
+        for v in doc.get("verification_needs") or []:
+            if not isinstance(v, dict):
+                continue
+            vid = v.get("id")
+            status = v.get("post_discussion_status")
+            if isinstance(vid, str) and isinstance(status, str) and status in result:
+                result[status].append(vid)
+    except Exception:
+        pass
+    return result
+
+
 def format_section_evidence_block(section: dict) -> str:
     """Evidence Block placeholder for verify sections."""
     if section["sub"] != "verify":
@@ -625,6 +652,18 @@ def format_section_evidence_block(section: dict) -> str:
         "  - SKIP 的 V-* 必须注明豁免理由\n"
         "  - 测试结果（Tests run: N, Failures: 0, Errors: 0）必须有日志摘要"
     )
+
+
+def format_define_summary_status_block(status_map: dict[str, list[str]]) -> str:
+    """v1.3: 生成 'V-* 状态声明' 子段，供 verify 章节使用."""
+    if not any(status_map.values()):
+        return ""
+    lines = ["", "  **define-summary 对账**（自动生成）:"]
+    for status in ("verifiable", "degraded", "skipped"):
+        ids = status_map.get(status) or []
+        if ids:
+            lines.append(f"  - {status}: {', '.join(ids)}")
+    return "\n".join(lines)
 
 
 def _section_stable_key(section: dict) -> str:
@@ -710,15 +749,18 @@ def build_tasks_md(sections: list[dict], env_map: dict[str, str],
                    config: dict, affected_paths: list[str],
                    proposal_text: str, change_name: str = "<change>",
                    affected_tracks: set[str] = set(),
-                   preserve_bodies: dict | None = None) -> str:
+                   preserve_bodies: dict | None = None,
+                   define_summary_path: str | None = None) -> str:
     """Generate the full tasks.md skeleton content.
 
     Args:
         preserve_bodies: 建议 17 --update-existing 模式传入.
             {stable_key: body_str} — 对应 section 用此 body 覆盖骨架占位.
+        define_summary_path: v1.3 新增，用于 verify 章节追加 V-* 状态声明.
     """
     out_lines = []
     preserve_bodies = preserve_bodies or {}
+    ds_status = parse_define_summary_status(define_summary_path)
 
     env_quote = format_env_block_quote(env_map)
     if env_quote:
@@ -744,6 +786,16 @@ def build_tasks_md(sections: list[dict], env_map: dict[str, str],
             out_lines.append(preserve_bodies[key])
         else:
             out_lines.append(format_section_body(sec, change_name))
+
+        # v1.3: verify 章节追加 evidence block + define-summary 状态声明
+        if sec.get("sub") == "verify":
+            evidence = format_section_evidence_block(sec)
+            status_block = format_define_summary_status_block(ds_status)
+            if evidence:
+                out_lines.append(evidence)
+            if status_block:
+                out_lines.append(status_block)
+
         out_lines.append("")
 
     return "\n".join(out_lines).rstrip() + "\n"
@@ -959,10 +1011,17 @@ def main():
                 file=sys.stderr,
             )
 
+    define_summary_path = args.define_summary
+    if define_summary_path is None:
+        define_summary_path = os.path.join(
+            CHANGES_DIR, args.change, "0-define", "define-summary.yaml"
+        )
+
     tasks_content = build_tasks_md(
         sections, env_map, config, affected_paths, proposal_text,
         change_name=args.change, affected_tracks=affected_tracks,
         preserve_bodies=preserve_bodies,
+        define_summary_path=define_summary_path,
     )
     eval_content = build_on_conditions_eval_md(
         config, affected_paths, proposal_text,

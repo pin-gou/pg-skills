@@ -277,6 +277,11 @@ tasks.md 的 verify 阶段只需写：
   - real-integration：runner 按 environments.<stage.env_name>.actions.verify 查找并执行
 - [ ] {N}.4 验证 V-{track_id}-N：来自 design.md 的 Verification Criteria
 
+  **define-summary 对账**（v1.3 自动生成）：
+  - verifiable: V-{track_id}-1, V-{track_id}-2
+  - degraded: V-{track_id}-3
+  - skipped: V-{track_id}-4
+
   **Evidence 要求**（verify agent 在验证报告中产出，gate agent 据此评审）：
   - 每个 V-* 必须有对应的原始输出（curl 响应 / 命令行输出 / 日志片段）
   - SKIP 的 V-* 必须注明豁免理由

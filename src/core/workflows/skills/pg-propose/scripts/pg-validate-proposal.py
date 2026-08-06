@@ -65,6 +65,12 @@ _HARDCODED_LOCAL_ALLOWLIST = {"127.0.0.1", "localhost", "0.0.0.0"}
 # 占位符 / 注释 / URL scheme 前缀
 _HARDCODED_ALLOW_PREFIXES = ("{env.", "#", "//", "https://{env.", "http://{env.")
 
+# v1.3: env_resource_refs 强引用 — design.md / scenario-*.yaml 至少引用一次
+_ENV_REF_PATTERN = re.compile(
+    r"\{env\.(infra_services|business_systems|data_resources|config_resources|"
+    r"runtime_environment|external_dependencies)\[([^\]]+)\]"
+)
+
 # v1.1.0: 通过环境变量可临时关闭新规则 (回滚路径)
 def _hardcoded_rule_enabled() -> bool:
     """lazy 读取环境变量, 允许测试在 import 后切换开关."""
@@ -794,6 +800,115 @@ def cmd_design_api(change):
 _V_ID_RE = re.compile(r"\bV-([a-zA-Z][a-zA-Z0-9]*(?:[-_][a-zA-Z0-9]+)*)\b")
 
 
+def _check_env_resource_refs_usage(
+    change: str,
+    design_text: str,
+    scenario_files: list[str],
+    define_summary_path: str | None,
+) -> list[tuple[str, str]]:
+    """v1.3: 强引用 define-summary.yaml 中已声明的 env_resource_refs.
+
+    规则:
+      - define-summary.yaml 不存在 → 跳过本规则 (旧 change 可能无 define 产物)
+      - define-summary 中 verification_needs[].env_resource_refs 为空 → 跳过
+      - design.md "环境限制与验证策略" 段未引用任何 env_resource_refs → WARN
+      - 所有 scenario-*.yaml 联合未引用任何 env_resource_refs → WARN
+      - 单 ref 维度不强制覆盖 (LLM 可合理选择不引用某些 ref)
+    """
+    issues: list[tuple[str, str]] = []
+    if not define_summary_path or not os.path.isfile(define_summary_path):
+        return issues
+    if yaml is None:
+        return issues
+    try:
+        with open(define_summary_path, encoding="utf-8") as f:
+            ds = yaml.safe_load(f) or {}
+        vns = ds.get("verification_needs") or []
+        ref_set: set[str] = set()
+        for v in vns:
+            if not isinstance(v, dict):
+                continue
+            for ref in v.get("env_resource_refs") or []:
+                if isinstance(ref, str):
+                    ref_set.add(ref)
+    except Exception:
+        return issues
+    if not ref_set:
+        return issues
+
+    # 抽取 design.md "环境限制与验证策略" 段 (从该 heading 到下一个二级 heading)
+    seg_match = re.search(
+        r"^###\s+环境限制与验证策略\s*\n(.*?)(?=^###\s|\Z)",
+        design_text, re.MULTILINE | re.DOTALL,
+    )
+    design_segment = seg_match.group(1) if seg_match else design_text
+    design_refs = set(_ENV_REF_PATTERN.findall(design_segment))
+    design_ref_full = set(m.group(0) for m in _ENV_REF_PATTERN.finditer(design_segment))
+
+    if not design_refs:
+        # fallback: 在整篇 design.md 中找, 避免 "段没匹配但全文有" 误报
+        design_refs = set(_ENV_REF_PATTERN.findall(design_text))
+        design_ref_full = set(m.group(0) for m in _ENV_REF_PATTERN.finditer(design_text))
+
+    # design 段中 {env.<段>[name=<x>]...} 的 (seg, name) 与 define-summary 中的 ref 比对
+    def _parse_ref(ref: str) -> tuple[str, str]:
+        m = re.match(
+            r"\{env\.(infra_services|business_systems|data_resources|config_resources|"
+            r"runtime_environment|external_dependencies)\[([^\]]+)\]",
+            ref,
+        )
+        return (m.group(1), m.group(2)) if m else ("", "")
+
+    ds_pairs = {_parse_ref(r) for r in ref_set}
+    design_pairs = set(design_refs)
+
+    if ds_pairs and not (ds_pairs & design_pairs):
+        issues.append((
+            "env_resource_refs_design_unused",
+            "design.md 未引用 define-summary 中任何 env_resource_refs (定义: {})".format(
+                ", ".join(sorted(ref_set)),
+            ),
+        ))
+
+    # scenario-*.yaml 联合检查
+    scenario_ref_full: set[str] = set()
+    for sf in scenario_files:
+        try:
+            with open(sf, encoding="utf-8") as f:
+                doc = yaml.safe_load(f)
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        for sc in doc.get("scenarios") or []:
+            for key in ("given", "when", "then", "evidence"):
+                val = sc.get(key)
+                if isinstance(val, list):
+                    for item in val:
+                        if isinstance(item, dict):
+                            for sub in ("url", "value", "expression", "expected"):
+                                v = item.get(sub)
+                                if isinstance(v, str):
+                                    scenario_ref_full.update(
+                                        m.group(0) for m in _ENV_REF_PATTERN.finditer(v)
+                                    )
+                        elif isinstance(item, str):
+                            scenario_ref_full.update(
+                                m.group(0) for m in _ENV_REF_PATTERN.finditer(item)
+                            )
+
+    scenario_pairs = set(_ENV_REF_PATTERN.findall(" ".join(scenario_ref_full)))
+    if ds_pairs and not (ds_pairs & scenario_pairs):
+        issues.append((
+            "env_resource_refs_scenario_unused",
+            "所有 scenario-*.yaml 联合未引用 define-summary 中任何 env_resource_refs (定义: {})".format(
+                ", ".join(sorted(ref_set)),
+            ),
+        ))
+
+    return issues
+
+
 def _check_v_identifier_consistency(
     change: str,
     design_text: str,
@@ -1179,6 +1294,17 @@ def _validate_define_summary_structure(ds: dict, schema) -> list:
                             "verification_needs[{}].id {!r} 不匹配 pattern {!r}".format(
                                 i, vid, id_pat),
                         ))
+                    # id 与 track_id 前缀一致性 (仅对 V-{track}-{seq} 形态校验,
+                    # 兼容旧 V-NNN 单一数字形态)
+                    if vid.startswith("V-"):
+                        track_id = item.get("track_id")
+                        m = re.match(r"^V-([a-z][a-z0-9-]*)-", vid)
+                        if m and isinstance(track_id, str) and m.group(1) != track_id:
+                            issues.append((
+                                "define_summary_vn_track_id_mismatch",
+                                "verification_needs[{}].id={!r} 与 track_id={!r} 前缀不一致".format(
+                                    i, vid, track_id),
+                            ))
     return issues
 
 
@@ -1545,6 +1671,28 @@ def cmd_manifest(change):
         ))
 
     coverage_warnings.extend(extra_warnings)
+
+    # 7.4c v1.3: env_resource_refs 强引用 (WARN 级)
+    try:
+        import glob as _glob_v2
+        _ds_path_v2 = os.path.join(CHANGES_DIR, change, "0-define", "define-summary.yaml")
+        _design_text_v2 = ""
+        _design_path_v2 = os.path.join(CHANGES_DIR, change, "design.md")
+        if os.path.isfile(_design_path_v2):
+            with open(_design_path_v2, encoding="utf-8") as _f_v2:
+                _design_text_v2 = _f_v2.read()
+        _scenario_files_v2 = _glob_v2.glob(
+            os.path.join(CHANGES_DIR, change, "scenario-*.yaml")
+        )
+        for code, msg in _check_env_resource_refs_usage(
+            change, _design_text_v2, _scenario_files_v2, _ds_path_v2,
+        ):
+            coverage_warnings.append((code, msg))
+    except Exception as _e_v2:
+        coverage_warnings.append((
+            "env_resource_refs_check_failed",
+            f"env_resource_refs 校验异常: {_e_v2}",
+        ))
 
     # 7.4b 建议 7+8: V-* 唯一化/对齐 + R-* 交叉校验
     try:

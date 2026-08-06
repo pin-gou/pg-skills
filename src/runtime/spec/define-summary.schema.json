@@ -76,6 +76,7 @@
         "type": "object",
         "required": [
           "id",
+          "track_id",
           "name",
           "what",
           "requires_capabilities",
@@ -85,8 +86,13 @@
         "properties": {
           "id": {
             "type": "string",
-            "pattern": "^V-[0-9]{3,}$",
-            "description": "V-* 编号, 与 design.md / tasks.md / scenario-*.yaml 保持一致"
+            "pattern": "^V-[A-Za-z][A-Za-z0-9-]*$",
+            "description": "V-* 编号, 与 design.md / tasks.md / scenario-*.yaml 保持一致（推荐格式 V-{track_id}-{seq}，如 V-backend-1）"
+          },
+          "track_id": {
+            "type": "string",
+            "pattern": "^[a-z][a-z0-9-]*$",
+            "description": "V-* 归属 track id (与 .pg/project.yaml tracks.<id> 对应). 当 id 形如 V-{track_id}-{seq} 时, track_id 必须与 id 中的 track 前缀一致; 不一致时 pg-validate-proposal.py define-summary 报 define_summary_track_id_mismatch."
           },
           "name": {
             "type": "string",

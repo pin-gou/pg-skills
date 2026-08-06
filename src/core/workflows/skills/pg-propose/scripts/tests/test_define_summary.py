@@ -59,7 +59,8 @@ def _valid_define_summary(change_id="demo-change", target_env="dev-local"):
         },
         "verification_needs": [
             {
-                "id": "V-001",
+                "id": "V-backend-1",
+                "track_id": "backend",
                 "name": "happy",
                 "what": "validate happy path",
                 "requires_capabilities": [
@@ -72,7 +73,8 @@ def _valid_define_summary(change_id="demo-change", target_env="dev-local"):
                 ],
             },
             {
-                "id": "V-002",
+                "id": "V-backend-2",
+                "track_id": "backend",
                 "name": "degraded",
                 "what": "validate degraded path",
                 "requires_capabilities": [
@@ -194,7 +196,7 @@ class TestDefineSummaryValidation(unittest.TestCase):
     def test_duplicate_v_id_fail(self):
         change = "demo-change"
         doc = _valid_define_summary(change)
-        doc["verification_needs"][1]["id"] = "V-001"
+        doc["verification_needs"][1]["id"] = "V-backend-1"
         self._write_define_summary(change, doc)
         self._write_env_description(change, _env_description(change))
         result = self._run_validate(change)
@@ -266,6 +268,61 @@ class TestDefineSummaryValidation(unittest.TestCase):
         result = self._run_validate(change)
         self.assertEqual(result.returncode, 1)
         self.assertIn("define_summary_missing_boundary", result.stderr)
+
+    # ---------- v1.3: V-{track}-N 编号 + track_id 必填 ----------
+
+    def test_v_track_id_format_pass(self):
+        """id=V-backend-1 + track_id=backend → OK（新格式）。"""
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["id"] = "V-backend-1"
+        doc["verification_needs"][0]["track_id"] = "backend"
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("OK: define-summary.yaml", result.stdout)
+
+    def test_legacy_v_nnn_format_now_fail(self):
+        """id=V-001 不带 track_id 的旧格式 → 必须 FAIL（强制迁移到 V-{track}-N + track_id）。
+
+        旧 define-summary 必须先用 migrate-define-summary.py 迁移, 再走 propose 校验。
+        """
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["id"] = "V-001"
+        doc["verification_needs"][0].pop("track_id", None)
+        doc["verification_needs"][1]["id"] = "V-002"
+        doc["verification_needs"][1].pop("track_id", None)
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("track_id", result.stderr)
+
+    def test_track_id_missing_fail(self):
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["id"] = "V-backend-1"
+        # 故意缺 track_id
+        doc["verification_needs"][0].pop("track_id", None)
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1, msg=f"stdout={result.stdout!r} stderr={result.stderr!r}")
+        self.assertIn("track_id", result.stderr)
+
+    def test_track_id_mismatch_fail(self):
+        """id=V-backend-1 + track_id=frontend → 前后缀不一致 FAIL。"""
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["id"] = "V-backend-1"
+        doc["verification_needs"][0]["track_id"] = "frontend"
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("track_id", result.stderr)
 
 
 if __name__ == "__main__":
