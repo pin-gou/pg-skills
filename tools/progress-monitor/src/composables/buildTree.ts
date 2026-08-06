@@ -1,4 +1,5 @@
-import type { Manifest, Snapshot, TreeNode, TrackState, PhaseState, SubPipelineInfo } from '@/types/pipeline'
+import type { Manifest, Snapshot, TreeNode, TrackState, SubPipelineInfo } from '../types/pipeline.ts'
+import { aggregateStatuses, finalGateStatus } from './status.ts'
 
 function phaseStatus(trackState: TrackState | undefined, phase: string): string {
   if (!trackState) return 'pending'
@@ -12,17 +13,7 @@ function findTrackState(snapshot: Snapshot | null, qualifiedTrack: string): Trac
   return snapshot.tracks[qualifiedTrack]
 }
 
-function findFixedPhaseStatus(trackState: TrackState, phase: string): string {
-  const ps = trackState.phases[phase]
-  if (!ps) return 'pending'
-  return ps.status
-}
-
-function extractBareTrack(qualifiedTrack: string): string {
-  return qualifiedTrack.includes('.') ? qualifiedTrack.split('.').pop()! : qualifiedTrack
-}
-
-function buildSubPipelineNodes(phases: SubPipelineInfo[], trackState: TrackState): TreeNode[] {
+function buildSubPipelineNodes(phases: SubPipelineInfo[]): TreeNode[] {
   const nodes: TreeNode[] = []
   for (const sp of phases) {
     const cycleLabel = `${sp.kind} cycle ${sp.cycle}`
@@ -43,13 +34,21 @@ function buildSubPipelineNodes(phases: SubPipelineInfo[], trackState: TrackState
         meta: { spKind: sp.kind, cycle: sp.cycle, phase: subPhase, parentTrack: sp.parent_track },
       })
     }
+    const inferredStatus = !sp.status
     nodes.push({
       id: `${sp.parent_track}.${sp.parent_phase}.${sp.kind}-${sp.cycle}`,
       label: cycleLabel,
       type: 'fix-cycle',
-      status: children.every(c => c.status === 'completed') ? 'completed' : 'in_progress',
+      status: sp.status || (children.every(c => c.status === 'completed') ? 'completed' : 'in_progress'),
       children,
-      meta: { spKind: sp.kind, cycle: sp.cycle, parentTrack: sp.parent_track, parentPhase: sp.parent_phase },
+      meta: {
+        spKind: sp.kind,
+        cycle: sp.cycle,
+        parentTrack: sp.parent_track,
+        parentPhase: sp.parent_phase,
+        inferredStatus,
+        failedReason: sp.failed_reason,
+      },
     })
   }
   return nodes
@@ -68,6 +67,11 @@ function findSubPipelinesForPhase(trackState: TrackState | undefined, phase: str
 
 const PHASE_ORDER = ['test', 'dev', 'review', 'verify', 'gate', 'simple', 'scenario-execute', 'scenario-fix']
 
+function phaseOrder(phase: string): number {
+  const index = PHASE_ORDER.indexOf(phase)
+  return index === -1 ? PHASE_ORDER.length : index
+}
+
 export function buildTree(manifest: Manifest, snapshot: Snapshot | null): TreeNode[] {
   const stages: TreeNode[] = []
 
@@ -82,7 +86,7 @@ export function buildTree(manifest: Manifest, snapshot: Snapshot | null): TreeNo
 
       const prompts = track.phase_prompts || {}
       const sortedPhases = Object.keys(prompts).sort(
-        (a, b) => PHASE_ORDER.indexOf(a) - PHASE_ORDER.indexOf(b)
+        (a, b) => phaseOrder(a) - phaseOrder(b)
       )
 
       for (const phase of sortedPhases) {
@@ -91,7 +95,7 @@ export function buildTree(manifest: Manifest, snapshot: Snapshot | null): TreeNo
 
         const children: TreeNode[] = []
         if (subPipelines.length > 0) {
-          const spNodes = buildSubPipelineNodes(subPipelines, trackState!)
+          const spNodes = buildSubPipelineNodes(subPipelines)
           children.push(...spNodes)
         }
 
@@ -126,29 +130,33 @@ export function buildTree(manifest: Manifest, snapshot: Snapshot | null): TreeNo
       id: stage.name,
       label: `${stage.name} (${stage.environment})`,
       type: 'stage',
-      status: 'pending',
+      status: aggregateStatuses(trackNodes.map(track => track.status)),
       children: trackNodes,
       meta: { environment: stage.environment },
     })
   }
 
   if (manifest.final_gate) {
+    const finalGateState = findTrackState(snapshot, 'final-gate')
+    const gatePhaseState = finalGateState?.phases?.gate
     const finalGateNode: TreeNode = {
       id: 'final-gate',
       label: 'final-gate',
       type: 'final-gate',
-      status: phaseStatus(
-        snapshot ? snapshot.tracks['final-gate'] as unknown as TrackState : undefined,
-        'gate'
-      ),
+      status: finalGateStatus(snapshot),
       children: [],
-      meta: { tasks_md_section: manifest.final_gate.tasks_md_section },
+      meta: {
+        track: 'final-gate',
+        phase: 'gate',
+        trackState: finalGateState,
+        phaseState: gatePhaseState,
+      },
     }
     stages.push({
       id: 'final',
       label: 'final',
       type: 'stage',
-      status: 'pending',
+      status: finalGateNode.status,
       children: [finalGateNode],
       meta: {},
     })
@@ -170,13 +178,19 @@ export function findNodeById(nodes: TreeNode[], id: string): TreeNode | null {
 
 export function findFirstInProgress(nodes: TreeNode[]): string | null {
   for (const node of nodes) {
+    const childMatch = findFirstInProgress(node.children)
+    if (childMatch) return childMatch
     if (node.status === 'in_progress' || node.status === 'running') return node.id
-    for (const child of node.children) {
-      if (child.status === 'in_progress' || child.status === 'running') return child.id
-      for (const grandchild of child.children) {
-        if (grandchild.status === 'in_progress' || grandchild.status === 'running') return grandchild.id
-      }
-    }
+  }
+  return null
+}
+
+function pathToNode(nodes: TreeNode[], id: string, ancestors: string[] = []): string[] | null {
+  for (const node of nodes) {
+    const path = [...ancestors, node.id]
+    if (node.id === id) return path
+    const childPath = pathToNode(node.children, id, path)
+    if (childPath) return childPath
   }
   return null
 }
@@ -184,6 +198,8 @@ export function findFirstInProgress(nodes: TreeNode[]): string | null {
 export function buildAutoExpandSet(nodes: TreeNode[]): Set<string> {
   const set = new Set<string>()
   const inProgressId = findFirstInProgress(nodes)
+  const activePath = inProgressId ? pathToNode(nodes, inProgressId) || [] : []
+  for (const id of activePath.slice(0, -1)) set.add(id)
   for (const stage of nodes) {
     set.add(stage.id)
     for (const track of stage.children) {

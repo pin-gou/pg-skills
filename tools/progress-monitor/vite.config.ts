@@ -4,304 +4,197 @@ import { fileURLToPath } from 'node:url'
 import path from 'node:path'
 import fs from 'node:fs'
 import yaml from 'yaml'
+import { filterEvents, paginateNewest } from './server/events'
+import { listChanges, parseJsonFile, readFileOrNull } from './server/change-info'
+import { findProjectRoot, isSafeSegment, resolvePathInside } from './server/path-utils'
+import { enrichSnapshotPhaseTelemetry } from './server/phase-telemetry'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
+let repoRoot = process.cwd()
+let changesRoot = path.join(repoRoot, '.pg', 'changes')
+const DEFAULT_STALL_THRESHOLD_MS = 5 * 60_000
 
-function findRepoRoot(): string {
-  const pgSkillsReal = fs.realpathSync(path.join(__dirname, '..', '..'))
-
-  let dir = __dirname
-  const visited = new Set<string>()
-  while (true) {
-    const resolved = fs.realpathSync(dir)
-    if (visited.has(resolved)) break
-    visited.add(resolved)
-    const projectYaml = path.join(dir, '.pg', 'project.yaml')
-    if (fs.existsSync(projectYaml)) {
-      return dir
-    }
-    let entries: string[] = []
-    try { entries = fs.readdirSync(dir) } catch { /* ignore */ }
-    for (const entry of entries) {
-      if (entry.startsWith('.') || entry === 'node_modules') continue
-      const candidate = path.join(dir, entry)
-      try {
-        const candidateYaml = path.join(candidate, '.pg', 'project.yaml')
-        if (fs.statSync(candidate).isDirectory() && fs.existsSync(candidateYaml)) {
-          const skillsLink = path.join(candidate, '.pg', 'skills')
-          try {
-            if (fs.lstatSync(skillsLink).isSymbolicLink() && fs.realpathSync(skillsLink) === pgSkillsReal) {
-              return candidate
-            }
-          } catch {
-            return candidate
-          }
-        }
-      } catch { /* ignore */ }
-    }
-    const parent = path.dirname(dir)
-    if (parent === dir) break
-    dir = parent
-  }
-  return process.cwd()
+function stallThresholdMs(): number {
+  const configured = Number(process.env.PG_MONITOR_STALL_MS)
+  return Number.isFinite(configured) && configured > 0 ? configured : DEFAULT_STALL_THRESHOLD_MS
 }
 
-const repoRoot = findRepoRoot()
-
-function readFileOrNull(filePath: string): string | null {
-  try {
-    return fs.readFileSync(filePath, 'utf-8')
-  } catch {
-    return null
-  }
+function decodeSafeSegment(encoded: string): string {
+  const value = decodeURIComponent(encoded)
+  if (!isSafeSegment(value)) throw new Error('Invalid change name')
+  return value
 }
 
-function readJsonOrNull(filePath: string): unknown | null {
-  const text = readFileOrNull(filePath)
-  if (!text) return null
-  try {
-    return JSON.parse(text)
-  } catch {
-    return null
-  }
-}
-
-interface ChangeInfo {
-  name: string
-  isActive: boolean
-  hasManifest: boolean
-  hasSnapshot: boolean
-  snapshotStatus: string | null
-  mtime: string | null
-}
-
-function listChanges(): ChangeInfo[] {
-  const changesDir = path.join(repoRoot, '.pg', 'changes')
-  const archiveDir = path.join(changesDir, 'archive')
-  const result: ChangeInfo[] = []
-
-  if (fs.existsSync(changesDir)) {
-    for (const entry of fs.readdirSync(changesDir, { withFileTypes: true })) {
-      if (!entry.isDirectory() || entry.name === 'archive') continue
-      const changeRoot = path.join(changesDir, entry.name)
-      const manifestPath = path.join(changeRoot, 'execution-manifest.yaml')
-      const snapshotPath = path.join(changeRoot, '2-build', 'pipeline.snapshot.json')
-      const hasManifest = fs.existsSync(manifestPath)
-      const hasSnapshot = fs.existsSync(snapshotPath)
-      let snapshotStatus: string | null = null
-      if (hasSnapshot) {
-        const snap = readJsonOrNull(snapshotPath) as Record<string, unknown> | null
-        snapshotStatus = snap?.status as string ?? null
-      }
-      let mtime: string | null = null
-      try {
-        const stat = fs.statSync(manifestPath)
-        mtime = stat.mtime.toISOString()
-      } catch { /* ignore */ }
-      result.push({ name: entry.name, isActive: true, hasManifest, hasSnapshot, snapshotStatus, mtime })
-    }
-  }
-
-  if (fs.existsSync(archiveDir)) {
-    for (const entry of fs.readdirSync(archiveDir, { withFileTypes: true })) {
-      if (!entry.isDirectory()) continue
-      const changeRoot = path.join(archiveDir, entry.name)
-      const manifestPath = path.join(changeRoot, 'execution-manifest.yaml')
-      const snapshotPath = path.join(changeRoot, '2-build', 'pipeline.snapshot.json')
-      const hasManifest = fs.existsSync(manifestPath)
-      const hasSnapshot = fs.existsSync(snapshotPath)
-      let snapshotStatus: string | null = null
-      if (hasSnapshot) {
-        const snap = readJsonOrNull(snapshotPath) as Record<string, unknown> | null
-        snapshotStatus = snap?.status as string ?? null
-      }
-      let mtime: string | null = null
-      try {
-        const stat = fs.statSync(manifestPath)
-        mtime = stat.mtime.toISOString()
-      } catch { /* ignore */ }
-      result.push({ name: entry.name, isActive: false, hasManifest, hasSnapshot, snapshotStatus, mtime })
-    }
-  }
-
-  result.sort((a, b) => {
-    if (a.isActive !== b.isActive) return a.isActive ? -1 : 1
-    return (b.mtime ?? '').localeCompare(a.mtime ?? '')
-  })
-
-  return result
+function resolveChangeRoot(change: string): string | null {
+  const active = path.join(changesRoot, change)
+  if (fs.existsSync(active) && fs.statSync(active).isDirectory()) return active
+  const archived = path.join(changesRoot, 'archive', change)
+  if (fs.existsSync(archived) && fs.statSync(archived).isDirectory()) return archived
+  return null
 }
 
 function listArtifactsForPhase(changeRoot: string, track: string, phase: string): string[] {
   const buildDir = path.join(changeRoot, '2-build')
   if (!fs.existsSync(buildDir)) return []
-  const files = fs.readdirSync(buildDir)
-  const pattern = track.replace(/^.*\./, '') + '-' + phase
-  return files
-    .filter(f => f.includes(pattern) && !f.endsWith('.json') && !f.startsWith('pipeline.'))
+  const pattern = `${track.replace(/^.*\./, '')}-${phase}`
+  return fs.readdirSync(buildDir, { withFileTypes: true })
+    .filter(entry => entry.isFile() && entry.name.includes(pattern) && !entry.name.startsWith('pipeline.'))
+    .map(entry => entry.name)
     .sort()
 }
 
-function readEvents(changeRoot: string, page: number, size: number): { events: unknown[]; total: number } {
-  const eventsPath = path.join(changeRoot, '2-build', 'pipeline.events')
-  const text = readFileOrNull(eventsPath)
+function readEvents(
+  changeRoot: string,
+  page: number,
+  size: number,
+  search = '',
+  failuresOnly = false,
+): { events: unknown[]; total: number } {
+  const text = readFileOrNull(path.join(changeRoot, '2-build', 'pipeline.events'))
   if (!text) return { events: [], total: 0 }
-  const lines = text.trim().split('\n').filter(Boolean)
-  const parsed = lines.map((l, i) => {
+  const parsed = text.trim().split(/\r?\n/).filter(Boolean).map((line, index) => {
     try {
-      const obj = JSON.parse(l)
-      obj._line = i + 1
-      return obj
-    } catch {
-      return { type: 'parse_error', _line: i + 1, raw: l.slice(0, 200) }
+      return { ...JSON.parse(line), _line: index + 1 }
+    } catch (error) {
+      return { type: 'parse_error', _line: index + 1, raw: line.slice(0, 500), error: String(error) }
     }
   })
-  const total = parsed.length
-  const start = (page - 1) * size
-  const end = Math.min(start + size, total)
-  const events = parsed.slice(start, end).reverse()
-  return { events, total }
+  const filtered = filterEvents(parsed, search, failuresOnly)
+  return { events: paginateNewest(filtered, page, size), total: filtered.length }
 }
 
-export default defineConfig(({ command }) => ({
+function readAllEvents(changeRoot: string): unknown[] {
+  const text = readFileOrNull(path.join(changeRoot, '2-build', 'pipeline.events'))
+  if (!text) return []
+  return text.trim().split(/\r?\n/).filter(Boolean).flatMap(line => {
+    try {
+      return [JSON.parse(line)]
+    } catch {
+      return []
+    }
+  })
+}
+
+function sendJson(res: import('node:http').ServerResponse, status: number, value: unknown): void {
+  res.statusCode = status
+  res.setHeader('Content-Type', 'application/json; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-store')
+  res.end(JSON.stringify(value))
+}
+
+function sendText(res: import('node:http').ServerResponse, status: number, value: string): void {
+  res.statusCode = status
+  res.setHeader('Content-Type', 'text/plain; charset=utf-8')
+  res.setHeader('Cache-Control', 'no-store')
+  res.end(value)
+}
+
+export default defineConfig(({ command }) => {
+  if (command === 'serve') {
+    repoRoot = findProjectRoot(process.cwd(), process.env.PG_PROJECT_ROOT)
+    changesRoot = path.join(repoRoot, '.pg', 'changes')
+  }
+
+  return {
   plugins: [
     {
       name: 'pg-progress-monitor-server',
       enforce: 'pre',
       configureServer(server) {
-        server.middlewares.use(async (req, res, next) => {
-          const url = req.url || ''
+        server.middlewares.use((req, res, next) => {
+          const requestUrl = new URL(req.url || '/', 'http://127.0.0.1')
+          const pathname = requestUrl.pathname
 
-          // CORS
-          res.setHeader('Access-Control-Allow-Origin', '*')
-          res.setHeader('Cache-Control', 'no-cache')
-
-          // List changes
-          if (url === '/__pg/changes') {
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify(listChanges()))
-            return
-          }
-
-          // Manifest
-          const manifestMatch = url.match(/^\/__pg\/manifest\/(.+)$/)
-          if (manifestMatch) {
-            const change = manifestMatch[1]
-            const filePath = path.join(repoRoot, '.pg', 'changes', change, 'execution-manifest.yaml')
-            const archivePath = path.join(repoRoot, '.pg', 'changes', 'archive', change, 'execution-manifest.yaml')
-            let content = readFileOrNull(filePath) || readFileOrNull(archivePath)
-            if (!content) {
-              res.statusCode = 404
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify({ error: 'manifest not found' }))
+          try {
+            if (pathname === '/__pg/changes') {
+              sendJson(res, 200, listChanges(changesRoot, stallThresholdMs()))
               return
             }
-            try {
-              const parsed = yaml.parse(content)
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify(parsed))
-            } catch {
-              res.setHeader('Content-Type', 'text/plain')
-              res.end(content)
-            }
-            return
-          }
 
-          // Snapshot
-          const snapMatch = url.match(/^\/__pg\/snapshot\/(.+)$/)
-          if (snapMatch) {
-            const change = snapMatch[1]
-            const filePath = path.join(repoRoot, '.pg', 'changes', change, '2-build', 'pipeline.snapshot.json')
-            const archivePath = path.join(repoRoot, '.pg', 'changes', 'archive', change, '2-build', 'pipeline.snapshot.json')
-            const content = readFileOrNull(filePath) || readFileOrNull(archivePath)
-            if (!content) {
-              res.statusCode = 404
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify({ error: 'snapshot not found' }))
+            const manifestRawMatch = pathname.match(/^\/__pg\/manifest-raw\/([^/]+)$/)
+            if (manifestRawMatch) {
+              const root = resolveChangeRoot(decodeSafeSegment(manifestRawMatch[1]))
+              if (!root) return sendJson(res, 404, { error: 'change not found' })
+              const content = readFileOrNull(path.join(root, 'execution-manifest.yaml'))
+              if (content === null) return sendJson(res, 404, { error: 'manifest not found' })
+              sendText(res, 200, content)
               return
             }
-            res.setHeader('Content-Type', 'application/json')
-            res.end(content)
-            return
-          }
 
-          // Events
-          const eventsMatch = url.match(/^\/__pg\/events\/(.+?)(?:\?|$)/)
-          if (eventsMatch) {
-            const change = eventsMatch[1]
-            const params = new URL(url, 'http://localhost').searchParams
-            const page = parseInt(params.get('page') || '1', 10)
-            const size = parseInt(params.get('size') || '50', 10)
-            const changeRoot = path.join(repoRoot, '.pg', 'changes', change)
-            const archiveRoot = path.join(repoRoot, '.pg', 'changes', 'archive', change)
-            const root = fs.existsSync(changeRoot) ? changeRoot : archiveRoot
-            const result = readEvents(root, Math.max(1, page), Math.max(1, Math.min(200, size)))
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify(result))
-            return
-          }
-
-          // Artifact content
-          const artifactMatch = url.match(/^\/__pg\/artifact\/(.+?)\?path=(.+)$/)
-          if (artifactMatch) {
-            const change = artifactMatch[1]
-            const relPath = decodeURIComponent(artifactMatch[2])
-            const changeRoot = path.join(repoRoot, '.pg', 'changes', change)
-            const archiveRoot = path.join(repoRoot, '.pg', 'changes', 'archive', change)
-            const base = fs.existsSync(changeRoot) ? changeRoot : archiveRoot
-            const filePath = path.join(base, '2-build', relPath)
-            const content = readFileOrNull(filePath)
-            if (!content) {
-              res.statusCode = 404
-              res.setHeader('Content-Type', 'application/json')
-              res.end(JSON.stringify({ error: 'artifact not found' }))
-              return
-            }
-            const ext = path.extname(filePath)
-            if (ext === '.json') {
-              res.setHeader('Content-Type', 'application/json')
-            } else {
-              res.setHeader('Content-Type', 'text/plain; charset=utf-8')
-            }
-            res.end(content)
-            return
-          }
-
-          // Artifacts list for phase
-          const artifactsMatch = url.match(/^\/__pg\/artifacts\/(.+?)\?track=(.+?)&phase=(.+)$/)
-          if (artifactsMatch) {
-            const change = artifactsMatch[1]
-            const track = decodeURIComponent(artifactsMatch[2])
-            const phase = decodeURIComponent(artifactsMatch[3])
-            const changeRoot = path.join(repoRoot, '.pg', 'changes', change)
-            const archiveRoot = path.join(repoRoot, '.pg', 'changes', 'archive', change)
-            const root = fs.existsSync(changeRoot) ? changeRoot : archiveRoot
-            const files = listArtifactsForPhase(root, track, phase)
-            res.setHeader('Content-Type', 'application/json')
-            res.end(JSON.stringify(files))
-            return
-          }
-
-          // Serve .pg/ files directly (for YAML viewer etc.)
-          if (url.startsWith('/.pg/')) {
-            const filePath = path.join(repoRoot, url)
-            if (fs.existsSync(filePath) && fs.statSync(filePath).isFile()) {
-              const content = fs.readFileSync(filePath, 'utf-8')
-              const ext = path.extname(filePath)
-              const mime: Record<string, string> = {
-                '.yaml': 'text/yaml', '.yml': 'text/yaml',
-                '.json': 'application/json', '.html': 'text/html',
-                '.js': 'application/javascript', '.css': 'text/css',
-                '.ts': 'application/typescript', '.sh': 'text/x-shellscript',
-                '.md': 'text/markdown',
+            const manifestMatch = pathname.match(/^\/__pg\/manifest\/([^/]+)$/)
+            if (manifestMatch) {
+              const root = resolveChangeRoot(decodeSafeSegment(manifestMatch[1]))
+              if (!root) return sendJson(res, 404, { error: 'change not found' })
+              const content = readFileOrNull(path.join(root, 'execution-manifest.yaml'))
+              if (content === null) return sendJson(res, 404, { error: 'manifest not found' })
+              try {
+                sendJson(res, 200, yaml.parse(content))
+              } catch (error) {
+                sendJson(res, 422, { error: 'manifest parse failed', detail: String(error) })
               }
-              res.setHeader('Content-Type', mime[ext] || 'application/octet-stream')
+              return
+            }
+
+            const snapshotMatch = pathname.match(/^\/__pg\/snapshot\/([^/]+)$/)
+            if (snapshotMatch) {
+              const root = resolveChangeRoot(decodeSafeSegment(snapshotMatch[1]))
+              if (!root) return sendJson(res, 404, { error: 'change not found' })
+              const filePath = path.join(root, '2-build', 'pipeline.snapshot.json')
+              const parsed = parseJsonFile(filePath)
+              if (!fs.existsSync(filePath)) return sendJson(res, 404, { error: 'snapshot not found' })
+              if (parsed.error) return sendJson(res, 422, { error: 'snapshot parse failed', detail: parsed.error })
+              sendJson(res, 200, enrichSnapshotPhaseTelemetry(parsed.value, readAllEvents(root)))
+              return
+            }
+
+            const eventsMatch = pathname.match(/^\/__pg\/events\/([^/]+)$/)
+            if (eventsMatch) {
+              const root = resolveChangeRoot(decodeSafeSegment(eventsMatch[1]))
+              if (!root) return sendJson(res, 404, { error: 'change not found' })
+              const page = Math.max(1, Number.parseInt(requestUrl.searchParams.get('page') || '1', 10) || 1)
+              const size = Math.max(1, Math.min(200, Number.parseInt(requestUrl.searchParams.get('size') || '50', 10) || 50))
+              const search = requestUrl.searchParams.get('q') || ''
+              const failuresOnly = requestUrl.searchParams.get('failures') === 'true'
+              sendJson(res, 200, readEvents(root, page, size, search, failuresOnly))
+              return
+            }
+
+            const artifactMatch = pathname.match(/^\/__pg\/artifact\/([^/]+)$/)
+            if (artifactMatch) {
+              const root = resolveChangeRoot(decodeSafeSegment(artifactMatch[1]))
+              if (!root) return sendJson(res, 404, { error: 'change not found' })
+              const requested = requestUrl.searchParams.get('path') || ''
+              let filePath: string
+              try {
+                filePath = resolvePathInside(path.join(root, '2-build'), requested)
+              } catch (error) {
+                return sendJson(res, 403, { error: 'artifact path rejected', detail: String(error) })
+              }
+              const content = readFileOrNull(filePath)
+              if (content === null || !fs.statSync(filePath).isFile()) return sendJson(res, 404, { error: 'artifact not found' })
+              const extension = path.extname(filePath).toLowerCase()
+              res.statusCode = 200
+              res.setHeader('Cache-Control', 'no-store')
+              res.setHeader('Content-Type', extension === '.json' ? 'application/json; charset=utf-8' : 'text/plain; charset=utf-8')
               res.end(content)
               return
             }
-          }
 
-          next()
+            const artifactsMatch = pathname.match(/^\/__pg\/artifacts\/([^/]+)$/)
+            if (artifactsMatch) {
+              const root = resolveChangeRoot(decodeSafeSegment(artifactsMatch[1]))
+              if (!root) return sendJson(res, 404, { error: 'change not found' })
+              const track = requestUrl.searchParams.get('track') || ''
+              const phase = requestUrl.searchParams.get('phase') || ''
+              if (!track || !phase) return sendJson(res, 400, { error: 'track and phase are required' })
+              sendJson(res, 200, listArtifactsForPhase(root, track, phase))
+              return
+            }
+
+            next()
+          } catch (error) {
+            sendJson(res, 400, { error: 'invalid monitor request', detail: String(error) })
+          }
         })
       },
     },
@@ -313,6 +206,7 @@ export default defineConfig(({ command }) => ({
     },
   },
   server: {
+    host: '127.0.0.1',
     port: 9323,
     strictPort: true,
   },
@@ -320,4 +214,5 @@ export default defineConfig(({ command }) => ({
   build: {
     outDir: path.resolve(__dirname, 'dist'),
   },
-}))
+  }
+})

@@ -1,30 +1,48 @@
-import { ref, onUnmounted } from 'vue'
+import { getCurrentScope, onScopeDispose, ref } from 'vue'
 
 export function usePolling(fn: () => Promise<void>, intervalMs = 5000) {
-  const enabled = ref(true)
-  let timer: ReturnType<typeof setInterval> | null = null
+  const enabled = ref(false)
+  const pending = ref(false)
+  let timer: ReturnType<typeof setTimeout> | null = null
+
+  function clearTimer() {
+    if (timer !== null) {
+      clearTimeout(timer)
+      timer = null
+    }
+  }
+
+  function schedule() {
+    clearTimer()
+    if (!enabled.value) return
+    timer = setTimeout(() => {
+      timer = null
+      void tick()
+    }, intervalMs)
+  }
 
   async function tick() {
-    if (!enabled.value) return
+    if (!enabled.value || pending.value) return
+    pending.value = true
     try {
       await fn()
     } catch {
       // silent
+    } finally {
+      pending.value = false
+      schedule()
     }
   }
 
   function start() {
-    stop()
+    clearTimer()
     enabled.value = true
-    tick()
-    timer = setInterval(tick, intervalMs)
+    if (!pending.value) void tick()
   }
 
   function stop() {
-    if (timer !== null) {
-      clearInterval(timer)
-      timer = null
-    }
+    enabled.value = false
+    clearTimer()
   }
 
   function toggle() {
@@ -36,7 +54,7 @@ export function usePolling(fn: () => Promise<void>, intervalMs = 5000) {
     }
   }
 
-  onUnmounted(stop)
+  if (getCurrentScope()) onScopeDispose(stop)
 
-  return { enabled, start, stop, toggle, tick }
+  return { enabled, pending, start, stop, toggle, tick }
 }

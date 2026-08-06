@@ -4,7 +4,16 @@ export interface ChangeInfo {
   hasManifest: boolean
   hasSnapshot: boolean
   snapshotStatus: string | null
+  currentStage: string | null
+  currentTrack: string | null
+  currentPhase: string | null
+  failedReason: string | null
+  completedPhases: number
+  totalPhases: number
+  lastEventAt: string | null
+  isStalled: boolean
   mtime: string | null
+  parseError: string | null
 }
 
 export interface Manifest {
@@ -54,6 +63,10 @@ export interface SubPipelineInfo {
   cycle: number
   phases: string[]
   current_index: number
+  status?: string
+  failed_reason?: string
+  started_at?: string | null
+  completed_at?: string | null
 }
 
 export interface TrackState {
@@ -91,6 +104,7 @@ export interface PhaseState {
 export interface PipelineEvent {
   type: string
   timestamp?: string
+  ts?: string
   track?: string
   phase?: string
   status?: string
