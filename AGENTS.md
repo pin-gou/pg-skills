@@ -277,18 +277,19 @@ cd tools/project-editor && pnpm build                   # 生产构建
 ### 6.4 开发约定
 
 - **分支策略**：1.0 之前使用单一线形分支（linear branch），所有变更直接提交到 master
-- **语言兼容性**：所有 Python 代码必须兼容 **Python 3.9+**（包括 3.9、3.10、3.11、3.12）。禁止使用仅在 Python 3.10+ 引入的语法或标准库 API，包括：
-  - PEP 604 `X | Y` 联合类型语法（如 `str | None`、`dict[str, Any] | None`）——除非文件已添加 `from __future__ import annotations`（该 import 使注解在运行时变为字符串，不实际求值 `|` 表达式，兼容 3.7+）
-  - `match`/`case` 结构模式匹配
-  - `dataclass` 的 `slots=True` 参数
-  - `zip(strict=True)` 参数
-  - `int.bit_count()` 方法
-  - `exceptiongroup` / `except*`
-  - `enum.StrEnum`
-  - `tomllib`
+- **语言兼容性**：所有 Python 代码必须兼容 **Python 3.7+**（包括 3.7、3.8、3.9、3.10、3.11、3.12）。所有文件已统一添加 `from __future__ import annotations`，使 PEP 604 `X | Y` 联合类型语法（如 `str | None`）在注解中安全可用。禁止使用以下仅在更高版本引入的语法或标准库 API：
+  - `match`/`case` 结构模式匹配（3.10+）
+  - `dataclass` 的 `slots=True` 参数（3.10+）
+  - `zip(strict=True)` 参数（3.10+）
+  - `int.bit_count()` 方法（3.8+）
+  - `exceptiongroup` / `except*`（3.11+）
+  - `enum.StrEnum`（3.11+）
+  - `tomllib`（3.11+）
   - `typing.Self`、`typing.TypeAlias`、`typing.Literal` 等 3.10+ 新增的 typing 类型（需从 `typing_extensions` 导入）
+  - `functools.cached_property`、`math.prod`、`importlib.metadata`（3.8+）
+  - 海象运算符 `:=` 和仅位置参数 `/`（3.8+）
 
-  如有疑问，在 CI 或本地 Python 3.9 环境验证。
+  如有疑问，在 CI 或本地 Python 3.7 环境验证。
 - **测试要求**：所有 Python 代码使用 pytest，SSOT 变更必须更新对应一致性测试
 - **命名规范**：全小写 + 下划线（snake_case），见 v0.5.x 迁移
 - **hook 脚本**：`set -uo pipefail`（不加 `-e`），由 `hook-helpers.sh` trap ERR 控制
