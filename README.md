@@ -130,7 +130,7 @@ git commit -m "feat: 接入 pg-skills $(cat .pg/skills/VERSION)"
 
 ```
 pg-skills/
-├── VERSION                       # semver （当前: 0.9.0）
+├── VERSION                       # semver （当前: 0.9.1）
 ├── CHANGELOG.md
 ├── README.md                     # 本文件
 ├── src/
@@ -230,7 +230,8 @@ pg-skills/
 | **0.8.0** | pg-build v2.6 review 阶段 + code-review profile 引擎（5 profile）+ pg-propose tasks.md 骨架脚本外化 + pg-fix-issue v3.2 重构 + code_view→code_review 重命名 + 品构品牌命名 |
 | **0.8.1** | verify/gate 按 track 关闭 + review_level 全量移除 + design.md 缺陷协议 + P0 硬约束 + review rule docs 注入 |
 | **0.8.3** | 集成验证不可 SKIP + API 端点强制完整性 + scenario-fix drift.md + scenario track 浏览器操作 + workflow_failed 可选 reset/resume + 脏分支检查 + AGENTS.md + skills 介绍文档 + build.injections→propose.injections 重命名 + schema 废弃字段清理 |
-| **0.9.0** | v6 describe_env 协议（env-description.yaml）+ pg-fix-issue 大幅精简 + pg-propose-refine 流程删除 + explore sub-agent + pg-build bootstrap 防御加固 + escalate_threshold 字段删除 —— **当前** |
+| **0.9.0** | v6 describe_env 协议（env-description.yaml）+ pg-fix-issue 大幅精简 + pg-propose-refine 流程删除 + explore sub-agent + pg-build bootstrap 防御加固 + escalate_threshold 字段删除 |
+| **0.9.1** | define-summary.yaml schema + 定界后环境验证 + env_resource_refs 强引用 + pg-propose 阶段 1.8 + progress-monitor 重构 —— **当前** |
 | **1.0.x** | 生产就绪，在 2+ 外部项目 dogfood（未达） |
 
 ### 升级命令
@@ -240,7 +241,7 @@ pg-skills/
 pg upgrade
 
 # 升级到指定版本
-pg upgrade v0.9.0
+pg upgrade v0.9.1
 
 # 查看远程可用版本
 pg upgrade --list

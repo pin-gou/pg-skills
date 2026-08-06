@@ -5,8 +5,41 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
-<!-- 下一版本在此累积 -->
-<!-- 将 VERSION 推进到 0.9.0，分析 git log / git diff，更新 CHANGELOG.md README.md -->
+## [0.9.1] - 2026-08-06
+
+### 新增
+
+- **define-summary.yaml schema + 产物协议**：pg-1-define 新增"定界后环境验证"可选环节（用户明确授权后调 describe_env 探测真实环境，逐 V-* 讨论验证方法，落盘 `define-summary.yaml`）；新增 `src/runtime/spec/define-summary.schema.json`（schema v1）、`examples/define-summary.example.yaml`、`src/core/workflows/skills/pg-propose/references/define-summary-templates.md`
+- **pg-propose 阶段 1.8 — 加载 define-summary.yaml（条件性）**：当 `.pg/changes/<change-id>/0-define/define-summary.yaml` 存在时自动加载并校验，V-* 状态（`verifiable` / `degraded` / `skipped`）作为阶段 2 全产物写作的强制 context；向后兼容（不存在时跳过）
+- **env_resource_refs 强引用机制**：design.md / scenario-\*.yaml 必须引用 define-summary 中已声明的 `{env.<段>[name=<资源名>]}` 占位引用，由 `pg-validate-proposal.py` 交叉校验；verifiable 的 V-* 必填引用，non-verifiable 必须为空
+- **pg-validate-proposal.py 新增 `define-summary` 校验子命令**：5 项校验（文件存在性 / 结构校验 / change_id 一致性 / target_environment 与 env-description 一致性 / env_resource_refs 交叉校验）
+- **pg-gen-tasks-skeleton.py v1.3**：新增 `--define-summary` 参数，verify 章节自动注入 V-* 状态声明（`define-summary 对账` 子段：verifiable / degraded / skipped 分组）
+- **migrate-define-summary.py 兼容性迁移工具**：旧格式 id (`V-NNN`) 改写为 `V-{track_id}-{seq}` 新格式，持 `--dry-run` 模式
+- **progress-monitor 服务端重构**：新增 `server/change-info.ts`（变更信息解析）、`server/events.ts`（事件追踪）、`server/path-utils.ts`（路径工具）、`server/phase-telemetry.ts`（阶段遥测）；新增 `scripts/start.mjs` 启动脚本；新增 `tests/monitor-utils.test.ts`（291 行测试）
+- **progress-monitor 前端优化**：EventLog / ManifestViewer / PipelineProgress 组件重构；新增 `status.ts` composable、`pipelineStatus.ts` 类型定义；`pipelineStore.ts` 状态管理优化；`vite.config.ts` 重构（405 行→更精简）
+- **pg-propose SKILL.md 升级到 v1.2.0**：todo 清单 12→13 项；新增阶段 1.8 完整流程与 context 注入契约；附录项编号同步更新
+- **pg-run 更新**：`describe_env` 调用入口对齐
+
+### 变更
+
+- **describe_env 提前到 pg-define**：原在 pg-propose 阶段 1.6 的 describe_env 调用，现在 pg-define 的"定界后环境验证"环节即可调用（产物位置不变：`.pg/changes/<change-id>/env-description.yaml`）；pg-propose 阶段 1.6 保持向后兼容
+- **pg-1-define.md 约束更新**：明文例外——「定界后环境验证」环节经用户明确确认后可落盘 `define-summary.yaml` 及 `env-description.yaml`（其他环节仍遵守不自动记录硬约束）
+- **progress-monitor Vite 配置重构**：`vite.config.ts` 从 405 行精简为更专注的配置
+
+### 修复
+
+- **pg-propose 多项问题修复**：`pg-gen-tasks-skeleton.py` 产物生成、校验逻辑、阶段路由等问题
+- **pg-build 执行时 bug 修复**：runner 执行过程中的 bug 修复
+- **pg-build bootstrap 重复执行问题**：修复 bootstrap 阶段重复执行的问题
+- **pg-init 集成问题**：multi-tool 集成场景下的初始化问题修复
+
+### 备注
+
+- 6 commits（含 2 个 merge），38 文件变更（+3520 / -753 LOC）
+- 新增 9 个文件：`src/runtime/spec/define-summary.schema.json`、`examples/define-summary.example.yaml`、`src/core/workflows/skills/pg-propose/references/define-summary-templates.md`、`src/runtime/bin/migrate-define-summary.py`、`src/core/workflows/scripts/tests/test_define_summary.py`、`src/core/workflows/scripts/tests/test_env_resource_refs.py`、`src/core/workflows/scripts/tests/test_tasks_skeleton_define_summary.py`、`src/runtime/tests/test_migrate_define_summary.py`、`tools/progress-monitor/tests/monitor-utils.test.ts`
+- 新增 4 个 server 端文件：`tools/progress-monitor/server/change-info.ts`、`events.ts`、`path-utils.ts`、`phase-telemetry.ts`
+- `define-summary.yaml` 向后兼容：pg-propose 阶段 1.8 仅在文件存在时执行，旧项目无此文件则跳过，不影响现有流程
+- pg-propose SKILL.md 版本从 1.0.1 升级到 1.2.0（跳过了 1.1.0 的版本号）
 
 ## [0.9.0] - 2026-08-03
 
