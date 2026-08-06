@@ -5,6 +5,7 @@ import { STATUS_ICONS, STATUS_COLORS, PHASE_ICONS } from '@/types/pipeline'
 import type { TreeNode, PhaseState, TrackState } from '@/types/pipeline'
 import { buildAutoExpandSet, findNodeById } from '@/composables/buildTree'
 import { api } from '@/api/client'
+import { formatPipelineTimestamp } from '@/shared/dateTime'
 
 const store = usePipelineStore()
 
@@ -15,12 +16,20 @@ const previewTitle = ref<string>('')
 const previewMode = ref<'summary' | 'artifact'>('summary')
 const artifacts = ref<string[]>([])
 const loadingArtifact = ref(false)
+const followCurrent = ref(true)
+const initializedExpand = ref(false)
 
 const tree = computed(() => store.tree)
 
 function initExpand() {
   if (tree.value.length > 0) {
-    expanded.value = buildAutoExpandSet(tree.value)
+    const automatic = buildAutoExpandSet(tree.value)
+    if (!initializedExpand.value) {
+      expanded.value = automatic
+      initializedExpand.value = true
+    } else if (followCurrent.value) {
+      expanded.value = new Set([...expanded.value, ...automatic])
+    }
   }
 }
 
@@ -70,6 +79,15 @@ function selectNode(node: TreeNode) {
 
     if (phaseState) {
       previewTitle.value = `${track}:${phase}`
+      previewContent.value = [
+        `状态: ${getStatusLabel(phaseState.status)}`,
+        `Agent: ${phaseState.agent || '-'}`,
+        `尝试次数: ${phaseState.attempt ?? 0}`,
+        `开始时间: ${formatPipelineTimestamp(phaseState.started_at)}`,
+        `完成时间: ${formatPipelineTimestamp(phaseState.completed_at)}`,
+        `摘要: ${phaseState.summary || '-'}`,
+        `报告: ${phaseState.report_path || '-'}`,
+      ].join('\n')
       loadArtifacts(track, phase)
     } else {
       previewTitle.value = `${track}:${phase}`
@@ -81,6 +99,19 @@ function selectNode(node: TreeNode) {
     const cycle = node.meta.cycle as number
     previewTitle.value = `${pt}:${pp} - fix cycle ${cycle}`
     previewContent.value = `修复循环 #${cycle}\n状态: ${getStatusLabel(node.status)}`
+  } else if (node.type === 'final-gate' && node.meta) {
+    const phaseState = node.meta.phaseState as PhaseState | undefined
+    previewTitle.value = 'final-gate'
+    previewContent.value = [
+      `状态: ${getStatusLabel(phaseState?.status || node.status)}`,
+      `Agent: ${phaseState?.agent || '-'}`,
+      `尝试次数: ${phaseState?.attempt ?? 0}`,
+      `开始时间: ${formatPipelineTimestamp(phaseState?.started_at)}`,
+      `完成时间: ${formatPipelineTimestamp(phaseState?.completed_at)}`,
+      `摘要: ${phaseState?.summary || '-'}`,
+      `报告: ${phaseState?.report_path || '-'}`,
+    ].join('\n')
+    loadArtifacts('final-gate', 'gate')
   } else if (node.type === 'track' && node.meta) {
     const ts = node.meta.trackState as TrackState | undefined
     previewTitle.value = node.label
@@ -116,7 +147,15 @@ async function viewArtifact(filePath: string) {
   try {
     const content = await api.getArtifactContent(store.currentChange!, filePath)
     previewMode.value = 'artifact'
-    previewContent.value = content
+    if (filePath.toLowerCase().endsWith('.json')) {
+      try {
+        previewContent.value = JSON.stringify(JSON.parse(content), null, 2)
+      } catch {
+        previewContent.value = content
+      }
+    } else {
+      previewContent.value = content
+    }
     previewTitle.value = filePath
   } catch (e) {
     previewContent.value = `加载失败: ${e}`
@@ -130,11 +169,21 @@ function showSummary() {
   const node = findNodeById(tree.value, selectedId.value || '')
   if (node) selectNode(node)
 }
+
+watch(() => store.refreshVersion, () => {
+  const node = selectedId.value ? findNodeById(tree.value, selectedId.value) : null
+  if ((node?.type === 'phase' || node?.type === 'final-gate') && node.meta) {
+    loadArtifacts(node.meta.track as string, node.meta.phase as string)
+  }
+})
 </script>
 
 <template>
   <div class="progress-container">
     <div class="tree-panel">
+      <label class="follow-toggle">
+        <input v-model="followCurrent" type="checkbox" /> 自动展开当前步骤
+      </label>
       <div v-for="stage in tree" :key="stage.id" class="tree-section">
         <div
           :class="['tree-node', 'stage-node', { selected: selectedId === stage.id }]"
@@ -153,9 +202,10 @@ function showSummary() {
               :class="['tree-node', 'track-node', { selected: selectedId === track.id }]"
               @click="selectNode(track)"
             >
-              <span class="expand-icon" @click.stop="toggleExpand(track.id)">
+              <span v-if="track.children.length > 0" class="expand-icon" @click.stop="toggleExpand(track.id)">
                 {{ expanded.has(track.id) ? '▼' : '▶' }}
               </span>
+              <span v-else class="expand-icon placeholder"></span>
               <span class="node-icon">{{ track.meta?.type === 'simple' ? '⚡' : '🔧' }}</span>
               <span class="node-label">{{ track.label }}</span>
               <span class="node-status" :style="{ color: getStatusColor(track.status) }">
@@ -262,6 +312,7 @@ function showSummary() {
   border-right: 1px solid var(--border-color);
   background: var(--bg-card); padding: 8px 0;
 }
+.follow-toggle { display: block; padding: 6px 12px 10px; color: var(--text-muted); font-size: 12px; border-bottom: 1px solid var(--border-color); }
 
 .tree-section { user-select: none; }
 
