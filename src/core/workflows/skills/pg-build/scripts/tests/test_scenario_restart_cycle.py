@@ -14,6 +14,7 @@ detect 在 dispatch scenario-execute 前用 (execute_phase.attempt > scenario_la
 7. state: to_dict/from_dict round-trip 保留 scenario_last_restart_attempt
 8. state: from_dict 含旧 stage_restarted 字段时忽略 (向后兼容)
 """
+from __future__ import annotations
 
 import json
 import os

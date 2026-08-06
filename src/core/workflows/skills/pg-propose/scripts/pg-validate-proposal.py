@@ -11,6 +11,7 @@ Usage:
 
 Exit code: 0 = valid, 1 = invalid (with error messages to stderr).
 """
+from __future__ import annotations
 
 import json
 import os

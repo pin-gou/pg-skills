@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 """v1.3: pg-gen-tasks-skeleton.py --define-summary 功能单测."""
+from __future__ import annotations
+
 import os
 import shutil
 import subprocess

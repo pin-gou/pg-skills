@@ -14,6 +14,7 @@ stage_restarted 确保环境是最新一次构建.
 7. dispatch.py: PHASE_AGENTS + ALLOWED_STATUSES (scenario-prepare 已删除)
 8. sub_agent_contract: PHASE_RULES (scenario-prepare 已删除)
 """
+from __future__ import annotations
 
 import os
 import unittest
