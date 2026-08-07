@@ -295,7 +295,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 <div class="card" style="border-left:4px solid var(--primary); font-size:16px; line-height:2; margin-top:8px; padding:18px 22px">
   <p style="margin:0 0 8px">AI 写代码不可怕，可怕的是——<strong>写完没人敢合</strong>。</p>
   <p style="margin:0">大模型扫得懂整个代码库，却答不上来四个问题：项目怎么构建？在哪个环境验证？什么算"改对了"？每一步谁复核过？</p>
-  <p style="margin:8px 0 0">这些答案代码里没有，但都写在一份文件里：<code>project.yaml</code>。</p>
+  <p style="margin:8px 0 0">这些答案代码里没有，但是品构 pg-skills 为 AI 补全了这份空白。</p>
   <p style="margin:8px 0 0; font-size:13px; color:var(--muted)">品构 = <strong>SEA</strong>-Driven Development（方案 · 环境 · 验收）——SDD 的延伸，三种要素，缺一不可。</p>
 </div>
 
@@ -382,8 +382,8 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 
 <ol style="padding-left:20px; margin:8px 0">
   <li style="margin:12px 0"><strong><code>/1-pg-define</code> — 约 20 分钟</strong><br>
-  跟 AI 对齐"这次变更要做什么 / 不做什么 / 边界在哪"<br>
-  <span style="font-size:13px;color:var(--muted)">产出：清晰的范围定义（写入 .pg/context/）</span></li>
+  跟 AI 对齐"这次变更要做什么 / 不做什么 / 边界在哪"，并在真实环境里讨论验收方法<br>
+  <span style="font-size:13px;color:var(--muted)">产出：口头 scope summary + <code>define-summary.yaml</code> + <code>env-description.yaml</code>（需求边界 + 验收方法 + 环境引用）</span></li>
 
   <li style="margin:12px 0"><strong><code>/2-pg-propose</code> — 自动</strong><br>
   按定义生成完整的 spec 链路：
