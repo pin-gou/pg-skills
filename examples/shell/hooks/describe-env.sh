@@ -36,6 +36,10 @@
 # 重要: prepare_env 与 describe_env 独立. describe_env 不调用 prepare_env,
 #       也不假设 prepare_env 已执行. 两脚本作者各自维护.
 #       (Q3 决策: 两脚本独立)
+#       语义契约: describe_env 的产出 (env-description.yaml) 描述的是
+#       prepare_env 成功执行后该环境的预期基线状态. pg-define/pg-propose 的
+#       LLM 应理解: pg-build 会先调 prepare_env, 确保成功后才执行 scenario
+#       track, 届时环境状态应与 env-description.yaml 一致.
 
 set -uo pipefail  # 注意: 不加 -e, 由 hook-helpers.sh trap ERR 控制
 

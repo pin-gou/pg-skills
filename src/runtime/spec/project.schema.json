@@ -188,7 +188,7 @@
         },
         "describe_env": {
           "type": "object",
-          "description": "env 级描述脚本: 只读探测当前环境状态, 输出 env-description.yaml. 由 pg-propose / pg-fix-issue / pg-regression 在选定 environment 后调用. 不依赖 prepare_env (两脚本独立维护). 必须显式声明, 无默认值.",
+          "description": "env 级描述脚本: 只读探测当前环境状态, 输出 env-description.yaml. 由 pg-propose / pg-fix-issue / pg-regression 在选定 environment 后调用. 不依赖 prepare_env (两脚本独立维护). 其产出描述的是 prepare_env 成功执行后该 env 的预期基线状态, 供 pg-define/pg-propose 判断 scenario 可验证性. 必须显式声明, 无默认值.",
           "required": ["script"],
           "additionalProperties": false,
           "properties": {

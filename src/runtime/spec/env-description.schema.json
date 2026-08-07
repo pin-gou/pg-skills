@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://pg-skills.local/spec/env-description.schema.json",
   "title": "env-description",
-  "description": "环境描述 YAML, 由 describe_env 脚本生成. 描述 prepare_env 准备完毕后的环境状态, 是 pg-propose / pg-fix-issue / pg-regression 生成 design/tasks/scenario 的输入. 文件位置: .pg/changes/<change-id>/env-description.yaml (per-change 特定, 与 pg-build scenario-execute 直接消费).",
+  "description": "环境描述 YAML, 由 describe_env 脚本生成. 描述 prepare_env 成功执行后的预期环境基线状态, 是 pg-propose / pg-fix-issue / pg-regression 生成 design/tasks/scenario 的输入. pg-build 在实际执行时先调 prepare_env 确保成功, 环境状态应与本文件一致. 文件位置: .pg/changes/<change-id>/env-description.yaml (per-change 特定, 与 pg-build scenario-execute 直接消费).",
   "type": "object",
   "required": ["schema_version", "described_by", "described_at", "described_for", "environments"],
   "additionalProperties": false,

@@ -293,6 +293,10 @@ def build_describe_env_spec(
       2. caller 限定为 pg-propose / pg-fix-issue / pg-regression / pg-quick-build / ad-hoc
          (其他 caller 调用直接报错)
 
+    语义契约: describe_env 的产出描述的是 prepare_env 成功执行后的预期基线.
+    pg-build 在 bootstrap 阶段先调 prepare_env 确保成功, 再 dispatch scenario
+    track, 届时环境状态应与 env-description.yaml 一致.
+
     输出路径按 caller 路由 (统一用 --session 作为路径派生源, 不再单独传 --change-id):
       pg-propose     -> .pg/changes/<session>/env-description.yaml
       pg-fix-issue   -> .pg/fix-issue/<session>/env-description.yaml

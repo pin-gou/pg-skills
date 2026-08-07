@@ -239,6 +239,9 @@ glob --pattern "**/AGENTS.md"
    ```
 
    产物落在 `.pg/changes/<change-id>/env-description.yaml`（change 根目录，与 pg-propose 阶段 1.6 相同位置）。失败处理与 pg-propose 1.6 一致：脚本非 0 退出 → 中断，提示用户修复 describe_env 脚本，不做兜底推断。
+
+    > **语义理解**：此产出描述的是 prepare_env 成功执行后该环境的预期基线状态。pg-build 实际执行顺序为：先调 prepare_env 确保成功，再执行 scenario track。因此当 LLM 在后续环节读取 env-description.yaml 时，应基于"prepare_env 已成功"的基线判断 V-* 可验证性，而非以"当前环境未就绪"为由跳过。
+
 4. **基于真实环境讨论验证方法**：读取 env-description.yaml，与用户逐个讨论 V-*（验收点）：
    - 每个 V-* 需要哪些**业务语义级能力**（如 `postgresql` / `multi_tenant_data` / `object_storage`，不绑死资源 ID）
    - 目标环境是否满足（对照 env-description.yaml 6 段）

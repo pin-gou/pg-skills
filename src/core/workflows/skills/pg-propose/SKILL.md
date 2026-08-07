@@ -178,7 +178,8 @@ python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-propose
 **职责**：让 LLM 知道当前 change 在目标 environment 上的真实状态（不是 design-time 假设），作为 design.md / tasks.md / scenario-*.yaml 的输入。这是 v6 新流程，与旧 env-capability.yaml 机制不兼容：旧机制是 LLM 看 prepare 脚本猜能力，新机制是项目自带 describe_env 脚本真实探测。
 
 **关键约束**：
-- describe_env 与 prepare_env **独立**：两脚本分别维护，describe_env 不调用 prepare_env，不假设其已执行
+- describe_env 与 prepare_env **独立**：两脚本分别维护，describe_env 不调用 prepare_env，不假设其已执行（实现独立性）
+- **语义契约**：env-description.yaml 描述的是 prepare_env **成功执行后**该环境的预期基线状态。pg-build 实际执行时先调 prepare_env 确保成功，再执行 scenario track，届时环境状态应与本文件一致。LLM 应以此基线判断 scenario 可验证性，而非以"当前环境未就绪"为由跳过
 - describe_env **必须显式声明**在 `environments.<env>.describe_env.script`，无默认值（Q8 决策）
 - 文件位置：`.pg/changes/<change-id>/env-description.yaml`（per-change 特定，固定路径覆盖，Q1 决策）
 - 失败处理：**中断**调用方（Q2 决策，无 partial / fallback / LLM 推断兜底）

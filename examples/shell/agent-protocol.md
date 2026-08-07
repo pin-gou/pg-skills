@@ -45,6 +45,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 - `--session` 由 agent 自己生成（见 §2.5），一次任务用同一个。
 - `--env` / `--role` / `--action` / `--instance` 必须先通过 `pg-parse-config.py pg-agent` 拿到 SSOT，再具体填。
 - action 取值：`start` / `stop` / `restart` / `logs` / `tail` / `health_check`（如已声明）。
+- `describe_env` 是 env-level 只读探测 action（不传 `--role` / `--instance`），产出 `env-description.yaml`。其描述的是 prepare_env **成功执行后**该环境的预期基线状态——pg-build 实际执行时先调 prepare_env 确保成功，再执行 scenario track。LLM 应以此基线判断可验证性。
 
 ⚠️ **禁止**直接 `bash .pg/hooks/role-backend-start.sh backend backend-1`——审计员 `grep "pg-agent" .pg/agent/<session>/...` 找不到这条记录。
 

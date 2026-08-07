@@ -189,9 +189,11 @@ python3 .pg/skills/src/core/workflows/skills/pg-build/scripts/pg-list-phases.py 
         • ok: false         → workflow_failed（fatal=true）。**禁止自动修复**（如 git checkout），展示 error 给用户。
         • ok: true + env_hook_plan=null → 进入 step 1
         • ok: true + env_hook_plan ≠ null 且 skipped=false → **严格按顺序执行以下 3 条命令（不可跳过任何一条）**：
-            CMD-1: bash "<env_hook_plan.command 的完整内容>"    ← 实际执行 hook 脚本
+            CMD-1: bash "<env_hook_plan.command 的完整内容>"    ← 实际执行 hook 脚本 (prepare_env)
             CMD-2: $RUNNER env-action-result <change> --phase prepare_env --stage <env_hook_plan.stage_name> --env <env_hook_plan.env_name> --success <CMD-1 exit code == 0 ? true : false>
             CMD-3: $RUNNER bootstrap <change>                  ← 必须再次调 bootstrap 检查是否还有下一个 env_hook_plan
+          — prepare_env 成功后方可 dispatch scenario track. 此时环境状态应与
+            env-description.yaml (describe_env 产出) 描述的基线一致.
           • ok: true + env_hook_plan ≠ null 且 skipped=true → 跳过 CMD-1，直接执行 CMD-2 + CMD-3
   1. $RUNNER next <change>       → 检查 action 字段
   2. switch(action):
