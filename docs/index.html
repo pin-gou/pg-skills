@@ -296,6 +296,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
   <p style="margin:0 0 8px">AI 写代码不可怕，可怕的是——<strong>写完没人敢合</strong>。</p>
   <p style="margin:0">大模型扫得懂整个代码库，却答不上来四个问题：项目怎么构建？在哪个环境验证？什么算"改对了"？每一步谁复核过？</p>
   <p style="margin:8px 0 0">这些答案代码里没有，但都写在一份文件里：<code>project.yaml</code>。</p>
+  <p style="margin:8px 0 0; font-size:13px; color:var(--muted)">品构 = <strong>SEA</strong>-Driven Development（方案 · 环境 · 验收）——SDD 的延伸，三种要素，缺一不可。</p>
 </div>
 
 <h2>1.1 同一个需求，两种命运</h2>
@@ -346,22 +347,22 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 
 <p>人只做两件事：<strong>说清需求</strong>、<strong>在关键节点点头</strong>。中间那 1-8 小时的实现 + 验证，全部由 pipeline 引擎自动跑完——你不参与。</p>
 
-<h2>1.3 从 SDD 到品构：方案 · 环境 · 验收</h2>
+<h2>1.3 品构的方法论：SEA-Driven Development</h2>
 
-<p>SDD（Specification-Driven Development）的核心是先写方案再写代码。但传统的 SDD 缺两样东西——它不关心真实环境长什么样，也不告诉你"验证通过"是在真环境跑的还是在 mock 里跑的。</p>
+<p>「品构」是品牌，藏着哲学——<strong>品质，长在结构里</strong>。那"结构"具体指什么？答案在它的方法论里：<strong>SEA-Driven Development</strong>（方案 · 环境 · 验收）。</p>
 
-<p>品构在方案之外加了两个同等级别的支柱：</p>
+<p>SEA 是对 SDD（Specification-Driven Development）的延伸。SDD 的核心是先写方案再写代码，但传统 SDD 缺两样东西——它不关心真实环境长什么样，也不告诉你"验证通过"是在真环境跑的还是在 mock 里跑的。品构在方案之外加了两个同等级别的支柱，凑成完整的 SEA：</p>
 
 <table>
   <tr><th>支柱</th><th>是什么</th><th>解决什么问题</th></tr>
-  <tr><td><strong>方案</strong></td><td>proposal / design / tasks</td><td>做什么、怎么做、怎么验证</td></tr>
-  <tr><td><strong>环境</strong></td><td>env-description.yaml（describe_env 只读探测）</td><td>真实环境快照——有哪些 DB、版本多少、数据状态如何，不再猜</td></tr>
-  <tr><td><strong>验收</strong></td><td>scenario-*.yaml（Gherkin 场景）</td><td>验收不是在 mock 里跑，而是在真实服务实例上跑 Given / When / Then</td></tr>
+  <tr><td><strong>方案 Spec</strong></td><td>proposal / design / tasks</td><td>做什么、怎么做、怎么验证</td></tr>
+  <tr><td><strong>环境 Environment</strong></td><td>env-description.yaml（describe_env 只读探测）</td><td>真实环境快照——有哪些 DB、版本多少、数据状态如何，不再猜</td></tr>
+  <tr><td><strong>验收 Acceptance</strong></td><td>scenario-*.yaml（Gherkin 场景）</td><td>验收不是在 mock 里跑，而是在真实服务实例上跑 Given / When / Then</td></tr>
 </table>
 
 <p>三根支柱加在一起，才是品构说的"结构"。缺了环境，方案写的是"假设中的环境"；缺了真实验收，验证跑的是"理想中的验证"。只有三者合一，系统才能完整地描述"项目长什么样 → 在哪验证 → 怎么算真通过"。</p>
 
-<p><strong>品质，长在结构里</strong>——就是这个"三合一"的结构。</p>
+<p><strong>品质，长在结构里</strong>——SEA 就是那套把抽象"结构"落到实处的三根支柱。</p>
 
 <h2>1.4 为什么敢合</h2>
 
@@ -585,7 +586,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 
 <h2>2.3 四层结构 —— 品质从哪里来</h2>
 
-<p>1.3 节讲了品构的三大支柱——方案 · 环境 · 验收。那这些支柱是靠什么"钉死"的？靠四层结构，层层收紧：</p>
+<p>1.3 节讲了品构的方法论——SEA（方案 · 环境 · 验收）。那这些支柱是靠什么"钉死"的？靠四层结构，层层收紧：</p>
 
 <table>
   <tr><th>层</th><th>载体</th><th>收紧什么</th><th>解决什么问题</th></tr>
@@ -617,7 +618,7 @@ tr:nth-child(even) { background: rgba(0,0,0,0.02); }
 
 <p>每一层都是系统可以自动执行的契约，不是需要人记的规则。四层合在一起，才让"品质"这个抽象词变成可操作、可验证、可回放的具体机制。</p>
 
-<p><strong>品质，长在结构里</strong>——就是"方案 · 环境 · 验收"三大支柱，被四层结构层层收紧的结果。</p>
+<p><strong>品质，长在结构里</strong>——就是 SEA 三大支柱，被四层结构层层收紧的结果。</p>
 
 <h2>2.4 AGENTS.md 的角色</h2>
 <p>AGENTS.md 是 AI 的"入职手册"——包含项目的技术栈、包结构、数据库约定、编码风格、路径规范等。pg-propose 直接通读所有 AGENTS.md 提取上下文作为 LLM 约束，不生成中间缓存文件。</p>
