@@ -12,6 +12,8 @@ import { usePolling } from '../src/composables/usePolling.ts'
 import { countSnapshotPhases } from '../src/shared/pipelineStatus.ts'
 import { formatPipelineTimestamp } from '../src/shared/dateTime.ts'
 import { enrichSnapshotPhaseTelemetry } from '../server/phase-telemetry.ts'
+import { renderMarkdown } from '../src/shared/markdown.ts'
+import { formatJson, highlightJson } from '../src/shared/highlightJson.ts'
 
 test('paginateNewest returns the latest page first', () => {
   assert.deepEqual(paginateNewest([1, 2, 3, 4, 5], 1, 2), [5, 4])
@@ -23,6 +25,53 @@ test('pipeline timestamps use a readable log format', () => {
   assert.equal(formatPipelineTimestamp('2026-07-31T11:03:06.123Z'), '2026-07-31 11:03:06')
   assert.equal(formatPipelineTimestamp(null), '-')
   assert.equal(formatPipelineTimestamp('unknown'), 'unknown')
+})
+
+test('renderMarkdown handles a header-only table without crashing', () => {
+  const html = renderMarkdown('| col1 | col2 |')
+  assert.ok(html.includes('<table>'))
+  assert.ok(html.includes('col1'))
+  assert.ok(html.includes('col2'))
+  assert.ok(!html.includes('thead'))
+})
+
+test('renderMarkdown escapes raw HTML and emits structure', () => {
+  const html = renderMarkdown('# 标题\n\n**加粗** 和 `code`\n\n- a\n- b\n\n| c1 | c2 |\n|----|----|\n| x | y |')
+  assert.ok(html.includes('<h1>标题</h1>'))
+  assert.ok(html.includes('<strong>加粗</strong>'))
+  assert.ok(html.includes('<code>code</code>'))
+  assert.ok(html.includes('<ul><li>a</li><li>b</li></ul>'))
+  assert.ok(html.includes('<th>c1</th>'))
+  assert.ok(html.includes('<td>x</td>'))
+  const escaped = renderMarkdown('<script>alert(1)</script>')
+  assert.ok(!escaped.includes('<script>'))
+  assert.ok(escaped.includes('&lt;script&gt;'))
+})
+
+test('renderMarkdown renders fenced code blocks without inline processing', () => {
+  const html = renderMarkdown('```sh\necho "**not bold**"\n```')
+  assert.ok(html.includes('<pre class="code-block"><code>'))
+  assert.ok(html.includes('echo &quot;**not bold**&quot;'))
+  assert.ok(!html.includes('<strong>'))
+})
+
+test('highlightJson colors keys, strings, numbers and keywords', () => {
+  const html = highlightJson('{"ok": true, "n": 12.5, "s": "x"}')
+  assert.ok(html.includes('<span class="j-key">&quot;ok&quot;</span>'))
+  assert.ok(html.includes('<span class="j-keyword">true</span>'))
+  assert.ok(html.includes('<span class="j-number">12.5</span>'))
+  assert.ok(html.includes('<span class="j-string">&quot;x&quot;</span>'))
+})
+
+test('formatJson pretty-prints valid minified JSON', () => {
+  assert.equal(formatJson('{"a":1,"b":[1,2,{"c":true}]}'), '{\n  "a": 1,\n  "b": [\n    1,\n    2,\n    {\n      "c": true\n    }\n  ]\n}')
+})
+
+test('formatJson structurally indents malformed JSON without dropping strings', () => {
+  const formatted = formatJson('{"url":"https://x/y","a":1,}')
+  assert.ok(formatted.includes('"url"'))
+  assert.ok(formatted.includes('https://x/y'))
+  assert.ok(formatted.includes('"a"'))
 })
 
 test('resolvePathInside rejects traversal and absolute paths', () => {
@@ -245,6 +294,43 @@ test('findFirstInProgress reaches nested fix sub-phases', () => {
   assert.equal(findFirstInProgress(tree as never), 'sub-phase')
   const expanded = buildAutoExpandSet(tree as never)
   for (const id of ['stage', 'track', 'phase', 'cycle']) assert.equal(expanded.has(id), true)
+})
+
+test('auto-expand uses snapshot current_track when no phase is in_progress', () => {
+  const tree = [{
+    id: 'dev', label: 'dev', type: 'stage', status: 'in_progress', meta: {}, children: [{
+      id: 'dev.backend', label: 'backend', type: 'track', status: 'pending', meta: {}, children: [
+        { id: 'dev.backend:test', label: 'test', type: 'phase', status: 'completed', meta: {}, children: [] },
+        { id: 'dev.backend:gate', label: 'gate', type: 'phase', status: 'pending', meta: {}, children: [] },
+      ],
+    }],
+  }]
+  const expanded = buildAutoExpandSet(tree as never, 'dev.backend')
+  for (const id of ['dev', 'dev.backend', 'dev.backend:test', 'dev.backend:gate']) {
+    assert.equal(expanded.has(id), true, `expected ${id} to be expanded`)
+  }
+})
+
+test('auto-expand reveals every phase of the active track down to leaves', () => {
+  const tree = [{
+    id: 'stage', label: 'stage', type: 'stage', status: 'in_progress', meta: {}, children: [{
+      id: 'dev.backend', label: 'backend', type: 'track', status: 'completed', meta: {}, children: [
+        { id: 'dev.backend:test', label: 'test', type: 'phase', status: 'completed', meta: {}, children: [] },
+        { id: 'dev.backend:dev', label: 'dev', type: 'phase', status: 'completed', meta: {}, children: [] },
+        {
+          id: 'dev.backend:gate', label: 'gate', type: 'phase', status: 'in_progress', meta: {}, children: [{
+            id: 'cycle-1', label: 'fix cycle 1', type: 'fix-cycle', status: 'in_progress', meta: {}, children: [{
+              id: 'sub-1', label: 'fix', type: 'sub-phase', status: 'in_progress', meta: {}, children: [],
+            }],
+          }],
+        },
+      ],
+    }],
+  }]
+  const expanded = buildAutoExpandSet(tree as never)
+  for (const id of ['stage', 'dev.backend', 'dev.backend:test', 'dev.backend:dev', 'dev.backend:gate', 'cycle-1', 'sub-1']) {
+    assert.equal(expanded.has(id), true, `expected ${id} to be expanded`)
+  }
 })
 
 test('usePolling never overlaps slow requests', async () => {

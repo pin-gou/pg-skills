@@ -6,6 +6,8 @@ import type { TreeNode, PhaseState, TrackState } from '@/types/pipeline'
 import { buildAutoExpandSet, findNodeById } from '@/composables/buildTree'
 import { api } from '@/api/client'
 import { formatPipelineTimestamp } from '@/shared/dateTime'
+import { renderMarkdown } from '@/shared/markdown'
+import { formatJson, highlightJson } from '@/shared/highlightJson'
 
 const store = usePipelineStore()
 
@@ -21,9 +23,25 @@ const initializedExpand = ref(false)
 
 const tree = computed(() => store.tree)
 
+const artifactHtml = computed<string | null>(() => {
+  if (previewMode.value !== 'artifact') return null
+  const name = previewTitle.value.toLowerCase()
+  if (name.endsWith('.md') || name.endsWith('.markdown')) return renderMarkdown(previewContent.value || '')
+  if (name.endsWith('.json')) return highlightJson(previewContent.value || '')
+  return null
+})
+
+const artifactFormat = computed<'md' | 'json' | null>(() => {
+  if (previewMode.value !== 'artifact') return null
+  const name = previewTitle.value.toLowerCase()
+  if (name.endsWith('.md') || name.endsWith('.markdown')) return 'md'
+  if (name.endsWith('.json')) return 'json'
+  return null
+})
+
 function initExpand() {
   if (tree.value.length > 0) {
-    const automatic = buildAutoExpandSet(tree.value)
+    const automatic = buildAutoExpandSet(tree.value, store.snapshot?.current_track || '')
     if (!initializedExpand.value) {
       expanded.value = automatic
       initializedExpand.value = true
@@ -35,6 +53,10 @@ function initExpand() {
 
 watch(tree, initExpand, { immediate: true })
 
+watch(followCurrent, (on) => {
+  if (on) initExpand()
+})
+
 function toggleExpand(id: string) {
   const next = new Set(expanded.value)
   if (next.has(id)) {
@@ -43,6 +65,24 @@ function toggleExpand(id: string) {
     next.add(id)
   }
   expanded.value = next
+}
+
+function collectNodeIds(nodes: TreeNode[], ids: string[] = []): string[] {
+  for (const node of nodes) {
+    if (node.children.length > 0) {
+      ids.push(node.id)
+      collectNodeIds(node.children, ids)
+    }
+  }
+  return ids
+}
+
+function expandAll() {
+  expanded.value = new Set(collectNodeIds(tree.value))
+}
+
+function collapseAll() {
+  expanded.value = new Set()
 }
 
 function getStatusIcon(status: string): string {
@@ -148,11 +188,7 @@ async function viewArtifact(filePath: string) {
     const content = await api.getArtifactContent(store.currentChange!, filePath)
     previewMode.value = 'artifact'
     if (filePath.toLowerCase().endsWith('.json')) {
-      try {
-        previewContent.value = JSON.stringify(JSON.parse(content), null, 2)
-      } catch {
-        previewContent.value = content
-      }
+      previewContent.value = formatJson(content)
     } else {
       previewContent.value = content
     }
@@ -181,9 +217,13 @@ watch(() => store.refreshVersion, () => {
 <template>
   <div class="progress-container">
     <div class="tree-panel">
-      <label class="follow-toggle">
-        <input v-model="followCurrent" type="checkbox" /> 自动展开当前步骤
-      </label>
+      <div class="tree-toolbar">
+        <label class="follow-toggle">
+          <input v-model="followCurrent" type="checkbox" /> 自动展开当前步骤
+        </label>
+        <button class="expand-btn" @click="expandAll">展开所有</button>
+        <button class="expand-btn" @click="collapseAll">折叠所有</button>
+      </div>
       <div v-for="stage in tree" :key="stage.id" class="tree-section">
         <div
           :class="['tree-node', 'stage-node', { selected: selectedId === stage.id }]"
@@ -298,7 +338,10 @@ watch(() => store.refreshVersion, () => {
 
       <div v-else class="preview-body artifact-content">
         <div v-if="loadingArtifact" class="loading">加载中...</div>
-        <pre v-else class="artifact-text">{{ previewContent }}</pre>
+        <template v-else>
+          <div v-if="artifactHtml" :class="['artifact-rendered', artifactFormat === 'json' ? 'artifact-json' : 'artifact-md']" v-html="artifactHtml"></div>
+          <pre v-else class="artifact-text">{{ previewContent }}</pre>
+        </template>
       </div>
     </div>
   </div>
@@ -312,7 +355,16 @@ watch(() => store.refreshVersion, () => {
   border-right: 1px solid var(--border-color);
   background: var(--bg-card); padding: 8px 0;
 }
-.follow-toggle { display: block; padding: 6px 12px 10px; color: var(--text-muted); font-size: 12px; border-bottom: 1px solid var(--border-color); }
+.follow-toggle { color: var(--text-muted); font-size: 12px; }
+.tree-toolbar {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+  padding: 6px 12px 10px; border-bottom: 1px solid var(--border-color);
+}
+.expand-btn {
+  background: transparent; border: 1px solid var(--border-color); border-radius: 4px;
+  color: var(--text-muted); font-size: 12px; padding: 2px 8px; cursor: pointer;
+}
+.expand-btn:hover { color: var(--text-primary); border-color: var(--text-muted); }
 
 .tree-section { user-select: none; }
 
@@ -338,7 +390,7 @@ watch(() => store.refreshVersion, () => {
 .node-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .node-status { font-weight: 600; font-size: 14px; flex-shrink: 0; }
 
-.preview-panel { flex: 1; display: flex; flex-direction: column; background: var(--bg-card); }
+.preview-panel { flex: 1; min-width: 0; display: flex; flex-direction: column; background: var(--bg-card); }
 .preview-header {
   display: flex; align-items: center; gap: 12px;
   padding: 12px 16px; border-bottom: 1px solid var(--border-color);
@@ -352,7 +404,7 @@ watch(() => store.refreshVersion, () => {
 }
 .back-to-summary:hover { border-color: var(--color-running); color: var(--color-running); }
 
-.preview-body { flex: 1; overflow: auto; padding: 16px; }
+.preview-body { flex: 1; min-width: 0; overflow: auto; padding: 16px; }
 .preview-empty { color: var(--text-muted); text-align: center; padding: 40px; }
 .summary-text { white-space: pre-wrap; font-family: var(--font-mono); font-size: 13px; line-height: 1.6; color: var(--text-primary); }
 
@@ -369,5 +421,53 @@ watch(() => store.refreshVersion, () => {
 
 .artifact-content { padding: 0; }
 .artifact-text { white-space: pre-wrap; font-family: var(--font-mono); font-size: 13px; line-height: 1.5; padding: 16px; margin: 0; }
+
+.artifact-rendered {
+  padding: 16px; font-size: 13px; line-height: 1.7;
+  color: var(--text-primary); overflow-wrap: break-word; word-break: break-word;
+  overflow-x: auto; max-width: 100%;
+}
+.artifact-rendered.artifact-json {
+  font-family: var(--font-mono); font-size: 13px; line-height: 1.6;
+  white-space: pre-wrap;
+}
+.artifact-rendered :deep(h1), .artifact-rendered :deep(h2),
+.artifact-rendered :deep(h3), .artifact-rendered :deep(h4),
+.artifact-rendered :deep(h5), .artifact-rendered :deep(h6) {
+  margin: 1em 0 0.5em; line-height: 1.3; font-weight: 600;
+}
+.artifact-rendered :deep(h1) { font-size: 1.5em; }
+.artifact-rendered :deep(h2) { font-size: 1.3em; }
+.artifact-rendered :deep(h3) { font-size: 1.15em; }
+.artifact-rendered :deep(h4) { font-size: 1em; }
+.artifact-rendered :deep(p) { margin: 0.5em 0; }
+.artifact-rendered :deep(a) { color: var(--color-running); text-decoration: underline; }
+.artifact-rendered :deep(ul), .artifact-rendered :deep(ol) { margin: 0.5em 0; padding-left: 1.5em; }
+.artifact-rendered :deep(li) { margin: 0.2em 0; }
+.artifact-rendered :deep(blockquote) {
+  margin: 0.5em 0; padding: 2px 12px; color: var(--text-secondary);
+  border-left: 3px solid var(--border-color);
+}
+.artifact-rendered :deep(code) {
+  font-family: var(--font-mono); font-size: 12px; background: #f2f3f5;
+  border-radius: 3px; padding: 1px 4px;
+}
+.artifact-rendered :deep(pre.code-block) {
+  background: #f7f8fa; border: 1px solid var(--border-color); border-radius: 4px;
+  padding: 12px; overflow: auto;
+}
+.artifact-rendered :deep(pre.code-block code) { background: none; padding: 0; }
+.artifact-rendered :deep(table) { border-collapse: collapse; margin: 0.5em 0; }
+.artifact-rendered :deep(th), .artifact-rendered :deep(td) {
+  border: 1px solid var(--border-color); padding: 4px 10px; text-align: left;
+}
+.artifact-rendered :deep(hr) { border: none; border-top: 1px solid var(--border-color); margin: 1em 0; }
+.artifact-rendered :deep(img) { max-width: 100%; }
+
+.artifact-rendered :deep(.j-key) { color: #409EFF; }
+.artifact-rendered :deep(.j-string) { color: #67C23A; }
+.artifact-rendered :deep(.j-number) { color: #E6A23C; }
+.artifact-rendered :deep(.j-keyword) { color: #F56C6C; }
+
 .loading { padding: 40px; text-align: center; color: var(--text-muted); }
 </style>

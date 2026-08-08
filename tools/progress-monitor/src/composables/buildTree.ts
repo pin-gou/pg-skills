@@ -195,14 +195,40 @@ function pathToNode(nodes: TreeNode[], id: string, ancestors: string[] = []): st
   return null
 }
 
-export function buildAutoExpandSet(nodes: TreeNode[]): Set<string> {
+function expandTrackToLeaves(set: Set<string>, track: TreeNode): void {
+  set.add(track.id)
+  for (const phase of track.children) {
+    set.add(phase.id)
+    for (const cycle of phase.children) {
+      set.add(cycle.id)
+      for (const sub of cycle.children) {
+        set.add(sub.id)
+      }
+    }
+  }
+}
+
+export function buildAutoExpandSet(nodes: TreeNode[], currentTrack?: string): Set<string> {
   const set = new Set<string>()
   const inProgressId = findFirstInProgress(nodes)
   const activePath = inProgressId ? pathToNode(nodes, inProgressId) || [] : []
   for (const id of activePath.slice(0, -1)) set.add(id)
+  let activeTrackId = activePath.length >= 2 ? activePath[1] : null
+  if (currentTrack) {
+    for (const stage of nodes) {
+      if (stage.children.some(track => track.id === currentTrack)) {
+        activeTrackId = currentTrack
+        break
+      }
+    }
+  }
   for (const stage of nodes) {
     set.add(stage.id)
     for (const track of stage.children) {
+      if (track.id === activeTrackId) {
+        expandTrackToLeaves(set, track)
+        continue
+      }
       if (track.status === 'completed' || track.status === 'pending') continue
       set.add(track.id)
       for (const phase of track.children) {
