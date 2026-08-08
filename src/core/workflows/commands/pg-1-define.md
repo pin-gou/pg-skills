@@ -239,14 +239,12 @@ glob --pattern "**/AGENTS.md"
    ```
 
    产物落在 `.pg/changes/<change-id>/env-description.yaml`（change 根目录，与 pg-propose 阶段 1.6 相同位置）。失败处理与 pg-propose 1.6 一致：脚本非 0 退出 → 中断，提示用户修复 describe_env 脚本，不做兜底推断。
-
-    > **语义理解**：此产出描述的是 prepare_env 成功执行后该环境的预期基线状态。pg-build 实际执行顺序为：先调 prepare_env 确保成功，再执行 scenario track。因此当 LLM 在后续环节读取 env-description.yaml 时，应基于"prepare_env 已成功"的基线判断 V-* 可验证性，而非以"当前环境未就绪"为由跳过。
-
 4. **基于真实环境讨论验证方法**：读取 env-description.yaml，与用户逐个讨论 V-*（验收点）：
    - 每个 V-* 需要哪些**业务语义级能力**（如 `postgresql` / `multi_tenant_data` / `object_storage`，不绑死资源 ID）
    - 目标环境是否满足（对照 env-description.yaml 6 段）
-   - 不满足时的降级路径（mock / @skip / 不做）
-   - 最终状态：`verifiable`（可验证，给出 `{env.<段>[name=<资源名>]…}` 占位引用）/ `degraded`（降级）/ `skipped`（跳过）
+   - 不满足时的降级路径（mock / @skip / 不做），**默认降级**：一旦判定环境不满足某 V-*，默认标记为 `degraded` / `skipped`，并同时提示用户优先修复 `prepare_env` / `describe_env` 对应的 hooks 脚本
+   - 若用户修复了 `prepare_env` / `describe_env` hooks 脚本且环境就绪，可回到当前会话输入提示词「重新用 hooks 协议执行 describe_env」→ 重新执行步骤 3 的 describe_env（只读探测）并回到第 4 步重新讨论受影响的 V-*，更新其在 define-summary.yaml 中的状态（degraded / skipped → verifiable）
+   - 最终状态：`verifiable`（可验证，给出 `{env.<段>[name=<资源名>]…}` 占位引用）/ `degraded`（降级，**默认**）/ `skipped`（跳过）
 5. **落盘 define-summary.yaml**：写入 `.pg/changes/<change-id>/0-define/define-summary.yaml`。
    - **schema**：`.pg/skills/src/runtime/spec/define-summary.schema.json`
    - **示例**：`.pg/skills/examples/define-summary.example.yaml`
