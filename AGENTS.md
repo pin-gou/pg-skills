@@ -294,6 +294,7 @@ cd tools/project-editor && pnpm build                   # 生产构建
 - **命名规范**：全小写 + 下划线（snake_case），见 v0.5.x 迁移
 - **hook 脚本**：`set -uo pipefail`（不加 `-e`），由 `hook-helpers.sh` trap ERR 控制
 - **版本管理**：semver，见 `VERSION` 文件
+  - **同步要求**：更新 VERSION 时，必须同步修改所有文档/代码中 `git subtree add --prefix=.pg/skills pg-skills v<old> --squash` 命令中的版本号为新版本。当前受影响文件：`README.md`、`docs/index.html`、`docs/pg-skills.md`、`docs/cards/07-onboarding.svg`、`src/core/init.py`。
 
 ---
 

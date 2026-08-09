@@ -40,7 +40,7 @@ pg-skills 仓库（独立远程）                  您的项目仓库
 # 1. 用 git subtree 把 pg-skills 同步进项目
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
-git subtree add --prefix=.pg/skills pg-skills master --squash
+git subtree add --prefix=.pg/skills pg-skills v0.9.1 --squash
 
 # 2a. 交互式终端可直接运行：自动探测，并要求确认或选择
 python3 .pg/skills/src/runtime/bin/pg init
@@ -116,7 +116,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 ```bash
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
-git subtree add --prefix=.pg/skills pg-skills master --squash
+git subtree add --prefix=.pg/skills pg-skills v0.9.1 --squash
 python3 .pg/skills/src/runtime/bin/pg init
 git add .pg/
 git commit -m "feat: 接入 pg-skills $(cat .pg/skills/VERSION)"
