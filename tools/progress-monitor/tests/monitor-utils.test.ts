@@ -243,6 +243,52 @@ test('final gate is a selectable leaf with event-derived details', () => {
   assert.equal((finalGate.meta?.phaseState as { agent: string }).agent, 'pg-build/gate')
 })
 
+test('phase-level fix/review/gate cycles are shown as children when sub_pipelines are absent', () => {
+  const manifest = {
+    stages: [{
+      name: 'dev',
+      environment: 'dev-local',
+      tracks: [{ id: 'backend', enabled: true, type: 'standard', phase_prompts: { review: 'x', verify: 'x', gate: 'x' } }],
+    }],
+  }
+  const snapshot = {
+    tracks: {
+      'dev.backend': {
+        status: 'completed',
+        sub_pipelines: [],
+        phases: {
+          review: { status: 'completed', review_fix_cycles: [{ cycle: 1, status: 'completed' }, { cycle: 2, status: 'completed' }, { cycle: 3, status: 'failed' }] },
+          verify: { status: 'completed', fix_cycles: [{ cycle: 1, status: 'completed' }] },
+          gate: { status: 'pass', gate_cycles: [{ cycle: 1, status: 'pass' }] },
+        },
+      },
+    },
+  }
+
+  const tree = buildTree(manifest as never, snapshot as never)
+  const backend = tree[0].children.find(t => t.id === 'dev.backend')!
+  const review = backend.children.find(p => p.label === 'review')!
+  const verify = backend.children.find(p => p.label === 'verify')!
+  const gate = backend.children.find(p => p.label === 'gate')!
+
+  const reviewGroup = review.children.find(c => c.type === 'cycle-group')!
+  assert.deepEqual(reviewGroup.children.map(c => [c.label, c.status]), [
+    ['review #1 / 4', 'completed'],
+    ['review-fix cycle 1', 'completed'],
+    ['review #2 / 4', 'completed'],
+    ['review-fix cycle 2', 'completed'],
+    ['review #3 / 4', 'completed'],
+    ['review-fix cycle 3', 'failed'],
+    ['review #4 / 4', 'completed'],
+  ])
+
+  const verifyGroup = verify.children.find(c => c.type === 'cycle-group')!
+  assert.deepEqual(verifyGroup.children.map(c => c.label), ['verify #1 / 2', 'fix cycle 1', 'verify #2 / 2'])
+
+  const gateGroup = gate.children.find(c => c.type === 'cycle-group')!
+  assert.deepEqual(gateGroup.children.map(c => c.label), ['gate #1 / 2', 'gate cycle 1', 'gate #2 / 2'])
+})
+
 test('latest dispatch wins when a phase is retried', () => {
   const snapshot = { tracks: { 'dev.api': { phases: { gate: {} } } } }
   const events = [

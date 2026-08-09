@@ -778,40 +778,105 @@ def invoke_hook_main(argv=None) -> int:
             )
             return 1
         if args.action not in (role_cfg.get("actions") or {}):
-            sys.stderr.write(
-                f"Error: action '{args.action}' not defined in "
-                f"environments.{args.env}.roles.{args.role}.actions\n"
-            )
-            return 1
-        act_cfg = role_cfg["actions"][args.action]
+            if args.action == "restart":
+                # Fallback: stop → start → [health_check] when restart hook not defined.
+                stop_cfg = (role_cfg.get("actions") or {}).get("stop")
+                start_cfg = (role_cfg.get("actions") or {}).get("start")
+                if not stop_cfg:
+                    sys.stderr.write(
+                        f"Error: action 'restart' not defined in role '{args.role}', "
+                        f"and fallback 'stop' is also not defined\n"
+                    )
+                    return 1
+                if not start_cfg:
+                    sys.stderr.write(
+                        f"Error: action 'restart' not defined in role '{args.role}', "
+                        f"and fallback 'start' is also not defined\n"
+                    )
+                    return 1
 
-        instance_obj = next(
-            (i for i in (role_cfg.get("instances") or [])
-             if i.get("name") == args.instance),
-            None,
-        )
-        if not instance_obj:
-            sys.stderr.write(
-                f"Error: instance '{args.instance}' not found in "
-                f"environments.{args.env}.roles.<role>.instances\n"
-            )
-            return 1
-        instance_host = instance_obj.get("host", "")
+                instance_obj = next(
+                    (i for i in (role_cfg.get("instances") or [])
+                     if i.get("name") == args.instance),
+                    None,
+                )
+                if not instance_obj:
+                    sys.stderr.write(
+                        f"Error: instance '{args.instance}' not found in "
+                        f"environments.{args.env}.roles.<role>.instances\n"
+                    )
+                    return 1
+                instance_host = instance_obj.get("host", "")
 
-        spec = build_role_hook_spec(
-            session=args.session,
-            env=args.env,
-            stage=args.stage,
-            action=args.action,
-            role=args.role,
-            instance=args.instance,
-            instance_host=instance_host,
-            act_cfg=act_cfg,
-            tail_lines=args.tail_lines,
-            project_root=project_root,
-            caller=args.caller,
-            wait_for_completion=_resolve_wait_for_completion(args.action, args.wait_for_completion, act_cfg.get("wait_for_completion")),
-        )
+                stop_spec = build_role_hook_spec(
+                    session=args.session, env=args.env, stage=args.stage,
+                    action="stop", role=args.role,
+                    instance=args.instance, instance_host=instance_host,
+                    act_cfg=stop_cfg, tail_lines=args.tail_lines,
+                    project_root=project_root, caller=args.caller,
+                    wait_for_completion=True,
+                )
+                start_spec = build_role_hook_spec(
+                    session=args.session, env=args.env, stage=args.stage,
+                    action="start", role=args.role,
+                    instance=args.instance, instance_host=instance_host,
+                    act_cfg=start_cfg, tail_lines=args.tail_lines,
+                    project_root=project_root, caller=args.caller,
+                    wait_for_completion=_resolve_wait_for_completion(
+                        "start", args.wait_for_completion, start_cfg.get("wait_for_completion")
+                    ),
+                )
+                specs = [stop_spec, start_spec]
+
+                hc_cfg = (role_cfg.get("actions") or {}).get("health_check")
+                if hc_cfg:
+                    hc_spec = build_role_hook_spec(
+                        session=args.session, env=args.env, stage=args.stage,
+                        action="health_check", role=args.role,
+                        instance=args.instance, instance_host=instance_host,
+                        act_cfg=hc_cfg, tail_lines=args.tail_lines,
+                        project_root=project_root, caller=args.caller,
+                        wait_for_completion=True,
+                    )
+                    specs.append(hc_spec)
+
+                spec = {"_multi_specs": specs, "action": "restart"}
+            else:
+                sys.stderr.write(
+                    f"Error: action '{args.action}' not defined in "
+                    f"environments.{args.env}.roles.{args.role}.actions\n"
+                )
+                return 1
+        else:
+            act_cfg = role_cfg["actions"][args.action]
+
+            instance_obj = next(
+                (i for i in (role_cfg.get("instances") or [])
+                 if i.get("name") == args.instance),
+                None,
+            )
+            if not instance_obj:
+                sys.stderr.write(
+                    f"Error: instance '{args.instance}' not found in "
+                    f"environments.{args.env}.roles.<role>.instances\n"
+                )
+                return 1
+            instance_host = instance_obj.get("host", "")
+
+            spec = build_role_hook_spec(
+                session=args.session,
+                env=args.env,
+                stage=args.stage,
+                action=args.action,
+                role=args.role,
+                instance=args.instance,
+                instance_host=instance_host,
+                act_cfg=act_cfg,
+                tail_lines=args.tail_lines,
+                project_root=project_root,
+                caller=args.caller,
+                wait_for_completion=_resolve_wait_for_completion(args.action, args.wait_for_completion, act_cfg.get("wait_for_completion")),
+            )
 
     # --log-dir 覆盖: 透传 PG_HOOK_LOG_DIR 到 hook (pg-run-hook.py:_PG_ENV_MAP 已映射)
     if args.log_dir:

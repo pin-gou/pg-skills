@@ -36,9 +36,15 @@ function resolveChangeRoot(change: string): string | null {
 function listArtifactsForPhase(changeRoot: string, track: string, phase: string): string[] {
   const buildDir = path.join(changeRoot, '2-build')
   if (!fs.existsSync(buildDir)) return []
-  const pattern = `${track.replace(/^.*\./, '')}-${phase}`
+  const bareTrack = track.replace(/^.*\./, '')
+  const phasePattern = `${bareTrack}-${phase}`
+  const fixPattern = `${bareTrack}-fix`
   return fs.readdirSync(buildDir, { withFileTypes: true })
-    .filter(entry => entry.isFile() && entry.name.includes(pattern) && !entry.name.startsWith('pipeline.'))
+    .filter(entry => {
+      if (!entry.isFile()) return false
+      if (entry.name.startsWith('pipeline.')) return false
+      return entry.name.includes(phasePattern) || entry.name.includes(fixPattern)
+    })
     .map(entry => entry.name)
     .sort()
 }

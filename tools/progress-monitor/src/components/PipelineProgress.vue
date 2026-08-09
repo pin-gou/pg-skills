@@ -168,6 +168,29 @@ function selectNode(node: TreeNode) {
     previewTitle.value = node.label
     const env = node.meta?.environment as string || ''
     previewContent.value = `Stage: ${node.label}\n\n环境: ${env}\nTracks: ${node.children.length}`
+  } else if (node.type === 'cycle-group' && node.meta) {
+    const pt = node.meta.parentTrack as string
+    const pp = node.meta.parentPhase as string
+    previewTitle.value = `${pt}:${pp} - ${node.label}`
+    previewContent.value = `循环组: ${node.label}\n子步骤: ${node.children.length}\n状态: ${getStatusLabel(node.status)}`
+  } else if (node.type === 'cycle-step' && node.meta) {
+    const pt = node.meta.parentTrack as string
+    const pp = node.meta.parentPhase as string
+    const stepKind = node.meta.stepKind as string
+    const stepPosition = node.meta.stepPosition as number
+    const totalSteps = node.meta.totalSteps as number
+    previewTitle.value = `${pt}:${pp} - ${node.label}`
+    const lines = [
+      `步骤: ${stepKind} (${stepPosition + 1} / ${totalSteps})`,
+      `状态: ${getStatusLabel(node.status)}`,
+    ]
+    if (stepKind === 'fix') {
+      const ck = node.meta.cycleKind as string
+      const cy = node.meta.cycle as number
+      lines.push(`循环: ${ck} cycle ${cy}`)
+    }
+    previewContent.value = lines.join('\n')
+    loadStepArtifacts(pt, pp, node.meta)
   } else {
     previewTitle.value = node.label
     previewContent.value = '选择节点查看详情'
@@ -176,10 +199,69 @@ function selectNode(node: TreeNode) {
 
 async function loadArtifacts(track: string, phase: string) {
   try {
-    artifacts.value = await api.listArtifacts(store.currentChange!, track, phase)
+    const list = await api.listArtifacts(store.currentChange!, track, phase)
+    artifacts.value = list
   } catch {
     artifacts.value = []
   }
+}
+
+async function loadStepArtifacts(track: string, phase: string, meta: Record<string, unknown>) {
+  const stepKind = meta.stepKind as string
+  const stepPosition = meta.stepPosition as number
+  const totalSteps = meta.totalSteps as number
+  try {
+    const list = await api.listArtifacts(store.currentChange!, track, phase)
+    artifacts.value = filterStepArtifacts(list, track, phase, stepKind, stepPosition, totalSteps, meta)
+  } catch {
+    artifacts.value = []
+  }
+}
+
+function filterStepArtifacts(
+  list: string[],
+  track: string,
+  phase: string,
+  stepKind: string,
+  stepPosition: number,
+  _totalSteps: number,
+  meta: Record<string, unknown>,
+): string[] {
+  const bareTrack = track.replace(/^.*\./, '')
+  const phasePattern = `${bareTrack}-${phase}`
+  const fixPattern = `${bareTrack}-fix`
+  const cycleKind = meta.cycleKind as string | null
+  const reviewFiles: string[] = []
+  const fixFiles: string[] = []
+  for (const name of list) {
+    if (name.includes(fixPattern)) {
+      const isOtherKind = cycleKind === 'review-fix'
+        ? name.includes('fix-gate')
+        : cycleKind === 'gate'
+          ? name.includes('fix-review')
+          : false
+      if (!isOtherKind) {
+        fixFiles.push(name)
+      }
+    } else if (name.includes(phasePattern)) {
+      reviewFiles.push(name)
+    }
+  }
+  if (stepKind === 'fix') {
+    const ordinal = Math.floor(stepPosition / 2) + 1
+    const uniqueSeqs = [...new Set(fixFiles.map(parseSequence))].sort((a, b) => a - b)
+    const targetSeq = uniqueSeqs[ordinal - 1]
+    return fixFiles.filter(name => parseSequence(name) === targetSeq)
+  }
+  const ordinal = Math.floor(stepPosition / 2) + 1
+  const uniqueSeqs = [...new Set(reviewFiles.map(parseSequence))].sort((a, b) => a - b)
+  const targetSeq = uniqueSeqs[ordinal - 1]
+  return reviewFiles.filter(name => parseSequence(name) === targetSeq)
+}
+
+function parseSequence(name: string): number {
+  const match = /^(\d{3})/.exec(name)
+  return match ? Number(match[1]) : Number.MAX_SAFE_INTEGER
 }
 
 async function viewArtifact(filePath: string) {

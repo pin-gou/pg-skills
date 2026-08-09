@@ -118,7 +118,7 @@ export interface EventsResponse {
   total: number
 }
 
-export type TreeNodeType = 'stage' | 'track' | 'phase' | 'fix-cycle' | 'sub-phase' | 'final-gate'
+export type TreeNodeType = 'stage' | 'track' | 'phase' | 'fix-cycle' | 'sub-phase' | 'final-gate' | 'cycle-step' | 'cycle-group'
 
 export interface TreeNode {
   id: string

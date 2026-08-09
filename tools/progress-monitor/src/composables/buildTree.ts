@@ -1,4 +1,4 @@
-import type { Manifest, Snapshot, TreeNode, TrackState, SubPipelineInfo } from '../types/pipeline.ts'
+import type { Manifest, PhaseState, Snapshot, TreeNode, TrackState, SubPipelineInfo } from '../types/pipeline.ts'
 import { aggregateStatuses, finalGateStatus } from './status.ts'
 
 function phaseStatus(trackState: TrackState | undefined, phase: string): string {
@@ -65,6 +65,143 @@ function findSubPipelinesForPhase(trackState: TrackState | undefined, phase: str
   return result
 }
 
+interface CycleRecord {
+  kind: string
+  cycle: number
+  status: string
+}
+
+function readCycleList(list: unknown, kind: string): CycleRecord[] {
+  if (!Array.isArray(list)) return []
+  const result: CycleRecord[] = []
+  for (let i = 0; i < list.length; i++) {
+    const record = list[i] as Record<string, unknown> | null
+    if (!record || typeof record !== 'object') continue
+    result.push({
+      kind,
+      cycle: typeof record.cycle === 'number' ? record.cycle : i + 1,
+      status: typeof record.status === 'string' ? record.status : 'unknown',
+    })
+  }
+  return result
+}
+
+function collectPhaseCycles(phaseState: PhaseState | undefined): CycleRecord[] {
+  if (!phaseState) return []
+  return [
+    ...readCycleList(phaseState.fix_cycles, 'fix'),
+    ...readCycleList(phaseState.review_fix_cycles, 'review-fix'),
+    ...readCycleList(phaseState.gate_cycles, 'gate'),
+    ...readCycleList(phaseState.cycles, 'cycle'),
+  ]
+}
+
+function groupCyclesByKind(records: CycleRecord[]): Map<string, CycleRecord[]> {
+  const groups = new Map<string, CycleRecord[]>()
+  for (const record of records) {
+    const list = groups.get(record.kind) || []
+    list.push(record)
+    groups.set(record.kind, list)
+  }
+  return groups
+}
+
+function cycleNodeLabel(record: CycleRecord): string {
+  return record.kind === 'cycle' ? `cycle ${record.cycle}` : `${record.kind} cycle ${record.cycle}`
+}
+
+interface TimelinePlan {
+  kind: 'review' | 'fix'
+  cycleIndex: number
+  record?: CycleRecord
+}
+
+function planTimeline(cycleList: CycleRecord[]): TimelinePlan[] {
+  const plan: TimelinePlan[] = [{ kind: 'review', cycleIndex: 0 }]
+  for (const record of cycleList) {
+    plan.push({ kind: 'fix', cycleIndex: record.cycle, record })
+    plan.push({ kind: 'review', cycleIndex: record.cycle })
+  }
+  return plan
+}
+
+const TIMELINE_PHASE_LABEL: Record<string, string> = {
+  review: 'review',
+  verify: 'verify',
+  gate: 'gate',
+  'scenario-execute': 'scenario',
+}
+
+function buildPhaseTimelineNodes(
+  phaseState: PhaseState | undefined,
+  qualifiedTrack: string,
+  phase: string,
+  cycleList: CycleRecord[],
+  phaseLabel = phase,
+): TreeNode[] {
+  if (cycleList.length === 0) return []
+  const plan = planTimeline(cycleList)
+  const overallStatus = phaseState?.status || 'unknown'
+  const reviewStepCount = plan.filter(step => step.kind === 'review').length
+  let reviewOrdinal = 0
+  return plan.map((step, position) => {
+    const isFix = step.kind === 'fix'
+    const record = step.record
+    let label: string
+    if (isFix && record) {
+      label = `${record.kind} cycle ${record.cycle}`
+    } else {
+      reviewOrdinal += 1
+      label = `${phaseLabel} #${reviewOrdinal} / ${reviewStepCount}`
+    }
+    const status = isFix && record ? record.status : overallStatus
+    return {
+      id: `${qualifiedTrack}:${phase}.step.${position}.${step.kind}-${step.cycleIndex}`,
+      label,
+      type: 'cycle-step' as const,
+      status,
+      children: [],
+      meta: {
+        stepKind: step.kind,
+        stepPosition: position,
+        cycleIndex: step.cycleIndex,
+        cycleKind: record?.kind || null,
+        cycle: record?.cycle ?? 0,
+        parentTrack: qualifiedTrack,
+        parentPhase: phase,
+        phaseState,
+        totalSteps: plan.length,
+      },
+    }
+  })
+}
+
+function buildPhaseCycleNodes(
+  phaseState: PhaseState | undefined,
+  qualifiedTrack: string,
+  phase: string,
+): TreeNode[] {
+  const records = collectPhaseCycles(phaseState)
+  if (records.length === 0) return []
+  const phaseLabel = TIMELINE_PHASE_LABEL[phase] || phase
+  const groups = groupCyclesByKind(records)
+  const children: TreeNode[] = []
+  for (const [kind, list] of groups) {
+    const timeline = buildPhaseTimelineNodes(phaseState, qualifiedTrack, phase, list, phaseLabel)
+    if (timeline.length > 0) {
+      children.push({
+        id: `${qualifiedTrack}:${phase}.group.${kind}`,
+        label: `${kind} 循环 (${list.length})`,
+        type: 'cycle-group',
+        status: list.every(r => r.status === 'completed' || r.status === 'pass') ? 'completed' : 'in_progress',
+        children: timeline,
+        meta: { kind, parentTrack: qualifiedTrack, parentPhase: phase },
+      })
+    }
+  }
+  return children
+}
+
 const PHASE_ORDER = ['test', 'dev', 'review', 'verify', 'gate', 'simple', 'scenario-execute', 'scenario-fix']
 
 function phaseOrder(phase: string): number {
@@ -97,6 +234,8 @@ export function buildTree(manifest: Manifest, snapshot: Snapshot | null): TreeNo
         if (subPipelines.length > 0) {
           const spNodes = buildSubPipelineNodes(subPipelines)
           children.push(...spNodes)
+        } else if (trackState?.phases[phase]) {
+          children.push(...buildPhaseCycleNodes(trackState.phases[phase], qualifiedTrack, phase))
         }
 
         const phaseMeta: Record<string, unknown> = {
