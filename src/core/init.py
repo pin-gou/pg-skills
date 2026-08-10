@@ -27,6 +27,7 @@ ad-hoc/
 fix-issue/
 agent/
 regression/
+skills.backup.*
 
 # Dynamic generated files
 *.profile
