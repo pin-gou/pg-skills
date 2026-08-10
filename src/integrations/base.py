@@ -6,8 +6,11 @@ import json
 import inspect
 import os
 import shutil
+import stat
 from dataclasses import dataclass, field
 from pathlib import Path
+
+from core.rendering import render_workflow_text
 
 
 @dataclass(frozen=True)
@@ -117,6 +120,39 @@ class ToolIntegration:
 
     def next_steps(self) -> list[str]:
         return []
+
+
+EXCLUDED_RENDER_DIRS = frozenset({"tests", "__pycache__", ".pytest_cache"})
+
+
+def collect_rendered_files(
+    source: Path,
+    target_prefix: Path,
+    variables: dict[str, str],
+    text_extensions: set[str],
+    *,
+    render_tokens: bool = True,
+) -> dict[Path, tuple[bytes, int]]:
+    generated: dict[Path, tuple[bytes, int]] = {}
+    for path in sorted(source.rglob("*")):
+        if not path.is_file():
+            continue
+        relative = path.relative_to(source)
+        if any(part in EXCLUDED_RENDER_DIRS for part in relative.parts):
+            continue
+        if relative.name == ".gitignore":
+            continue
+        data = path.read_bytes()
+        if path.suffix.lower() in text_extensions:
+            text = data.decode("utf-8")
+            if render_tokens:
+                text = render_workflow_text(text, variables, source=str(path))
+            data = text.encode("utf-8")
+        generated[target_prefix / relative] = (
+            data,
+            stat.S_IMODE(path.stat().st_mode),
+        )
+    return generated
 
 
 def _is_legacy_link(entry: Path, source_root: Path) -> bool:

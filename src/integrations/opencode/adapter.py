@@ -4,15 +4,13 @@ from __future__ import annotations
 
 import hashlib
 import json
-import stat
 from pathlib import Path
-
-from core.rendering import render_workflow_text
 
 from ..base import (
     IntegrationContext,
     IntegrationResult,
     ToolIntegration,
+    collect_rendered_files,
     _remove_legacy_links,
 )
 
@@ -32,30 +30,6 @@ MANIFEST_NAME = ".pg-adapter-manifest.json"
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
-
-
-def _collect_rendered_tree(
-    source: Path,
-    target_prefix: Path,
-    variables: dict[str, str],
-) -> dict[Path, tuple[bytes, int]]:
-    generated: dict[Path, tuple[bytes, int]] = {}
-    for path in sorted(source.rglob("*")):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(source)
-        data = path.read_bytes()
-        if path.suffix.lower() in TEXT_EXTENSIONS:
-            data = render_workflow_text(
-                data.decode("utf-8"),
-                variables,
-                source=str(path),
-            ).encode("utf-8")
-        generated[target_prefix / relative] = (
-            data,
-            stat.S_IMODE(path.stat().st_mode),
-        )
-    return generated
 
 
 class OpenCodeIntegration(ToolIntegration):
@@ -83,7 +57,7 @@ class OpenCodeIntegration(ToolIntegration):
                 result.warnings.append(f"{source_dir} not found; skipped")
                 continue
             generated.update(
-                _collect_rendered_tree(source_dir, Path(target_name), variables)
+                collect_rendered_files(source_dir, Path(target_name), variables, TEXT_EXTENSIONS)
             )
 
         manifest_path = opencode_root / MANIFEST_NAME

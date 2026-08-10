@@ -9,12 +9,11 @@ import re
 import stat
 from pathlib import Path
 
-from core.rendering import render_workflow_text
-
 from ..base import (
     IntegrationContext,
     IntegrationResult,
     ToolIntegration,
+    collect_rendered_files,
     _remove_legacy_links,
 )
 
@@ -71,36 +70,19 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _collect_tree(
-    source: Path,
-    target_prefix: Path,
+def _adapt_tree(
     generated: dict[Path, tuple[bytes, int]],
-    variables: dict[str, str],
-    *,
-    render_tokens: bool = True,
 ) -> None:
-    for path in sorted(source.rglob("*")):
-        if not path.is_file():
-            continue
-        relative = path.relative_to(source)
-        data = path.read_bytes()
-        if path.suffix.lower() in TEXT_EXTENSIONS:
-            text = data.decode("utf-8")
-            if render_tokens:
-                text = render_workflow_text(
-                    text,
-                    variables,
-                    source=str(path),
-                )
-            text = _adapt_text(text)
-            target = target_prefix / relative
-            if target in {
-                Path("commands/pg-3-build.md"),
-                Path("agents/pg-manager.md"),
-            }:
-                text = _append_completion_contract(text)
-            data = text.encode("utf-8")
-        generated[target_prefix / relative] = (data, stat.S_IMODE(path.stat().st_mode))
+    completion_targets = {
+        Path("commands/pg-3-build.md"),
+        Path("agents/pg-manager.md"),
+    }
+    for relative, (data, mode) in generated.items():
+        text = data.decode("utf-8")
+        text = _adapt_text(text)
+        if relative in completion_targets:
+            text = _append_completion_contract(text)
+        generated[relative] = (text.encode("utf-8"), mode)
 
 
 def _append_completion_contract(text: str) -> str:
@@ -187,20 +169,33 @@ class MobileCoderIntegration(ToolIntegration):
 
         generated: dict[Path, tuple[bytes, int]] = {}
         variables = self.template_variables()
-        _collect_tree(source_root / "commands", Path("commands"), generated, variables)
-        _collect_tree(source_root / "agents", Path("agents"), generated, variables)
-        _collect_tree(source_root / "skills", Path("skills"), generated, variables)
-        _collect_tree(source_root / "scripts", Path("runtime/scripts"), generated, variables)
-        _collect_tree(
-            runtime_root,
-            Path("pg-skills/src/runtime"),
-            generated,
-            variables,
-            render_tokens=False,
+        generated.update(
+            collect_rendered_files(source_root / "commands", Path("commands"), variables, TEXT_EXTENSIONS)
+        )
+        generated.update(
+            collect_rendered_files(source_root / "agents", Path("agents"), variables, TEXT_EXTENSIONS)
+        )
+        generated.update(
+            collect_rendered_files(source_root / "skills", Path("skills"), variables, TEXT_EXTENSIONS)
+        )
+        generated.update(
+            collect_rendered_files(
+                source_root / "scripts", Path("runtime/scripts"), variables, TEXT_EXTENSIONS
+            )
+        )
+        generated.update(
+            collect_rendered_files(
+                runtime_root,
+                Path("pg-skills/src/runtime"),
+                variables,
+                TEXT_EXTENSIONS,
+                render_tokens=False,
+            )
         )
         # The generic pg CLI owns adapter selection and imports src/integrations.
         # Mobile Coder only needs the pipeline/hook runtime, not a nested CLI copy.
         generated.pop(Path("pg-skills/src/runtime/bin/pg"), None)
+        _adapt_tree(generated)
         _patch_runtime(generated)
 
         readme = """# Mobile Coder adapter
