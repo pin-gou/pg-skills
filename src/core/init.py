@@ -41,6 +41,13 @@ changes/**/2-build/*.txt
 changes/**/*.log
 """
 
+CHANGES_GITIGNORE_CONTENT = """\
+# Build artifacts within change sessions
+**/2-build/*.png
+**/2-build/*.txt
+**/*.log
+"""
+
 
 @dataclass(frozen=True)
 class InitOptions:
@@ -196,19 +203,7 @@ def initialize_project(
             output(f"ERROR: {exc}")
             return 2
 
-    for subdir in ("hooks", "context", "scripts", "changes", "runs"):
-        (pg_dir / subdir).mkdir(exist_ok=True)
-
-    pg_gitignore = pg_dir / ".gitignore"
-    if not pg_gitignore.exists():
-        pg_gitignore.write_text(GITIGNORE_CONTENT, encoding="utf-8")
-
-    project_yaml = pg_dir / "project.yaml"
-    if not project_yaml.exists():
-        project_yaml.write_text(
-            generate_project_yaml(project_root),
-            encoding="utf-8",
-        )
+    ensure_project_skeleton(project_root)
 
     integration_result = None
     if integration is not None:
@@ -307,6 +302,23 @@ def create_pg_run_wrappers(
     link.symlink_to(target)
     link.chmod(link.stat().st_mode | 0o111)
     output(f"  - symlink: pg-run -> {target}")
+
+
+def ensure_project_skeleton(project_root: Path) -> None:
+    pg_dir = project_root / ".pg"
+    for subdir in ("hooks", "context", "scripts", "changes", "runs"):
+        (pg_dir / subdir).mkdir(exist_ok=True)
+    pg_gitignore = pg_dir / ".gitignore"
+    if not pg_gitignore.exists():
+        pg_gitignore.write_text(GITIGNORE_CONTENT, encoding="utf-8")
+    changes_gitignore = pg_dir / "changes" / ".gitignore"
+    if not changes_gitignore.exists():
+        changes_gitignore.write_text(CHANGES_GITIGNORE_CONTENT, encoding="utf-8")
+    project_yaml = pg_dir / "project.yaml"
+    if not project_yaml.exists():
+        project_yaml.write_text(
+            generate_project_yaml(project_root), encoding="utf-8"
+        )
 
 
 def generate_project_yaml(project_root: Path) -> str:

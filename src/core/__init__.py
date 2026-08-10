@@ -3,6 +3,7 @@
 __all__ = [
     "InitOptions",
     "initialize_project",
+    "ensure_project_skeleton",
     "refresh_configured_integration",
     "run_doctor",
 ]
@@ -18,17 +19,20 @@ def __getattr__(name: str):
     if name in {
         "InitOptions",
         "initialize_project",
+        "ensure_project_skeleton",
         "refresh_configured_integration",
     }:
         from .init import (
             InitOptions,
             initialize_project,
+            ensure_project_skeleton,
             refresh_configured_integration,
         )
 
         return {
             "InitOptions": InitOptions,
             "initialize_project": initialize_project,
+            "ensure_project_skeleton": ensure_project_skeleton,
             "refresh_configured_integration": refresh_configured_integration,
         }[name]
     raise AttributeError(name)

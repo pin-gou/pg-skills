@@ -40,7 +40,7 @@ from core import (  # noqa: E402
     refresh_configured_integration as core_refresh_configured_integration,
     run_doctor,
 )
-from core.init import create_pg_run_wrappers  # noqa: E402
+from core.init import create_pg_run_wrappers, ensure_project_skeleton  # noqa: E402
 
 
 # ----- 路径解析 -----
@@ -232,6 +232,7 @@ def _upgrade_pull(project_root: Path, current: str, ref: str, force: bool = Fals
     pg_skills_root = find_pg_skills_root()
     new_version = (pg_skills_root / 'VERSION').read_text().strip()
 
+    ensure_project_skeleton(project_root)
     refresh_configured_integration(project_root, pg_skills_root)
     create_pg_run_symlink(project_root)
 
@@ -292,7 +293,8 @@ def _upgrade_by_copy(project_root: Path, pg_skills_dir: Path, ref: str) -> int:
     # 4. 清理临时目录
     shutil.rmtree(tmp_dir, ignore_errors=True)
 
-    # 5. 刷新上次 pg init 选择的开发工具适配
+    # 5. 补齐骨架目录 + 刷新上次 pg init 选择的开发工具适配
+    ensure_project_skeleton(project_root)
     refresh_configured_integration(project_root, pg_skills_dir)
     create_pg_run_symlink(project_root)
 
