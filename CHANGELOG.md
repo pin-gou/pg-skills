@@ -5,6 +5,40 @@
 格式基于 [Keep a Changelog](https://keepachangelog.com/zh-CN/1.1.0/)，
 版本号遵循[语义化版本](https://semver.org/lang/zh-CN/)。
 
+## [0.9.2] - 2026-08-10
+
+pg-1-define → pg-propose 衔接优化。消除 V-* 编号格式冲突、能力对账缺失、文档漂移等问题；新增重新定界协议与三态→产物契约校验。
+
+### 新增
+
+- **PR-A1 / PR-C1 — V-* 编号格式统一**：`define-summary.schema.json` 的 `verification_needs[].id` regex 收窄为 `^V-(?:[a-z][a-z0-9]*)(?:-[a-z][a-z0-9]+)*-(?:\d+)(?:-[a-z][a-z0-9]+)*$`，强制 `V-{track_id}-{seq}` 形态，可选连字符描述后缀（`V-backend-1-install-token`）；旧 `V-NNN` 纯数字格式被 `define_summary_vn_id_bad_pattern` 拦截，必须迁移
+- **PR-A2 — requires_capabilities 对账**：`env-description.schema.json` 给 `InfraService` / `BusinessSystem` / `DataResource` 三类资源加可选 `capabilities: array<string>` 字段；`pg-validate-proposal.py` 新增 `_validate_define_summary_capabilities`（计数策略：infra_service 按 `instances[]` 长度累加，business_system / data_resource 按 resource 个数累加），2 条新 issue code（`define_summary_capability_unsatisfied` / `define_summary_capability_quantity_insufficient`）
+- **PR-B1 — pg-1-define 重新定界协议**：拆分 `src/core/workflows/skills/pg-define/SKILL.md`（v1.0.0），命令文件 `pg-1-define.md` 改为壳子（与 `pg-2-propose.md` 一致）；新增 `--redefine <change-id>` 触发模式与执行步骤；`pg-validate-proposal.py define-summary` 失败时 stderr 末尾输出可执行命令 `/1-pg-define --redefine <change-id>`
+- **PR-B2 — 三态→产物契约校验**：`pg-validate-proposal.py manifest` 阶段 3 新增 `_check_define_summary_propagation`，3 条新 ERROR 级规则：
+  - `define_summary_verifiable_uncovered` — `verifiable` 的 V-* 未出现在任何 `scenario-*.yaml` covers
+  - `define_summary_degraded_no_fallback` — `degraded` 的 V-* 未出现在 `design.md`「环境限制与验证策略」段
+  - `define_summary_skipped_not_in_proposal` — `skipped` 的 V-* 未出现在 `proposal.md`「风险和注意事项」/「未做」段
+
+### 变更
+
+- **PR-B1 扩展 — pg-1-grill.md 与 pg-1-define.md 对齐**：pg-1-grill.md 从 248 行内联完整 SKILL 改为 20 行壳子，复用 `pg-define` skill 并启用 **grill 模式**（设计树 / 前沿 / 分轮次拷问方法）；pg-define skill 新增「模式选择」段 +「设计树拷问方法（grill 模式专属）」+「grill 模式额外自检信号」。两种姿态的定界环节、define-summary.yaml 落盘、三态契约校验、重新定界协议完全同一；`/1-pg-grill --redefine <change-id>` 同样触发重新定界协议
+- **PR-A1 — 模板示例对齐**：define-summary-templates.md 主示例从 `V-001` 改为 `V-backend-1`，与 design.md 一致；examples/define-summary.example.yaml 保持 `V-backend-N` 形态
+- **PR-A3 — 清理文档漂移**：`design-templates.md`「环境限制与验证策略」段引用的 SSOT 从 `.pg/context/env-capability.yaml`（已废弃）改为 `.pg/changes/<change-id>/env-description.yaml`（v6 SSOT），并显式标注废弃说明
+- **PR-C1 — track_id 字段去冗余**：`define-summary.schema.json` 把 `track_id` 从 `required` 移除；`pg-validate-proposal.py` 支持"省略时按 `^V-([a-z][a-z0-9-]*)-` 自动派生"；显式声明时仍校验与 id 前缀一致性（`define_summary_vn_track_id_mismatch`）
+- **PR-B1 — 命令文件瘦身**：`pg-1-define.md` 从 336 行（内联完整 SKILL）精简为 12 行壳子，详细指引移入 `pg-define` skill
+- **PR-A2 — 示例补 capabilities**：examples/env-description.example.yaml 给 5 类资源补 `capabilities[]` 演示（`k8s_cluster` / `postgresql` / `redis_cache` / `external_http` / `multi_version_cluster` 等）
+
+### 测试
+
+- `tests/test_define_summary.py`：新增 7 case（V-* 带描述后缀、track 含连字符、下划线后缀拒绝、`requires_capabilities` 4 类场景（未声明 / quantity 不足 / infra_instances 计数 / business_system 计数）、redefine 提示输出）
+- `tests/test_define_summary_propagation.py`（新文件）：6 case（verifiable 覆盖 / degraded 降级列 / skipped 未做段 / 三态全部 PASS / define-summary 缺失向后兼容 / proposal 风险段匹配）
+- 232 passed（pg-propose / pg-quick-build / workflows scripts tests 全集，无回归）
+
+### 迁移指引
+
+- 旧 `define-summary.yaml` 格式（`V-NNN` + 强制 `track_id`）需用 `migrate-define-summary.py` 迁移到新格式（命令及细节参见 v0.9.1 changelog）；本版本 schema 收紧后未迁移文件会在 `pg-validate-proposal.py define-summary` 阶段被拒绝
+- `env-description.yaml` 中各资源可选补 `capabilities[]` 字段；未补时 `pg-validate-proposal.py` 跳过能力对账（向后兼容），补了之后可机械校验 define-summary 中 `requires_capabilities` 满足度
+
 ## [0.9.1] - 2026-08-06
 
 ### 新增

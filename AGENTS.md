@@ -83,7 +83,8 @@ pg-skills/
 ├── src/
 │   ├── opencode/                 # Skill & Agent 层（opencode 集成）
 │   │   ├── commands/             # 7 个 slash command 定义
-│   │   │   ├── pg-1-define.md          # 探索/设计/定界
+│   │   │   ├── pg-1-define.md          # 探索/设计/定界（壳子，调用 pg-define skill）
+│   │   │   ├── pg-1-grill.md           # 设计树拷问模式（壳子，调用 pg-define skill 的 grill 模式）
 │   │   │   ├── pg-2-propose.md          # 提出变更
 │   │   │   ├── pg-2b-quick-build.md     # 跳过 proposal 直接实施
 │   │   │   ├── pg-3-build.md            # 执行 tasks.md 构建代码
@@ -193,6 +194,8 @@ pg-skills/
 | `src/runtime/spec/error-categories.yaml` | 14 个错误分类：severity（recoverable/blocked）、agent-recoverable、retry_strategy |
 | `src/runtime/spec/hook-env-vars.yaml` | PG_* 环境变量 SSOT（v5）：always_injected（3 个）+ spec_injected（9 个）+ removed（5 个） |
 | `src/runtime/spec/project.schema.json` | `.pg/project.yaml` 的 JSON Schema（draft-07，556 行） |
+| `src/runtime/spec/env-description.schema.json` | `.pg/changes/<change-id>/env-description.yaml` 的 JSON Schema（6 段 + relations，474 行） |
+| `src/runtime/spec/define-summary.schema.json` | `.pg/changes/<change-id>/0-define/define-summary.yaml` 的 JSON Schema（schema v1，163 行）。pg-propose 阶段 1.8 校验，pg-1-define「定界后环境验证」环节落盘 |
 
 ### 4.3 Skill 层
 

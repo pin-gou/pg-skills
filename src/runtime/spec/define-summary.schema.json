@@ -76,7 +76,6 @@
         "type": "object",
         "required": [
           "id",
-          "track_id",
           "name",
           "what",
           "requires_capabilities",
@@ -86,13 +85,13 @@
         "properties": {
           "id": {
             "type": "string",
-            "pattern": "^V-[A-Za-z][A-Za-z0-9-]*$",
-            "description": "V-* 编号, 与 design.md / tasks.md / scenario-*.yaml 保持一致（推荐格式 V-{track_id}-{seq}，如 V-backend-1）"
+            "pattern": "^V-(?:[a-z][a-z0-9]*)(?:-[a-z][a-z0-9]+)*-(?:\\d+)(?:-[a-z][a-z0-9]+)*$",
+            "description": "V-* 编号, 必须与 design.md / tasks.md / scenario-*.yaml 保持一致. 强制格式: V-{track_id}-{seq}, seq 为从 1 开始的递增数字 (如 V-backend-1). track_id 段允许含连字符 (如 V-agent-proto-1). 可选连字符描述后缀 (如 V-backend-1-install-token). track_id 段必须与 .pg/project.yaml tracks.<id> 对应, 与显式 track_id 字段一致性由 pg-validate-proposal.py define-summary 校验."
           },
           "track_id": {
             "type": "string",
             "pattern": "^[a-z][a-z0-9-]*$",
-            "description": "V-* 归属 track id (与 .pg/project.yaml tracks.<id> 对应). 当 id 形如 V-{track_id}-{seq} 时, track_id 必须与 id 中的 track 前缀一致; 不一致时 pg-validate-proposal.py define-summary 报 define_summary_track_id_mismatch."
+            "description": "V-* 归属 track id (与 .pg/project.yaml tracks.<id> 对应). 推荐显式声明; 省略时 pg-validate-proposal.py 自动从 id 按 ^V-([a-z][a-z0-9-]*)- 派生. 当显式声明时, 必须与 id 中的 track 前缀一致; 不一致时 pg-validate-proposal.py define-summary 报 define_summary_vn_track_id_mismatch."
           },
           "name": {
             "type": "string",

@@ -38,7 +38,8 @@ boundary:
     - <明确排除的功能 / 模块 / API>
 
 verification_needs:
-  - id: V-001
+  - id: V-backend-1     # 必须 V-{track_id}-{seq} 形态, 与 design.md 保持一致
+    # track_id 字段可选 (PR-C1 起): 省略时 validator 自动从 id 派生
     name: <验收点名称，一句话>
     what: >-
       要验证什么（业务语义，不写具体实现）。
@@ -79,11 +80,12 @@ open_questions:   # 可选
 
 | 字段 | 必填 | 说明 |
 |------|------|------|
-| `id` | ✅ | `V-[0-9]{3,}` 格式，与 design.md / tasks.md / scenario 的 V-* 编号保持一致，全文唯一 |
+| `id` | ✅ | `V-{track_id}-{seq}` 格式（如 `V-backend-1`），与 design.md / tasks.md / scenario 的 V-* 编号保持一致，全文唯一；可选连字符描述后缀（`V-backend-install-command-token`） |
+| `track_id` | 可选 | V-* 归属 track id。**PR-C1 起改为可选**：省略时 `pg-validate-proposal.py` 自动从 `id` 按 `^V-([a-z][a-z0-9-]*)-` 派生。显式声明时必须与 id 中的 track 段一致 |
 | `name` | ✅ | 验收点名称（一句话） |
 | `what` | ✅ | 要验证什么（业务语义） |
 | `requires_capabilities` | ✅ | 业务语义级能力需求清单，至少 1 项 |
-| `requires_capabilities[].capability` | ✅ | **开放枚举**，由项目自行约定（如 `postgresql` / `redis_cache` / `object_storage` / `k8s_cluster` / `libvirt_local` / `multi_tenant_data` / `agent_grpc` / `iam_rbac` / `external_http`），必须与 env-description.yaml 中可探测的能力语义对应 |
+| `requires_capabilities[].capability` | ✅ | **开放枚举**，由项目自行约定（如 `postgresql` / `redis_cache` / `object_storage` / `k8s_cluster` / `libvirt_local` / `multi_tenant_data` / `agent_grpc` / `iam_rbac` / `external_http`），必须与 env-description.yaml 中可探测的能力语义对应。propose 阶段 1.8 校验：每个 capability 必须在 env-description 中至少一个 infra_service / business_system / data_resource 的 `capabilities[]` 字段中声明，且 `min_quantity` ≤ 累计数量（infra_service 按 instances 数累加，business_system / data_resource 按 resource 数累加） |
 | `requires_capabilities[].min_quantity` | ✅ | 最小数量要求（如"至少 2 个租户"→ `2`） |
 | `downgrade_when_missing` | 可选 | 能力缺失时的降级路径 |
 | `post_discussion_status` | ✅ | `verifiable` / `degraded` / `skipped`——define 阶段与用户讨论后基于真实 env-description 得出的最终状态 |

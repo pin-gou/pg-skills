@@ -109,6 +109,11 @@
         "tags": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "该资源提供的业务语义级能力列表 (开放枚举, 如 postgresql|redis_cache|object_storage|k8s_cluster|multi_tenant_data). 与 define-summary.yaml 的 requires_capabilities[].capability 对齐, 由 pg-validate-proposal.py define-summary 校验 min_quantity 满足度. 不填视为该资源不声明任何能力."
         }
       }
     },
@@ -177,6 +182,11 @@
         "tags": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "该业务系统提供的业务语义级能力列表 (如 iam_rbac|external_http|agent_grpc). 与 define-summary.yaml 的 requires_capabilities 对齐."
         }
       }
     },
@@ -242,6 +252,11 @@
         "tags": {
           "type": "array",
           "items": { "type": "string" }
+        },
+        "capabilities": {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "该数据资源提供的业务语义级能力列表 (如 multi_tenant_data|sample_dataset). 与 define-summary.yaml 的 requires_capabilities 对齐. 注意: 能力计数时, multi_tenant_data / sample_dataset 这类 capability 按 resource 维度计数 (1 个 resource = 1 个能力实例); 而 postgresql / object_storage 这类 capability 按 owner 维度的 instance 计数."
         }
       }
     },

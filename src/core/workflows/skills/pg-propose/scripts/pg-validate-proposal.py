@@ -1037,6 +1037,116 @@ def _check_risk_criteria_alignment(
     return issues
 
 
+def _check_define_summary_propagation(
+    change: str,
+    design_text: str,
+    proposal_text: str,
+    scenario_files: list[str],
+    ds_path: str | None,
+) -> list[tuple[str, str]]:
+    """PR-B2: define-summary.yaml post_discussion_status 三态 → 产物契约校验.
+
+    规则:
+      1. verifiable 的 V-* id 必须出现在至少一个 scenario-<track>.yaml 的 covers 中
+         → 否则 define_summary_verifiable_uncovered (ERROR)
+      2. skipped 的 V-* id 必须出现在 proposal.md「风险和注意事项」或「未做」段
+         → 否则 define_summary_skipped_not_in_proposal (ERROR)
+      3. degraded 的 V-* id 必须出现在 design.md「环境限制与验证策略」段
+         (H3 + 表格行, 表格列含 V-* id)
+         → 否则 define_summary_degraded_no_fallback (ERROR)
+
+    define-summary.yaml 不存在 → 跳过 (向后兼容, 旧 change 无 define 产物)
+    """
+    issues: list[tuple[str, str]] = []
+    if not ds_path or not os.path.isfile(ds_path):
+        return issues
+    if yaml is None:
+        return issues
+    try:
+        with open(ds_path, encoding="utf-8") as f:
+            ds = yaml.safe_load(f) or {}
+    except Exception:
+        return issues
+
+    verifiable: list[str] = []
+    degraded: list[str] = []
+    skipped: list[str] = []
+    for v in ds.get("verification_needs") or []:
+        if not isinstance(v, dict):
+            continue
+        vid = v.get("id")
+        status = v.get("post_discussion_status")
+        if not isinstance(vid, str):
+            continue
+        if status == "verifiable":
+            verifiable.append(vid)
+        elif status == "degraded":
+            degraded.append(vid)
+        elif status == "skipped":
+            skipped.append(vid)
+
+    # 规则 1: verifiable 的 V-* id 必须出现在 scenario covers
+    covered_v_ids: set[str] = set()
+    for sf in scenario_files:
+        try:
+            with open(sf, encoding="utf-8") as f:
+                doc = yaml.safe_load(f)
+        except Exception:
+            continue
+        if not isinstance(doc, dict):
+            continue
+        for sc in doc.get("scenarios") or []:
+            if not isinstance(sc, dict):
+                continue
+            for cover in sc.get("covers") or []:
+                if isinstance(cover, str):
+                    covered_v_ids.add(cover)
+    for vid in verifiable:
+        if vid not in covered_v_ids:
+            issues.append((
+                "define_summary_verifiable_uncovered",
+                "{}: post_discussion_status=verifiable, 但未在 scenario-*.yaml covers 中引用".format(vid),
+            ))
+
+    # 规则 2: skipped 的 V-* id 必须出现在 proposal.md「风险和注意事项」或「未做」段
+    # 解析方式: 找 ## 风险和注意事项 / ## 未做 段, 收集段内所有 V-XXX ID
+    skipped_section_re = re.compile(
+        r"^##\s+(风险和注意事项|未做|不做)\s*\n(.*?)(?=^##\s|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    proposal_v_ids: set[str] = set()
+    for m in skipped_section_re.finditer(proposal_text):
+        for v_match in _V_ID_RE.finditer(m.group(2)):
+            proposal_v_ids.add("V-" + v_match.group(1))
+    for vid in skipped:
+        if vid not in proposal_v_ids:
+            issues.append((
+                "define_summary_skipped_not_in_proposal",
+                "{}: post_discussion_status=skipped, 但未在 proposal.md「风险和注意事项」/「未做」段列出".format(vid),
+            ))
+
+    # 规则 3: degraded 的 V-* id 必须出现在 design.md「环境限制与验证策略」段
+    # 解析方式: 找 ### 环境限制与验证策略 段, 段内 markdown 表格行含 V-XXX ID
+    degraded_section_re = re.compile(
+        r"^###\s+环境限制与验证策略\s*\n(.*?)(?=^###\s|\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    design_degraded_v_ids: set[str] = set()
+    dm = degraded_section_re.search(design_text)
+    if dm:
+        section_body = dm.group(1)
+        for v_match in _V_ID_RE.finditer(section_body):
+            design_degraded_v_ids.add("V-" + v_match.group(1))
+    for vid in degraded:
+        if vid not in design_degraded_v_ids:
+            issues.append((
+                "define_summary_degraded_no_fallback",
+                "{}: post_discussion_status=degraded, 但未在 design.md「环境限制与验证策略」段列出".format(vid),
+            ))
+
+    return issues
+
+
 def _check_scenario_env_consistency(change: str, manifest: dict) -> list[tuple[str, str]]:
     """v1.0 (v6 hook 协议): 校验 scenario given 与 env-description.yaml 的一致性 (warning 级).
 
@@ -1287,25 +1397,37 @@ def _validate_define_summary_structure(ds: dict, schema) -> list:
                             "verification_needs 存在重复 id: {}".format(vid),
                         ))
                     seen_ids.add(vid)
+                    # 优先用 schema 内的 pattern; 若 schema 加载失败, 用内置 regex 兜底
                     id_pat = (vn_schema.get("properties", {})
                               .get("id", {}).get("pattern"))
-                    if id_pat and not re.match(id_pat, vid):
+                    if id_pat is None:
+                        id_pat = r"^V-(?:[a-z][a-z0-9]*)(?:-[a-z][a-z0-9]+)*-(?:\d+)(?:-[a-z][a-z0-9]+)*$"
+                    if not re.match(id_pat, vid):
                         issues.append((
                             "define_summary_vn_id_bad_pattern",
                             "verification_needs[{}].id {!r} 不匹配 pattern {!r}".format(
                                 i, vid, id_pat),
                         ))
-                    # id 与 track_id 前缀一致性 (仅对 V-{track}-{seq} 形态校验,
-                    # 兼容旧 V-NNN 单一数字形态)
+                    # id 与 track_id 前缀一致性 (schema regex 已强制 V-{track_id}-{seq}
+                    # 形态, 此处只需校验 id 中 track 段与显式 track_id 一致)
                     if vid.startswith("V-"):
-                        track_id = item.get("track_id")
-                        m = re.match(r"^V-([a-z][a-z0-9-]*)-", vid)
-                        if m and isinstance(track_id, str) and m.group(1) != track_id:
-                            issues.append((
-                                "define_summary_vn_track_id_mismatch",
-                                "verification_needs[{}].id={!r} 与 track_id={!r} 前缀不一致".format(
-                                    i, vid, track_id),
-                            ))
+                        # 拆 track 段: 必须匹配到第一个 -<digits> 之前 (即 seq 之前)
+                        m = re.match(
+                            r"^V-([a-z][a-z0-9]*(?:-[a-z][a-z0-9]+)*)-\d+",
+                            vid,
+                        )
+                        if m:
+                            derived_track = m.group(1)
+                            track_id = item.get("track_id")
+                            if track_id is None:
+                                # PR-C1: track_id 字段可选, 省略时自动派生
+                                pass
+                            elif isinstance(track_id, str) and track_id != derived_track:
+                                issues.append((
+                                    "define_summary_vn_track_id_mismatch",
+                                    "verification_needs[{}].id={!r} 与 track_id={!r} 前缀不一致 (省略 track_id 即可自动派生)".format(
+                                        i, vid, track_id),
+                                ))
     return issues
 
 
@@ -1394,6 +1516,95 @@ def _validate_define_summary_env_refs(ds: dict, env_desc: dict) -> list:
     return issues
 
 
+def _validate_define_summary_capabilities(ds: dict, env_desc: dict) -> list:
+    """PR-A2: requires_capabilities ↔ env-description capabilities 交叉校验.
+
+    规则:
+      - 收集 env-description.environments.<env> 三段中每资源的 capabilities[] (infra_services /
+        business_systems / data_resources)
+      - 计数策略: postgresql / object_storage / redis_cache / k8s_cluster 这类
+        "基础设施型" capability 按 infra_service.instances[] 长度累加;
+        multi_tenant_data / sample_dataset 这类 "数据型" capability 按 resource 个数累加
+        (不论 instances 多少)
+      - 若 requires_capabilities[].capability 未在环境能力集合中找到 → error
+      - 找到但 quantity < min_quantity → error
+      - 描述仅用于提示, 不参与对账
+
+    决定 "基础设施型 vs 数据型" 不可静态推断, 这里采用折中:
+      - infra_services[*].capabilities: 按 instances 数量累加
+      - business_systems[*].capabilities: 按 1 累加 (端点已存在即满足)
+      - data_resources[*].capabilities: 按 1 累加
+    若项目有更细策略, 可在 schema 后续版本加 capability_kind 字段.
+    """
+    issues = []
+    target_env = ds.get("target_environment")
+    if not target_env:
+        return issues
+
+    env_block = (env_desc.get("environments") or {}).get(target_env)
+    if not isinstance(env_block, dict):
+        return issues
+
+    # 收集 capability 计数
+    capability_count: dict[str, int] = {}
+
+    def _accumulate(cap_list, multiplier):
+        if not isinstance(cap_list, list):
+            return
+        for cap in cap_list:
+            if isinstance(cap, str) and cap:
+                capability_count[cap] = capability_count.get(cap, 0) + multiplier
+
+    for svc in env_block.get("infra_services", []) or []:
+        if not isinstance(svc, dict):
+            continue
+        instances = svc.get("instances", []) or []
+        _accumulate(svc.get("capabilities"), len(instances))
+
+    for biz in env_block.get("business_systems", []) or []:
+        if not isinstance(biz, dict):
+            continue
+        _accumulate(biz.get("capabilities"), 1)
+
+    for dr in env_block.get("data_resources", []) or []:
+        if not isinstance(dr, dict):
+            continue
+        _accumulate(dr.get("capabilities"), 1)
+
+    # 对每个 requires_capabilities 校验
+    for vn in ds.get("verification_needs", []) or []:
+        if not isinstance(vn, dict):
+            continue
+        vid = vn.get("id", "<unknown>")
+        requires = vn.get("requires_capabilities") or []
+        if not isinstance(requires, list):
+            continue
+        for req in requires:
+            if not isinstance(req, dict):
+                continue
+            cap = req.get("capability")
+            min_q = req.get("min_quantity", 1)
+            if not isinstance(cap, str) or not cap:
+                continue
+            available = capability_count.get(cap, 0)
+            if available == 0:
+                issues.append((
+                    "define_summary_capability_unsatisfied",
+                    "{}: requires_capability={!r} 在 env-description 中未声明 (请检查 "
+                    "infra_services/business_systems/data_resources 的 capabilities 字段,"
+                    "或在 describe_env 脚本补充)".format(vid, cap),
+                ))
+                continue
+            if isinstance(min_q, int) and available < min_q:
+                issues.append((
+                    "define_summary_capability_quantity_insufficient",
+                    "{}: requires_capability={!r} min_quantity={}, 但环境仅提供 {} 个".format(
+                        vid, cap, min_q, available),
+                ))
+
+    return issues
+
+
 def cmd_define_summary(change):
     """Validate .pg/changes/<change>/0-define/define-summary.yaml (阶段 1.8 产物校验).
 
@@ -1403,6 +1614,7 @@ def cmd_define_summary(change):
       3. 结构校验 (对照 define-summary.schema.json, 无外部库)
       4. env_resource_refs ↔ env-description.yaml 交叉校验
       5. target_environment 与 env-description described_for.environment 一致性
+      6. requires_capabilities ↔ env-description capabilities 交叉校验 (PR-A2)
 
     Exit 0 = valid, 1 = invalid.
     """
@@ -1473,6 +1685,12 @@ def cmd_define_summary(change):
         for code, msg in ref_issues:
             print("  [{}] {}".format(code, msg), file=sys.stderr)
             all_issues.append(code)
+
+        # 5c. requires_capabilities ↔ env-description capabilities 交叉校验 (PR-A2)
+        cap_issues = _validate_define_summary_capabilities(ds, env_desc)
+        for code, msg in cap_issues:
+            print("  [{}] {}".format(code, msg), file=sys.stderr)
+            all_issues.append(code)
     else:
         print("  [env_description_missing] env-description.yaml 不存在, "
               "跳过 env_resource_refs 交叉校验 (请先跑 pg-1-define 定界环节的 describe_env)",
@@ -1482,6 +1700,11 @@ def cmd_define_summary(change):
     if all_issues:
         print("\nERROR: define-summary.yaml 校验失败, 共 {} 个问题: {}".format(
             len(all_issues), ", ".join(all_issues)), file=sys.stderr)
+        # PR-B1: 给用户/agent 可执行的回退路径
+        print(
+            "\n  → 修复方式: /1-pg-define --redefine {}  (详见 pg-define SKILL §重新定界协议)".format(change),
+            file=sys.stderr,
+        )
         sys.exit(1)
 
     print("OK: define-summary.yaml 校验通过 (change={})".format(change))
@@ -1736,6 +1959,36 @@ def cmd_manifest(change):
         coverage_warnings.append((
             "v_identifier_consistency_check_failed",
             f"V-* 一致性校验异常: {_e7}",
+        ))
+
+    # 7.4d v1.4 (PR-B2): define-summary 三态 → 产物契约校验 (ERROR 级)
+    try:
+        _ds_path_b2 = os.path.join(CHANGES_DIR, change, "0-define", "define-summary.yaml")
+        _design_path_b2 = os.path.join(CHANGES_DIR, change, "design.md")
+        _proposal_path_b2 = os.path.join(CHANGES_DIR, change, "proposal.md")
+        _design_text_b2 = ""
+        _proposal_text_b2 = ""
+        if os.path.isfile(_design_path_b2):
+            with open(_design_path_b2, encoding="utf-8") as _f_b2:
+                _design_text_b2 = _f_b2.read()
+        if os.path.isfile(_proposal_path_b2):
+            with open(_proposal_path_b2, encoding="utf-8") as _f_b2:
+                _proposal_text_b2 = _f_b2.read()
+        import glob as _glob_b2
+        _scenario_files_b2 = _glob_b2.glob(
+            os.path.join(CHANGES_DIR, change, "scenario-*.yaml")
+        )
+        for code, msg in _check_define_summary_propagation(
+            _design_text_b2, _proposal_text_b2,
+            list(_scenario_files_b2), _ds_path_b2,
+        ):
+            print(f"  [{code}] {msg}", file=sys.stderr)
+            all_issues.append(code)
+            valid = False
+    except Exception as _e_b2:
+        coverage_warnings.append((
+            "define_summary_propagation_check_failed",
+            f"三态契约校验异常: {_e_b2}",
         ))
 
     # 7.5 v3.10: scenario 覆盖度校验（warning 级, 不阻塞）

@@ -286,7 +286,7 @@ python3 .pg/skills/src/core/workflows/skills/pg-propose/scripts/pg-validate-prop
 4. `target_environment` 与 env-description.yaml 的 `described_for.environment` 一致性
 5. `env_resource_refs` ↔ env-description.yaml 交叉校验（verifiable 必填且引用的段/资源名真实存在；non-verifiable 必须为空）
 
-**失败处理**：校验非 0 退出 → 中断，提示用户回到 pg-1-define 定界环节修复（典型原因：阶段 1.6 重跑 describe_env 后环境漂移导致 `env_resource_refs` 引用失效）。
+**失败处理**：校验非 0 退出 → 中断，stderr 末尾输出可执行命令 `/1-pg-define --redefine <change-id>`（详见 `pg-define` SKILL §重新定界协议），由 agent 或用户手动执行。典型原因：阶段 1.6 重跑 describe_env 后环境漂移导致 `env_resource_refs` 引用失效，或新增 `requires_capabilities` 未在 env-description 中声明（PR-A2 起）。
 
 **Context 注入契约**（校验通过后）：define-summary.yaml 作为强制 context 进入阶段 2 全产物写作：
 
@@ -521,6 +521,14 @@ scenario track 是常驻 track，但 LLM 仍可在阶段二 2.3 决策为某个 
 | `v_identifier_uncovered` | design.md V-{track}-N 未被 tasks.md verify 章节引用 | WARN |
 | `scenario_yaml_referenced` | tasks.md body 引用 scenario-*.yaml 路径 | WARN |
 | `tasks_md_section_duplicate` / `tasks_md_section_skipped` | 章节编号重号 / 跳号 | WARN |
+
+**v1.4 新增（PR-B2）三态契约校验**（ERROR 等级，违反时阻断）：
+
+| 规则 | 触发条件 |
+|------|---------|
+| `define_summary_verifiable_uncovered` | define-summary 中 `verifiable` 的 V-* id 未出现在任何 scenario-*.yaml covers |
+| `define_summary_degraded_no_fallback` | define-summary 中 `degraded` 的 V-* id 未出现在 design.md「环境限制与验证策略」段 |
+| `define_summary_skipped_not_in_proposal` | define-summary 中 `skipped` 的 V-* id 未出现在 proposal.md「风险和注意事项」或「未做」段 |
 
 WARN 不阻塞 build，但会显著提示 LLM 在阶段 3 校验后重点审视。
 

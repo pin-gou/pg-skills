@@ -28,7 +28,7 @@ boundary:
 
 verification_needs:
   - id: V-backend-1
-    track_id: backend
+    # track_id 字段可选, 省略时自动从 id 按 ^V-([a-z][a-z0-9-]*)- 派生
     name: 桶列表返回容量字段
     what: >-
       调用桶列表 API，响应中每个桶包含 capacity_bytes 与 object_count。
@@ -46,7 +46,6 @@ verification_needs:
       - "{env.data_resources[name=bucket-catalog]}"
 
   - id: V-backend-2
-    track_id: backend
     name: 统计接口超时降级
     what: >-
       对象存储统计接口超时时，capacity_bytes / object_count 缺省为 null，列表仍正常返回。
@@ -58,7 +57,6 @@ verification_needs:
     post_discussion_status: degraded
 
   - id: V-backend-3
-    track_id: backend
     name: 多租户隔离
     what: >-
       租户 A 只能看到自己的桶容量，不能看到租户 B。

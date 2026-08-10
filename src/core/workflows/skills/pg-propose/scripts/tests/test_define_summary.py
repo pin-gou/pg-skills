@@ -105,10 +105,20 @@ def _env_description(change_id="demo-change", target_env="dev-local"):
                         "type": "seaweedfs",
                         "category": "object_storage",
                         "instances": [{"id": "object-storage-1", "reachable": True}],
+                        "capabilities": ["postgresql", "object_storage"],
                     },
                 ],
                 "data_resources": [
-                    {"name": "bucket-catalog", "state": {"status": "seeded"}},
+                    {
+                        "name": "bucket-catalog",
+                        "state": {"status": "seeded"},
+                        "capabilities": ["multi_tenant_data"],
+                    },
+                    {
+                        "name": "tenant-b",
+                        "state": {"status": "seeded"},
+                        "capabilities": ["multi_tenant_data"],
+                    },
                 ],
             },
         },
@@ -166,6 +176,22 @@ class TestDefineSummaryValidation(unittest.TestCase):
         result = self._run_validate("no-such-change")
         self.assertEqual(result.returncode, 1)
         self.assertIn("define-summary.yaml 不存在", result.stderr)
+
+    def test_failure_outputs_redefine_hint(self):
+        """PR-B1: 校验失败 stderr 末尾必须包含可执行的 redefine 命令。"""
+        change = "demo-change"
+        self._write_define_summary(change, _valid_define_summary(change))
+        self._write_env_description(change, _env_description(change))
+        # 人为破坏 env_resource_refs 让校验失败
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["env_resource_refs"] = [
+            "{env.infra_services[name=nonexistent]}",
+        ]
+        self._write_define_summary(change, doc)
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("/1-pg-define --redefine", result.stderr)
+        self.assertIn(change, result.stderr)
 
     def test_missing_env_description_fail(self):
         change = "demo-change"
@@ -284,9 +310,11 @@ class TestDefineSummaryValidation(unittest.TestCase):
         self.assertIn("OK: define-summary.yaml", result.stdout)
 
     def test_legacy_v_nnn_format_now_fail(self):
-        """id=V-001 不带 track_id 的旧格式 → 必须 FAIL（强制迁移到 V-{track}-N + track_id）。
+        """id=V-001 不带 track_id 的旧格式 → 必须 FAIL（强制迁移到 V-{track}-N）。
 
         旧 define-summary 必须先用 migrate-define-summary.py 迁移, 再走 propose 校验。
+        schema regex 已收窄为 ^V-[a-z][a-z0-9-]*-\\d+(?:-[a-z0-9-]+)?$, V-001 直接被
+        define_summary_vn_id_bad_pattern 拦截。
         """
         change = "demo-change"
         doc = _valid_define_summary(change)
@@ -298,19 +326,20 @@ class TestDefineSummaryValidation(unittest.TestCase):
         self._write_env_description(change, _env_description(change))
         result = self._run_validate(change)
         self.assertEqual(result.returncode, 1)
-        self.assertIn("track_id", result.stderr)
+        self.assertIn("define_summary_vn_id_bad_pattern", result.stderr)
 
-    def test_track_id_missing_fail(self):
+    def test_track_id_missing_pass(self):
+        """PR-C1: track_id 字段可选, 省略时自动从 id 派生。"""
         change = "demo-change"
         doc = _valid_define_summary(change)
         doc["verification_needs"][0]["id"] = "V-backend-1"
-        # 故意缺 track_id
+        # 故意缺 track_id (省略)
         doc["verification_needs"][0].pop("track_id", None)
         self._write_define_summary(change, doc)
         self._write_env_description(change, _env_description(change))
         result = self._run_validate(change)
-        self.assertEqual(result.returncode, 1, msg=f"stdout={result.stdout!r} stderr={result.stderr!r}")
-        self.assertIn("track_id", result.stderr)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("OK: define-summary.yaml", result.stdout)
 
     def test_track_id_mismatch_fail(self):
         """id=V-backend-1 + track_id=frontend → 前后缀不一致 FAIL。"""
@@ -323,6 +352,109 @@ class TestDefineSummaryValidation(unittest.TestCase):
         result = self._run_validate(change)
         self.assertEqual(result.returncode, 1)
         self.assertIn("track_id", result.stderr)
+
+    # ---------- v1.3 (PR-A1): V-{track_id}-{seq} 编号收紧 ----------
+
+    def test_v_id_with_hyphen_suffix_pass(self):
+        """id=V-backend-1-install-token (seq 后描述后缀) → PASS。"""
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["id"] = "V-backend-1-install-token"
+        doc["verification_needs"][0]["track_id"] = "backend"
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+        self.assertIn("OK: define-summary.yaml", result.stdout)
+
+    def test_v_id_multi_segment_track_pass(self):
+        """id=V-agent-proto-1 含连字符 track 段 → PASS。"""
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["id"] = "V-agent-proto-1"
+        doc["verification_needs"][0]["track_id"] = "agent-proto"
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_v_id_underscore_suffix_fail(self):
+        """id=V-backend-1_extra 不带数字结尾 → FAIL（regex 强制 \\d+ 结尾）。"""
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["id"] = "V-backend-1_extra"
+        doc["verification_needs"][0]["track_id"] = "backend"
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_vn_id_bad_pattern", result.stderr)
+
+    # ---------- v1.4 (PR-A2): requires_capabilities 对账 ----------
+
+    def test_capability_unsatisfied_fail(self):
+        """requires_capability 在 env-description 中未声明 → FAIL。"""
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["requires_capabilities"] = [
+            {"capability": "redis_cache", "min_quantity": 1},
+        ]
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_capability_unsatisfied", result.stderr)
+
+    def test_capability_quantity_insufficient_fail(self):
+        """requires_capability min_quantity > 环境累计数量 → FAIL。"""
+        change = "demo-change"
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["requires_capabilities"] = [
+            {"capability": "postgresql", "min_quantity": 5},
+        ]
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, _env_description(change))
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("define_summary_capability_quantity_insufficient", result.stderr)
+
+    def test_capability_via_infra_instances_count_pass(self):
+        """infra_service 有 N 个 instances → capability 计数 = N（满足 min_quantity=N）。"""
+        change = "demo-change"
+        env_doc = _env_description(change)
+        env_doc["environments"]["dev-local"]["infra_services"][0][
+            "instances"
+        ] = [{"id": f"pg-{i}", "reachable": True} for i in range(3)]
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["requires_capabilities"] = [
+            {"capability": "postgresql", "min_quantity": 3},
+        ]
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, env_doc)
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
+
+    def test_capability_via_business_system_count_pass(self):
+        """business_system 声明 capability → 计数 = 1（不依赖 endpoints 数）。"""
+        change = "demo-change"
+        env_doc = _env_description(change)
+        env_doc["environments"]["dev-local"]["business_systems"] = [
+            {
+                "name": "iam-server",
+                "type": "rest-api",
+                "category": "upstream",
+                "endpoints": [{"name": "primary", "url": "http://iam:8080"}],
+                "capabilities": ["iam_rbac"],
+            },
+        ]
+        doc = _valid_define_summary(change)
+        doc["verification_needs"][0]["requires_capabilities"] = [
+            {"capability": "iam_rbac", "min_quantity": 1},
+        ]
+        self._write_define_summary(change, doc)
+        self._write_env_description(change, env_doc)
+        result = self._run_validate(change)
+        self.assertEqual(result.returncode, 0, msg=result.stderr)
 
 
 if __name__ == "__main__":
