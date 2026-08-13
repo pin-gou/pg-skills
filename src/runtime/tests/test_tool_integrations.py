@@ -752,6 +752,10 @@ class TestCli(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertTrue((project / ".pg" / "project.yaml").is_file())
+            self.assertIn(
+                "$schema: .pg/skills/src/runtime/spec/project.schema.json",
+                (project / ".pg" / "project.yaml").read_text(encoding="utf-8"),
+            )
             self.assertTrue((project / "pg-run").exists())
             if sys.platform == "win32":
                 self.assertTrue((project / "pg-run.cmd").is_file())

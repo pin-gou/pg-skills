@@ -326,9 +326,9 @@ def generate_project_yaml(project_root: Path) -> str:
     name = project_root.name
     return f"""# pg-skills project declaration
 # Edit this file to declare real modules, environments, tracks, and stages.
-# Schema: .pg/skills/src/runtime/spec/project.schema.json
 
 schema: spec-driven
+$schema: .pg/skills/src/runtime/spec/project.schema.json
 # project: name={name}
 
 modules:

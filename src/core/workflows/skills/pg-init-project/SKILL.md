@@ -135,6 +135,7 @@ pg-build v2.6 的 review phase（`test → dev → review → verify → gate`�
 读取 `.pg/skills/src/runtime/spec/project.schema.json`，按 schema 字段填：
 
 - `schema: spec-driven`（固定）
+- `$schema: .pg/skills/src/runtime/spec/project.schema.json`（相对路径别名，IDE/编辑器补全与校验用；非 required，但建议写上）
 - `modules`：从 `repo-scan.md` 的模块清单生成。每个 module 必须有 `root` 和 `language`（language 用 schema 允许的枚举：`java` / `go` / `typescript` / `python` / `proto` / `shell`）。
   - **多模块 Maven**：`root: <子模块相对路径>`, `language: java`。
   - **单模块**：一个 module，`root: .`, `language: <推断>`。
