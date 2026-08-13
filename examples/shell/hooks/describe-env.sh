@@ -50,8 +50,7 @@ set -uo pipefail  # 注意: 不加 -e, 由 hook-helpers.sh trap ERR 控制
 : "${PG_ENV:?describe_env requires PG_ENV}"
 : "${PG_OUTPUT_PATH:?describe_env requires PG_OUTPUT_PATH}"
 
-SELF_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-export PG_SKILLS_PATH="${PG_SKILLS_PATH:-$SELF_DIR}"
+export PG_SKILLS_PATH="${PG_SKILLS_PATH:-$PROJECT_ROOT/.pg/skills}"
 source "$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"
 
 # === 失败现场处理 ===

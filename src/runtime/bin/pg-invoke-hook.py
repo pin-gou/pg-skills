@@ -390,6 +390,7 @@ def build_restart_all_specs(
                 session=session, env=env, stage=stage, action="stop",
                 role=role_name, instance=inst_obj["name"],
                 instance_host=inst_obj.get("host", ""),
+                instance_port=str(inst_obj.get("port", "")),
                 act_cfg=stop_cfg, tail_lines=None,
                 project_root=project_root, caller=caller,
                 wait_for_completion=True,
@@ -408,6 +409,7 @@ def build_restart_all_specs(
                 session=session, env=env, stage=stage, action="start",
                 role=role_name, instance=inst_obj["name"],
                 instance_host=inst_obj.get("host", ""),
+                instance_port=str(inst_obj.get("port", "")),
                 act_cfg=start_cfg, tail_lines=None,
                 project_root=project_root, caller=caller,
                 wait_for_completion=_resolve_wait_for_completion(
@@ -428,6 +430,7 @@ def build_restart_all_specs(
                 session=session, env=env, stage=stage, action="health_check",
                 role=role_name, instance=inst_obj["name"],
                 instance_host=inst_obj.get("host", ""),
+                instance_port=str(inst_obj.get("port", "")),
                 act_cfg=hc_cfg, tail_lines=None,
                 project_root=project_root, caller=caller,
                 wait_for_completion=True,
@@ -456,6 +459,7 @@ def build_role_hook_spec(
     role: str,
     instance: str,
     instance_host: str,
+    instance_port: str,
     act_cfg: dict,
     tail_lines,
     project_root: Path,
@@ -508,6 +512,7 @@ def build_role_hook_spec(
         "role": role,
         "instance_name": instance,
         "instance_host": instance_host,
+        "instance_port": instance_port,
         "hook_type": action,
         "timeout_seconds": act_cfg.get("timeout_seconds"),
         "log_path": log_path,
@@ -807,11 +812,13 @@ def invoke_hook_main(argv=None) -> int:
                     )
                     return 1
                 instance_host = instance_obj.get("host", "")
+                instance_port = str(instance_obj.get("port", ""))
 
                 stop_spec = build_role_hook_spec(
                     session=args.session, env=args.env, stage=args.stage,
                     action="stop", role=args.role,
                     instance=args.instance, instance_host=instance_host,
+                    instance_port=instance_port,
                     act_cfg=stop_cfg, tail_lines=args.tail_lines,
                     project_root=project_root, caller=args.caller,
                     wait_for_completion=True,
@@ -820,6 +827,7 @@ def invoke_hook_main(argv=None) -> int:
                     session=args.session, env=args.env, stage=args.stage,
                     action="start", role=args.role,
                     instance=args.instance, instance_host=instance_host,
+                    instance_port=instance_port,
                     act_cfg=start_cfg, tail_lines=args.tail_lines,
                     project_root=project_root, caller=args.caller,
                     wait_for_completion=_resolve_wait_for_completion(
@@ -834,6 +842,7 @@ def invoke_hook_main(argv=None) -> int:
                         session=args.session, env=args.env, stage=args.stage,
                         action="health_check", role=args.role,
                         instance=args.instance, instance_host=instance_host,
+                        instance_port=instance_port,
                         act_cfg=hc_cfg, tail_lines=args.tail_lines,
                         project_root=project_root, caller=args.caller,
                         wait_for_completion=True,
@@ -862,6 +871,7 @@ def invoke_hook_main(argv=None) -> int:
                 )
                 return 1
             instance_host = instance_obj.get("host", "")
+            instance_port = str(instance_obj.get("port", ""))
 
             spec = build_role_hook_spec(
                 session=args.session,
@@ -871,6 +881,7 @@ def invoke_hook_main(argv=None) -> int:
                 role=args.role,
                 instance=args.instance,
                 instance_host=instance_host,
+                instance_port=instance_port,
                 act_cfg=act_cfg,
                 tail_lines=args.tail_lines,
                 project_root=project_root,

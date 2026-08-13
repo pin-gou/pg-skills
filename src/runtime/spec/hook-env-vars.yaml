@@ -52,6 +52,10 @@ spec_injected:
     spec_key: instance_host
     scope: per-role
     description: instance host
+  - name: PG_INSTANCE_PORT
+    spec_key: instance_port
+    scope: per-role
+    description: "实例声明的端口号，从 project.yaml 中 instances[].port 读取"
   - name: PG_HOOK_TYPE
     spec_key: hook_type
     description: "hook 类型 (start / stop / logs / tail / prepare_env / clean_env)"

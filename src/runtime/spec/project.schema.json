@@ -184,7 +184,7 @@
         "description": { "type": "string" },
         "prepare_env": {
           "description": "env 级生命周期 hook: 启动该 env 前的准备工作 (db migrate / seed / dependencies). runner 在 environment.required=true 的 stage 开头调一次.",
-          "$ref": "#/definitions/action"
+          "$ref": "#/definitions/env_lifecycle_action"
         },
         "describe_env": {
           "type": "object",
@@ -198,7 +198,7 @@
         },
         "clean_env": {
           "description": "env 级生命周期 hook: 跑完该 env 后的清理工作 (drop temp data / stop services). runner 在 environment.required=true 的 stage 结尾调一次.",
-          "$ref": "#/definitions/action"
+          "$ref": "#/definitions/env_lifecycle_action"
         },
         "roles": {
           "type": "array",
@@ -264,6 +264,30 @@
         { "required": ["host"]  },
         { "required": ["hosts"] }
       ]
+    },
+
+    "env_lifecycle_action": {
+      "type": "object",
+      "description": "环境级生命周期 hook (prepare_env / clean_env). 与 action 的区别: host/hosts 可选 (环境级不需要指定执行主机).",
+      "additionalProperties": false,
+      "properties": {
+        "host":     { "type": "string", "description": "执行 host, 可选 (环境级 hook 通常不需要)" },
+        "hosts":    { "type": "string", "description": "单 host 简写, 可选" },
+        "parallel": { "type": "boolean", "default": false, "description": "hosts 列表下是否并行" },
+        "script":   { "type": "string", "description": "执行的脚本路径或命令" },
+        "args":     {
+          "type": "array",
+          "items": { "type": "string" },
+          "description": "脚本参数, 支持模板 {role} / {instance.name} / {instance.host}"
+        },
+        "timeout_seconds": { "type": "integer", "minimum": 1, "description": "执行超时 (秒)" },
+        "wait_for_completion": {
+          "type": "boolean",
+          "default": true,
+          "description": "True=runner 等待 hook 进程结束 (proc.wait), 超时走 SIGTERM→SIGKILL; False=fire-and-forget, hook 后台跑, SIGKILL 不算失败."
+        },
+        "description": { "type": "string", "description": "动作语义说明, 仅供 LLM 阅读" }
+      }
     },
 
     "track": {

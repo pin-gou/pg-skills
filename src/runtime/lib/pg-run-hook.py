@@ -100,6 +100,7 @@ _PG_ENV_MAP = {
     "role": "PG_ROLE",
     "instance_name": "PG_INSTANCE_NAME",
     "instance_host": "PG_INSTANCE_HOST",
+    "instance_port": "PG_INSTANCE_PORT",
     "hook_type": "PG_HOOK_TYPE",
     "hook_log_dir": "PG_HOOK_LOG_DIR",
     "log_path": "PG_LOG_FILE",

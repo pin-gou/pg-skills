@@ -256,6 +256,45 @@ pg_start_bg() {
     echo "$pid"
 }
 
+# ----- pg-run-bash: 后台启动 shell 复合命令 -----
+#
+# pg_run_bash <log_file> <pid_file> [env_kv ...] -- <bash_code>
+#
+# 与 pg_start_bg 相同, 但将 <bash_code> 包装为 `bash -c "<code>"`,
+# 避免 shell 操作符 (&&, ||, ;, cd) 被作为参数传递给 exec.
+#
+# 用法:
+#   pg_run_bash "$LOG" "$PID" "PORT=3008" "PATH=$PATH" -- \
+#       "cd /app && npm run dev -- --port \$PORT"
+#
+# 注意: bash_code 中引用 $PORT 等 env 变量时, 需用 \$ 转义
+# (因为 env_args 通过 env -i 注入, 在子进程 shell 中展开).
+pg_run_bash() {
+    local log_file=$1 pid_file=$2
+    shift 2
+    local -a env_args=() bash_args=()
+    while [[ $# -gt 0 && "$1" != "--" ]]; do
+        env_args+=("$1"); shift
+    done
+    if [[ "${1:-}" != "--" ]]; then
+        echo "pg_run_bash: missing '--' separator" >&2
+        return 1
+    fi
+    shift
+    # 拼接剩余参数为一行 bash 代码
+    local bash_code=""
+    for part in "$@"; do
+        bash_code+="$part "
+    done
+    # 剥离尾部空格, 传入 pg_start_bg 实际执行
+    bash_code="${bash_code%" "}"
+    if [[ -z "$bash_code" ]]; then
+        echo "pg_run_bash: empty bash_code" >&2
+        return 1
+    fi
+    pg_start_bg "$log_file" "$pid_file" "${env_args[@]}" -- bash -c "$bash_code"
+}
+
 # ----- pg-stop-bg: 优雅关停 PID 文件指向的进程 -----
 #
 # 用法: pg_stop_bg <pid_file> <name> [<grace_seconds>]

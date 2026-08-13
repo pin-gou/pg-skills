@@ -5,7 +5,7 @@ license: MIT
 compatibility: 项目根目录需要 `.pg/` 目录（已由 `pg init` 创建）和 `.pg/skills/`（已由 `git subtree add` 同步）。
 metadata:
   author: pg-spec
-  version: "0.3"
+  version: "0.4"
 ---
 
 # pg-init-project
@@ -185,27 +185,44 @@ pg-build v2.6 的 review phase（`test → dev → review → verify → gate`�
 
 **产出**：`.pg/code-review/code-review.yaml` 已写盘，对应 `.pg/code-review/<profile>/` 子目录已就绪。**例外情况**：项目已有 `.pg/code-review/` 时全步骤跳过，Phase 2.5 视为 noop。
 
-### Phase 3: 生成 `.pg/hooks/`
+### Phase 3: 生成 `.pg/hooks/` 并修复 `project.yaml` 引用
 
-**目标**：仅在 environments 节点实际声明 `actions` / `prepare_env` / `clean_env` 时，为对应的 role / environment 生成 hook 脚本。
+**目标**：仅为 environments 节点实际声明的 `actions` / `prepare_env` / `clean_env` 生成 hook 脚本，并修改 `project.yaml` 中 action 的 `script` 字段指向生成的 hook 文件（而非内联命令）。
 
 **module 维度的命令不进 hook**：见上方 `核心原则 §3` —— `modules.<m>.{build, lint, test.<key>}` 直接以 `executable_command` 形态写在 `project.yaml`，**不**在 `.pg/hooks/` 生成对应文件。
 
 **生成步骤**：
 
-1. 遍历 `environments.<env>.roles`，对每个 role 的 `actions.start` / `actions.stop` / `actions.restart` / `actions.health_check`（声明才生成，含其它 lifecycle action），生成 `.pg/hooks/<role>-<action>.sh`。
-   - **health_check 是 opt-in**：仅当 `environments.<env>.roles.<r>.actions.health_check` 字段存在时才生成 `.pg/hooks/role-<r>-health-check.sh`，避免项目没有健康检查需求时被强加。
-2. 遍历 `environments.<env>.prepare_env` / `clean_env`，生成 `.pg/hooks/prepare_env.sh` / `.pg/hooks/clean_env.sh`（如声明）。
-2.5. 复制 SSOT 公共库（与模板同源）：
+1. 遍历 `environments.<env>.roles`，对每个 role 的 `actions.start` / `actions.stop` / `actions.health_check`（声明才生成），生成 `.pg/hooks/<role>-<action>.sh`。
+   - **不生成 restart 脚本**：`restart` action 的 `script` 直接指向 `<role>-start.sh`，因为 start 已内置 `kill_port` 端口清理逻辑，等价于 stop + start。
+   - **health_check 是 opt-in**：仅当 `environments.<env>.roles.<r>.actions.health_check` 字段存在时才生成 `.pg/hooks/<role>-health-check.sh`。
+   - **所有 role 必须生成完整辅助脚本**：有 start 就必须有 stop + health_check（即使 project.yaml 中只声明了 start，也要补全）。确保 `project.yaml` 中 actions 引用完整。
+
+2. **生成后立即修改 `project.yaml`**：将 `environments.<env>.roles.<r>.actions.<action>.script` 从内联命令改为 `.pg/hooks/<role>-<action>.sh` 路径。确保 `pg-invoke-hook.py` 执行的是 hook 文件而非内联命令。
+
+3. 遍历 `environments.<env>.prepare_env` / `clean_env`，生成 `.pg/hooks/prepare_env.sh` / `.pg/hooks/clean_env.sh`（如声明）。
+   - **prepare_env 模板应调用 `pg-invoke-hook.py` 来启动/停止服务**，而非直接调用 `pg_start_bg`。格式：
+     ```bash
+     python3 "$PG_SKILLS_PATH/src/runtime/bin/pg-invoke-hook.py" \
+         --caller pg-build --session "$SESSION" \
+         --env local --role <role> --action start --instance <instance>
+     # ... 种子化逻辑 ...
+     python3 "$PG_SKILLS_PATH/src/runtime/bin/pg-invoke-hook.py" \
+         --caller pg-build --session "$SESSION" \
+         --env local --role <role> --action stop --instance <instance>
+     ```
+     这样 start/stop 逻辑只需维护一份（在 start/stop hook 中），prepare_env 不复现。
+
+4. 复制 SSOT 公共库（与模板同源）：
    - 源：`.pg/skills/examples/shell/hooks/lib/common.sh`
    - 目标：`.pg/hooks/lib/common.sh`
    - 作用：模板头部条件 `source lib/common.sh` + `pg_resolve_paths` 才能找到目标；`pg_resolve_paths` 优先信任 `PG_HOOK_LOG_DIR`（由 `pg-invoke-hook.py` 预拼），fallback 时按 `PG_RUN_CALLER + PG_RUN_SESSION + PG_ENV` 自拼（v5 caller × session 双维度路由）
        - 跳过此步：生成的 hook 仍能工作（走 `$PG_LOG_FILE`），但 pg-regression / pg-fix-issue 日志会回落到 `scripts/logs`，不写到预期的 `.pg/regression/` / `.pg/fix-issue/` 目录
-3. 模板来源：从 `.pg/skills/examples/shell/hooks/role-<action>.sh` 复制并替换 TODO 块；env 级模板从 `env-prepare.sh` / `env-clean.sh` 复制。health_check 模板从 `role-health-check.sh` 复制（**不含 TODO 块，是已实例化的最终形态**），仅在 §1 检测到 `actions.health_check` 字段时生成。模板依赖 `pg-run-hook.py` 注入的 PG_* env vars（v5 SSOT 见 `.pg/skills/src/runtime/spec/hook-env-vars.yaml`）。
-4. chmod 755。
-5. **不**改 trap / `pg_fail` / `pg_exit` 调用——hook 协议是 SSOT。
+5. 模板来源：从 `.pg/skills/examples/shell/hooks/role-<action>.sh` 复制并替换 TODO 块；env 级模板从 `env-prepare.sh` / `env-clean.sh` 复制。health_check 模板从 `role-health-check.sh` 复制（**不含 TODO 块，是已实例化的最终形态**），仅在 §1 检测到 `actions.health_check` 字段时生成。模板依赖 `pg-run-hook.py` 注入的 PG_* env vars（v5 SSOT 见 `.pg/skills/src/runtime/spec/hook-env-vars.yaml`）。
+6. chmod 755。
+7. **不**改 trap / `pg_fail` / `pg_exit` 调用——hook 协议是 SSOT。
 
-**产出**：`.pg/hooks/<role>-<action>.sh` 与 `.pg/hooks/{prepare_env,clean_env}.sh`（如适用）全部写盘且可执行。如果 environments 没有任何 actions（只声明静态 roles），**不**生成任何 hook，目录保持空。
+**产出**：`.pg/hooks/<role>-<action>.sh` 与 `.pg/hooks/{prepare_env,clean_env}.sh`（如适用）全部写盘且可执行，同时 `project.yaml` 中 action 引用已更新为 hook 文件路径。如果 environments 没有任何 actions（只声明静态 roles），**不**生成任何 hook，目录保持空。
 
 ### Phase 4: 跑 `pg doctor` 校验
 
@@ -483,7 +500,14 @@ Next steps:
 
 ## 文档变更记录
 
-- **v0.3（待定日期）**：适配 pg-build v2.6 code-review phase。
+- **v0.4（当前版本）**：适配 Phase 1 协议变更（PG_INSTANCE_PORT 注入、pg_run_bash）。
+  - Phase 2 修复：模板路径使用 `PG_PROJECT_ROOT` 兜底，`lib/common.sh` 路径 `$HOOK_DIR/../lib/common.sh`。
+  - Phase 3 修复：不生成 restart 脚本；action 引用 hook 文件而非内联命令；prepare_env 调用 invoke-hook 而非重复实现 start/stop；所有 role 补齐 stop/health-check 脚本。
+  - 模板修复：`role-start.sh` 新增端口检查（`check_port` + `kill_port`）、`pg_run_bash` 示例、`PG_INSTANCE_PORT` 变量、`START_TIME` 正确 duration 计算。`role-health-check.sh` 使用 `PG_INSTANCE_PORT` 取代硬编码常量。
+  - 可执行命令：`pg_run_bash` 新增于 `hook-helpers.sh`，自动包装 shell 操作符（`&&`、`||`、`cd`）为 `bash -c "..."`。
+  - 环境变量：`PG_INSTANCE_PORT` 新增于 `hook-env-vars.yaml` 并注入，所有脚本端口从 `PG_INSTANCE_PORT` 读取。
+
+- **v0.3（前置版本）**：适配 pg-build v2.6 code-review phase。
   - 新增 Phase 2.5：根据 Phase 1 扫到的 module language 自动派发 review profile，写入 `.pg/code-review/code-review.yaml` + 对应 profile 目录。Security profile 保持 opt-in，不自动拷贝。
   - §1 模板：`repo-scan.md` 模块清单表追加语言相关列。
   - §2 终态汇报：追加 `.pg/code-review/` 与"手动启用 security profile"两条提示。
