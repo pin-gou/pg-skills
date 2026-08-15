@@ -54,6 +54,22 @@
           "type": "boolean",
           "default": true,
           "description": "merge 无冲突时是否跳过 Phase 2 全部测试. 默认 true 加速合并."
+        },
+        "stale_diff_gate": {
+          "type": "boolean",
+          "default": true,
+          "description": "是否启用 Diff Scope Gate: 合并后检测所有 staged 文件是否被特征分支改动过, 发现未改动却出现在合并结果的文件(stale 回溯)即中止, 防止旧版文件覆盖已合入 main 的功能."
+        },
+        "max_branch_staleness": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 10,
+          "description": "特征分支落后 default_branch 的 commit 数阈值. 超过该值视为 stale, 触发自动 rebase(auto_rebase_stale=true)或中止(auto_rebase_stale=false)."
+        },
+        "auto_rebase_stale": {
+          "type": "boolean",
+          "default": true,
+          "description": "检测到特征分支 stale 时是否自动 rebase 到最新 default_branch 并 force-push. false 则中止并提示人工 rebase."
         }
       }
     },

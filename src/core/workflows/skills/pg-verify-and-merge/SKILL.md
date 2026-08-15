@@ -28,6 +28,8 @@ pg-build 完成后，将 feature branch 合并到 master 前，先将 feature br
 - **AffectedTracks 自动推断**：从 `<change>/tasks.md` 章节号读起，tasks.md 缺失则 fallback 到 `git diff` + `tracks.<t>.root` 路径前缀匹配，最后 fallback 到 `regression.suite` 的 key 列表。**simple track 永远过滤**（`openapi-gen` 等跑 commands 不跑 TDVG，无 regression.suite）。
 - **按 AffectedTracks 过滤**：只跑 manager agent 传入（或自动推断）的受影响 track 对应的 testSuite（不是全跑）。
 - **merge 无冲突时跳过测试**：`verify_merge.skip_tests_if_no_conflict=true`（默认）时，无冲突 = 跳过 Phase 2 = 加速合并。
+- **分支新鲜度检查与自动 rebase**：合并前检测特征分支落后 default_branch 的 commit 数，超过 `max_branch_staleness`（默认 10）时自动 rebase 到最新，消除旧 merge-base 导致的 stale 文件回溯。
+- **Diff Scope Gate**：合并后检测每个 staged 文件，确认特征分支确实改过它；发现"特征分支从未改动却出现在合并结果"的文件则中止，防止旧版文件无声覆盖已合入的功能（如本次修复的 timeline/i18n 回归）。
 - **envSetup / verifySetup 派生**：从 `environments.<env>.prepare_env` 派生 envSetup，从 `required_roles` 的 `start` action 派生 verifySetup probe。
 - **outputFormat 智能推断**：按 `modules.<m>.language + test_key` 推断（`e2e → playwright`，`java → maven-surefire`，`go → go-test`），可在 `regression.suite.<n>.output_format` 显式覆盖。
 - **Key 改进**：模拟合并后不切换分支，Phase 2 的验证和 Phase 3 的提交都在 default_branch 上完成。
@@ -70,7 +72,10 @@ manager agent **无需显式传入** `AffectedTracks`（除非有特殊原因要
 | `regressionSuites.<t>.verifySetup` | `environments.<env>.actions.<role>.start` (first role) | Phase 2 suite 环境就绪探测 |
 | `regressionSuites.<t>.runAllCommand` | `modules.<m>.test.<test_key>` 串行链 (含 timeout 包装) | Phase 2 跑测试 |
 | `regressionSuites.<t>.outputFormat` | `regression.suite.<n>.output_format` (override) → fallback `modules.<m>.language + test_key` 推断 | Phase 2 解析失败清单 |
-| `verify_merge.skip_tests_if_no_conflict` | `verify_merge.skip_tests_if_no_conflict` | Phase 1.5 跳过判断 |
+| `verify_merge.skip_tests_if_no_conflict` | `verify_merge.skip_tests_if_no_conflict` | Phase 1.6 跳过判断 |
+| `verify_merge.stale_diff_gate` | `verify_merge.stale_diff_gate` | Phase 1.5 是否启用 stale 文件检测（默认 true） |
+| `verify_merge.max_branch_staleness` | `verify_merge.max_branch_staleness` | Phase 1 Step 1 分支落后阈值（默认 10） |
+| `verify_merge.auto_rebase_stale` | `verify_merge.auto_rebase_stale` | Phase 1 Step 1 是否自动 rebase（默认 true） |
 | `flyway.migration_path` | `flyway.migration_path` | Phase 0 migration 重编号 |
 | `git.default_branch` | `git.default_branch` | Phase 1/3 目标分支 |
 
@@ -116,10 +121,17 @@ Phase 0: Auto-fix on Feature Branch（feature branch）
     └── Step 3: 提交所有修复
     ↓
 Phase 1: 模拟合并到 master（切换到 default_branch）
-    ├── 合并
-    └── 检测 unmerged 文件，写入 temp/merge-status.txt
+    ├── Step 1: 分支新鲜度检查与自动 rebase（仍在 feature branch）
+    │     - 落后 origin/<default> 超过 max_branch_staleness 个 commit → 自动 rebase 或中止
+    │     - rebase 后 merge-base = 最新 default_branch，消除 stale 文件回溯
+    ├── Step 2: squash 合并
+    └── Step 3: 检测 unmerged 文件，写入 temp/merge-status.txt
     ↓
-Phase 1.5: 判定是否跳过 Phase 2
+Phase 1.5: Diff Scope Gate（stale 文件检测）[新增]
+    ├── 对每个 staged 文件判断: 合并改动了它，但特征分支从未改动它 → stale 回溯
+    └── 发现 stale 文件 → 中止（人工确认误报后可 override 继续）
+    ↓
+Phase 1.6: 判定是否跳过 Phase 2（原 Phase 1.5，仅 Scope Gate 通过后才可跳过）
     ├── 条件 1: merge 无冲突 + skip_tests_if_no_conflict=true → SKIP
     └── 条件 2: AffectedTracks 中无可运行 testSuite → SKIP
     ↓
@@ -214,7 +226,41 @@ echo "$CURRENT_BRANCH" > temp/feature-branch.txt
 CURRENT_BRANCH=$(git branch --show-current)
 DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default_branch'])")
 
-# 切换到目标分支并以 squash 方式合并
+# --- Step 1: 分支新鲜度检查与自动 rebase（仍在 feature branch 上执行） ---
+# 根因预防: 特征分支落后 default_branch 过久时, squash 合并会以旧 merge-base 计算 3-way,
+# 把特征分支树上从未改动的旧文件（如已被 main 升级过的 timeline/i18n）回溯进合并结果。
+# rebase 到最新 default_branch 后 merge-base = 最新 HEAD, 这类文件自动取 main 版本。
+STALE_LIMIT=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['verify_merge'].get('max_branch_staleness', 10))")
+AUTO_REBASE=$(python3 -c "import json; print(str(json.load(open('temp/vm-context.json'))['verify_merge'].get('auto_rebase_stale', True)).lower())")
+MERGE_BASE=$(git merge-base "origin/$DEFAULT_BRANCH" "origin/$CURRENT_BRANCH" 2>/dev/null || echo "")
+if [ -z "$MERGE_BASE" ]; then
+    echo "MERGE_BASE_MISSING: 分支关系异常，请人工确认 origin/$CURRENT_BRANCH 与 origin/$DEFAULT_BRANCH 分支基态"
+    exit 1
+fi
+STALENESS=$(git rev-list --count "$MERGE_BASE..origin/$DEFAULT_BRANCH" 2>/dev/null || echo "0")
+if [ "$STALENESS" -gt "$STALE_LIMIT" ]; then
+    echo "⚠️ 特征分支落后 origin/$DEFAULT_BRANCH 共 $STALENESS 个 commit（阈值 $STALE_LIMIT）"
+    if [ "$AUTO_REBASE" = "true" ]; then
+        echo "→ 自动 rebase 到最新 origin/$DEFAULT_BRANCH"
+        git fetch origin "$DEFAULT_BRANCH" || { echo "FETCH_FAILED"; exit 1; }
+        git rebase "origin/$DEFAULT_BRANCH" || {
+            echo "REBASE_CONFLICT: rebase 冲突，需人工解决后 git rebase --continue"
+            exit 1
+        }
+        git push --force-with-lease origin "HEAD:$CURRENT_BRANCH" || {
+            echo "PUSH_FAILED: 自动 rebase 后 push 失败，请人工处理"
+            exit 1
+        }
+        echo "✓ 已 rebase 到最新 origin/$DEFAULT_BRANCH 并推送"
+    else
+        echo "STALE_BRANCH: auto_rebase_stale=false，请先在 feature branch 上 rebase 到 origin/$DEFAULT_BRANCH 再重试"
+        exit 1
+    fi
+else
+    echo "✓ 分支新鲜（落后 $STALENESS 个 commit，阈值 $STALE_LIMIT）"
+fi
+
+# --- Step 2: 切换到目标分支并以 squash 方式合并 ---
 git checkout "$DEFAULT_BRANCH"
 
 # 处理本地 default_branch 与 origin 偏离（详见下方"本地 default_branch 偏离"小节）
@@ -293,9 +339,60 @@ rebase/merge 过程中若 default_branch 上有与 feature branch 冲突的提�
 
 ---
 
-### Phase 1.5: 判定是否跳过测试
+### Phase 1.5: Diff Scope Gate（stale 文件检测）
+
+> **核心目标**：检测合并结果中是否包含"特征分支从未改动"的文件。若发现，说明这些文件是在旧 merge-base 下被回溯成旧版（如已合入 main 的 timeline/i18n 功能被无声覆盖），必须中止。
+>
+> 通过条件：`stale_diff_gate=true`（默认）时，所有 staged 文件必须已被特征分支改动过。
+>
+> **override 机制**：当人工确认所有 stale 文件属于误报（如特征分支的 commit 被交互式 rebase 压平导致"从未改动"判断不准确），可写入 `temp/stale-gate-override` 跳过拦截。
+
+```bash
+DEFAULT_BRANCH=$(python3 -c "import json; print(json.load(open('temp/vm-context.json'))['git']['default_branch'])")
+CURRENT_BRANCH=$(cat temp/feature-branch.txt 2>/dev/null)
+GATE_ENABLED=$(python3 -c "import json; print(str(json.load(open('temp/vm-context.json'))['verify_merge'].get('stale_diff_gate', True)).lower())")
+
+if [ "$GATE_ENABLED" = "true" ]; then
+    # 检查 override
+    if [ -f temp/stale-gate-override ]; then
+        echo "⚠️ Stale Gate override 已存在，跳过检测"
+    else
+        MERGE_BASE=$(git merge-base "origin/$DEFAULT_BRANCH" "origin/$CURRENT_BRANCH")
+        STALE_FILES=()
+        while IFS= read -r file; do
+            [ -z "$file" ] && continue
+            # 特征分支是否改过该文件？没改过却出现在合并结果里 = stale 回溯信号
+            if git diff --quiet "$MERGE_BASE" "origin/$CURRENT_BRANCH" -- "$file"; then
+                STALE_FILES+=("$file")
+            fi
+        done < <(git diff --cached --name-only)
+
+        if [ ${#STALE_FILES[@]} -gt 0 ]; then
+            echo "❌ Diff Scope Gate 拦截：以下文件在合并结果中被改动，但特征分支从未改动它们。"
+            echo "   这通常是旧 merge-base 导致的 stale 回溯（如把已合入 main 的功能覆盖回旧版）。"
+            printf '   - %s\n' "${STALE_FILES[@]}"
+            echo "---"
+            echo "   人工确认误报后，可执行: echo USR_OVERRIDE > temp/stale-gate-override"
+            echo "   然后重新执行本 SKILL（Phase 1.5 会跳过检测）"
+            exit 1
+        fi
+        echo "✓ Diff Scope Gate 通过：合并结果未携带特征分支范围外的文件改动"
+    fi
+fi
+```
+
+**验证条件：**
+- `stale_diff_gate=true` 时：所有 `git diff --cached --name-only` 文件均被特征分支改动过，或 `temp/stale-gate-override` 存在
+- `stale_diff_gate=false` 时：直接跳过，输出提示
+
+**关键说明**：该 Gate 与 Phase 1 Step 1 的分支新鲜度检查互补。新鲜度检查通过 rebase 消除大部分 stale 回溯；Gate 则是最后的兜底防线，确保即使 rebase 未做（如 `auto_rebase_stale=false`）或 rebase 后仍有残留，也能阻止无声覆盖。
+
+---
+
+### Phase 1.6: 判定是否跳过测试
 
 > **核心目标**：根据 merge 状态与 AffectedTracks，决定 Phase 2 是否需要跑测试。
+> **前置条件**：Scope Gate（Phase 1.5）必须已通过（或已 override 跳过），否则跳过判断无意义。
 >
 > 跳过条件（任一满足即跳过）：
 > 1. merge 无冲突（`MERGE_STATUS=CLEAN`）且 `verify_merge.skip_tests_if_no_conflict=true`（默认 true）
@@ -563,6 +660,10 @@ Phase: <phase> (<phase_name>)
 | Phase 0 (renumber) | 中止，提示手动检查 migration 版本冲突 | 自动重编号失败，通常因本地 default_branch 不存在或 git tree 不完整 |
 | Phase 0 (lint) | 中止，提示手动修复 | lint 自动修复未必全覆盖 |
 | Phase 1 | 中止，提示手动解决冲突 | 合并冲突必须人工介入 |
+| Phase 1 (merge 无冲突但分支 stale) | 中止，提示人工处理 | 详见下方 `STALE_BRANCH` / `REBASE_CONFLICT` |
+| Phase 1.5 (Scope Gate) | 中止，提示人工确认 stale 文件 | 合并结果携带特征分支从未改动过的文件（stale 回溯），确认误报后写 `temp/stale-gate-override` 重试 |
+| Phase 1 (STALE_BRANCH) | 中止，提示先 rebase 再重试 | `auto_rebase_stale=false`，但特征分支落后超过 `max_branch_staleness` |
+| Phase 1 (REBASE_CONFLICT) | 中止，人工解决 rebase 冲突后 `git rebase --continue`，再重跑本 SKILL | 自动 rebase 时与 main 上的新提交冲突 |
 | Phase 2 (envSetup) | 中止，提示环境问题 | 依赖服务未启动或配置错误 |
 | Phase 2 (verifySetup) | 中止，提示环境未就绪 | 30 次重试后仍未就绪 |
 | Phase 2 (runAllCommand) | 中止，提示修复并重试 | 测试失败，需人工修复 |

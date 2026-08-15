@@ -787,7 +787,14 @@ def cmd_pg_verify_and_merge(args, config, project_root):
       - regressionSuites: { suite_name: { module, test_keys, envSetup,
                                           verifySetup, runAllCommand,
                                           outputFormat } }   (only for affected tracks)
-      - verify_merge:  { skip_tests_if_no_conflict: bool }
+      - verify_merge:  { skip_tests_if_no_conflict: bool,
+                         stale_diff_gate: bool,
+                         max_branch_staleness: int,
+                         auto_rebase_stale: bool }
+        stale_diff_gate:       是否启用 Diff Scope Gate（合并结果中检测"特征分支从未改动
+                               却被回溯为旧版"的文件，发现即中止）
+        max_branch_staleness:  特征分支落后 default_branch 的 commit 数阈值，超过即视为 stale
+        auto_rebase_stale:     检测到 stale 分支时是否自动 rebase + force-push（false 则中止）
       - flyway:        { migration_path: str }
       - git:           { default_branch: str }
       - __meta:        { affected_tracks_source: 'cli'|'tasks_md'|'git_diff'|'suite_keys' }
@@ -881,12 +888,15 @@ def cmd_pg_verify_and_merge(args, config, project_root):
             "outputFormat":     output_format,
         }
 
+    vm = config.get("verify_merge") or {}
     return {
         "tracks":           tracks_out,
         "regressionSuites": suites_out,
         "verify_merge": {
-            "skip_tests_if_no_conflict": (config.get("verify_merge") or {}).get(
-                "skip_tests_if_no_conflict", True),
+            "skip_tests_if_no_conflict": vm.get("skip_tests_if_no_conflict", True),
+            "stale_diff_gate":           vm.get("stale_diff_gate", True),
+            "max_branch_staleness":      vm.get("max_branch_staleness", 10),
+            "auto_rebase_stale":         vm.get("auto_rebase_stale", True),
         },
         "flyway":  config.get("flyway")  or {},
         "git":     config.get("git")     or {},
