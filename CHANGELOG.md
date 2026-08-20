@@ -1,12 +1,24 @@
 # 变更日志
 
-## [0.9.2] - 2026-08-10
+## [0.9.2] - 2026-08-15
 
-- **V-* 编号格式统一**：`V-NNN` 旧格式不再接受，需迁移到 `V-{track_id}-{seq}` 格式
-- **能力对账**：env-description 支持声明 `capabilities`，pg-propose 自动校验 define-summary 中的 `requires_capabilities` 是否满足
-- **重新定界协议**：`/1-pg-define --redefine <change-id>` 支持在定界后重新定界；pg-1-grill.md 和 pg-1-define.md 均对齐为壳子，复用 pg-define skill
-- **三态→产物契约校验**：verifiable/degraded/skipped 状态必须对应出现在 scenario 文件、design.md、proposal.md 中，否则校验失败
-- **track_id 可选**：define-summary 中可省略 `track_id`，自动从 V-* 编号派生
+**升级前必读**
+- 需要更新 `project.yaml`：`environments.<name>.roles` 由键值对改为数组格式（`[{name, ...}]`），旧写法将解析失败
+- V-* 编号统一为 `V-{track_id}-{seq}` 格式，旧的 `V-NNN` 编号将不再被接受
+
+**改进**
+- **合并更安全**：合并前自动检测分支是否落后，落后过多时自动 rebase；合并后校验是否有"本次改动之外"的文件被覆盖，发现异常会中止合并并提示
+- **restart 更省心**：role 没有 restart 脚本也能直接重启，自动按"停止→启动→健康检查"执行
+- **能力自动对账**：定界时声明环境能力，提案阶段自动检查所用能力是否满足，不满足会提前提示
+- **支持重新定界**：定界之后想调整范围，可用 `/1-pg-define --redefine <change-id>` 重新定界，无需重开
+- **质量校验更严**：verifiable/degraded/skipped 三种状态必须落实到对应产物文档中，推动方案落地更完整
+- **初始化体验优化**：`pg upgrade` 自动补齐缺失的骨架目录，`pg init` 自动生成合适的 `.gitignore`
+- **进度预览更好用**：产物（md/json）在进度面板中直接渲染预览，支持一键展开/折叠
+- **模板更完善**：hook 模板新增 `pg_run_bash` 辅助和 `PG_INSTANCE_PORT` 环境变量，减少手写样板
+
+**其他**
+- 支持 Python 3.9+；渲染时自动排除 `__pycache__` 等非源文件
+- 文档全面更新（desribe_env 语义、定义阶段环境检查提示、首页重写）
 
 ## [0.9.1] - 2026-08-06
 
