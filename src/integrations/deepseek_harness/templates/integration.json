@@ -1,0 +1,28 @@
+{
+  "schema_version": 1,
+  "tool": "deepseek-harness",
+  "output_root": ".dsh",
+  "install_mode": "render",
+  "surfaces": {
+    "commands": "commands",
+    "agents": "agents"
+  },
+  "template_variables": {
+    "tool.name": "DeepSeek Harness",
+    "tool.config_file": ".dsh/cordis.patch.yml",
+    "tool.chrome_path_reference": "${CHROME_PATH}",
+    "action.skill_loader": "DeepSeek Harness native Skill loader",
+    "action.subagent_dispatcher": "DeepSeek Harness native routed subagent tools (pg_associate, pg_expert, pg_master)",
+    "action.subagent_call": "the routed pg_associate, pg_expert, or pg_master tool selected from the role model",
+    "action.subagent_agent_parameter": "description",
+    "action.user_question": "DeepSeek Harness native ask_user_question tool",
+    "action.user_question_call": "ask_user_question",
+    "action.task_tracker": "DeepSeek Harness native todo_write tool",
+    "action.agent_cli": "dsh",
+    "action.agent_cli_argv_json": "[\"dsh\"]",
+    "permission.subagent": "subagent",
+    "model.associate": "deepseek-official/deepseek-v4-flash",
+    "model.expert": "deepseek-official/deepseek-v4-flash",
+    "model.master": "deepseek-official/deepseek-v4-flash"
+  }
+}

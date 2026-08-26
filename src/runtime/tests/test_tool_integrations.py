@@ -38,7 +38,10 @@ from core.init import (  # noqa: E402
 
 class TestIntegrationRegistry(unittest.TestCase):
     def test_supported_tools(self):
-        self.assertEqual(supported_tools(), ("mobile-coder", "opencode"))
+        self.assertEqual(
+            supported_tools(),
+            ("deepseek-harness", "mobile-coder", "opencode"),
+        )
 
     def test_selected_tool_round_trip(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -50,6 +53,7 @@ class TestIntegrationRegistry(unittest.TestCase):
 
     def test_aliases_are_normalized(self):
         self.assertEqual(get_integration("mobile_coder").tool_id, "mobile-coder")
+        self.assertEqual(get_integration("dsh").tool_id, "deepseek-harness")
 
     def test_detection_uses_project_markers(self):
         with tempfile.TemporaryDirectory() as temp:
@@ -57,6 +61,14 @@ class TestIntegrationRegistry(unittest.TestCase):
             (project / ".mobile-coder").mkdir()
             detected = detect_tools(project, REPO_ROOT)
             self.assertEqual(detected[0].tool_id, "mobile-coder")
+            self.assertGreaterEqual(detected[0].confidence, 80)
+
+    def test_deepseek_harness_detection_uses_native_project_marker(self):
+        with tempfile.TemporaryDirectory() as temp:
+            project = Path(temp)
+            (project / ".dsh").mkdir()
+            detected = detect_tools(project, REPO_ROOT)
+            self.assertEqual(detected[0].tool_id, "deepseek-harness")
             self.assertGreaterEqual(detected[0].confidence, 80)
 
 
@@ -67,7 +79,7 @@ class TestArchitecture(unittest.TestCase):
         self.assertTrue((REPO_ROOT / "src" / "core" / "workflows").is_dir())
         self.assertFalse((REPO_ROOT / "src" / "opencode").exists())
 
-        for tool in ("opencode", "mobile_coder"):
+        for tool in ("opencode", "mobile_coder", "deepseek_harness"):
             package = REPO_ROOT / "src" / "integrations" / tool
             self.assertTrue((package / "adapter.py").is_file())
             self.assertTrue((package / "templates" / "integration.json").is_file())
@@ -463,6 +475,131 @@ class TestMobileCoderIntegration(unittest.TestCase):
         )
 
 
+class TestDeepSeekHarnessIntegration(unittest.TestCase):
+    def setUp(self):
+        self.temp = tempfile.TemporaryDirectory()
+        self.project = Path(self.temp.name)
+
+    def tearDown(self):
+        self.temp.cleanup()
+
+    def _install(self):
+        return get_integration("deepseek-harness").install(
+            IntegrationContext(self.project, REPO_ROOT)
+        )
+
+    def test_install_generates_project_local_native_surfaces(self):
+        self._install()
+
+        harness = self.project / ".dsh"
+        self.assertTrue((harness / "commands" / "pg-3-build.md").is_file())
+        self.assertTrue((harness / "agents" / "pg-manager.md").is_file())
+        self.assertTrue((harness / "bridge" / "index.ts").is_file())
+        self.assertTrue((harness / "cordis.patch.yml").is_file())
+        self.assertTrue((harness / "start-web.cmd").is_file())
+        self.assertTrue((harness / "run-task.cmd").is_file())
+        self.assertTrue((harness / "run.cmd").is_file())
+        self.assertTrue((harness / "start-web.sh").is_file())
+        self.assertTrue((harness / "run-task.sh").is_file())
+        self.assertTrue((harness / "run.sh").is_file())
+        self.assertTrue(
+            (harness / "skills" / "pg-build" / "SKILL.md").is_file()
+        )
+        self.assertFalse((self.project / ".agents").exists())
+        self.assertFalse((self.project / ".deepseek-harness").exists())
+
+    def test_generated_bridge_registers_commands_with_cordis(self):
+        self._install()
+
+        bridge = (self.project / ".dsh" / "bridge" / "index.ts").read_text(
+            encoding="utf-8"
+        )
+        patch = (self.project / ".dsh" / "cordis.patch.yml").read_text(
+            encoding="utf-8"
+        )
+
+        self.assertIn("ctx.commands.register", bridge)
+        self.assertIn("createUserMessage", bridge)
+        self.assertIn("invocation.agent.followup", bridge)
+        self.assertIn(r".join('\n\n')", bridge)
+        self.assertNotIn("@deepseek-ai/", bridge)
+        self.assertIn('"name": "pg-1-define"', bridge)
+        self.assertIn('"name": "pg-3-build"', bridge)
+        self.assertIn(
+            (
+                self.project / ".dsh" / "bridge" / "index.ts"
+            ).resolve().as_uri(),
+            patch,
+        )
+        for tool_name in ("pg_associate", "pg_expert", "pg_master"):
+            self.assertIn(f"toolName: {tool_name}", patch)
+        self.assertEqual(patch.count("provider: deepseek-official"), 3)
+        self.assertEqual(patch.count("model: deepseek-v4-flash"), 3)
+        self.assertEqual(patch.count("name: '@deepseek-ai/dsh-tool-subagent'"), 3)
+
+    def test_generated_launchers_separate_web_headless_and_usage(self):
+        self._install()
+
+        harness = self.project / ".dsh"
+        start_web_cmd = (harness / "start-web.cmd").read_text(encoding="utf-8")
+        run_task_cmd = (harness / "run-task.cmd").read_text(encoding="utf-8")
+        run_cmd = (harness / "run.cmd").read_text(encoding="utf-8")
+        start_web_sh = (harness / "start-web.sh").read_text(encoding="utf-8")
+        run_task_sh = (harness / "run-task.sh").read_text(encoding="utf-8")
+        run_sh = (harness / "run.sh").read_text(encoding="utf-8")
+
+        self.assertIn("dsh --profile web --patch", start_web_cmd)
+        self.assertIn("dsh --profile web --patch", start_web_sh)
+        self.assertIn("dsh --profile headless --patch", run_task_cmd)
+        self.assertIn("dsh --profile headless --patch", run_task_sh)
+        self.assertIn('if "%~1"==""', run_task_cmd)
+        self.assertIn('if [ "$#" -eq 0 ]', run_task_sh)
+        self.assertIn("start-web.cmd", run_cmd)
+        self.assertIn("run-task.cmd", run_cmd)
+        self.assertNotIn("dsh --profile", run_cmd)
+        self.assertIn("start-web.sh", run_sh)
+        self.assertIn("run-task.sh", run_sh)
+        self.assertNotIn("dsh --profile", run_sh)
+
+    def test_rendered_workflows_use_deepseek_harness_native_contract(self):
+        self._install()
+
+        command = (
+            self.project / ".dsh" / "commands" / "pg-3-build.md"
+        ).read_text(encoding="utf-8")
+        manager = (
+            self.project / ".dsh" / "agents" / "pg-manager.md"
+        ).read_text(encoding="utf-8")
+        skill = (
+            self.project / ".dsh" / "skills" / "pg-build" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        for text in (command, manager, skill):
+            self.assertNotIn("{{pg:", text)
+            self.assertIn("DeepSeek Harness execution contract", text)
+            self.assertIn("ask_user_question", text)
+            self.assertIn("todo_write", text)
+            self.assertIn("native routed subagent tool", text)
+            self.assertNotIn(".deepseek-harness", text)
+        self.assertNotIn("subagent_type", manager)
+        self.assertNotIn("model: current", manager)
+
+    def test_reinstall_preserves_modified_generated_and_custom_files(self):
+        self._install()
+        command = self.project / ".dsh" / "commands" / "pg-3-build.md"
+        command.write_text("custom command\n", encoding="utf-8")
+        custom = self.project / ".dsh" / "commands" / "custom.md"
+        custom.write_text("custom project command\n", encoding="utf-8")
+
+        result = self._install()
+
+        self.assertEqual(command.read_text(encoding="utf-8"), "custom command\n")
+        self.assertEqual(custom.read_text(encoding="utf-8"), "custom project command\n")
+        self.assertTrue(
+            any("preserved modified file" in warning for warning in result.warnings)
+        )
+
+
 class TestOpenCodeIntegration(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory()
@@ -680,6 +817,7 @@ class TestCli(unittest.TestCase):
             encoding="utf-8",
         )
         self.assertEqual(completed.returncode, 0, completed.stderr)
+        self.assertIn("deepseek-harness", completed.stdout)
         self.assertIn("mobile-coder", completed.stdout)
         self.assertIn("opencode", completed.stdout)
 
@@ -731,6 +869,43 @@ class TestCli(unittest.TestCase):
                 (project / ".pg" / "tool-integration.json").read_text(encoding="utf-8")
             )
             self.assertEqual(state["tool"], "mobile-coder")
+
+    def test_explicit_deepseek_harness_init_installs_selected_adapter(self):
+        with tempfile.TemporaryDirectory() as temp:
+            project = Path(temp)
+            (project / ".pg").mkdir()
+            completed = subprocess.run(
+                [
+                    sys.executable,
+                    str(REPO_ROOT / "src" / "runtime" / "bin" / "pg"),
+                    "init",
+                    "--non-interactive",
+                    "--tool",
+                    "deepseek-harness",
+                ],
+                cwd=str(project),
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+            )
+            self.assertEqual(completed.returncode, 0, completed.stderr)
+            self.assertTrue(
+                (project / ".dsh" / "skills" / "pg-build" / "SKILL.md").is_file()
+            )
+            self.assertTrue(
+                (project / ".dsh" / "commands" / "pg-3-build.md").is_file()
+            )
+            self.assertTrue(
+                (project / ".dsh" / "agents" / "pg-manager.md").is_file()
+            )
+            self.assertTrue(
+                (project / ".dsh" / "bridge" / "index.ts").is_file()
+            )
+            self.assertFalse((project / ".deepseek-harness").exists())
+            state = json.loads(
+                (project / ".pg" / "tool-integration.json").read_text(encoding="utf-8")
+            )
+            self.assertEqual(state["tool"], "deepseek-harness")
 
     def test_explicit_opencode_init_preserves_original_project_layout(self):
         with tempfile.TemporaryDirectory() as temp:
