@@ -499,6 +499,32 @@ class TestOpenCodeIntegration(unittest.TestCase):
             (self.project / ".opencode" / ".pg-adapter-manifest.json").is_file()
         )
 
+    def test_install_renders_opencode_config_scaffold(self):
+        self._install()
+
+        config_path = self.project / ".opencode" / "opencode.json"
+        self.assertTrue(config_path.is_file())
+        config = json.loads(config_path.read_text(encoding="utf-8"))
+        self.assertEqual(config, {"$schema": "https://opencode.ai/config.json"})
+
+    def test_install_preserves_user_opencode_config(self):
+        user_config = self.project / ".opencode" / "opencode.json"
+        user_config.parent.mkdir(parents=True, exist_ok=True)
+        user_config.write_text(
+            '{"$schema": "https://opencode.ai/config.json", "autoupdate": false}\n',
+            encoding="utf-8",
+        )
+
+        result = self._install()
+
+        self.assertEqual(
+            json.loads(user_config.read_text(encoding="utf-8")),
+            {"$schema": "https://opencode.ai/config.json", "autoupdate": False},
+        )
+        self.assertTrue(
+            any("preserved untracked file" in warning for warning in result.warnings)
+        )
+
     def test_install_preserves_opencode_workflow_semantics(self):
         self._install()
 

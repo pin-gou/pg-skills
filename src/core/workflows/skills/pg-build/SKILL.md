@@ -1,6 +1,6 @@
 ---
 name: pg-build
-description: 基于 Event Sourcing + Reducer 模式的 pipeline 编排引擎。取代旧版过程式状态机架构。
+description: 仅当用户显式触发构建工作流时使用（`/3-pg-build` 命令，或用户明确说"实现这个变更/开始构建"）；与构建无关的日常任务禁止自行加载。功能：基于 Event Sourcing + Reducer 模式的 pipeline 编排引擎，端到端实现变更。取代旧版过程式状态机架构。
 license: MIT
 compatibility: 需要 .pg/project.yaml / execution-manifest.yaml 驱动编排。
 metadata:
@@ -534,7 +534,7 @@ reducer 返回 `kind="error"` 时：
 
 | 场景 | 排查 | 处理 |
 |------|------|------|
-| pipeline 已 `status=completed`（所有 track 都 done） | `python3 ... progress <change>` 看 status | 正常！直接触发 pg-verify-and-merge，不要尝试 record |
+| pipeline 已 `status=completed`（所有 track 都 done） | `python3 ... progress <change>` 看 status | 正常！输出最终完成报告并停止，**不要自动触发** pg-verify-and-merge；由用户明确指示（如"verify 并合并"）后再加载 |
 | 上一个 dispatch 还在 `attempt=N` 重试中 | 等 `max_fail_retries` 耗尽或 sub-agent 成功 | 继续调用 `next` 等 dispatch 回来 |
 | snapshot 损坏 / `current_track` 为空字符串 | `cat .pg/changes/<change>/2-build/pipeline.snapshot.json \| jq .state.current_track` | 不要直接 patch — 调用 `pg-archive move` 归档后重新触发 pg-build |
 | track 已 completed 但想补一个 sub-phase | 设计错误：track 完成应触发下一 phase dispatch | 重跑 `/2-pg-propose` 修改 design.md |
@@ -1103,7 +1103,7 @@ build 过程中（如 scenario-fix 阶段）可能发现设计文档（design.md
 | 条件 | 行为 | 编排器下一步 |
 |------|------|-------------|
 | 至少一个 standard track 处于非 completed 状态 | detect 返回该 track 的 dispatch | 继续跑当前 track |
-| 所有 track（standard + simple + scenario）均 `status=completed` | **不派发**，detect.py:39 `state.status == "completed"` 直接返回 `done` | 直接触发 pg-verify-and-merge |
+| 所有 track（standard + simple + scenario）均 `status=completed` | **不派发**，detect.py:39 `state.status == "completed"` 直接返回 `done` | 输出最终完成报告并停止，由用户明确指示后再触发 pg-verify-and-merge |
 | standard track gate 缺失（`missing_gate_assessments` 非空） | 不派发，返回 `workflow_failed` | 按 §final-gate 前置门控协议 处理 |
 | scenario track 无 gate phase | 不派发（v3.6 起 `gate_enabled=False`，豁免） | 直接进入下一步 |
 | 当前处于 fix 子 pipeline 活跃状态 | 不派发，dispatch 子 pipeline 的当前 phase | 继续跑 fix 循环 |
@@ -1112,7 +1112,7 @@ build 过程中（如 scenario-fix 阶段）可能发现设计文档（design.md
 
 - 当所有 track 完成后直接拿到 `{"action": "done"}` 是**正常行为**，不是 bug
 - **不要尝试强制派发 final-gate**（如直接修改 state 或重复调用 `next`）
-- 直接触发 pg-verify-and-merge 即可
+- **不要自动触发 pg-verify-and-merge**：输出最终完成报告后停止，等待用户明确指示（如"verify 并合并"）再加载 pg-verify-and-merge
 - 若 `done` 出现但你怀疑漏了 final-gate，检查：
   - `state.status` 是否真的是 `completed`（而非 `failed`/`running`）
   - 是否有未完成 track 隐藏在子 pipeline 里

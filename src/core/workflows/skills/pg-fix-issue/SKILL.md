@@ -1,6 +1,6 @@
 ---
 name: pg-fix-issue
-description: 修订 BUG
+description: 仅当用户显式触发 BUG 修复工作流时使用（`/5-pg-fix-issue` 命令，或用户明确要求修复某个 bug）；与用户明确修复请求无关的任务禁止自行加载。功能：修订 BUG——复现、诊断、修复并在真实环境验证。
 license: MIT
 compatibility: 需要 `.pg/project.yaml` 统一配置文件。
 metadata:

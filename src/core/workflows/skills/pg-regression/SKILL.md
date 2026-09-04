@@ -1,6 +1,6 @@
 ---
 name: pg-regression
-description: "回归测试流水线：跑测试 → 按单元调度 fix-test agent 修测试脚本 → 输出 JSON 问题清单 → [可选] 启动 runner 修复生产代码。suite 编排完全由 regression.suite 段声明（env/required_roles/module/test_keys）。"
+description: "仅当用户显式触发回归测试工作流时使用（`/4-pg-regression` 命令，或用户明确说\"跑回归测试\"）；与回归无关的日常任务禁止自行加载。功能：回归测试流水线——跑测试 → 按单元调度 fix-test agent 修测试脚本 → 输出 JSON 问题清单 → [可选] 启动 runner 修复生产代码。suite 编排完全由 regression.suite 段声明（env/required_roles/module/test_keys）。"
 license: MIT
 compatibility: "项目根目录需要 .pg/project.yaml（v3.0 modules/environments 段 + regression.suite 段）。"
 metadata:

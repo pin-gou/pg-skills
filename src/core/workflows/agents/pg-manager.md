@@ -166,10 +166,10 @@ python3 .pg/skills/src/core/workflows/skills/pg-build/scripts/pg-list-phases.py 
 - 脚本返回 `{"error": "...", "items": []}` → 退化为旧行为（4 项固定条目），并在 stderr 输出错误信息提示用户
 - 任何 `--with-progress` / `--detect-sub-pipelines` 调用失败（exit 非 0 / 超时）→ 保留当前 TODO 状态不刷新，下一次再试
 
-### 工作流链式调用
+### 工作流链式调用（仅用户显式触发）
 
-`pg-build <change-name>` 执行完毕后，若所有 pipeline item 均通过（无 FAILED），**立即自动触发** `pg-verify-and-merge` 工作流，**无需任何确认步骤**：
+`pg-build <change-name>` 执行完毕后，输出最终完成报告并**停止**——**不得自动触发** `pg-verify-and-merge` 工作流，**不得自行加载该 SKILL**，等待用户明确指示：
 
 1. 当前分支即 `feat/<WORKER_NAME>/<change-name>`（pg-build 已创建并切换），无需重新推导
-2. 加载 `pg-verify-and-merge` SKILL，按 SKILL 定义执行合并前验证和合并
+2. 仅当用户明确要求（如自然语言"verify 并合并"、"合并到 master"）时，再加载 `pg-verify-and-merge` SKILL，按 SKILL 定义执行合并前验证和合并
 3. 若 pg-verify-and-merge 任一 phase 失败，中止并报告，不回退

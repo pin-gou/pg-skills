@@ -26,6 +26,7 @@ TEXT_EXTENSIONS = {
     ".txt",
 }
 MANIFEST_NAME = ".pg-adapter-manifest.json"
+CONFIG_FILENAME = "opencode.json"
 
 
 def _sha256(data: bytes) -> str:
@@ -39,6 +40,16 @@ class OpenCodeIntegration(ToolIntegration):
     project_markers = (".opencode", "opencode.json", "opencode.jsonc")
     environment_markers = ("OPENCODE_CONFIG", "OPENCODE_CONFIG_DIR")
     executables = ("opencode",)
+
+    def _project_config(self) -> dict:
+        """Minimal project config scaffold rendered to .opencode/opencode.json.
+
+        pg-* workflow skills are kept user-trigger-only via their SKILL.md
+        descriptions; the scaffold reserves the config file so a
+        ``permission.skill`` hard-gate can be enabled later with a one-line
+        change, and keeps OpenCode pointing at its official schema.
+        """
+        return {"$schema": "https://opencode.ai/config.json"}
 
     def install(self, context: IntegrationContext) -> IntegrationResult:
         source_root = context.workflow_root
@@ -59,6 +70,9 @@ class OpenCodeIntegration(ToolIntegration):
             generated.update(
                 collect_rendered_files(source_dir, Path(target_name), variables, TEXT_EXTENSIONS)
             )
+
+        config_data = json.dumps(self._project_config(), ensure_ascii=False, indent=2) + "\n"
+        generated[Path(CONFIG_FILENAME)] = (config_data.encode("utf-8"), 0o644)
 
         manifest_path = opencode_root / MANIFEST_NAME
         previous: dict = {}

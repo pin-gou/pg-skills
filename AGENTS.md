@@ -59,12 +59,14 @@ pg-skills 仓库（独立远程）               您的项目仓库
 ### 2.3 标准工作流
 
 ```
-/1-pg-define → /2-pg-propose → /3-pg-build → pg-verify-and-merge
+/1-pg-define → /2-pg-propose → /3-pg-build → pg-verify-and-merge（仅用户显式触发，如"verify 并合并"）
 ```
 
 > **v0.8.4 起**：`/2.1-pg-propose-refine` 已删除。5 项 common decisions 固化为 `pg-gen-tasks-skeleton.py` 常量块；产物生成后直接进入 `/3-pg-build`。
 
-快捷流：`/2b-pg-quick-build` → `pg-verify-and-merge`
+> **pg-* 工作流 skill 仅限用户显式触发**：pg-define / pg-propose / pg-build / pg-fix-issue / pg-quick-build / pg-regression / pg-verify-and-merge 只在用户通过对应 `/pg-*` 命令或明确自然语言请求时加载；pg-build 完成后**不自动触发** pg-verify-and-merge，由用户明确指示后执行。
+
+快捷流：`/2b-pg-quick-build` → `pg-verify-and-merge`（用户显式触发）
 回归流：`/4-pg-regression`
 修复流：`/5-pg-fix-issue`
 归档：`/6-pg-archive`

@@ -1,6 +1,6 @@
 ---
 name: pg-verify-and-merge
-description: 将 feature branch 模拟合并到 master 并按需验证后合并。pg-build 完成后自动触发。
+description: 仅当用户显式触发合并工作流时使用（用户明确说"verify 并合并"、"合并到 master"、"模拟合并验证"等）；pg-build 完成后**不会自动触发**，禁止自行加载。功能：将 feature branch 模拟合并到 master 并按需验证后合并。
 license: MIT
 compatibility: 项目根目录需要 `.pg/project.yaml`（v3.0 schema：modules / environments / tracks / stages / regression.suite / verify_merge / flyway / git）。SKILL 通过 `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-verify-and-merge` 统一注入所有配置（tracks / regressionSuites / verify_merge / flyway / git 五段 JSON），不再单独调用 `--key` 取值。
 metadata:
@@ -681,15 +681,15 @@ Phase: <phase> (<phase_name>)
 
 ## 与 pg-build 的集成
 
-`pg-build` 完成后，所有 phase 均通过时，**自动触发** pg-verify-and-merge 工作流，无需人工确认。
+`pg-build` 完成后**不会自动触发**本工作流。编排器输出最终报告后即停止，等待用户明确指示（如自然语言"verify 并合并"、"合并到 master"）后再加载本 SKILL。
 
 ```
 pg-build（feature 开发与验证）
-    ↓ (manager agent 自动触发，从最终报告读取 affected_tasks → 转为 AffectedTracks 传入)
-pg-verify-and-merge（合并前验证与合并）
+    ↓ (输出最终报告后停止，等待用户明确指示)
+pg-verify-and-merge（合并前验证与合并）  ← 仅由用户显式触发
 ```
 
-编排器（manager agent）在 pg-build 末尾输出最终报告后，加载 `pg-verify-and-merge` SKILL 继续执行。
+编排器（manager agent）在 pg-build 末尾输出最终报告后**终止**，不再继续执行；由用户明确要求合并时再加载 `pg-verify-and-merge` SKILL。
 
 ## 配置变更记录
 

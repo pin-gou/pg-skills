@@ -1,6 +1,6 @@
 ---
 name: pg-quick-build
-description:  跳过 pg-propse，不生成 proposal.md/design.md/tasks.md，直接构建代码
+description: 仅当用户显式触发快速构建工作流时使用（`/2b-pg-quick-build` 命令，或用户明确说"直接实现/快速构建"）；与该工作流无关的日常任务禁止自行加载。功能：跳过 pg-propose，不生成 proposal.md/design.md/tasks.md，直接构建代码。
 license: MIT
 compatibility: 需要 `.pg/project.yaml`（schema：modules / environments / tracks / stages）
 metadata:
@@ -491,7 +491,7 @@ assert isinstance(result["self_check"], dict)
 - 查看改动: `git status` / `git diff`
 - 提交暂存: `git add -A && git commit --amend` (合并到上一个 commit) 或 `git reset --soft HEAD~N` 后重整
 - 如需正式 proposal 化以备归档: 走 `/2-pg-propose <slug>`
-- 如需合并到 master: 走 `/4-pg-verify-and-merge <slug>`（微变更无 review-notes 流程，pg-verify-and-merge 直接接收）
+- 如需合并到 master: 由用户明确要求（如"verify 并合并"）后触发 pg-verify-and-merge（微变更无 review-notes 流程，pg-verify-and-merge 直接接收）
 ```
 
 #### 步骤 2.2：FAILED / ABORTED 路径
@@ -562,7 +562,7 @@ git log --oneline -10
 | 上游 | `pg-define` (command) | pg-quick-build 可在 pg-define 探索后接管, 不强制 |
 | 同级 | `pg-propose` | pg-propose 生成完整 proposal/design/tasks 落盘; pg-quick-build 不落盘 |
 | 同级 | `pg-fix-issue` | bug 修复场景优选 pg-fix-issue; pg-quick-build 不适合修复 bug |
-| 下游（可选）| `pg-verify-and-merge` | 微变更可直接推送+pr+merge; 重要变更建议先走 pg-propose 生成完整产物 |
+| 下游（可选，仅用户显式触发）| `pg-verify-and-merge` | 微变更可直接推送+pr+merge; 重要变更建议先走 pg-propose 生成完整产物; 合并动作需用户明确要求后触发 |
 
 ---
 

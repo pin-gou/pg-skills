@@ -1,6 +1,6 @@
 ---
 name: pg-define
-description: 进入探索/设计/定界模式——思考想法、调查问题、澄清需求、确定范围。包含唯一落盘环节：定界后环境验证（落盘 define-summary.yaml + describe_env）。
+description: 仅当用户显式触发探索/设计/定界工作流时使用（`/1-pg-define` 命令，或用户明确说"先定界/设计/调研一下"）；与定界无关的日常任务禁止自行加载。功能：进入探索/设计/定界模式——思考想法、调查问题、澄清需求、确定范围。包含唯一落盘环节：定界后环境验证（落盘 define-summary.yaml + describe_env）。
 license: MIT
 compatibility: 需要 .pg/changes/<change-id>/ 目录结构；定界后产出 0-define/define-summary.yaml, 由 pg-propose 阶段 1.8 消费。
 metadata:

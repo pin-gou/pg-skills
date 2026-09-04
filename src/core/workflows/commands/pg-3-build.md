@@ -49,7 +49,7 @@ if (!change_name) {
 3. 进入主循环：`python3 ... next {change_name}` → 按 action 派送 sub-agent / record 结果 / 循环
    - **每次 record 完成后**：调 `pg-list-phases.py {change_name} --with-progress` 刷新 TODO 状态
    - **每次 next 返回后**：调 `pg-list-phases.py {change_name} --detect-sub-pipelines` 检测是否有 fix/review/scenario-fix 子 pipeline 需追加
-4. 循环至 pipeline 完成（`action: done` → 触发 pg-verify-and-merge）
+4. 循环至 pipeline 完成（`action: done` → 输出最终完成报告并**停止**；**不自动触发** pg-verify-and-merge，等待用户明确指示（如"verify 并合并"））
 
 **示例**:
 ```

@@ -174,23 +174,23 @@ pg-skills/
 
 ## 4. 日常工作流
 
-> 所有工作流通过 slash command 触发。opencode 加载 `.opencode/commands/` 下的 symlink 后即可使用。
+> 所有工作流通过 slash command 或用户显式要求触发。opencode 加载 `.opencode/commands/` 下的 symlink 后即可使用。**pg-* 工作流 skill 仅由用户显式触发（对应 `/pg-*` 命令或明确自然语言请求），agent 不得自行加载。**
 
 ### 标准流：propose → build → verify → merge
 
 | 步骤 | 命令 / skill | 产出 |
 |------|-------------|------|
-| 定义需求 | `/1-pg-define` 或 `pg-propose` skill | `.pg/changes/<name>/proposal.md` |
+| 定义需求 | `/1-pg-define` 或 `pg-define` skill（用户显式触发） | `.pg/changes/<name>/proposal.md` |
 | 生成设计 | `/2-pg-propose` | design.md + tasks.md + execution-manifest.yaml |
 | 构建实现 | `/3-pg-build` | 事件溯源引擎驱动，runner 自动编排 sub-agent |
-| 验证合并 | `pg-verify-and-merge` skill | 合并到 master |
+| 验证合并 | `pg-verify-and-merge` skill（用户显式要求后触发，如"verify 并合并"） | 合并到 master |
 
 ### 快捷流：跳过 proposal 直接构建
 
 | 步骤 | 命令 / skill | 说明 |
 |------|-------------|------|
 | 直接编码 | `/2b-pg-quick-build` | 不生成 proposal/design/tasks，直接构建代码与测试。v2.1 起可选调 `describe_env` 做 V-* 可达性过滤（白名单触发） |
-| 验证 | `pg-verify-and-merge` skill | 同上 |
+| 验证 | `pg-verify-and-merge` skill（用户显式要求后触发） | 同上 |
 
 ### 回归流
 

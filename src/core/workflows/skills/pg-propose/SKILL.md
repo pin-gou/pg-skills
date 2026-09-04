@@ -1,6 +1,6 @@
 ---
 name: pg-propose
-description: 生成一个变更提案，一次性产出所有产物（proposal、design、tasks、manifest、scenario）。v0.8.4 起 review-notes 自审 + refine 流程已删除，由 pg-validate-proposal.py 机械校验替代。
+description: 仅当用户显式触发提案生成工作流时使用（`/2-pg-propose` 命令，或用户明确说"生成变更提案/提出变更"）；与提案生成无关的日常任务禁止自行加载。功能：生成一个变更提案，一次性产出所有产物（proposal、design、tasks、manifest、scenario）。v0.8.4 起 review-notes 自审 + refine 流程已删除，由 pg-validate-proposal.py 机械校验替代。
 license: MIT
 compatibility: 需要 `.pg/changes/` 目录结构和 `.pg/project.yaml` 统一配置文件。
 metadata:
