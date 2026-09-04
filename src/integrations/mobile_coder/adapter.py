@@ -31,10 +31,13 @@ TEXT_EXTENSIONS = {
 MANIFEST_NAME = ".pg-adapter-manifest.json"
 BUILD_COMPLETION_CONTRACT = """Mandatory pg-build completion contract:
 - Treat runner action `done` as a transition, not as final command success.
-- Immediately load and execute the native `pg-verify-and-merge` skill.
-- Do not report pg-build as complete until verification and merge succeed, the
-  current branch is the configured default branch, and the business changes
-  are committed.
+- Report the build result to the user and STOP. Do not auto-load
+  `pg-verify-and-merge`: verification and merge happen only when the user
+  explicitly requests them (e.g. "verify 并合并").
+- Only when the user asks for verification/merge, load and execute the native
+  `pg-verify-and-merge` skill, and do not report completion until verification
+  and merge succeed, the current branch is the configured default branch, and
+  the business changes are committed.
 - If an auto-record commit, archive commit, verification, or merge fails,
   report the failure and stop instead of claiming completion."""
 

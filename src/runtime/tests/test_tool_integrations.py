@@ -244,8 +244,10 @@ class TestMobileCoderIntegration(unittest.TestCase):
 
         mobile = self.project / ".mobile-coder"
         self.assertTrue((mobile / "commands" / "pg-3-build.md").is_file())
+        self.assertTrue((mobile / "commands" / "pg-0-auto-pilot.md").is_file())
         self.assertTrue((mobile / "agents" / "pg-build" / "test.md").is_file())
         self.assertTrue((mobile / "skills" / "pg-build" / "SKILL.md").is_file())
+        self.assertTrue((mobile / "skills" / "pg-auto-pilot" / "SKILL.md").is_file())
         self.assertTrue(
             (mobile / "pg-skills" / "src" / "runtime" / "bin" / "pg-invoke-hook.py").is_file()
         )
@@ -288,6 +290,11 @@ class TestMobileCoderIntegration(unittest.TestCase):
         build_command = (mobile / "commands" / "pg-3-build.md").read_text(encoding="utf-8")
         self.assertIn(".mobile-coder/skills/pg-build", build_command)
         self.assertNotIn(".opencode/", build_command)
+        auto_pilot_command = (mobile / "commands" / "pg-0-auto-pilot.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("0-pg-auto-pilot", auto_pilot_command)
+        self.assertIn("`pg-auto-pilot` skill", auto_pilot_command)
         browser_skill = (
             mobile
             / "skills"
@@ -540,6 +547,12 @@ class TestOpenCodeIntegration(unittest.TestCase):
         self.assertIn("task: allow", manager)
         self.assertIn("Skill tool", manager)
         self.assertIn("model: pg-router/pg-associate", manager)
+        auto_pilot_command = (
+            self.project / ".opencode" / "commands" / "pg-0-auto-pilot.md"
+        ).read_text(encoding="utf-8")
+        self.assertIn("0-pg-auto-pilot", auto_pilot_command)
+        self.assertIn("`pg-auto-pilot` skill", auto_pilot_command)
+        self.assertNotIn("{{pg:", auto_pilot_command)
         browser_skill = (
             self.project
             / ".opencode"

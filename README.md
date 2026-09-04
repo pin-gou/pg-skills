@@ -97,11 +97,11 @@ python3 .pg/skills/src/runtime/bin/pg init --list-tools
 ```
 .opencode/
 ├── agents/   <── symlinks: explore.md, pg-manager.md, pg-build/, pg-fix-issue/, pg-quick-build/, pg-regression/
-├── commands/ <── symlinks: pg-1-define.md, pg-2-propose.md, pg-2.1-propose-refine.md, pg-2b-quick-build.md,
+├── commands/ <── symlinks: pg-0-auto-pilot.md, pg-1-define.md, pg-2-propose.md, pg-2.1-propose-refine.md, pg-2b-quick-build.md,
 │                          pg-3-build.md, pg-4-regression.md, pg-5-fix-issue.md, pg-6-archive.md
 ├── skills/   <── symlinks: pg-archive/, pg-browser-testing-with-devtools/, pg-build/, pg-fix-issue/,
 │                          pg-init-project/, pg-propose/, pg-quick-build/,
-│                          pg-regression/, pg-systematic-diagnosing/, pg-verify-and-merge/
+│                          pg-regression/, pg-systematic-diagnosing/, pg-verify-and-merge/, pg-auto-pilot/
 └── (无 scripts/ —— pg-skills 的 scripts/ 不通过 symlink 暴露)
 ```
 

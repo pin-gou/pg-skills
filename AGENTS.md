@@ -33,7 +33,7 @@ pg-skills 仓库（独立远程）               您的项目仓库
 │                    Skill 层 (src/core/workflows/)                   │
 │  ┌──────────┐  ┌───────────┐  ┌───────────┐  ┌───────────┐  │
 │  │ commands │  │  skills   │  │  agents   │  │  scripts  │  │
-│  │ (8 个)   │  │ (11 个)   │  │ (sub-     │  │ (config/  │  │
+│  │ (9 个)   │  │ (12 个)   │  │ (sub-     │  │ (config/  │  │
 │  │          │  │           │  │  agent)   │  │  test     │  │
 │  └──────────┘  └───────────┘  └───────────┘  │  parser)  │  │
 │                                               └───────────┘  │
@@ -65,6 +65,8 @@ pg-skills 仓库（独立远程）               您的项目仓库
 > **v0.8.4 起**：`/2.1-pg-propose-refine` 已删除。5 项 common decisions 固化为 `pg-gen-tasks-skeleton.py` 常量块；产物生成后直接进入 `/3-pg-build`。
 
 > **pg-* 工作流 skill 仅限用户显式触发**：pg-define / pg-propose / pg-build / pg-fix-issue / pg-quick-build / pg-regression / pg-verify-and-merge 只在用户通过对应 `/pg-*` 命令或明确自然语言请求时加载；pg-build 完成后**不自动触发** pg-verify-and-merge，由用户明确指示后执行。
+>
+> **例外：`pg-auto-pilot`（`/0-pg-auto-pilot`）** 是自动驾驶模式——LLM 可自主加载，不归入上述门控。它不限定 LLM 如何规划与执行，只要求实施计划含"启动实例并验证结果"步骤、执行前让用户选定环境并确认环境准备方式。
 
 快捷流：`/2b-pg-quick-build` → `pg-verify-and-merge`（用户显式触发）
 回归流：`/4-pg-regression`
@@ -84,7 +86,8 @@ pg-skills/
 │
 ├── src/
 │   ├── opencode/                 # Skill & Agent 层（opencode 集成）
-│   │   ├── commands/             # 7 个 slash command 定义
+│   │   ├── commands/             # 9 个 slash command 定义
+│   │   │   ├── pg-0-auto-pilot.md      # 自动驾驶模式（壳子，调用 pg-auto-pilot skill）
 │   │   │   ├── pg-1-define.md          # 探索/设计/定界（壳子，调用 pg-define skill）
 │   │   │   ├── pg-1-grill.md           # 设计树拷问模式（壳子，调用 pg-define skill 的 grill 模式）
 │   │   │   ├── pg-2-propose.md          # 提出变更
@@ -94,17 +97,19 @@ pg-skills/
 │   │   │   ├── pg-5-fix-issue.md        # 修复问题
 │   │   │   └── pg-6-archive.md          # 手动归档
 │   │   │
-│   │   ├── skills/               # 10 个 SKILL.md 定义
+│   │   ├── skills/               # 12 个 SKILL.md 定义
 │   │   │   ├── pg-archive/               # 变更归档
 │   │   │   ├── pg-browser-testing-with-devtools/  # 浏览器 E2E 测试
 │   │   │   ├── pg-build/                 # 事件溯源 pipeline 引擎（最大 skill）
+│   │   │   ├── pg-define/                # 探索/设计/定界
 │   │   │   ├── pg-fix-issue/             # Bug 修复工作流
 │   │   │   ├── pg-init-project/          # 首次项目初始化
 │   │   │   ├── pg-propose/               # 设计提案生成
 │   │   │   ├── pg-quick-build/           # 快速构建
 │   │   │   ├── pg-regression/            # 回归测试与修复
 │   │   │   ├── pg-systematic-diagnosing/ # 系统诊断调试
-│   │   │   └── pg-verify-and-merge/      # 验证与合并
+│   │   │   ├── pg-verify-and-merge/      # 验证与合并
+│   │   │   └── pg-auto-pilot/          # 自动驾驶模式：不限定 LLM 编排，仅要求计划含验证、执行前确认环境
 │   │   │
 │   │   ├── agents/               # 子 agent 定义
 │   │   │   └── explore.md               # 代码探索子 agent
