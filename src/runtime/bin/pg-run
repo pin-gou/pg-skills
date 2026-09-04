@@ -710,22 +710,83 @@ def _build_update_items(project_root: Path) -> list:
     header = f"  ── 当前版本: {version} ──" if version else "  ── 当前版本: 未知 ──"
     return [
         _c("33", header),
-        ("检查更新", "列出远程可用版本 (pg upgrade --list)"),
+        ("检查更新", "从官方仓库拉取 tag 列表"),
         ("强制更新到指定版本", "留空 = main 分支; 否则输入 tag (如 0.9.0)"),
     ]
 
 
+_PG_SKILLS_OFFICIAL_REPO = "https://github.com/pin-gou/pg-skills.git"
+
+
 def _exec_update_action(idx: int, project_root: Path):
+    pg_skills_root = find_pg_skills_root(project_root)
+    version_file = pg_skills_root / "VERSION"
+    current = version_file.read_text().strip() if version_file.is_file() else ""
+
+    if idx == 0:
+        label = "检查更新"
+        print()
+        print(_c("1;36", "=" * 60))
+        print(_c("1;33", f"  {label}"))
+        print(_c("1;36", "=" * 60))
+        print(f"  仓库: {_PG_SKILLS_OFFICIAL_REPO}")
+        print(f"  拉取 tag 列表 (git ls-remote --tags --refs) ...")
+        print()
+
+        start = time.time()
+        result = subprocess.run(
+            ["git", "ls-remote", "--tags", "--refs", _PG_SKILLS_OFFICIAL_REPO],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+        elapsed = time.time() - start
+
+        if result.returncode != 0:
+            err = (result.stderr or result.stdout).strip().splitlines()
+            tail = err[-1] if err else "(no output)"
+            print(f"  ✗ 拉取失败: {tail}")
+            print(f"    请检查网络或访问 {_PG_SKILLS_OFFICIAL_REPO}")
+            _print_exec_stats(
+                label, [{"label": label, "duration": elapsed, "ok": False}]
+            )
+            pause()
+            return
+
+        tags: list[str] = []
+        for line in result.stdout.splitlines():
+            parts = line.split("\t")
+            if len(parts) != 2:
+                continue
+            ref = parts[1]
+            if ref.startswith("refs/tags/"):
+                tag = ref[len("refs/tags/"):]
+                if tag:
+                    tags.append(tag)
+
+        if not tags:
+            print("  (远程仓库未发现任何 v* tag)")
+
+        current_tag = f"v{current}" if current and not current.startswith("v") else current
+        print(f"  Current: {current_tag or '(未知)'}")
+        for t in sorted(tags):
+            marker = "  ← current" if t == current_tag else ""
+            print(f"    {t}{marker}")
+        print()
+        _print_exec_stats(
+            label,
+            [{"label": label, "duration": elapsed, "ok": True}],
+        )
+        pause()
+        return
+
     pg_cli = find_pg_cli(project_root)
     if not pg_cli.is_file():
         print(f"  找不到 pg CLI: {pg_cli}")
         pause()
         return
 
-    if idx == 0:
-        label = "检查更新"
-        cmd = f"python3 {shlex.quote(str(pg_cli))} upgrade --list"
-    elif idx == 1:
+    if idx == 1:
         try:
             version = input("目标版本 (留空 = main 分支): ").strip()
         except (EOFError, KeyboardInterrupt):
