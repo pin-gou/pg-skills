@@ -71,6 +71,10 @@ def find_invoke_hook(project_root: Path) -> Path:
     )
 
 
+def find_pg_cli(project_root: Path) -> Path:
+    return find_pg_skills_root(project_root) / "src" / "runtime" / "bin" / "pg"
+
+
 # ----- YAML 加载 -----
 
 
@@ -614,8 +618,8 @@ def _pick_env(config: dict) -> tuple:
 
 # ----- 顶栏菜单 -----
 
-TAB_NAMES = ["常用操作", "Environment", "Instance", "Module"]
-TAB_KEYS = ["f", "e", "i", "m"]
+TAB_NAMES = ["常用操作", "Environment", "Instance", "Module", "更新"]
+TAB_KEYS = ["f", "e", "i", "m", "u"]
 _ACTION_ORDER = ["start", "stop", "health_check", "logs", "tail"]
 
 
@@ -693,6 +697,58 @@ def _build_instance_items(
         for a in act_names
     ]
     return items
+
+
+def _build_update_items(project_root: Path) -> list:
+    version = ""
+    version_file = find_pg_skills_root(project_root) / "VERSION"
+    if version_file.is_file():
+        try:
+            version = version_file.read_text().strip()
+        except OSError:
+            version = "未知"
+    header = f"  ── 当前版本: {version} ──" if version else "  ── 当前版本: 未知 ──"
+    return [
+        _c("33", header),
+        ("检查更新", "列出远程可用版本 (pg upgrade --list)"),
+        ("强制更新到指定版本", "留空 = main 分支; 否则输入 tag (如 0.9.0)"),
+    ]
+
+
+def _exec_update_action(idx: int, project_root: Path):
+    pg_cli = find_pg_cli(project_root)
+    if not pg_cli.is_file():
+        print(f"  找不到 pg CLI: {pg_cli}")
+        pause()
+        return
+
+    if idx == 0:
+        label = "检查更新"
+        cmd = f"python3 {shlex.quote(str(pg_cli))} upgrade --list"
+    elif idx == 1:
+        try:
+            version = input("目标版本 (留空 = main 分支): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            pause()
+            return
+        version_args = f" {shlex.quote(version)}" if version else ""
+        label = f"强制更新到指定版本 ({version or 'main'})"
+        cmd = (
+            f"python3 {shlex.quote(str(pg_cli))} upgrade{version_args} --force"
+        )
+    else:
+        return
+
+    print()
+    print(_c("1;36", "=" * 60))
+    print(_c("1;33", f"  {label}"))
+    print(_c("1;36", "=" * 60))
+    rc = run_shell(cmd, cwd=project_root)
+    _print_exec_stats(
+        label, [{"label": label, "duration": 0.0, "ok": rc == 0}]
+    )
+    pause()
 
 
 def _exec_quick_action(idx: int, env_name: str, config: dict, project_root: Path):
@@ -1045,6 +1101,7 @@ def tabbed_main_menu(config: dict, project_root: Path):
                     _build_module_items(env_name, config, module_selected),
                     module_selected is not None,
                 ),
+                lambda: (_build_update_items(project_root), False),
             ]
             action, tab_idx, val, height = _tab_menu_loop(
                 f"pg-run — {t.yellow(env_name)}",
@@ -1136,6 +1193,12 @@ def tabbed_main_menu(config: dict, project_root: Path):
                         t.save()
                         t.flush()
                         executed_action = True
+                elif current_tab == 4:
+                    _exec_update_action(val, project_root)
+                    t.write("\n")
+                    t.save()
+                    t.flush()
+                    executed_action = True
 
 
 # ----- 非交互模式（CLI flags 直达） -----
