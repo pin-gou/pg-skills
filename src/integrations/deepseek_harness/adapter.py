@@ -43,8 +43,10 @@ HARNESS_CONTRACT = """## DeepSeek Harness execution contract
 - After the subagent returns, pass its result to the pg runner `record` action
   exactly as the workflow requires. The native subagent tool does not accept
   an OpenCode-style agent-id parameter.
-- Treat runner action `done` as a transition. Continue into
-  `pg-verify-and-merge` when required by the canonical pg-build workflow.
+- Treat runner action `done` as a transition. Per the v0.9.2 breaking change,
+  pg-build no longer auto-loads `pg-verify-and-merge` after `done`. Stop and
+  wait for the user to explicitly request verification/merge (e.g. "verify
+  并合并") before loading the skill.
 """
 
 
@@ -437,6 +439,6 @@ cordis.patch.yml when distinct associate, expert, and master models are availabl
         return [
             "Start the interactive UI with .dsh/start-web.cmd (Windows) or .dsh/start-web.sh (Unix).",
             "For one Headless task, use .dsh/run-task.cmd \"task\" or .dsh/run-task.sh \"task\".",
-            "Confirm /pg-1-define and /pg-3-build are listed as commands.",
+            "Confirm /0-pg-auto-pilot, /pg-1-define and /pg-3-build are listed as commands.",
             "Ask Harness to load pg-init-project and initialize the project configuration.",
         ]

@@ -588,8 +588,24 @@ class TestDeepSeekHarnessIntegration(unittest.TestCase):
             self.assertIn("todo_write", text)
             self.assertIn("native routed subagent tool", text)
             self.assertNotIn(".deepseek-harness", text)
+            self.assertIn("no longer auto-loads", text)
         self.assertNotIn("subagent_type", manager)
         self.assertNotIn("model: current", manager)
+
+    def test_rendered_pg0_auto_pilot_command_and_skill(self):
+        self._install()
+
+        harness = self.project / ".dsh"
+        auto_pilot_command = (harness / "commands" / "pg-0-auto-pilot.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("0-pg-auto-pilot", auto_pilot_command)
+        self.assertIn("`pg-auto-pilot` skill", auto_pilot_command)
+        self.assertNotIn("{{pg:", auto_pilot_command)
+        self.assertTrue((harness / "skills" / "pg-auto-pilot" / "SKILL.md").is_file())
+
+        bridge = (harness / "bridge" / "index.ts").read_text(encoding="utf-8")
+        self.assertIn("pg-0-auto-pilot", bridge)
 
     def test_reinstall_preserves_modified_generated_and_custom_files(self):
         self._install()

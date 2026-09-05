@@ -5,7 +5,8 @@
   "install_mode": "render",
   "surfaces": {
     "commands": "commands",
-    "agents": "agents"
+    "agents": "agents",
+    "skills": "skills"
   },
   "template_variables": {
     "tool.name": "DeepSeek Harness",
