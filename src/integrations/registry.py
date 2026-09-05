@@ -7,6 +7,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .base import DetectionResult, IntegrationContext, ToolIntegration
+from .deepseek_harness import DeepSeekHarnessIntegration
 from .mobile_coder import MobileCoderIntegration
 from .opencode import OpenCodeIntegration
 
@@ -14,6 +15,7 @@ from .opencode import OpenCodeIntegration
 _INTEGRATIONS: dict[str, ToolIntegration] = {
     OpenCodeIntegration.tool_id: OpenCodeIntegration(),
     MobileCoderIntegration.tool_id: MobileCoderIntegration(),
+    DeepSeekHarnessIntegration.tool_id: DeepSeekHarnessIntegration(),
 }
 STATE_PATH = Path(".pg") / "tool-integration.json"
 
