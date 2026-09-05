@@ -1,5 +1,20 @@
 # 变更日志
 
+## [0.9.3] - 2026-09-05
+
+**行为变更（使用前请知悉）**
+- **工作流 skill 仅限用户显式触发**：`pg-define` / `pg-propose` / `pg-build` / `pg-fix-issue` / `pg-quick-build` / `pg-regression` / `pg-verify-and-merge` 只能在用户通过对应 `/pg-*` 命令或明确自然语言请求时由 agent 加载，agent 不得自行启动；`pg-build` 完成后不再自动触发 `pg-verify-and-merge`，需用户明确指示后执行（如"verify 并合并"）
+
+**新增**
+- **Auto-Pilot 自动驾驶模式**：新增 `/0-pg-auto-pilot` 命令与 `pg-auto-pilot` skill——不限定 LLM 如何规划与执行，只要求实施计划含"启动实例并验证结果"步骤、执行前让用户选定环境并确认环境准备方式
+- **DeepSeek Harness 集成**：`pg init` 新增 `--tool deepseek-harness` 适配器，可在 DeepSeek Harness 工具环境中安装 pg-* 工作流
+- **pg-run 新增"更新"Tab**：菜单中可直接"检查更新"（拉取官方仓库版本列表）或"强制更新到指定版本"（留空 = main 分支，或输入 tag），无需退出菜单命令行操作
+
+**改进**
+- **`pg upgrade` 默认更新到 main 分支**：不再默认拉取 master
+- **更新检查更可靠**：改为直接拉取官方 pg-skills 仓库的 tag 列表，不再依赖消费项目中是否配置了 pg-skills remote
+- **修复**：pg-run 更新子菜单在 raw（非 cooked）终端模式下无法输入版本号的问题
+
 ## [0.9.2] - 2026-08-15
 
 **升级前必读**

@@ -9,7 +9,7 @@
   <g transform="translate(60 320)">
     <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#60a5fa"/>
     <text x="30" y="40" font-size="16" font-weight="700" fill="#60a5fa">STEP 1 · 同步</text>
-    <text x="30" y="75" font-size="16" fill="#f8fafc" font-family="ui-monospace, monospace">git subtree add --prefix=.pg/skills pg-skills v0.9.1</text>
+    <text x="30" y="75" font-size="16" fill="#f8fafc" font-family="ui-monospace, monospace">git subtree add --prefix=.pg/skills pg-skills v0.9.3</text>
   </g>
 
   <g transform="translate(60 440)">

@@ -185,7 +185,7 @@ def initialize_project(
         output(f"ERROR: .pg/ not found at {pg_dir}.")
         output("  .pg/skills must be present before running pg init.")
         output("  If pg-skills has not been synced, run:")
-        output("    git subtree add --prefix=.pg/skills pg-skills v0.9.1 --squash")
+        output("    git subtree add --prefix=.pg/skills pg-skills v0.9.3 --squash")
         return 1
 
     integration = None
