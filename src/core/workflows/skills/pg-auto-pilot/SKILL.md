@@ -21,6 +21,7 @@ metadata:
 无论任务怎么规划，**实施计划里必须要有启动实例并验证编码结果是否达到预期这一步**：
 
 - 启动实例：在选定的环境中把对应 role 的实例跑起来（走 hooks 协议，见下）
+- **改完代码必须用 hooks 协议重新启动实例**：即使实例已经在运行，也**不得跳过** start/restart——不重启的话运行中的进程仍持有旧代码，新修改不会被应用；restart（或 stop + start）后 `health_check` 通过才算真正应用了新代码
 - 验证结果：用你能想到的手段确认编码结果达到预期（build/lint/test、health_check、运行时检查、回归等，手段不限）
 - 验证不通过 → 修复 → 重验，直到通过或上报用户
 
@@ -96,6 +97,7 @@ hook 失败时先识别 category，再决定重试 / 上报：
    → 需要准备 → prepare_env（env-level）
    → 已就绪 → 跳过准备，直接下一步
 2. 启动所需实例：--action start（--role ... --instance ...）
+   → 若实例已在运行，改完代码后必须 --action restart（或 stop+start）再启动，确保新代码被应用，不得跳过
    → health_check 通过才算就绪；失败按上表分类处理
 3. 执行编码工作 + 验证：build/lint/test、运行时检查等（手段不限）
    → 失败 → 修复 → 重验
