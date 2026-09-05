@@ -2,7 +2,6 @@
 name: 0-pg-auto-pilot
 description: 0. 自动驾驶模式——不限定 LLM 如何规划与执行，只要求计划含"启动实例并验证结果"步骤、执行前让用户选定环境并确认环境准备方式
 trigger: slash
-model: {{pg:model.master}}
 ---
 
 **约束：本命令不限定你的规划与执行方式。**
