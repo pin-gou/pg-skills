@@ -16,6 +16,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import select
 import shlex
 import subprocess
 import sys
@@ -266,38 +267,6 @@ def pause():
         print()
     except OSError:
         pass
-
-
-class _cooked_stdin:
-    """临时把 stdin 还原到 cooked 模式 (canonical + echo) 的上下文管理器.
-
-    Tabbed TUI 通过 termios 把 stdin 切到 raw 模式 (Term.__enter__)，
-    在此模式下 input() 拿不到完整一行. 仅 raw 输入 raw 后需要 input() 时使用.
-    """
-
-    def __enter__(self):
-        try:
-            import termios
-            fd = sys.stdin.fileno()
-            if not sys.stdin.isatty():
-                self._restore = None
-                return self
-            old = termios.tcgetattr(fd)
-            new = termios.tcgetattr(fd)
-            new[3] = new[3] | (termios.ICANON | termios.ECHO)
-            termios.tcsetattr(fd, termios.TCSADRAIN, new)
-            self._restore = old
-        except (termios.error, OSError, ImportError):
-            self._restore = None
-        return self
-
-    def __exit__(self, *args):
-        if self._restore is not None:
-            try:
-                import termios
-                termios.tcsetattr(sys.stdin.fileno(), termios.TCSADRAIN, self._restore)
-            except (termios.error, OSError):
-                pass
 
 
 def _action_label(action_name: str) -> str:
@@ -731,6 +700,42 @@ def _build_instance_items(
     return items
 
 
+_PG_SKILLS_OFFICIAL_REPO = "https://github.com/pin-gou/pg-skills.git"
+_UPDATE_TAGS_CACHE: dict = {"ts": 0.0, "tags": [], "error": ""}
+_update_menu_tags: list = []
+
+
+def _fetch_remote_tags() -> tuple[list, str]:
+    """拉取官方仓库 tag 列表, 30s 内复用缓存. 返回 (tags, error)."""
+    now = time.time()
+    cache = _UPDATE_TAGS_CACHE
+    if now - cache["ts"] < 30:
+        return cache["tags"], cache["error"]
+    try:
+        result = subprocess.run(
+            ["git", "ls-remote", "--tags", "--refs", _PG_SKILLS_OFFICIAL_REPO],
+            capture_output=True,
+            text=True,
+            timeout=30,
+        )
+    except subprocess.TimeoutExpired:
+        cache.update(ts=now, tags=[], error="git ls-remote 超时 (30s)")
+        return [], cache["error"]
+    if result.returncode != 0:
+        tail = (result.stderr or result.stdout).strip().splitlines()
+        cache.update(ts=now, tags=[], error=tail[-1] if tail else "git ls-remote 失败")
+        return [], cache["error"]
+    tags: list[str] = []
+    for line in result.stdout.splitlines():
+        parts = line.split("\t")
+        if len(parts) == 2 and parts[1].startswith("refs/tags/"):
+            tag = parts[1][len("refs/tags/"):]
+            if tag:
+                tags.append(tag)
+    cache.update(ts=now, tags=tags, error="")
+    return tags, ""
+
+
 def _build_update_items(project_root: Path) -> list:
     version = ""
     version_file = find_pg_skills_root(project_root) / "VERSION"
@@ -740,75 +745,66 @@ def _build_update_items(project_root: Path) -> list:
         except OSError:
             version = "未知"
     header = f"  ── 当前版本: {version} ──" if version else "  ── 当前版本: 未知 ──"
-    return [
-        _c("33", header),
-        ("检查更新", "从官方仓库拉取 tag 列表"),
-        ("强制更新到指定版本", "留空 = main 分支; 否则输入 tag (如 0.9.0)"),
-    ]
+    tags, err = _fetch_remote_tags()
+    global _update_menu_tags
+    _update_menu_tags = sorted(tags)
+    items = [_c("33", header)]
+    if not _update_menu_tags:
+        msg = f"获取远程版本失败: {err}" if err else "远程仓库未发现任何 tag"
+        items.append(_c("31", f"  ({msg})"))
+        return items
+    current_tag = f"v{version}" if version and not version.startswith("v") else version
+    for t in _update_menu_tags:
+        desc = "← 当前版本" if t == current_tag else "强制更新到此版本"
+        items.append((t, desc))
+    return items
 
 
-_PG_SKILLS_OFFICIAL_REPO = "https://github.com/pin-gou/pg-skills.git"
+def _drain_stdin():
+    """清空 stdin 中已缓冲的按键, 避免残留字符被后续子进程/暂停读到."""
+    fd = sys.stdin.fileno()
+    while select.select([fd], [], [], 0)[0]:
+        try:
+            if not os.read(fd, 1):
+                break
+        except OSError:
+            break
 
 
-def _exec_update_action(idx: int, project_root: Path):
+def _exec_update_action(idx: int, project_root: Path, term: Term):
+    if idx >= len(_update_menu_tags):
+        return
+    target = _update_menu_tags[idx]
+
     pg_skills_root = find_pg_skills_root(project_root)
     version_file = pg_skills_root / "VERSION"
     current = version_file.read_text().strip() if version_file.is_file() else ""
+    current_tag = f"v{current}" if current and not current.startswith("v") else current
 
-    if idx == 0:
-        label = "检查更新"
-        print()
-        print(_c("1;36", "=" * 60))
-        print(_c("1;33", f"  {label}"))
-        print(_c("1;36", "=" * 60))
-        print(f"  仓库: {_PG_SKILLS_OFFICIAL_REPO}")
-        print(f"  拉取 tag 列表 (git ls-remote --tags --refs) ...")
-        print()
+    print()
+    print(_c("1;36", "=" * 60))
+    print(_c("1;33", f"  强制更新到 {target}"))
+    print(_c("1;36", "=" * 60))
+    print(f"  当前版本: {current_tag or '(未知)'}")
+    print(f"  目标版本: {target}")
+    print()
+    print("  确认强制更新? [y/N] ", end="")
+    sys.stdout.flush()
 
-        start = time.time()
-        result = subprocess.run(
-            ["git", "ls-remote", "--tags", "--refs", _PG_SKILLS_OFFICIAL_REPO],
-            capture_output=True,
-            text=True,
-            timeout=30,
-        )
-        elapsed = time.time() - start
+    confirmed = False
+    while True:
+        ch = term.getch()
+        if ch in (b"y", b"Y"):
+            print("y")
+            confirmed = True
+            break
+        if ch in (b"n", b"N", b"\r", b"\n", b"\x1b", b"", b"q", b"Q", b"b", b"B"):
+            print("n")
+            break
+    _drain_stdin()
 
-        if result.returncode != 0:
-            err = (result.stderr or result.stdout).strip().splitlines()
-            tail = err[-1] if err else "(no output)"
-            print(f"  ✗ 拉取失败: {tail}")
-            print(f"    请检查网络或访问 {_PG_SKILLS_OFFICIAL_REPO}")
-            _print_exec_stats(
-                label, [{"label": label, "duration": elapsed, "ok": False}]
-            )
-            pause()
-            return
-
-        tags: list[str] = []
-        for line in result.stdout.splitlines():
-            parts = line.split("\t")
-            if len(parts) != 2:
-                continue
-            ref = parts[1]
-            if ref.startswith("refs/tags/"):
-                tag = ref[len("refs/tags/"):]
-                if tag:
-                    tags.append(tag)
-
-        if not tags:
-            print("  (远程仓库未发现任何 v* tag)")
-
-        current_tag = f"v{current}" if current and not current.startswith("v") else current
-        print(f"  Current: {current_tag or '(未知)'}")
-        for t in sorted(tags):
-            marker = "  ← current" if t == current_tag else ""
-            print(f"    {t}{marker}")
-        print()
-        _print_exec_stats(
-            label,
-            [{"label": label, "duration": elapsed, "ok": True}],
-        )
+    if not confirmed:
+        print("  已取消")
         pause()
         return
 
@@ -818,30 +814,13 @@ def _exec_update_action(idx: int, project_root: Path):
         pause()
         return
 
-    if idx == 1:
-        # 在 tabbed TUI 的 raw 模式下 input() 不会缓冲, 必须先还原 cooked 模式
-        with _cooked_stdin():
-            try:
-                version = input("目标版本 (留空 = main 分支): ").strip()
-            except (EOFError, KeyboardInterrupt):
-                print()
-                pause()
-                return
-        version_args = f" {shlex.quote(version)}" if version else ""
-        label = f"强制更新到指定版本 ({version or 'main'})"
-        cmd = (
-            f"python3 {shlex.quote(str(pg_cli))} upgrade{version_args} --force"
-        )
-    else:
-        return
-
-    print()
-    print(_c("1;36", "=" * 60))
-    print(_c("1;33", f"  {label}"))
-    print(_c("1;36", "=" * 60))
+    cmd = (
+        f"python3 {shlex.quote(str(pg_cli))} upgrade {shlex.quote(target)} --force"
+    )
     rc = run_shell(cmd, cwd=project_root)
     _print_exec_stats(
-        label, [{"label": label, "duration": 0.0, "ok": rc == 0}]
+        f"强制更新到 {target}",
+        [{"label": f"强制更新到 {target}", "duration": 0.0, "ok": rc == 0}],
     )
     pause()
 
@@ -1289,7 +1268,7 @@ def tabbed_main_menu(config: dict, project_root: Path):
                         t.flush()
                         executed_action = True
                 elif current_tab == 4:
-                    _exec_update_action(val, project_root)
+                    _exec_update_action(val, project_root, t)
                     t.write("\n")
                     t.save()
                     t.flush()
