@@ -1,6 +1,6 @@
 ---
 name: pg-verify-and-merge
-description: 仅当用户显式触发合并工作流时使用（用户明确说"verify 并合并"、"合并到 master"、"模拟合并验证"等）；pg-build 完成后**不会自动触发**，禁止自行加载。功能：将 feature branch 模拟合并到 master 并按需验证后合并。
+description: 仅当用户显式触发合并工作流时使用（用户明确说"verify 并合并"、"合并到 master"、"模拟合并验证"等）；pg-build 完成后**不会自动触发**，禁止自行加载；未加载 pg-define SKILL 时不得提示用户使用本 SKILL。功能：将 feature branch 模拟合并到 master 并按需验证后合并。
 license: MIT
 compatibility: 项目根目录需要 `.pg/project.yaml`（v3.0 schema：modules / environments / tracks / stages / regression.suite / verify_merge / flyway / git）。SKILL 通过 `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-verify-and-merge` 统一注入所有配置（tracks / regressionSuites / verify_merge / flyway / git 五段 JSON），不再单独调用 `--key` 取值。
 metadata:

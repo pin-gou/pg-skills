@@ -1,6 +1,6 @@
 ---
 name: pg-build
-description: 仅当用户显式触发构建工作流时使用（`/3-pg-build` 命令，或用户明确说"实现这个变更/开始构建"）；与构建无关的日常任务禁止自行加载。功能：基于 Event Sourcing + Reducer 模式的 pipeline 编排引擎，端到端实现变更。取代旧版过程式状态机架构。
+description: 仅当用户显式触发构建工作流时使用（`/3-pg-build` 命令，或用户明确说"实现这个变更/开始构建"）；与构建无关的日常任务禁止自行加载；未加载 pg-define SKILL 时不得提示用户使用本 SKILL。功能：基于 Event Sourcing + Reducer 模式的 pipeline 编排引擎，端到端实现变更。取代旧版过程式状态机架构。
 license: MIT
 compatibility: 需要 .pg/project.yaml / execution-manifest.yaml 驱动编排。
 metadata:
