@@ -14,13 +14,14 @@ import subprocess
 import sys
 import tempfile
 import unittest
+from pathlib import Path
 
 try:
     import yaml
 except ImportError:
     yaml = None
 
-_SCRIPT = "/home/ubuntu/workspace/oc1-web-virt/.pg/skills/src/runtime/bin/migrate-define-summary.py"
+_SCRIPT = Path(__file__).resolve().parent.parent / "bin" / "migrate-define-summary.py"
 
 
 def _run(args, cwd=None):

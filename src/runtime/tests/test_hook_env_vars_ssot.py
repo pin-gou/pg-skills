@@ -195,10 +195,8 @@ class TestProjectCommonSh(unittest.TestCase):
     """项目本地副本 .pg/hooks/lib/common.sh 不引用 deprecated alias."""
 
     def test_project_common_exists(self):
-        self.assertIsNotNone(
-            PROJECT_HOOKS_COMMON,
-            "项目本地副本路径解析失败",
-        )
+        if PROJECT_HOOKS_COMMON is None:
+            self.skipTest("项目本地副本 .pg/hooks/lib/common.sh 不存在 (非消费项目), 跳过")
         assert PROJECT_HOOKS_COMMON is not None  # for type checker
         if not PROJECT_HOOKS_COMMON.is_file():
             self.skipTest(f"项目本地副本 {PROJECT_HOOKS_COMMON} 不存在, 跳过")

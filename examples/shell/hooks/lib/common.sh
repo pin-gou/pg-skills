@@ -2,7 +2,7 @@
 # pg-skills hooks 公共工具 (SSOT — Single Source of Truth)
 #
 # 用途:
-#   - 由 pg-init-project 复制到新项目的 .pg/hooks/lib/common.sh
+#   - 由 pg init 复制到新项目的 .pg/hooks/lib/common.sh
 #   - 现有项目可 `cp` 此文件覆盖 .pg/hooks/lib/common.sh 来同步上游改动
 #   - 角色/环境 hook (role-*.sh / env-*.sh) 通过 source 此文件获得
 #     pg_resolve_paths (caller × session 维度路由) 与 kill_port / wait_for_port 等工具
@@ -37,12 +37,8 @@ AGENT_PORT=9082
 # 优先：直接信任 pg-invoke-hook.py 预拼的 PG_HOOK_LOG_DIR（权威路径）
 # Fallback（老式手工调用 / 未走 pg-invoke-hook.py）：
 # 路由规则（与 .pg/skills/src/runtime/bin/pg-invoke-hook.py:pg_log_dir_for_skill 同步）：
-#     pg-build       -> .pg/changes/<session>/2-build/<env>/logs|pids
-#     pg-regression  -> .pg/regression/<session>/<env>/logs|pids   (session = <suite>-<date>-<seq>)
-#     pg-fix-issue   -> .pg/fix-issue/<session>/<env>/logs|pids    (session 含 fix- 前缀)
-#     pg-quick-build -> .pg/quick-build/<session>/<env>/logs|pids  (v2.1 新增, 独立命名空间, 不与 .pg/changes/ 混)
 #     pg-agent       -> .pg/agent/<session>/<env>/logs|pids        (LLM agent 通用入口, session = <iso-date>-<keyword>)
-#     ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs|pids       (新顶级目录, 不与 SKILL 命名空间混)
+#     ad-hoc         -> .pg/ad-hoc/<session>/<env>/logs|pids       (独立顶级目录, 不与其他命名空间混)
 #
 # 调用方必须在 source 此文件前 export:
 #   - PG_HOOK_LOG_DIR  (由 pg-run-hook.py 从 spec.hook_log_dir 注入, 推荐)
@@ -61,24 +57,6 @@ pg_resolve_paths() {
         local env="${PG_ENV:-unknown}"
 
         case "$caller" in
-            pg-build)
-                [[ -z "$session" ]] && session="manual"
-                LOG_DIR="$project_root/.pg/changes/${session}/2-build/${env}/logs"
-                PID_DIR="$project_root/.pg/changes/${session}/2-build/${env}/pids"
-                ;;
-            pg-regression)
-                LOG_DIR="$project_root/.pg/regression/${session}/${env}/logs"
-                PID_DIR="$project_root/.pg/regression/${session}/${env}/pids"
-                ;;
-            pg-fix-issue)
-                LOG_DIR="$project_root/.pg/fix-issue/${session}/${env}/logs"
-                PID_DIR="$project_root/.pg/fix-issue/${session}/${env}/pids"
-                ;;
-            pg-quick-build)
-                [[ -z "$session" ]] && session="manual"
-                LOG_DIR="$project_root/.pg/quick-build/${session}/${env}/logs"
-                PID_DIR="$project_root/.pg/quick-build/${session}/${env}/pids"
-                ;;
             pg-agent)
                 [[ -z "$session" ]] && session="manual"
                 LOG_DIR="$project_root/.pg/agent/${session}/${env}/logs"

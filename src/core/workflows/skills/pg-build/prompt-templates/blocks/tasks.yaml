@@ -1,9 +1,0 @@
-# tasks.yaml — tasks.md 预格式化
-
-prompt: |
-  ### 执行要求
-
-  **任务清单**：
-  {tasks_preformatted}
-
-  **验证要求**：{tasks_validation}

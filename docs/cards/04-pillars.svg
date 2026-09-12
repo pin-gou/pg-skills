@@ -25,17 +25,17 @@
   <g transform="translate(60 660)">
     <rect width="680" height="160" rx="20" fill="#fff" stroke="#f59e0b" stroke-width="2"/>
     <rect x="0" y="0" width="6" height="160" rx="3" fill="#f59e0b"/>
-    <text x="30" y="45" font-size="18" font-weight="700" fill="#f59e0b">③ 事件溯源 pipeline 引擎</text>
-    <text x="30" y="85" font-size="26" font-weight="800" fill="#0f172a">Event Sourcing + Reducer · 杜绝 LLM 自由发挥</text>
-    <text x="30" y="125" font-size="16" fill="#475569">pg-build · 每步是事件 · 下一步由纯函数算出</text>
+    <text x="30" y="45" font-size="18" font-weight="700" fill="#f59e0b">③ 真实环境验证</text>
+    <text x="30" y="85" font-size="26" font-weight="800" fill="#0f172a">启动实例 · 验证结果 · 修复重验</text>
+    <text x="30" y="125" font-size="16" fill="#475569">pg-auto-pilot · hooks 协议 · health_check</text>
   </g>
 
   <g transform="translate(60 840)">
     <rect width="680" height="160" rx="20" fill="#fff" stroke="#10b981" stroke-width="2"/>
     <rect x="0" y="0" width="6" height="160" rx="3" fill="#10b981"/>
-    <text x="30" y="45" font-size="18" font-weight="700" fill="#10b981">④ 自包含工作流</text>
-    <text x="30" y="85" font-size="26" font-weight="800" fill="#0f172a">spec 生成 → TDD → 真实环境 E2E 一条龙</text>
-    <text x="30" y="125" font-size="16" fill="#475569">不需要外部 spec / TDD / E2E 框架拼装</text>
+    <text x="30" y="45" font-size="18" font-weight="700" fill="#10b981">④ 自动驾驶模式</text>
+    <text x="30" y="85" font-size="26" font-weight="800" fill="#0f172a">不限定 LLM 如何规划与执行</text>
+    <text x="30" y="125" font-size="16" fill="#475569">两条要求：计划含验证 · 执行前选定环境</text>
   </g>
 
   <text x="40" y="1040" font-size="16" fill="#94a3b8">04 / 12</text>

@@ -53,55 +53,38 @@
 
 ---
 
-## 一次变更的全过程
+## 一次任务的全过程
 
-### 步骤 1：定界（`/1-pg-define`）— 约 20 分钟
+### 步骤 1：自动驾驶（`/0-pg-auto-pilot`）
 
-跟 AI 聊清楚：这次改什么、不改什么、边界在哪。AI 是思考伙伴，陪你把三件事聊明白：
+AI 自主规划与执行一次会话内可完成的任务，只受两条要求约束：
 
-- 需求 vs 现实代码：不空谈，把想法落到代码库里
-- 方案与边界：做什么 / 不做什么、影响范围多大
-- 真实环境验收：将来在真实环境里怎么验收
+1. **实施计划必须包含"启动实例并验证编码结果是否达到预期"的步骤**——改完代码必须通过 hooks 协议重启实例（restart / stop+start），health_check 通过才算真正应用了新代码
+2. **执行计划前，先让用户选定环境并确认准备方式**——需要准备就 prepare_env，环境已就绪则跳过
 
-**红线：只讨论，不写代码。**
-
-### 步骤 2：提案（`/2-pg-propose`）— 自动
-
-AI 把定界结论整理成一套"施工图纸"：
-
-| 文件 | 一句话解释 |
-|------|-----------|
-| `proposal.md` | 做什么、为什么做 |
-| `design.md` | 怎么做、怎么验证 |
-| `tasks.md` | 分步施工单，支持断点续做 |
-| `execution-manifest.yaml` | pipeline 的"总指挥" |
-| `scenario-*.yaml` | 端到端验收脚本（按需） |
-
-图纸齐了，AI 才能开工。
-
-### 步骤 3：构建（`/3-pg-build`）— 1-8 小时，无人工干预
-
-Pipeline 引擎自动跑完：
+### 步骤 2：实现 + 验证（AI 自主，手段不限）
 
 ```
-写测试 → 写实现 → 代码审查 → 真实环境验证 → 门控打分(≥80分) → 合并
+写实现 → 启动实例 → build/lint/test + health_check 验证 → 失败则修复重验 → 通过
 ```
 
-每一步都是不可变事件，随时可以回放复盘。跑挂了能从断点恢复，不从头再来。
+验证手段不限：build/lint/test、health_check、运行时检查、回归等。
 
-### 步骤 4：你验收 — 几分钟
+### 步骤 3：你验收 — 几分钟
 
-大多数情况下（约 80%）一次就达到预期，直接合并。剩余约 20% 的情况，用 vibecoding 微调即可。
+AI 把改动内容、验证结果、hook 日志位置汇总给你确认。达不到预期就继续修复 → 重验，直到通过或上报。
+
+### 步骤 4：合并 — 手动
+
+合并到 default 分支改用手动 `git merge`，不再由任何 SKILL 自动执行。
 
 ---
 
-## 三种工作流，适配不同场景
+## 工作流说明
 
 ```
-标准流：  定界 → 提案 → 构建 → 合并  （正经功能开发）
-快捷流：  定界 → 直接改                （小改动，≤8 tasks）
-修复流：  诊断 → 展示方案 → 修复 → 验证（Bug 修复）
-回归流：  跑测试 → 分类失败 → 自动修复  （回归测试）
+当前唯一 SKILL：pg-auto-pilot（自动驾驶）
+已移除：/1-pg-define / /2-pg-propose / /3-pg-build / /4-pg-regression / /5-pg-fix-issue / /6-pg-archive / pg-verify-and-merge
 ```
 
 ---
@@ -128,12 +111,12 @@ git subtree add --prefix=.pg/skills pg-skills v0.9.4 --squash
 # 2. 初始化骨架
 python3 .pg/skills/src/runtime/bin/pg init
 
-# 3. 重启 opencode，触发 pg-init-project 自动扫描仓库
+# 3. 重启 opencode，运行 /0-pg-auto-pilot
 # 4. 验证
 python3 .pg/skills/src/runtime/bin/pg doctor
 ```
 
-接入后，AI 自动扫描仓库，生成 `project.yaml`（你的项目"户口本"）+ hooks（环境生命周期脚本）+ code review 配置。你只需要核对一遍 AI 生成的产物是否正确。
+接入后，`pg init` 生成 `project.yaml`（你的项目"户口本"）+ hooks（环境生命周期脚本）骨架。你只需要核对一遍 AI 生成的产物是否正确。
 
 ---
 

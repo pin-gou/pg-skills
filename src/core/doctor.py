@@ -99,7 +99,7 @@ def run_doctor(
     protocol = pg_dir / "context" / "agent-protocol.md"
     if not protocol.is_file():
         warnings.append(
-            ".pg/context/agent-protocol.md is missing; run pg-init-project"
+            ".pg/context/agent-protocol.md is missing; run `pg init` to re-install the project adapter"
         )
     else:
         output("OK: .pg/context/agent-protocol.md exists")

@@ -33,7 +33,7 @@ skills.backup.*
 *.profile
 cronjobs/prompt.txt
 
-# pg-init-project dynamic output (review-only, regenerated each run)
+# pg-init 动态生成文件 (review-only, 每次重新生成)
 agents-md-patches.md
 
 # Build artifacts within change sessions
@@ -301,7 +301,10 @@ def create_pg_run_wrappers(
     elif link.exists():
         link.unlink()
     link.symlink_to(target)
-    link.chmod(link.stat().st_mode | 0o111)
+    try:
+        link.chmod(link.lstat().st_mode | 0o111)
+    except OSError:
+        pass
     output(f"  - symlink: pg-run -> {target}")
 
 
@@ -335,12 +338,12 @@ modules:
   placeholder:
     root: .
     language: python
-    description: "Placeholder module; replaced by pg-init-project."
+    description: "Placeholder module; edit this file to declare real modules."
 environments:
   placeholder:
     description: "Placeholder environment; replace during project onboarding."
     roles:
-      placeholder:
+      - name: placeholder
         instances:
           - name: placeholder-1
             host: localhost

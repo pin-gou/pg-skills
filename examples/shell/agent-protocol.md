@@ -1,6 +1,6 @@
 # Agent ↔ pg-skills 协议速查
 
-> 本文件由 pg-init-project Phase 5 生成。Agent 拿到 SSOT、调用 hook、找日志时, 按本文件指引操作。
+> 本文件由 pg init 生成。Agent 拿到 SSOT、调用 hook、找日志时, 按本文件指引操作。
 > 项目自有 AGENTS.md 可以引用本文件作为 SSOT 来源, 但**不在本文件记录项目专属约定**。
 
 ## §1 SSOT 查询（pg-parse-config.py pg-agent）
@@ -16,7 +16,7 @@ LLM agent **必须**通过 `pg-parse-config.py pg-agent` workflow 拿 SSOT——
 | 拿单值（如 backend port） | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --key environments.<env>.roles.backend.instances.0.port` |
 | 拿子树（如所有 tracks） | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --prefix tracks` |
 
-⚠️ **不要**用 `pg-parse-config.py pg-fix-issue` / `pg-build` / `pg-quick-build` / `pg-regression` 等带 skill 名的调用——那些是给 skill 编排器用的, agent 用会被迫看到噪声（如 `fix_issue.escalation_artifacts`）。
+⚠️ **不要**用带 skill 名的调用（`pg-propose` / `pg-build` / `pg-regression` 等已移除）——只有 `pg-agent` 是 agent 专用入口。
 
 ⚠️ **不要** `pg-parse-config.py --prefix modules.backend.test.unit` 后手动 parse JSON——直接用 `--resolve-module-test <m> <key>`。
 
@@ -45,7 +45,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 - `--session` 由 agent 自己生成（见 §2.5），一次任务用同一个。
 - `--env` / `--role` / `--action` / `--instance` 必须先通过 `pg-parse-config.py pg-agent` 拿到 SSOT，再具体填。
 - action 取值：`start` / `stop` / `restart` / `logs` / `tail` / `health_check`（如已声明）。
-- `describe_env` 是 env-level 只读探测 action（不传 `--role` / `--instance`），产出 `env-description.yaml`。其描述的是 prepare_env **成功执行后**该环境的预期基线状态——pg-build 实际执行时先调 prepare_env 确保成功，再执行 scenario track。LLM 应以此基线判断可验证性。
+- `describe_env` 是 env-level 只读探测 action（不传 `--role` / `--instance`），产出 `env-description.yaml`。其描述的是 prepare_env **成功执行后**该环境的预期基线状态——pg-auto-pilot 实际执行时会先 prepare_env 确保成功，再启动实例并验证。LLM 应以此基线判断可验证性。
 
 ⚠️ **禁止**直接 `bash .pg/hooks/role-backend-start.sh backend backend-1`——审计员 `grep "pg-agent" .pg/agent/<session>/...` 找不到这条记录。
 
@@ -66,9 +66,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 |---|---|---|---|
 | `pg-agent` | `<iso-date>-<keyword>` | dev-local | `.pg/agent/<session>/dev-local/logs/` |
 | `pg-agent` | `<iso-date>-<keyword>` | multi-tier | `.pg/agent/<session>/multi-tier/logs/` |
-| `pg-build` | `<change-id>` | dev-local | `.pg/changes/<change-id>/2-build/dev-local/logs/` |
-| `pg-fix-issue` | `<change-id>` | dev-local | `.pg/fix-issue/<change-id>/dev-local/logs/` |
-| `pg-regression` | `<suite>-<date>-<seq>` | dev-local | `.pg/regression/<session>/dev-local/logs/` |
+| `ad-hoc` | `auto-<date>-<pid>` | dev-local | `.pg/ad-hoc/<session>/dev-local/logs/` |
 
 ⚠️ **不要去 `scripts/logs/`**——那只是兜底路径, 不属于 pg-skills 标准路由（hook 没走 `pg-invoke-hook.py` 才会落这里）。
 

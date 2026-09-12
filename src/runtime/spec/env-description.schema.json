@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://pg-skills.local/spec/env-description.schema.json",
   "title": "env-description",
-  "description": "环境描述 YAML, 由 describe_env 脚本生成. 描述 prepare_env 成功执行后的预期环境基线状态, 是 pg-propose / pg-fix-issue / pg-regression 生成 design/tasks/scenario 的输入. pg-build 在实际执行时先调 prepare_env 确保成功, 环境状态应与本文件一致. 文件位置: .pg/changes/<change-id>/env-description.yaml (per-change 特定, 与 pg-build scenario-execute 直接消费).",
+  "description": "环境描述 YAML, 由 describe_env 脚本生成. 描述 prepare_env 成功执行后的预期环境基线状态, 是 pg-auto-pilot (pg-agent) 生成实现计划/验证的输入. 文件位置: .pg/agent/<session>/env-description.yaml (per-session, 由 pg-invoke-hook.py describe_env 路由).",
   "type": "object",
   "required": ["schema_version", "described_by", "described_at", "described_for", "environments"],
   "additionalProperties": false,
@@ -29,16 +29,16 @@
       "properties": {
         "caller": {
           "type": "string",
-          "enum": ["pg-propose", "pg-fix-issue", "pg-regression", "ad-hoc"],
-          "description": "调用方标识 (v7+ 加 ad-hoc: pg-run 手动探测场景)"
+          "enum": ["pg-agent", "ad-hoc"],
+          "description": "调用方标识 (pg-agent: pg-auto-pilot 自动驾驶模式; ad-hoc: pg-run 手动探测)"
         },
         "change": {
           "type": "string",
-          "description": "change-id (pg-regression 可省略)"
+          "description": "change-id (pg-agent 可省略, 等于 session)"
         },
         "session": {
           "type": "string",
-          "description": "session-id (pg-regression 必填)"
+          "description": "session-id (pg-agent 必填)"
         },
         "environment": {
           "type": "string",

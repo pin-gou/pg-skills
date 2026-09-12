@@ -38,7 +38,7 @@ metadata:
 
 ## 使用边界
 
-本 SKILL 不要求落盘 proposal/design/tasks、不派发 sub-agent、不定义阶段状态机。**不负责合并**（pg-verify-and-merge 的职责）、不修历史、不落变更文档。
+本 SKILL 不要求落盘 proposal/design/tasks、不派发 sub-agent、不定义阶段状态机。**不负责合并**（合并到 default 分支请用手动 `git merge`）、不修历史、不落变更文档。
 
 ---
 

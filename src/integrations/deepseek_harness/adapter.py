@@ -32,21 +32,19 @@ HARNESS_CONTRACT = """## DeepSeek Harness execution contract
 
 - Skills are loaded through the native Skill loader from `.dsh/skills/`.
 - Use `ask_user_question` for user decisions and `todo_write` for task tracking.
-- A runner `dispatch` action names a pg role such as `pg-build/test`. Read the
-  matching `.dsh/agents/<role>.md`, inspect its `model` frontmatter, then use the
-  corresponding native routed subagent tool: `pg_associate` for
-  `pg-router/pg-associate`, `pg_expert` for `pg-router/pg-expert`, or `pg_master`
-  for `pg-router/pg-master`. Those tool names are stable workflow tiers; their
-  actual DSH provider/model mappings are configured in .dsh/cordis.patch.yml.
-  Put the complete role document and runner dispatch
-  prompt in `prompt`; keep `description` to a short 3-5 word summary.
+- When a workflow dispatches a subagent, read the matching `.dsh/agents/<role>.md`,
+  inspect its `model` frontmatter, then use the corresponding native routed subagent tool:
+  `pg_associate` for `pg-router/pg-associate`, `pg_expert` for
+  `pg-router/pg-expert`, or `pg_master` for `pg-router/pg-master`. Those tool
+  names are stable workflow tiers; their actual DSH provider/model mappings are
+  configured in .dsh/cordis.patch.yml. Put the complete role document and
+  runner dispatch prompt in `prompt`; keep `description` to a short 3-5 word
+  summary.
 - After the subagent returns, pass its result to the pg runner `record` action
   exactly as the workflow requires. The native subagent tool does not accept
   an OpenCode-style agent-id parameter.
-- Treat runner action `done` as a transition. Per the v0.9.2 breaking change,
-  pg-build no longer auto-loads `pg-verify-and-merge` after `done`. Stop and
-  wait for the user to explicitly request verification/merge (e.g. "verify
-  并合并") before loading the skill.
+- Report results to the user and stop. Merging to the default branch is done
+  manually via `git merge` on user request; do not auto-merge.
 """
 
 
@@ -439,6 +437,5 @@ cordis.patch.yml when distinct associate, expert, and master models are availabl
         return [
             "Start the interactive UI with .dsh/start-web.cmd (Windows) or .dsh/start-web.sh (Unix).",
             "For one Headless task, use .dsh/run-task.cmd \"task\" or .dsh/run-task.sh \"task\".",
-            "Confirm /0-pg-auto-pilot, /pg-1-define and /pg-3-build are listed as commands.",
-            "Ask Harness to load pg-init-project and initialize the project configuration.",
+            "Confirm /0-pg-auto-pilot is listed as a command.",
         ]

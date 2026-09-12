@@ -1,6 +1,6 @@
 # AGENTS.md Drift Patches
 
-> 本文件由 pg-init-project Phase 5 生成。**不直接修改任何 AGENTS.md**，仅作为 review 清单。
+> 本文件由 pg init 生成。**不直接修改任何 AGENTS.md**，仅作为 review 清单。
 > 用户 review 后，可按本文件手动修改 AGENTS.md，或写脚本批量应用。
 
 ## Drift 总览

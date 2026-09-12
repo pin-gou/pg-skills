@@ -146,5 +146,5 @@ class OpenCodeIntegration(ToolIntegration):
     def next_steps(self) -> list[str]:
         return [
             "Restart OpenCode so it reloads project commands, skills, and agents.",
-            "Load the pg-init-project skill to scan and configure the project.",
+            "Run /0-pg-auto-pilot to start an autonomous implementation task.",
         ]

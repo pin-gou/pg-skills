@@ -26,8 +26,8 @@
 
   <g transform="translate(60 680)">
     <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#10b981"/>
-    <text x="30" y="40" font-size="16" font-weight="700" fill="#10b981">STEP 4 · 扫描</text>
-    <text x="30" y="75" font-size="16" fill="#f8fafc">提示词：加载并执行 pg-init-project skill</text>
+    <text x="30" y="40" font-size="16" font-weight="700" fill="#10b981">STEP 4 · 使用</text>
+    <text x="30" y="75" font-size="16" fill="#f8fafc">运行 /0-pg-auto-pilot 自动驾驶模式</text>
   </g>
 
   <g transform="translate(60 800)">
@@ -37,7 +37,7 @@
   </g>
 
   <text x="60" y="960" font-size="18" fill="#94a3b8">之后的工作流：</text>
-  <text x="60" y="995" text-anchor="start" font-size="22" font-weight="700" fill="#fbbf24">/1-define → /2-propose → /3-build → verify-and-merge</text>
+  <text x="60" y="995" text-anchor="start" font-size="22" font-weight="700" fill="#fbbf24">/0-pg-auto-pilot（唯一 SKILL）</text>
 
   <text x="40" y="1040" font-size="16" fill="#64748b">07 / 12</text>
   <text x="760" y="1040" text-anchor="end" font-size="16" fill="#64748b">语言无关 · 项目无关 · 跨环境复用</text>

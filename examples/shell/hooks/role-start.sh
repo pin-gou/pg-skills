@@ -16,7 +16,7 @@
 #   $PG_HOOK_LOG_DIR    — 预拼日志绝对目录 (lib/common.sh:pg_resolve_paths 优先)
 #   $PG_LOG_FILE        — stdout/stderr 目标 (caller 注入)
 #   $PG_RESULT_FILE     — 写 result.json 路径
-#   $PG_RUN_CALLER      — caller 身份 (pg-build / pg-regression / pg-fix-issue / ad-hoc)
+#   $PG_RUN_CALLER      — caller 身份 (pg-agent / ad-hoc)
 #   $PG_RUN_SESSION     — session 名 (与 caller 正交)
 #   $PG_ROLE / $PG_INSTANCE_NAME — per-role 维度
 #   $PG_INSTANCE_PORT   — 实例声明的端口 (project.yaml instances[].port)

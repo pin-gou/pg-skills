@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://pg-skills.local/spec/project.schema.json",
   "title": "pg-skills project.yaml",
-  "description": "项目级 SSOT 配置. v3.0: 4 段结构 (modules / environments / tracks / stages) + regression. environments 下每个 role 带 lifecycle actions (start/stop), environment 级带 cross-role orchestration actions (health/verify). 任何 per-change 信息(verify 任务)都应写到 tasks.md, 不写到这里. dev-isolated stage 通过 environment.required:false 跳过部署, 仅跑 modules.<m>.test.unit. regression 段定义 pg-regression 跑的测试套件, 完全显式声明, 与 tracks/stages 解耦.",
+  "description": "项目级 SSOT 配置. v3.0: 4 段结构 (modules / environments / tracks / stages). environments 下每个 role 带 lifecycle actions (start/stop), environment 级带 cross-role orchestration actions (health/verify). 当前工作流收敛到 pg-auto-pilot (pg-agent): 运行时 (pg-invoke-hook.py) 只消费 modules + environments, tracks/stages 作为历史编排段保留在 schema 中.",
   "type": "object",
   "required": ["schema", "modules", "environments", "tracks", "stages"],
   "additionalProperties": false,
@@ -47,82 +47,18 @@
 
     "verify_merge": {
       "type": "object",
-      "description": "pg-verify-and-merge SKILL 专用配置. 顶层段, SKILL 通过 pg-parse-config.py pg-verify-and-merge 子命令消费.",
+      "description": "已废弃 (pg-verify-and-merge SKILL 已移除). 合并请用手动 git merge.",
+      "deprecated": true,
       "additionalProperties": false,
-      "properties": {
-        "skip_tests_if_no_conflict": {
-          "type": "boolean",
-          "default": true,
-          "description": "merge 无冲突时是否跳过 Phase 2 全部测试. 默认 true 加速合并."
-        },
-        "stale_diff_gate": {
-          "type": "boolean",
-          "default": true,
-          "description": "是否启用 Diff Scope Gate: 合并后检测所有 staged 文件是否被特征分支改动过, 发现未改动却出现在合并结果的文件(stale 回溯)即中止, 防止旧版文件覆盖已合入 main 的功能."
-        },
-        "max_branch_staleness": {
-          "type": "integer",
-          "minimum": 1,
-          "default": 10,
-          "description": "特征分支落后 default_branch 的 commit 数阈值. 超过该值视为 stale, 触发自动 rebase(auto_rebase_stale=true)或中止(auto_rebase_stale=false)."
-        },
-        "auto_rebase_stale": {
-          "type": "boolean",
-          "default": true,
-          "description": "检测到特征分支 stale 时是否自动 rebase 到最新 default_branch 并 force-push. false 则中止并提示人工 rebase."
-        }
-      }
-    },
-    "flyway": {
-      "type": "object",
-      "description": "Flyway 数据库迁移路径. pg-verify-and-merge Phase 0 用此路径做 migration 重编号.",
-      "additionalProperties": false,
-      "properties": {
-        "migration_path": { "type": "string", "minLength": 1, "description": "Flyway migration 目录, 相对项目根" }
-      }
+      "properties": {}
     },
     "git": {
       "type": "object",
-      "description": "Git 仓库配置. pg-verify-and-merge Phase 1/3 用 default_branch 切到目标分支.",
+      "description": "Git 仓库配置. default_branch 用于合并/回归指引.",
       "additionalProperties": false,
       "properties": {
         "default_branch": { "type": "string", "minLength": 1, "description": "主分支名 (master / main)" }
       }
-    },
-    "propose": {
-      "type": "object",
-      "properties": {
-        "guidelines": { "type": "object", "additionalProperties": true },
-        "injections": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": { "type": "object" }
-          }
-        }
-      },
-      "additionalProperties": false
-    },
-    "build": {
-      "type": "object",
-      "properties": {
-        "injections": {
-          "type": "object",
-          "additionalProperties": {
-            "type": "array",
-            "items": {
-              "type": "object",
-              "properties": {
-                "position": { "type": "string", "enum": ["prepend", "append"] },
-                "template": { "type": "string" }
-              },
-              "required": ["position", "template"],
-              "additionalProperties": false
-            }
-          }
-        }
-      },
-      "additionalProperties": false
     },
     "regression": { "$ref": "#/definitions/regression" }
   },
@@ -193,7 +129,7 @@
 
     "environment": {
       "type": "object",
-      "description": "环境定义: role × host × instance topology + per-role lifecycle actions + cross-role orchestration + env-level lifecycle hooks (prepare_env / describe_env / clean_env). prepare_env 与 describe_env 独立: prepare_env 真实执行环境准备动作, describe_env 只读探测并产出 env-description.yaml 给 pg-propose / pg-fix-issue / pg-regression 作为 design/tasks/scenario 的输入.",
+      "description": "环境定义: role × host × instance topology + per-role lifecycle actions + cross-role orchestration + env-level lifecycle hooks (prepare_env / describe_env / clean_env). prepare_env 与 describe_env 独立: prepare_env 真实执行环境准备动作, describe_env 只读探测并产出 env-description.yaml 供 pg-auto-pilot (pg-agent) 作为实现计划/验证的输入.",
       "required": ["roles"],
       "additionalProperties": false,
       "properties": {
@@ -204,7 +140,7 @@
         },
         "describe_env": {
           "type": "object",
-          "description": "env 级描述脚本: 只读探测当前环境状态, 输出 env-description.yaml. 由 pg-propose / pg-fix-issue / pg-regression 在选定 environment 后调用. 不依赖 prepare_env (两脚本独立维护). 其产出描述的是 prepare_env 成功执行后该 env 的预期基线状态, 供 pg-define/pg-propose 判断 scenario 可验证性. 必须显式声明, 无默认值.",
+          "description": "env 级描述脚本: 只读探测当前环境状态, 输出 env-description.yaml. 由 pg-agent (pg-auto-pilot) 在选定 environment 后调用. 不依赖 prepare_env (两脚本独立维护). 其产出描述的是 prepare_env 成功执行后该 env 的预期基线状态. 必须显式声明, 无默认值.",
           "required": ["script"],
           "additionalProperties": false,
           "properties": {
@@ -320,7 +256,7 @@
         },
         "lint": {
           "type": "object",
-          "description": "Track-level lint override. pg-verify-and-merge 优先用此字段; 缺省时 fallback 到 tracks.<t>.modules[0] 的 module.lint. 字段值是 normalize 后的 executable_command 形态 (cmd + 可选 timeout_seconds).",
+          "description": "Track-level lint override. 缺省时 fallback 到 tracks.<t>.modules[0] 的 module.lint. 字段值是 normalize 后的 executable_command 形态 (cmd + 可选 timeout_seconds).",
           "additionalProperties": false,
           "required": ["cmd"],
           "properties": {
@@ -388,7 +324,7 @@
         "code_review_enabled": {
           "type": "boolean",
           "default": true,
-          "description": "v3.x: 关闭此 track 的 review 阶段 (静态代码审查). 由 pg-propose 派生到 tasks.md / execution-manifest.yaml; pg-build reducer 走通用 silent-skip 模式 (silently 标记 review phase 为 completed 并跳过). 默认 true."
+          "description": "v3.x: 关闭此 track 的 review 阶段 (静态代码审查). 历史编排段保留, 当前运行时不再消费. 默认 true."
         },
         "verify_enabled": {
           "type": "boolean",
@@ -403,7 +339,7 @@
         "on_conditions": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "本 track 是否启用的自然语言规则 (pg-propose 解析). 任一命中即启用 track (OR 语义). 字段缺省 = track 视为常驻 (永远生成 tasks.md 对应章节). 主要用于 type=simple 的 track, 避免每次变更都跑不必要的代码生成."
+          "description": "本 track 是否启用的自然语言规则. 任一命中即启用 track (OR 语义). 字段缺省 = track 视为常驻. 历史编排段保留, 当前运行时不再消费."
         },
         "description":  { "type": "string" }
       }
@@ -430,7 +366,7 @@
             "selection_rules": {
               "type": "array",
               "items": { "type": "string" },
-              "description": "per-change environment 选择规则 (自然语言). pg-propose 读取这些规则作为推理依据, 为每个 environment.required=true 的 stage 在 changes/<change>/environment.yaml 中选定一个 environment 名称 (或 skip). 同一架构下不同项目可在此处定义自己的选择规则."
+              "description": "per-change environment 选择规则 (自然语言). 历史编排段保留, 当前运行时不再消费."
             }
           }
         },
@@ -442,7 +378,7 @@
         "on_conditions": {
           "type": "array",
           "items": { "type": "string" },
-          "description": "本 stage 是否启用的自然语言规则 (pg-propose 解析). 任一命中即启用 stage (OR 语义). 字段缺省 = stage 视为常驻 (永远生成 tasks.md 章节). runner 不读此字段."
+          "description": "本 stage 是否启用的自然语言规则. 任一命中即启用 stage (OR 语义). 字段缺省 = stage 视为常驻. 历史编排段保留, 当前运行时不再消费."
         },
         "description": { "type": "string" }
       }
@@ -450,59 +386,9 @@
 
     "regression": {
       "type": "object",
-      "description": "pg-regression SKILL 专用配置. 完全显式声明 (无全局默认), 每个 suite 独立声明 env / required_roles / module / test_keys. 与 tracks / stages 解耦.",
-      "additionalProperties": false,
-      "properties": {
-        "suite": {
-          "type": "object",
-          "description": "测试套件定义. key = suite 名 (= 问题清单文件名后缀, 存放在 .pg/regression/<suite>.json). (注: pgs/regression/ 引用为历史命名)",
-          "minProperties": 1,
-          "additionalProperties": { "$ref": "#/definitions/regression_suite" }
-        }
-      }
-    },
-
-    "regression_suite": {
-      "type": "object",
-      "description": "单个测试套件: 跑哪个 module 的哪些 test_key, 用哪个 env, 启哪些 service role.",
-      "additionalProperties": false,
-      "required": ["module", "test_keys", "environment"],
-      "properties": {
-        "output_format": {
-          "type": "string",
-          "enum": ["maven-surefire", "playwright", "go-test", "shell"],
-          "description": "测试结果解析器格式. pg-verify-and-merge 优先用此字段; 缺省时根据 modules.<m>.language + test_key 推断 (e.g. java→maven-surefire, go→go-test, e2e→playwright)."
-        },
-        "module": {
-          "type": "string",
-          "minLength": 1,
-          "description": "被测 module id, 必须对应 modules 段已定义的 key. 通常与 suite 名同名 (frontend / backend / agent)."
-        },
-        "test_keys": {
-          "type": "array",
-          "minItems": 1,
-          "items": { "type": "string", "pattern": "^[a-z][a-z0-9_-]*$" },
-          "description": "要跑的 test 类型列表, 串行执行. 每项必须对应 modules.<m>.test.* 中已定义的 key. 运行时 (pg-parse-config / pg-regression) 会校验实际有效性."
-        },
-        "environment": {
-          "type": "object",
-          "description": "suite 级 env 声明. 必填, 不读全局.",
-          "additionalProperties": false,
-          "required": ["name", "required_roles"],
-          "properties": {
-            "name": {
-              "type": "string",
-              "minLength": 1,
-              "description": "目标 env name, 必须对应 environments 段已定义的 key."
-            },
-            "required_roles": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "跑此 suite 前需要启动的 role 列表. 单元测试可传空数组. 每项必须 ∈ environments.<env_name>.roles."
-            }
-          }
-        }
-      }
+      "description": "已废弃 (pg-regression SKILL 已移除). 保留定义仅为兼容历史 project.yaml.",
+      "deprecated": true,
+      "additionalProperties": true
     }
   }
 }

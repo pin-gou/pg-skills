@@ -22,14 +22,14 @@ _PG_INVOKE_HOOK = Path(__file__).resolve().parent.parent / "bin" / "pg-invoke-ho
 
 
 def _make_project_root(tmp: Path) -> Path:
-    """构造最小 project.yaml 含 2 role × 1 instance."""
+    """构造最小 project.yaml 含 2 role × 1 instance (roles 为 array-of-dict, v3.7+)."""
     pg_dir = tmp / ".pg"
     pg_dir.mkdir(exist_ok=True)
     (pg_dir / "project.yaml").write_text(
         "environments:\n"
         "  test-env:\n"
         "    roles:\n"
-        "      backend:\n"
+        "      - name: backend\n"
         "        instances:\n"
         "          - {name: backend-1, host: localhost}\n"
         "        actions:\n"
@@ -39,12 +39,12 @@ def _make_project_root(tmp: Path) -> Path:
         "            script: /tmp/fake-stop.sh\n"
         "          health_check:\n"
         "            script: /tmp/fake-health.sh\n"
-        "      frontend:\n"
+        "      - name: frontend\n"
         "        instances:\n"
         "          - {name: frontend-1, host: localhost}\n"
         "        actions:\n"
         "          start:\n"
-            "            script: /tmp/fake-start.sh\n"
+        "            script: /tmp/fake-start.sh\n"
         "          stop:\n"
         "            script: /tmp/fake-stop.sh\n"
     )
@@ -102,7 +102,7 @@ class TestRestartAllInstances(unittest.TestCase):
              "--session", "test",
              "--env", "test-env",
              "--action", "restart_all_instances",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 0, f"stderr={proc.stderr}")
@@ -133,7 +133,7 @@ class TestRestartAllInstances(unittest.TestCase):
              "--session", "test",
              "--env", "test-env",
              "--action", "restart_all_instances",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 1)
@@ -152,7 +152,7 @@ class TestRestartAllInstances(unittest.TestCase):
              "--action", "restart_all_instances",
              "--role", "backend",
              "--instance", "backend-1",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 1)
@@ -173,7 +173,7 @@ class TestRestartAllInstances(unittest.TestCase):
              "--session", "test",
              "--env", "test-env",
              "--action", "restart_all_instances",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 1)
@@ -191,7 +191,7 @@ class TestRestartAllInstances(unittest.TestCase):
              "--session", "test",
              "--env", "test-env",
              "--action", "restart_all_instances",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 0, f"stderr={proc.stderr}")
@@ -217,7 +217,7 @@ class TestRestartAllInstances(unittest.TestCase):
              "--session", "test",
              "--env", "test-env",
              "--action", "restart_all_instances",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 1)

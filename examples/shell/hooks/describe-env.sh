@@ -14,13 +14,13 @@
 #   environments.<env>.describe_env.script
 #
 # 由 pg-invoke-hook.py --action describe_env 调起 (PG_HOOK_TYPE=describe_env),
-# 调用方限定 (v7): pg-propose / pg-fix-issue / pg-regression / ad-hoc.
+# 调用方限定 (v8): pg-agent / ad-hoc.
 #
 # 注入 env vars (SSOT: src/runtime/spec/hook-env-vars.yaml v6+):
 #   - PG_RUN_CALLER     调用方身份
 #   - PG_PROJECT_ROOT   项目根
 #   - PG_SESSION_ID     session-id (per-SKILL 路由标识)
-#   - PG_CHANGE_ID      change-id (v7 起与 --session 等价; hook 仅消费作日志标识)
+#   - PG_CHANGE_ID      change-id (v8 起等于 --session; hook 仅消费作日志标识)
 #   - PG_ENV_NAME       目标 environment 名
 #   - PG_OUTPUT_PATH    env-description.yaml 输出绝对路径 (必须写入)
 #   - PG_HOOK_LOG_DIR   日志目录
@@ -37,9 +37,9 @@
 #       也不假设 prepare_env 已执行. 两脚本作者各自维护.
 #       (Q3 决策: 两脚本独立)
 #       语义契约: describe_env 的产出 (env-description.yaml) 描述的是
-#       prepare_env 成功执行后该环境的预期基线状态. pg-define/pg-propose 的
-#       LLM 应理解: pg-build 会先调 prepare_env, 确保成功后才执行 scenario
-#       track, 届时环境状态应与 env-description.yaml 一致.
+#       prepare_env 成功执行后该环境的预期基线状态. pg-auto-pilot 的
+#       LLM 应理解: 它会在选定环境后先 prepare_env, 确保成功后才启动实例
+#       并验证, 届时环境状态应与 env-description.yaml 一致.
 
 set -uo pipefail  # 注意: 不加 -e, 由 hook-helpers.sh trap ERR 控制
 

@@ -5,7 +5,7 @@ Reads a JSON command spec from stdin, injects consistent PG_* env vars
 (hook protocol), runs the command, handles timeout and logging,
 returns JSON result.
 
-Replaces: pg-regression/scripts/pg-run-command.py (merged here).
+Replaces: pg-regression/scripts/pg-run-command.py (merged here; skill 已移除, 实现保留).
 Scope:    env hooks (prepare_env / clean_env) + role actions
           (start / stop / logs / tail) only. Module hooks (build / lint /
           test.unit / test.integration) stay as raw `timeout N bash -c '<cmd>'`
@@ -116,7 +116,7 @@ def build_env(spec):
     Always-injected (project-controlled):
         PG_PROJECT_ROOT — project root (find_project_root)
         PG_SKILLS_PATH  — pg-skills subtree path (computed from __file__)
-        PG_RUN_CALLER   — caller identity (pg-build / pg-regression / pg-fix-issue / pg-quick-build / ad-hoc)
+        PG_RUN_CALLER   — caller identity (pg-agent / ad-hoc)
                           resolved from $PG_RUNNER_ORIGIN (legacy alias 仍兼容) or "ad-hoc".
 
     Spec-injected (caller-controlled):

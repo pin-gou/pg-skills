@@ -9,7 +9,7 @@
         :schema="strSchema1"
         @update:modelValue="v => store.setAt(['git', 'default_branch'], v)" />
     </div>
-    <p class="hint">pg-verify-and-merge Phase 1/3 用此字段切到目标分支. 通常是 master 或 main.</p>
+    <p class="hint">default_branch 用于合并/回归指引. 通常是 master 或 main.</p>
   </div>
 </template>
 

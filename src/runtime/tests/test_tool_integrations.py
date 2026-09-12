@@ -246,7 +246,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
             / "core"
             / "workflows"
             / "commands"
-            / "pg-3-build.md"
+            / "pg-0-auto-pilot.md"
         )
         source_before = source_command.read_bytes()
 
@@ -255,11 +255,9 @@ class TestMobileCoderIntegration(unittest.TestCase):
         )
 
         mobile = self.project / ".mobile-coder"
-        self.assertTrue((mobile / "commands" / "pg-3-build.md").is_file())
         self.assertTrue((mobile / "commands" / "pg-0-auto-pilot.md").is_file())
-        self.assertTrue((mobile / "agents" / "pg-build" / "test.md").is_file())
-        self.assertTrue((mobile / "skills" / "pg-build" / "SKILL.md").is_file())
         self.assertTrue((mobile / "skills" / "pg-auto-pilot" / "SKILL.md").is_file())
+        self.assertTrue((mobile / "agents" / "explore.md").is_file())
         self.assertTrue(
             (mobile / "pg-skills" / "src" / "runtime" / "bin" / "pg-invoke-hook.py").is_file()
         )
@@ -270,50 +268,22 @@ class TestMobileCoderIntegration(unittest.TestCase):
 
         self.assertFalse((mobile / "mobile-coder.json").exists())
 
-        build_template = (mobile / "commands" / "pg-3-build.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("name: 3-pg-build", build_template)
-        self.assertIn("agent: pg-manager", build_template)
-        self.assertIn("Treat runner action `done` as a transition", build_template)
-        self.assertIn("pg-verify-and-merge", build_template)
-
-        manager_prompt = (mobile / "agents" / "pg-manager.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("name: pg-manager", manager_prompt)
-        self.assertIn("mode: primary", manager_prompt)
-        self.assertIn("subagent: allow", manager_prompt)
-        self.assertIn("configured default branch", manager_prompt)
-        self.assertIn("business changes", manager_prompt)
-
-        test_agent = (mobile / "agents" / "pg-build" / "test.md").read_text(
-            encoding="utf-8"
-        )
-        self.assertIn("mode: subagent", test_agent)
-        self.assertIn("subagent: allow", test_agent)
-        scenario_agent = (
-            mobile / "agents" / "pg-build" / "scenario-execute.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("webfetch: allow", scenario_agent)
-        self.assertTrue(
-            (mobile / "skills" / "pg-verify-and-merge" / "SKILL.md").is_file()
-        )
-        build_command = (mobile / "commands" / "pg-3-build.md").read_text(encoding="utf-8")
-        self.assertIn(".mobile-coder/skills/pg-build", build_command)
-        self.assertNotIn(".opencode/", build_command)
         auto_pilot_command = (mobile / "commands" / "pg-0-auto-pilot.md").read_text(
             encoding="utf-8"
         )
         self.assertIn("0-pg-auto-pilot", auto_pilot_command)
         self.assertIn("`pg-auto-pilot` skill", auto_pilot_command)
-        browser_skill = (
-            mobile
-            / "skills"
-            / "pg-browser-testing-with-devtools"
-            / "SKILL.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("${CHROME_PATH}", browser_skill)
+
+        auto_pilot_skill = (mobile / "skills" / "pg-auto-pilot" / "SKILL.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("pg-auto-pilot", auto_pilot_skill)
+        self.assertIn("health_check", auto_pilot_skill)
+
+        explore_agent = (mobile / "agents" / "explore.md").read_text(
+            encoding="utf-8"
+        )
+        self.assertIn("mode: subagent", explore_agent)
         for root_name in ("commands", "agents", "skills"):
             for generated_file in (mobile / root_name).rglob("*"):
                 if generated_file.is_file() and generated_file.suffix.lower() in {
@@ -360,7 +330,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
         context = IntegrationContext(self.project, REPO_ROOT)
         integration.install(context)
 
-        command = self.project / ".mobile-coder" / "commands" / "pg-3-build.md"
+        command = self.project / ".mobile-coder" / "commands" / "pg-0-auto-pilot.md"
         command.write_text("custom command\n", encoding="utf-8")
         custom = self.project / ".mobile-coder" / "commands" / "my-command.md"
         custom.write_text("custom project command\n", encoding="utf-8")
@@ -385,7 +355,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
         # rendered surface path. The target does not exist on disk.
         mobile = self.project / ".mobile-coder"
         mobile.mkdir()
-        target = mobile / "commands" / "pg-3-build.md"
+        target = mobile / "commands" / "pg-0-auto-pilot.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.symlink_to("/nonexistent/path/that/does/not/exist")
 
@@ -403,7 +373,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
         # Re-plant a dangling symlink at a *different* rendered surface
         # path, then re-install, to capture the migration message in
         # result.messages.
-        second = mobile / "commands" / "pg-1-define.md"
+        second = mobile / "agents" / "explore.md"
         if second.exists() or second.is_symlink():
             second.unlink()
         second.symlink_to("/nonexistent/another-dangling-target")
@@ -425,7 +395,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
         # file content would otherwise satisfy the "below source_root" check.
         old_root = self.project / "_old_pg_skills" / "src" / "core" / "workflows"
         (old_root / "commands").mkdir(parents=True, exist_ok=True)
-        old_command = old_root / "commands" / "pg-3-build.md"
+        old_command = old_root / "commands" / "pg-0-auto-pilot.md"
         old_command.write_text(
             "stale content from a removed pg-skills checkout\n",
             encoding="utf-8",
@@ -433,7 +403,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
 
         mobile = self.project / ".mobile-coder"
         mobile.mkdir()
-        target = mobile / "commands" / "pg-3-build.md"
+        target = mobile / "commands" / "pg-0-auto-pilot.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.symlink_to(old_command)
 
@@ -461,7 +431,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
 
         mobile = self.project / ".mobile-coder"
         mobile.mkdir()
-        target = mobile / "commands" / "pg-3-build.md"
+        target = mobile / "commands" / "pg-0-auto-pilot.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.symlink_to(user_file)
 
@@ -474,7 +444,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
         # No "preserved" warning for this file (silent overwrite contract).
         self.assertFalse(
             any(
-                "pg-3-build.md" in warning
+                "pg-0-auto-pilot.md" in warning
                 for warning in result.warnings
                 if "preserved" in warning
             ),
@@ -499,8 +469,8 @@ class TestDeepSeekHarnessIntegration(unittest.TestCase):
         self._install()
 
         harness = self.project / ".dsh"
-        self.assertTrue((harness / "commands" / "pg-3-build.md").is_file())
-        self.assertTrue((harness / "agents" / "pg-manager.md").is_file())
+        self.assertTrue((harness / "commands" / "pg-0-auto-pilot.md").is_file())
+        self.assertTrue((harness / "agents" / "explore.md").is_file())
         self.assertTrue((harness / "bridge" / "index.ts").is_file())
         self.assertTrue((harness / "cordis.patch.yml").is_file())
         self.assertTrue((harness / "start-web.cmd").is_file())
@@ -510,7 +480,7 @@ class TestDeepSeekHarnessIntegration(unittest.TestCase):
         self.assertTrue((harness / "run-task.sh").is_file())
         self.assertTrue((harness / "run.sh").is_file())
         self.assertTrue(
-            (harness / "skills" / "pg-build" / "SKILL.md").is_file()
+            (harness / "skills" / "pg-auto-pilot" / "SKILL.md").is_file()
         )
         self.assertFalse((self.project / ".agents").exists())
         self.assertFalse((self.project / ".deepseek-harness").exists())
@@ -530,8 +500,7 @@ class TestDeepSeekHarnessIntegration(unittest.TestCase):
         self.assertIn("invocation.agent.followup", bridge)
         self.assertIn(r".join('\n\n')", bridge)
         self.assertNotIn("@deepseek-ai/", bridge)
-        self.assertIn('"name": "pg-1-define"', bridge)
-        self.assertIn('"name": "pg-3-build"', bridge)
+        self.assertIn('"name": "pg-0-auto-pilot"', bridge)
         self.assertIn(
             (
                 self.project / ".dsh" / "bridge" / "index.ts"
@@ -572,25 +541,24 @@ class TestDeepSeekHarnessIntegration(unittest.TestCase):
         self._install()
 
         command = (
-            self.project / ".dsh" / "commands" / "pg-3-build.md"
+            self.project / ".dsh" / "commands" / "pg-0-auto-pilot.md"
         ).read_text(encoding="utf-8")
-        manager = (
-            self.project / ".dsh" / "agents" / "pg-manager.md"
+        agent = (
+            self.project / ".dsh" / "agents" / "explore.md"
         ).read_text(encoding="utf-8")
         skill = (
-            self.project / ".dsh" / "skills" / "pg-build" / "SKILL.md"
+            self.project / ".dsh" / "skills" / "pg-auto-pilot" / "SKILL.md"
         ).read_text(encoding="utf-8")
 
-        for text in (command, manager, skill):
+        for text in (command, agent, skill):
             self.assertNotIn("{{pg:", text)
             self.assertIn("DeepSeek Harness execution contract", text)
             self.assertIn("ask_user_question", text)
             self.assertIn("todo_write", text)
             self.assertIn("native routed subagent tool", text)
             self.assertNotIn(".deepseek-harness", text)
-            self.assertIn("no longer auto-loads", text)
-        self.assertNotIn("subagent_type", manager)
-        self.assertNotIn("model: current", manager)
+            self.assertIn("do not auto-merge", text)
+        self.assertNotIn("subagent_type", agent)
 
     def test_rendered_pg0_auto_pilot_command_and_skill(self):
         self._install()
@@ -609,7 +577,7 @@ class TestDeepSeekHarnessIntegration(unittest.TestCase):
 
     def test_reinstall_preserves_modified_generated_and_custom_files(self):
         self._install()
-        command = self.project / ".dsh" / "commands" / "pg-3-build.md"
+        command = self.project / ".dsh" / "commands" / "pg-0-auto-pilot.md"
         command.write_text("custom command\n", encoding="utf-8")
         custom = self.project / ".dsh" / "commands" / "custom.md"
         custom.write_text("custom project command\n", encoding="utf-8")
@@ -688,57 +656,28 @@ class TestOpenCodeIntegration(unittest.TestCase):
     def test_install_preserves_opencode_workflow_semantics(self):
         self._install()
 
-        build_command = (
-            self.project / ".opencode" / "commands" / "pg-3-build.md"
-        ).read_text(encoding="utf-8")
-        manager = (
-            self.project / ".opencode" / "agents" / "pg-manager.md"
-        ).read_text(encoding="utf-8")
-
-        self.assertIn("使用 Skill tool 加载 `pg-build` skill", build_command)
-        self.assertIn("question tool", build_command)
-        self.assertIn("task: allow", manager)
-        self.assertIn("Skill tool", manager)
-        self.assertIn("model: pg-router/pg-associate", manager)
         auto_pilot_command = (
             self.project / ".opencode" / "commands" / "pg-0-auto-pilot.md"
         ).read_text(encoding="utf-8")
+        auto_pilot_skill = (
+            self.project / ".opencode" / "skills" / "pg-auto-pilot" / "SKILL.md"
+        ).read_text(encoding="utf-8")
+
+        self.assertIn("使用 Skill tool 加载 `pg-auto-pilot` skill", auto_pilot_command)
         self.assertIn("0-pg-auto-pilot", auto_pilot_command)
         self.assertIn("`pg-auto-pilot` skill", auto_pilot_command)
+        self.assertIn("pg-invoke-hook.py", auto_pilot_skill)
+        self.assertIn("health_check", auto_pilot_skill)
         self.assertNotIn("{{pg:", auto_pilot_command)
-        browser_skill = (
-            self.project
-            / ".opencode"
-            / "skills"
-            / "pg-browser-testing-with-devtools"
-            / "SKILL.md"
-        ).read_text(encoding="utf-8")
-        self.assertIn("{env:CHROME_PATH}", browser_skill)
-        self.assertNotIn("Mobile Coder", build_command)
-        self.assertNotIn("Mobile Coder", manager)
-        self.assertNotIn("{{pg:", build_command)
-        self.assertNotIn("{{pg:", manager)
-        for root_name in ("commands", "agents", "skills"):
-            for generated_file in (
-                self.project / ".opencode" / root_name
-            ).rglob("*"):
-                if generated_file.is_file() and generated_file.suffix.lower() in {
-                    ".md",
-                    ".py",
-                    ".sh",
-                    ".json",
-                    ".yaml",
-                    ".yml",
-                    ".html",
-                    ".txt",
-                }:
-                    generated_text = generated_file.read_text(encoding="utf-8")
-                    self.assertNotIn("{{pg:", generated_text, generated_file)
+        self.assertNotIn("{{pg:", auto_pilot_skill)
+        self.assertNotIn("Mobile Coder", auto_pilot_command)
+        self.assertNotIn("Mobile Coder", auto_pilot_skill)
+        self.assertNotIn("Mobile Coder", auto_pilot_skill)
 
     def test_reinstall_is_idempotent_and_preserves_custom_paths(self):
         self._install()
         build_command = (
-            self.project / ".opencode" / "commands" / "pg-3-build.md"
+            self.project / ".opencode" / "commands" / "pg-0-auto-pilot.md"
         )
         build_command.unlink()
         build_command.write_text("custom build command\n", encoding="utf-8")
@@ -753,7 +692,7 @@ class TestOpenCodeIntegration(unittest.TestCase):
         )
         self.assertEqual(custom.read_text(encoding="utf-8"), "project command\n")
         self.assertTrue(
-            any("pg-3-build.md" in warning for warning in result.warnings)
+            any("pg-0-auto-pilot.md" in warning for warning in result.warnings)
         )
 
     def test_legacy_pg_skills_link_is_migrated(self):
@@ -783,7 +722,7 @@ class TestOpenCodeIntegration(unittest.TestCase):
         crashes with FileNotFoundError because Python follows symlinks
         on open()."""
         self._install()
-        target = self.project / ".opencode" / "commands" / "pg-1-define.md"
+        target = self.project / ".opencode" / "commands" / "pg-0-auto-pilot.md"
         target.unlink()
         target.symlink_to("/nonexistent/path/that/does/not/exist")
 
@@ -806,11 +745,11 @@ class TestOpenCodeIntegration(unittest.TestCase):
         ``_is_below(source_root)`` check missed these and crashed on
         write."""
         self._install()
-        target = self.project / ".opencode" / "commands" / "pg-1-define.md"
+        target = self.project / ".opencode" / "commands" / "pg-0-auto-pilot.md"
 
         old_root = self.project / "_old_pg_skills" / "src" / "core" / "workflows"
         (old_root / "commands").mkdir(parents=True, exist_ok=True)
-        old_command = old_root / "commands" / "pg-1-define.md"
+        old_command = old_root / "commands" / "pg-0-auto-pilot.md"
         old_command.write_text(
             "stale content from a removed pg-skills checkout\n",
             encoding="utf-8",
@@ -836,7 +775,7 @@ class TestOpenCodeIntegration(unittest.TestCase):
         pg-skills). No ``preserved`` warning is emitted for the
         replacement itself."""
         self._install()
-        target = self.project / ".opencode" / "commands" / "pg-1-define.md"
+        target = self.project / ".opencode" / "commands" / "pg-0-auto-pilot.md"
 
         user_file = self.project / "user-content.md"
         user_file.write_text("# user content\n", encoding="utf-8")
@@ -853,7 +792,7 @@ class TestOpenCodeIntegration(unittest.TestCase):
         # Silent overwrite contract: no "preserved" warning for this file.
         self.assertFalse(
             any(
-                "pg-1-define.md" in warning
+                "pg-0-auto-pilot.md" in warning
                 for warning in result.warnings
                 if "preserved" in warning
             ),
@@ -916,9 +855,9 @@ class TestCli(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             mobile = project / ".mobile-coder"
             self.assertFalse((mobile / "mobile-coder.json").exists())
-            self.assertTrue((mobile / "commands" / "pg-3-build.md").is_file())
-            self.assertTrue((mobile / "agents" / "pg-manager.md").is_file())
-            self.assertTrue((mobile / "skills" / "pg-build" / "SKILL.md").is_file())
+            self.assertTrue((mobile / "commands" / "pg-0-auto-pilot.md").is_file())
+            self.assertTrue((mobile / "agents" / "explore.md").is_file())
+            self.assertTrue((mobile / "skills" / "pg-auto-pilot" / "SKILL.md").is_file())
             self.assertFalse((project / ".agents").exists())
             state = json.loads(
                 (project / ".pg" / "tool-integration.json").read_text(encoding="utf-8")
@@ -945,13 +884,13 @@ class TestCli(unittest.TestCase):
             )
             self.assertEqual(completed.returncode, 0, completed.stderr)
             self.assertTrue(
-                (project / ".dsh" / "skills" / "pg-build" / "SKILL.md").is_file()
+                (project / ".dsh" / "skills" / "pg-auto-pilot" / "SKILL.md").is_file()
             )
             self.assertTrue(
-                (project / ".dsh" / "commands" / "pg-3-build.md").is_file()
+                (project / ".dsh" / "commands" / "pg-0-auto-pilot.md").is_file()
             )
             self.assertTrue(
-                (project / ".dsh" / "agents" / "pg-manager.md").is_file()
+                (project / ".dsh" / "agents" / "explore.md").is_file()
             )
             self.assertTrue(
                 (project / ".dsh" / "bridge" / "index.ts").is_file()
@@ -966,6 +905,11 @@ class TestCli(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             project = Path(temp)
             (project / ".pg").mkdir()
+            skills_link = project / ".pg" / "skills"
+            try:
+                skills_link.symlink_to(REPO_ROOT)
+            except OSError:
+                pass
             completed = subprocess.run(
                 [
                     sys.executable,
@@ -986,13 +930,13 @@ class TestCli(unittest.TestCase):
             if sys.platform == "win32":
                 self.assertTrue((project / "pg-run.cmd").is_file())
             self.assertTrue(
-                (project / ".opencode" / "commands" / "pg-3-build.md").is_file()
+                (project / ".opencode" / "commands" / "pg-0-auto-pilot.md").is_file()
             )
             self.assertTrue(
-                (project / ".opencode" / "agents" / "pg-manager.md").is_file()
+                (project / ".opencode" / "agents" / "explore.md").is_file()
             )
             self.assertTrue(
-                (project / ".opencode" / "skills" / "pg-build").is_dir()
+                (project / ".opencode" / "skills" / "pg-auto-pilot").is_dir()
             )
             state = json.loads(
                 (project / ".pg" / "tool-integration.json").read_text(encoding="utf-8")

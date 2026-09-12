@@ -45,22 +45,21 @@ class TestLibCommon(unittest.TestCase):
         )
 
     def test_lib_common_has_all_skill_routes(self):
-        """三个 skill 路由必须都存在 (与运行时 helper 三处一致)."""
+        """caller 路由必须都存在 (与运行时 helper 三处一致)."""
         content = LIB_COMMON.read_text(encoding="utf-8")
-        for skill in ("pg-build", "pg-regression", "pg-fix-issue"):
+        for skill in ("pg-agent", "ad-hoc"):
             self.assertIn(
                 skill, content,
                 f"lib/common.sh 缺 {skill} 路由, "
-                f"运行时 helper (pg-invoke-hook.py:pg_log_dir_for_skill, "
-                f"pg-pipeline-runner.py:_pg_log_dir_for_skill) 会与本 SSOT 分叉",
+                f"运行时 helper (pg-invoke-hook.py:pg_log_dir_for_skill) "
+                f"会与本 SSOT 分叉",
             )
 
     def test_lib_common_has_per_skill_paths(self):
-        """三个 skill 各自的目录前缀必须存在."""
+        """caller 各自的目录前缀必须存在."""
         content = LIB_COMMON.read_text(encoding="utf-8")
-        self.assertIn(".pg/changes", content, "缺 .pg/changes 路径 (pg-build)")
-        self.assertIn(".pg/regression", content, "缺 .pg/regression 路径 (pg-regression)")
-        self.assertIn(".pg/fix-issue", content, "缺 .pg/fix-issue 路径 (pg-fix-issue)")
+        self.assertIn(".pg/agent", content, "缺 .pg/agent 路径 (pg-agent)")
+        self.assertIn(".pg/ad-hoc", content, "缺 .pg/ad-hoc 路径 (ad-hoc)")
 
     def test_lib_common_bash_syntax(self):
         result = subprocess.run(

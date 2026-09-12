@@ -614,89 +614,42 @@ tbody tr:nth-child(even) { background: var(--sl-color-gray-1); }
 
 <div class="subsection-card">
 <h2 style="margin-top:16px">使用 pg-skills 的日常体感</h2>
-<p>这是开发者用 pg-skills 跑一个 change（一次变更）时，时间线上大致发生的事：</p>
+<p>这是开发者用 pg-skills 跑一次任务（一个会话内可完成的实现任务）时，时间线上大致发生的事：</p>
 
 <ol style="padding-left:20px; margin:8px 0">
-  <li style="margin:12px 0"><strong><code>/1-pg-define</code> — 约 20 分钟</strong><br>
-  跟 AI 对齐"这次变更要做什么 / 不做什么 / 边界在哪"，并在真实环境里讨论验收方法<br>
-  <span style="font-size:13px;color:var(--muted)">产出：口头 scope summary + <code>define-summary.yaml</code> + <code>env-description.yaml</code>（需求边界 + 验收方法 + 环境引用）</span></li>
-
-  <li style="margin:12px 0"><strong><code>/2-pg-propose</code> — 自动</strong><br>
-  按定义生成完整的 spec 链路：
-  <ul style="font-size:13px;color:var(--muted);margin:4px 0">
-    <li><code>proposal.md</code> — 这次变更为什么做、做什么</li>
-    <li><code>design.md</code> — 技术方案</li>
-    <li><code>tasks.md</code> — 任务拆分（每个任务 2-5 分钟可完成粒度）</li>
-    <li><code>execution-manifest.yaml</code> — 本次执行的 SSOT</li>
-    <li><code>scenario-&lt;track&gt;.yaml</code> — 真实环境 E2E 场景定义</li>
-  </ul></li>
-
-  <li style="margin:12px 0"><strong><code>/3-pg-build</code> — 1-8 小时（取决于变更规模）· 无人工干预</strong><br>
-  编排器自动跑完：
-  <ul style="font-size:13px;color:var(--muted);margin:4px 0">
-    <li>自动准备环境（按 manifest 的 stage→env 映射调 hook）</li>
-    <li>自动写失败的测试（TDD 红 phase，确认真的失败后才进入实现）</li>
-    <li>自动写实现代码 · 自动做代码 Review</li>
-    <li>自动门控检查（gate + final-gate）</li>
-    <li>真实场景验证（Scenario 真起 dev/staging 环境跑端到端）</li>
-  </ul>
-  <span style="font-size:13px;color:var(--muted)">跑完直接产出一个可以验收的 change。</span></li>
+  <li style="margin:12px 0"><strong><code>/0-pg-auto-pilot</code> — 自动驾驶模式</strong><br>
+  与 AI 对齐任务范围，AI 自主规划并执行，但必须遵守两条要求：<br>
+  <span style="font-size:13px;color:var(--muted)">① 实施计划必须含"启动实例并验证编码结果是否达到预期"的步骤；② 执行计划前，先让用户选定环境并确认是否需要准备环境。</span></li>
 
   <li style="margin:12px 0"><strong>你验收 — 几分钟</strong><br>
-  <span style="font-size:13px;color:var(--muted)">大多数情况下（约 80%）一次就达到预期，直接合并；<br>
-  剩余约 20% 的情况，AI 的产出跟预期有偏差——你用 vibecoding（人机对话微调）做细微调整即可达到预期。</span></li>
+  <span style="font-size:13px;color:var(--muted)">AI 在真实环境中启动实例并验证结果，达不到预期就修复 → 重验，直到通过或上报你。</span></li>
+
+  <li style="margin:12px 0"><strong>合并 — 手动</strong><br>
+  <span style="font-size:13px;color:var(--muted)">合并到 default 分支改用手动 <code>git merge</code>。</span></li>
 </ol>
 
 <div class="card" style="margin-top:8px">
-  <p style="margin:0"><strong>长期迭代回路</strong>：跑完一轮后，产品上线不是终点。pg-skills 还有两条自动回路：</p>
-  <ul style="margin:8px 0 0; padding-left:20px">
-    <li><strong>自动回归</strong>：<code>/4-pg-regression &lt;suite&gt;</code> 选定测试套件，自动初始化环境跑回归，对失败的测试自动修复脚本（不创建 PR），对失败的生产代码自动修复并创建 PR 给你审；</li>
-    <li><strong>Bug 修复</strong>：<code>/5-pg-fix-issue</code> 拿到 bug 描述后，按 propose → build 同款流程产出修复 patch。</li>
-  </ul>
-  <p style="margin:8px 0 0"><strong>开发者要做的两件事</strong>：</p>
-  <ol style="margin:4px 0 0; padding-left:20px">
-    <li><strong>定义每个 change 的边界</strong>（用 <code>/1-pg-define</code> 想清楚要做什么 / 不做什么）；</li>
-    <li><strong>验收每个 change 的结果</strong>（看 build 产物是否符合预期，不符合就 vibecoding 微调；之后审 <code>/4-pg-regression</code> 提的 PR 即可）。</li>
-  </ol>
-  <p style="margin-top:8px; font-style:italic; color:var(--primary)">中间那 1-8 小时的实现 + 验证过程，全部由 pg-skills 在事件溯源 pipeline 引擎上跑完——<strong>人不参与</strong>。</p>
+  <p style="margin:0"><strong>范围说明</strong>：pg-define / pg-propose / pg-build / pg-regression / pg-fix-issue / pg-archive / pg-verify-and-merge 等 SKILL 及对应 <code>/1-pg-define</code> ~ <code>/6-pg-archive</code> 命令已移除。<code>pg-auto-pilot</code> 是当前唯一保留的 SKILL。</p>
 </div>
 </div>
 
 <h2>1.5 AI 在每一步的角色</h2>
 
-<p>「品质，长在结构里」——这里「<strong>写出</strong>」二字要分开看：</p>
+<p>「品质，长在结构里」——当前唯一工作流 <code>/0-pg-auto-pilot</code>（自动驾驶模式）：</p>
 
 <table>
   <tr><th>流程</th><th>AI 角色</th><th>是否署名</th><th>谁兜底</th></tr>
   <tr>
-    <td><strong>定界</strong> <code>/1-pg-define</code></td>
-    <td><span class="tag tag-green">半结构化"准出图员"</span>：扫 repo、把模糊表达收成 in/out of scope</td>
-    <td>AI 决策部分：辅助澄清；最终签名 = 人</td>
-    <td>人用 <code>question</code> 工具三选一</td>
+    <td><strong>自动驾驶</strong> <code>/0-pg-auto-pilot</code></td>
+    <td><span class="tag tag-green">自主编排</span>：不限定如何规划与执行；计划必须含"启动实例并验证结果"，执行前让用户选定环境并确认准备方式</td>
+    <td>AI 全程规划与执行；每段实现都通过 hooks 协议重启实例并验证</td>
+    <td>真实环境 build/lint/test、health_check、运行时检查；失败 → 修复 → 重验</td>
   </tr>
   <tr>
-    <td><strong>提案</strong> <code>/2-pg-propose</code></td>
-    <td><span class="tag tag-blue">被规训的"出图员"</span>：填 proposal / design / tasks 骨架 + 出 execution-manifest.yaml</td>
-    <td>AI 全程写；产物必含 <code>proposal / design / tasks / execution-manifest.yaml</code></td>
-    <td>5 项 common decisions 已固化；产物生成后直接进入 build</td>
-  </tr>
-  <tr>
-    <td><strong>构建</strong> <code>/3-pg-build</code></td>
-    <td><span class="tag tag-purple">受约束的"代码工人"</span>：被 TDRVG + stages × tracks pipeline 约束的 sub-agent 派遣</td>
-    <td>每段 commit 写明 dispatch 来源（dispatch file）</td>
-    <td>events_log 全留痕；<code>replay</code> 可重放；review cycle 独立计数</td>
-  </tr>
-  <tr>
-    <td><strong>回归</strong> <code>/4-pg-regression</code></td>
-    <td><span class="tag tag-yellow">测试修缮工（带边界）</span>：fix-test 只修 A/B 类（断言漂移 / 选择器过期），C 类（生产 bug）不碰</td>
-    <td>改的就 commit；不改的就拉问题清单走 fix-issue</td>
-    <td><code>pg-check-fix-test-boundary.py</code> 二次守门</td>
-  </tr>
-  <tr>
-    <td><strong>修复</strong> <code>/5-pg-fix-issue</code></td>
-    <td><span class="tag tag-red">受环境探测约束的"诊断员"</span>：describe_env 探测环境 → 诊断根因 → 展示修复方案 → 用户确认 → 改代码</td>
-    <td>每个动作落 commit；验证失败的 commit 标 [ ] 待继续</td>
-    <td>真实环境 API / 日志 / 单测三路验证 → 收尾</td>
+    <td><strong>合并</strong> 手动 <code>git merge</code></td>
+    <td>不负责自动合并；合并到 default 分支由用户手动执行</td>
+    <td>用户手动操作</td>
+    <td>用户确认</td>
   </tr>
 </table>
 
@@ -779,45 +732,23 @@ tbody tr:nth-child(even) { background: var(--sl-color-gray-1); }
 <h2>2.2 项目目录结构</h2>
 <pre>
 .pg/
-├── project.yaml                  # 统一配置 SSOT（六段结构）
-├── changes/                      # pg-build caller 路由：变更提案与过程产物
-│   ├── add-login-page/           # 某次变更
-│   │   ├── proposal.md           # 做什么、为什么做
-│   │   ├── design.md             # 怎么做、验证标准
-│   │   ├── tasks.md              # stages × tracks  任务列表（含可选 review sub）
-│   │   ├── execution-manifest.yaml  # 按 tasks.md 结构化生成的 pipeline 编排清单（runner 读取）；含 stages[i].environment 字段
-│   │   └── 2-build/              # pipeline 过程产物（pipeline.events / 报告 / gate-score）
-│   └── archive/                  # 已完成变更归档
-├── regression/                   # pg-regression caller 路由：回归测试与问题清单
-│   ├── frontend.json             # 生产代码问题清单（SSOT, 跨 run 累积）
-│   ├── frontend-<date>-NN/       # 单次 run 目录（fix-issues / fix-test 留痕 + 报告）
-│   └── ...
-├── fix-issue/                    # pg-fix-issue caller 路由：bug 修复会话
-│   └── fix-<YYYY-MM-DD>-<slug>/  # 每次修复一个独立目录
+├── project.yaml                  # 统一配置 SSOT（modules / environments / tracks / stages）
+├── agent/                        # pg-agent caller 路由：LLM agent 会话日志与产物
+│   └── 2026-09-12-fix-login/     # 一次任务一个独立目录（session = &lt;iso-date&gt;-&lt;keyword&gt;）
 │       └── dev-local/logs/       # hook 日志与产物
 ├── ad-hoc/                       # ad-hoc caller 路由：用户/agent 直接调 hook
 │   └── auto-<date>-<pid>/        # 留空 --session 时自动生成
-├── cronjobs/                     # 定时任务：crontab + opencode run 驱动批量任务
-│   ├── run-opencode.sh           # 入口脚本（stash → master → opencode run → pop）
-│   ├── prompt.txt                # 待执行提示词（git ignored）
-│   └── cron.log                  # 定时执行日志
 ├── hooks/                        # 环境生命周期脚本（仅 environments 维度）
 │   ├── role-backend-start.sh
 │   ├── role-agent-start.sh
 │   ├── env-dev-local-prepare.sh
 │   └── ...
-├── code-review/                  # review phase 的检查项源头（由 pg-init-project Phase 2.5 生成）
-│   ├── code-review.yaml          # profile 索引（default + 语言 profile 的 Union）
-│   ├── default/                  # 兜底 profile（含 design_alignment / scope_creep 等）
-│   ├── java-spring/              # java/kotlin/scala 自动派发
-│   ├── go/                       # go 自动派发
-│   └── vue3/                     # ts/js/vue 自动派发
 ├── context/                      # 项目上下文快照（AGENTS.md 提取后缓存）
 └── skills/                       # pg-skills 嵌入（git subtree），pg init 在 .opencode/ 创建 symlink
 </pre>
 
 <div class="info-card card">
-  <p style="margin:0"><strong>caller × session 双维度路由</strong>：上面 <code>changes/</code> / <code>regression/</code> / <code>fix-issue/</code> / <code>ad-hoc/</code> 四个目录由 <code>PG_RUN_CALLER</code> 决定一级目录，由 <code>PG_RUN_SESSION</code> 决定二级目录。runner 自动按调用方身份把日志、PID、result.json 写到对应路径，无需手动指定。<code>cronjobs/</code> 不属于 hook 协议路由，由项目自管；典型场景是 crontab 触发 <code>pg-regression</code> 或 <code>pg-propose</code> 批量任务。</p>
+  <p style="margin:0"><strong>caller × session 双维度路由</strong>：上面 <code>agent/</code> / <code>ad-hoc/</code> 两个目录由 <code>PG_RUN_CALLER</code> 决定一级目录，由 <code>PG_RUN_SESSION</code> 决定二级目录。runner 自动按调用方身份把日志、PID、result.json 写到对应路径，无需手动指定。<code>changes/</code> / <code>regression/</code> / <code>fix-issue/</code> 等目录已随对应 SKILL 移除。</p>
 </div>
 
 <h2>2.3 四层结构 —— 品质从哪里来</h2>
@@ -857,7 +788,7 @@ tbody tr:nth-child(even) { background: var(--sl-color-gray-1); }
 <p><strong>品质，长在结构里</strong>——就是 SEA 三大支柱，被四层结构层层收紧的结果。</p>
 
 <h2>2.4 AGENTS.md 的角色</h2>
-<p>AGENTS.md 是 AI 的"入职手册"——包含项目的技术栈、包结构、数据库约定、编码风格、路径规范等。pg-propose 直接通读所有 AGENTS.md 提取上下文作为 LLM 约束，不生成中间缓存文件。</p>
+<p>AGENTS.md 是 AI 的"入职手册"——包含项目的技术栈、包结构、数据库约定、编码风格、路径规范等。pg-auto-pilot 直接通读 AGENTS.md 提取上下文作为 LLM 约束。</p>
 </div>
 
 <!-- ============================================================ -->
@@ -876,8 +807,8 @@ tbody tr:nth-child(even) { background: var(--sl-color-gray-1); }
     或 <a href="https://github.com/PinGou/9router">9router</a> 等工具进行模型路由选择。</li>
   <li><strong>git subtree 拉入 pg-skills</strong>（含 <code>.pg/skills/examples/code-review/</code> 模板：default / java-spring / go / vue3 / security 五个 profile）</li>
   <li><strong>pg init 生成骨架 + symlink</strong></li>
-  <li><strong>重启 opencode</strong>（加载 slash commands + skills + sub-agents，含新 <code>pg-build/review</code> / <code>pg-build/fix-review</code>）</li>
-  <li><strong>在 opencode 中触发 pg-init-project skill</strong>（AI 自动扫描仓库，生成 project.yaml + hooks + .pg/code-review/）</li>
+  <li><strong>重启 opencode</strong>（加载 slash commands + skills + sub-agents）</li>
+  <li><strong>运行 <code>/0-pg-auto-pilot</code></strong>（自动驾驶模式：自主规划、启动实例并验证、执行前选定环境）</li>
 </ol>
 </div>
 
@@ -896,7 +827,7 @@ git subtree add --prefix=.pg/skills pg-skills v0.9.4 --squash
 <span style="color:#94a3b8"># ③ 跑 pg init 创建 .pg/ 骨架 + .opencode/ symlink</span>
 python3 .pg/skills/src/runtime/bin/pg init
 
-<span style="color:#94a3b8"># ④ 重启 opencode 后，在 opencode 中执行 pg-init-project</span>
+<span style="color:#94a3b8"># ④ 重启 opencode 后，运行 /0-pg-auto-pilot</span>
 <span style="color:#94a3b8">#    （Phase 1 扫仓库 → Phase 2 写 .pg/project.yaml → Phase 2.5 按 language 派发 review profile → Phase 3 写 .pg/hooks/ → Phase 4 doctor 校验）</span>
 <span style="color:#94a3b8"># ⑤ 验证</span>
 python3 .pg/skills/src/runtime/bin/pg doctor
@@ -970,7 +901,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
   <text x="36" y="375" font-size="11" fill="#64748b">补充字段：verify_merge / flyway.migration_path / git.default_branch / build_rules</text>
 
   <rect x="36" y="385" width="648" height="30" rx="6" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="48" y="404" font-size="11" font-family="monospace" fill="#2563eb">python3 .pg/skills/src/opencode/scripts/pg-parse-config.py &lt;workflow&gt;</text>
+  <text x="48" y="404" font-size="11" font-family="monospace" fill="#2563eb">python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-agent</text>
   <text x="475" y="404" font-size="11" fill="#64748b">exit code ≠ 0 → 修复 project.yaml</text>
 </svg>
 </div>
@@ -1110,7 +1041,7 @@ DURATION=$(($(date +%s) - START))
   <tr><th>变量</th><th>说明</th><th>适用范围</th></tr>
   <tr><td><code>PG_SKILLS_PATH</code></td><td>pg-skills 根路径</td><td>全部</td></tr>
   <tr><td><code>PG_PROJECT_ROOT</code></td><td>项目根路径</td><td>全部</td></tr>
-  <tr><td><code>PG_RUN_CALLER</code></td><td>调用方身份（pg-build / pg-regression / pg-fix-issue / pg-agent / ad-hoc）</td><td>全部</td></tr>
+  <tr><td><code>PG_RUN_CALLER</code></td><td>调用方身份（pg-agent / ad-hoc）</td><td>全部</td></tr>
   <tr><td><code>PG_RUN_SESSION</code></td><td>session 名（与 caller 正交）</td><td>全部</td></tr>
   <tr><td><code>PG_HOOK_LOG_DIR</code></td><td>hook 派生的业务日志目录（预拼绝对路径）</td><td>全部</td></tr>
   <tr><td><code>PG_LOG_FILE</code></td><td>hook 自身 stdout/stderr 目标路径</td><td>全部</td></tr>
@@ -1133,21 +1064,17 @@ DURATION=$(($(date +%s) - START))
 <p><code>pg-invoke-hook.py</code> 是底层 CLI，LLM 和 runner <strong>不直接调用 hook 脚本</strong>，通过它统一调度：</p>
 
 <pre>
-<span style="color:#94a3b8"># Agent / SKILL 内部调用（用户请用 ./pg-run）</span>
+<span style="color:#94a3b8"># pg-agent（pg-auto-pilot）内部调用（用户请用 ./pg-run）</span>
 python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --session &lt;session-name&gt; \
+  --session 2026-09-12-fix-login \
   --env dev-local \
   --role backend \
   --instance backend-1 \
   --action start \
-  --caller pg-build
+  --caller pg-agent
 
 <span style="color:#94a3b8"># 用户手工查看日志</span>
 ./pg-run --env dev-local --role backend --instance backend-1 --action logs --tail-lines 20
-
-<span style="color:#94a3b8"># 查询环境准备状态（agent 用）</span>
-python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py status \
-  --session &lt;session-name&gt;
 </pre>
 
 <h2>错误 Category 枚举（SSOT）</h2>
@@ -1215,14 +1142,12 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py status \
 
 <h2>演示 4：读取 workflow config</h2>
 <pre>
-<span style="color:#94a3b8"># 查看 pg-propose 需要读取的配置段</span>
-python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-propose
+<span style="color:#94a3b8"># 查看 pg-agent（pg-auto-pilot 的 SSOT 查询入口）需要读取的配置段</span>
+python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-agent
 
-<span style="color:#94a3b8"># 查看 pg-build 需要读取的配置段</span>
-python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-build
-
-<span style="color:#94a3b8"># 查看 pg-fix-issue 需要读取的配置段</span>
-python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
+<span style="color:#94a3b8"># 细粒度取值</span>
+python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-module-build backend
+python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-env dev-local
 </pre>
 
 <div class="info-card card">
@@ -1236,25 +1161,18 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 <h1>3.5 新项目接入 Checklist</h1>
 
 <div class="tip-card card">
-  <p style="margin:0">接入流程的前 3 步（<code>git subtree</code> → <code>pg init</code> → <code>pg-init-project</code>）会<strong>自动生成 project.yaml、hooks 骨架、<code>.pg/code-review/</code>（Phase 2.5 按 language 派发）</strong>。但 AI 推断可能与实际项目有偏差，需要人工核对产物准确性，并通过 <code>./pg-run</code> 对所有 hooks 做端到端测试验证。</p>
+  <p style="margin:0">接入流程（<code>git subtree</code> → <code>pg init</code> → <code>/0-pg-auto-pilot</code>）会<strong>自动生成 project.yaml 与 hooks 骨架</strong>。但 AI 推断可能与实际项目有偏差，需要人工核对产物准确性，并通过 <code>./pg-run</code> 对所有 hooks 做端到端测试验证。</p>
 </div>
 
 <div class="card">
 <ul class="checklist">
   <li><input type="checkbox"> <code>git subtree</code> 拉入 pg-skills → <code>.pg/skills/</code>（含 <code>examples/code-review/</code> 模板目录）</li>
   <li><input type="checkbox"> <code>pg init</code> 生成骨架 + symlink</li>
-  <li><input type="checkbox"> 在 opencode 中触发 <code>pg-init-project</code> skill（自动生成 project.yaml + hooks 模板 + .pg/code-review/）</li>
-  <li style="margin-top:12px"><strong>人工核对自动产物</strong></li>
-  <li><input type="checkbox" style="margin-left:24px"> modules：每个模块的根目录 + build/lint/test 命令是否准确</li>
-  <li><input type="checkbox" style="margin-left:24px"> modules.<m>.code_review_profiles 是否按敏感度追加（java/go/proto 默认含 security；ts/py 默认 standard；shell 默认 none）</li>
-  <li><input type="checkbox" style="margin-left:24px"> environments：环境列表、role 列表、actions 是否完整</li>
-  <li><input type="checkbox" style="margin-left:24px"> tracks / stages：编排是否符合项目结构；<code>tracks.&lt;m&gt;.code_review_enabled</code> 是否需要为鉴权/协议模块开启</li>
-  <li><input type="checkbox" style="margin-left:24px"> fix_issue / regression：参数是否合理</li>
-  <li><input type="checkbox" style="margin-left:24px"> 每个 role 的 start / stop / logs 脚本：业务命令是否准确（<code>CMD_PLACEHOLDER</code> 是否替换）</li>
-  <li><input type="checkbox" style="margin-left:24px"> 每个 env 的 prepare_env / clean_env 脚本：环境准备/清理逻辑是否对</li>
-  <li><input type="checkbox" style="margin-left:24px"> lib/common.sh 是否复制到 <code>.pg/hooks/lib/</code></li>
-  <li><input type="checkbox" style="margin-left:24px"> <code>.pg/code-review/</code> 是否按 language 派发（java → java-spring, go → go, ts → vue3）；security profile <strong>未</strong>自动拷（opt-in）</li>
-  <li><input type="checkbox" style="margin-left:24px"> （可选）声明 <code>actions.health_check</code> → <code>pg-init-project</code> 自动生成 health_check hook</li>
+  <li><input type="checkbox"> <code>pg doctor</code> 校验（含 <code>hooks/lib/common.sh</code> 检查）</li>
+  <li><input type="checkbox"> 核对 project.yaml：modules / environments / tracks / stages 是否准确</li>
+  <li><input type="checkbox"> 每个 role 的 start / stop / logs 脚本：业务命令是否准确</li>
+  <li><input type="checkbox"> 每个 env 的 prepare_env / clean_env 脚本：环境准备/清理逻辑是否对</li>
+  <li><input type="checkbox"> lib/common.sh 是否复制到 <code>.pg/hooks/lib/</code></li>
   <li style="margin-top:12px"><strong>通过 pg-run 验证 hooks</strong></li>
   <li><input type="checkbox" style="margin-left:24px"> <code>pg doctor</code> 校验（含 <code>hooks/lib/common.sh</code> 检查）</li>
   <li><input type="checkbox" style="margin-left:24px"> 人工 grep 验证 <code>.pg/code-review/&lt;language&gt;/</code> 检查项细则文件存在（doctor 不覆盖）</li>
@@ -1275,12 +1193,12 @@ python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-fix-issue
 
 <!-- ============================================================ -->
 <!-- 4.1 概述 -->
-<div id="sec4-overview" class="section">
+ <div id="sec4-overview" class="section">
 <h1>4. 日常开发工作流</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 我们让每一段都先出图再施工。这一章是品构的核心流：定界（Define）→ 提案（Propose）→ 构建（Build）→ 评审（Review）→ 合并（Merge）。</p>
+<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 当前唯一工作流是 <code>/0-pg-auto-pilot</code>（自动驾驶模式）。本章 4.2~4.5 描述的 define/propose/build/regression/fix-issue 流程及其 <code>/1-pg-define</code> ~ <code>/6-pg-archive</code> 命令<strong>已移除</strong>，仅保留为历史说明。</p>
 
 <div class="tip-card card">
-<p><strong>本章结构</strong>：4.1 全景路线图 → 4.2 定界 → 4.3 提案 → 4.4 构建。每节都讲核心机制 + 实操要点。</p>
+<p><strong>当前使用方式</strong>：运行 <code>/0-pg-auto-pilot</code>，AI 自主规划与执行；实施计划必须包含"启动实例并验证编码结果是否达到预期"的步骤，执行计划前让用户选定环境并确认环境准备方式。合并到 default 分支改用手动 <code>git merge</code>。</p>
 </div>
 
 <h2>4.1 概述 —— 全景路线图</h2>
@@ -1725,7 +1643,7 @@ regression:
 python3 .pg/skills/src/runtime/bin/pg doctor
 
 <span style="color:#94a3b8"># 读取 workflow config</span>
-python3 .pg/skills/src/opencode/scripts/pg-parse-config.py pg-build
+python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-agent
 
 <span style="color:#94a3b8"># 查看 propose 参考文档</span>
 ls .opencode/skills/pg-propose/references/
@@ -1914,7 +1832,7 @@ pg doctor
 <h2>关键路径</h2>
 <pre>
 配置 SSOT：        .pg/project.yaml
-解读命令：         python3 .pg/skills/src/opencode/scripts/pg-parse-config.py &lt;workflow&gt;
+解读命令：         python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-agent
 检查接入：         python3 .pg/skills/src/runtime/bin/pg doctor
 升级：             pg upgrade
 操作 hooks（用户）：   ./pg-run --env &lt;E&gt; --role &lt;R&gt; --instance &lt;I&gt; --action &lt;A&gt;

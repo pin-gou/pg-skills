@@ -68,7 +68,7 @@ const typeSchema: JSONSchema7 = {
 }
 const agentSchema: JSONSchema7 = {
   type: 'string',
-  enum: ['pg-build/dev', 'pg-build/test', 'pg-build/verify', 'pg-build/gate', 'pg-build/fix', 'pg-build/fix-gate', 'pg-fix-issue/executor'],
+  enum: ['pg-auto-pilot'],
   description: '注入到哪个 agent',
 }
 const positionSchema: JSONSchema7 = {
@@ -90,7 +90,7 @@ function updateField(idx: number, key: string, value: unknown) {
 
 function addItem() {
   const cur = items.value.map((it: any) => ({ ...it }))
-  cur.push({ id: `${props.sectionKey}_new`, type: 'inject-prompt', target_agent: 'pg-build/dev', position: 'prepend', template: '' })
+  cur.push({ id: `${props.sectionKey}_new`, type: 'inject-prompt', target_agent: 'pg-auto-pilot', position: 'prepend', template: '' })
   store.setAt([props.sectionKey], cur)
 }
 

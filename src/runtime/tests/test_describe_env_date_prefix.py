@@ -1,8 +1,8 @@
-"""Tests for pg-invoke-hook.py describe_env 日期前缀剥离 (v1.1 修复).
+"""Tests for pg-invoke-hook.py describe_env 路由 (v8: pg-agent / ad-hoc).
 
-session 格式 <iso-date>-<change-id> (如 2026-08-04-foo), describe_env 的
-产物路径与日志目录必须剥离日期前缀, 落到 .pg/changes/<change-id>/ 下,
-与 pg-propose 产物目录对齐 (SKILL.md 阶段 1.6 约定产物路径不带日期).
+describe_env 的产物路径与日志目录按 caller 路由:
+  pg-agent -> .pg/agent/<session>/env-description.yaml + .pg/agent/<session>/<env>-logs
+  ad-hoc   -> .pg/ad-hoc/<session>/env-description.yaml + .pg/ad-hoc/<session>/<env>-logs
 """
 
 import importlib.util
@@ -23,14 +23,14 @@ def load_invoke_hook() -> types.ModuleType:
     return mod
 
 
-class DescribeEnvDatePrefixStripTest(unittest.TestCase):
+class DescribeEnvRoutingTest(unittest.TestCase):
     def setUp(self):
         self.mod = load_invoke_hook()
         self.tmp = tempfile.TemporaryDirectory()
         self.addCleanup(self.tmp.cleanup)
         self.project_root = Path(self.tmp.name)
 
-    def _spec(self, session, caller="pg-propose"):
+    def _spec(self, session, caller="pg-agent"):
         act_cfg = {"script": ".pg/hooks/env-dev-local-describe.sh", "timeout_seconds": 60}
         return self.mod.build_describe_env_spec(
             session=session,
@@ -41,52 +41,48 @@ class DescribeEnvDatePrefixStripTest(unittest.TestCase):
             caller=caller,
         )
 
-    def test_output_path_strips_date_prefix(self):
-        spec = self._spec("2026-08-04-my-change")
+    def test_pg_agent_output_path(self):
+        spec = self._spec("2026-09-12-my-task")
         self.assertTrue(
             spec["output_path"].endswith(
-                ".pg/changes/my-change/env-description.yaml"
+                ".pg/agent/2026-09-12-my-task/env-description.yaml"
             ),
-            f"output_path 应剥离日期前缀: {spec['output_path']}",
+            f"output_path 应路由到 .pg/agent/: {spec['output_path']}",
         )
-        self.assertNotIn("2026-08-04-my-change", spec["output_path"])
 
-    def test_output_path_without_date_prefix_unchanged(self):
-        spec = self._spec("my-change")
+    def test_pg_agent_change_id_equals_session(self):
+        spec = self._spec("2026-09-12-my-task")
+        self.assertEqual(spec["change_id"], "2026-09-12-my-task")
+
+    def test_pg_agent_log_dir(self):
+        spec = self._spec("2026-09-12-my-task")
+        self.assertTrue(
+            spec["hook_log_dir"].endswith(
+                ".pg/agent/2026-09-12-my-task/dev-local-logs"
+            ),
+            f"日志目录应路由到 .pg/agent/: {spec['hook_log_dir']}",
+        )
+
+    def test_ad_hoc_output_path(self):
+        spec = self._spec("my-session", caller="ad-hoc")
         self.assertTrue(
             spec["output_path"].endswith(
-                ".pg/changes/my-change/env-description.yaml"
+                ".pg/ad-hoc/my-session/env-description.yaml"
             ),
-            f"无日期前缀的 session 应保持原样: {spec['output_path']}",
+            f"output_path 应路由到 .pg/ad-hoc/: {spec['output_path']}",
         )
 
-    def test_change_id_field_strips_date_prefix(self):
-        spec = self._spec("2026-08-04-my-change")
-        self.assertEqual(spec["change_id"], "my-change")
-
-    def test_session_field_keeps_original(self):
-        # session 字段用于日志路由键, 保留原值
-        spec = self._spec("2026-08-04-my-change")
-        self.assertEqual(spec["session"], "2026-08-04-my-change")
-
-    def test_log_dir_strips_date_prefix_for_propose(self):
-        spec = self._spec("2026-08-04-my-change")
-        self.assertIn(
-            ".pg/changes/my-change/2-propose/dev-local-logs",
-            spec["hook_log_dir"],
-            f"日志目录应剥离日期前缀: {spec['hook_log_dir']}",
-        )
-
-    def test_non_date_dash_session_not_stripped(self):
-        # 形如 foo-bar-baz 但无日期前缀的 session 不应被误剥离
-        spec = self._spec("foo-bar-baz")
-        self.assertTrue(spec["output_path"].endswith("foo-bar-baz/env-description.yaml"))
-
-    def test_log_dir_no_date_prefix_for_plain_session(self):
+    def test_log_dir_ad_hoc(self):
         log_dir = self.mod.pg_log_dir_for_skill(
-            "pg-propose", "plain-change", "dev-local", self.project_root
+            "ad-hoc", "my-session", "dev-local", self.project_root
         )
-        self.assertTrue(str(log_dir).endswith(".pg/changes/plain-change/2-propose/dev-local-logs"))
+        self.assertTrue(str(log_dir).endswith(".pg/ad-hoc/my-session/dev-local-logs"))
+
+    def test_log_dir_pg_agent(self):
+        log_dir = self.mod.pg_log_dir_for_skill(
+            "pg-agent", "2026-09-12-my-task", "dev-local", self.project_root
+        )
+        self.assertTrue(str(log_dir).endswith(".pg/agent/2026-09-12-my-task/dev-local-logs"))
 
 
 if __name__ == "__main__":

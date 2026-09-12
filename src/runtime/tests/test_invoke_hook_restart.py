@@ -103,7 +103,7 @@ class TestRestartFallback(unittest.TestCase):
              "--role", "backend",
              "--instance", "backend-1",
              "--action", "restart",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 0, f"stderr={proc.stderr}")
@@ -131,7 +131,7 @@ class TestRestartFallback(unittest.TestCase):
              "--role", "backend",
              "--instance", "backend-1",
              "--action", "restart",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 0, f"stderr={proc.stderr}")
@@ -153,7 +153,7 @@ class TestRestartFallback(unittest.TestCase):
              "--role", "backend",
              "--instance", "backend-1",
              "--action", "restart",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 1)
@@ -174,7 +174,7 @@ class TestRestartFallback(unittest.TestCase):
              "--role", "backend",
              "--instance", "backend-1",
              "--action", "restart",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 1)
@@ -206,7 +206,7 @@ class TestRestartFallback(unittest.TestCase):
              "--role", "backend",
              "--instance", "backend-1",
              "--action", "restart",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 1)
@@ -235,7 +235,7 @@ class TestRestartFallback(unittest.TestCase):
              "--role", "backend",
              "--instance", "backend-1",
              "--action", "restart",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 1)
@@ -270,7 +270,7 @@ class TestRestartExplicit(unittest.TestCase):
              "--role", "backend",
              "--instance", "backend-1",
              "--action", "restart",
-             "--skill", "pg-build"],
+             "--skill", "pg-agent"],
             capture_output=True, text=True, env=env, timeout=30,
         )
         self.assertEqual(proc.returncode, 0, f"stderr={proc.stderr}")

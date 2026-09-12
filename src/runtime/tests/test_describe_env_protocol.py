@@ -4,7 +4,7 @@
   1. env-description.schema.json 是合法 JSON Schema (draft-07)
   2. examples/env-description.example.yaml 符合 schema
   3. examples/shell/hooks/describe-env.sh 必读检查完整 (5 个 PG_* vars)
-  4. pg-invoke-hook.py:describe_env action 的 caller 白名单 = pg-propose / pg-fix-issue / pg-regression
+  4. pg-invoke-hook.py:describe_env action 的 caller 白名单 = pg-agent / ad-hoc
   5. pg-invoke-hook.py:build_describe_env_spec 输出路径按 caller 路由
   6. pg-run-hook.py:_PG_ENV_MAP 包含 change_id / output_path 映射
 
@@ -180,8 +180,7 @@ class TestInvokeHookDescribeEnv(unittest.TestCase):
         m = re.search(r"DESCRIBE_ENV_CALLERS\s*=\s*\((.*?)\)", text, re.DOTALL)
         self.assertIsNotNone(m, "找不到 DESCRIBE_ENV_CALLERS 定义")
         block = m.group(1)
-        for caller in ("CALLER_PG_PROPOSE", "CALLER_PG_FIX_ISSUE",
-                       "CALLER_PG_REGRESSION", "CALLER_AD_HOC"):
+        for caller in ("CALLER_PG_AGENT", "CALLER_AD_HOC"):
             self.assertIn(caller, block, f"DESCRIBE_ENV_CALLERS 缺 {caller}")
 
     def test_build_describe_env_spec_function_exists(self):
@@ -198,11 +197,11 @@ class TestInvokeHookDescribeEnv(unittest.TestCase):
         self.assertNotIn("change_id", sig,
                          "build_describe_env_spec 签名仍包含 change_id 参数 (v7 应移除)")
 
-    def test_pg_propose_caller_in_known_callers(self):
+    def test_pg_agent_caller_in_known_callers(self):
         text = INVOKE_HOOK_PY.read_text(encoding="utf-8")
         m = re.search(r"KNOWN_CALLERS\s*=\s*\((.*?)\)", text, re.DOTALL)
         self.assertIsNotNone(m, "找不到 KNOWN_CALLERS 定义")
-        self.assertIn("CALLER_PG_PROPOSE", m.group(1), "KNOWN_CALLERS 缺 CALLER_PG_PROPOSE")
+        self.assertIn("CALLER_PG_AGENT", m.group(1), "KNOWN_CALLERS 缺 CALLER_PG_AGENT")
 
     def test_ad_hoc_caller_in_known_callers(self):
         """v7: ad-hoc 进入 DESCRIBE_ENV_CALLERS 白名单."""
@@ -262,14 +261,14 @@ class TestHookEnvVarsSSOTIntegration(unittest.TestCase):
         self.assertIn("PG_CHANGE_ID", spec_names)
         self.assertIn("PG_OUTPUT_PATH", spec_names)
 
-    def test_pg_propose_in_caller_enum(self):
+    def test_pg_agent_in_caller_enum(self):
         yaml = _load_yaml()
         with open(SPEC_DIR / "hook-env-vars.yaml", encoding="utf-8") as f:
             ssot = yaml.safe_load(f)
         for entry in ssot["always_injected"]:
             if entry["name"] == "PG_RUN_CALLER":
-                self.assertIn("pg-propose", entry["enum"],
-                              "PG_RUN_CALLER enum 缺 pg-propose")
+                self.assertIn("pg-agent", entry["enum"],
+                              "PG_RUN_CALLER enum 缺 pg-agent")
 
 
 if __name__ == "__main__":

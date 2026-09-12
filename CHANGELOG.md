@@ -1,5 +1,21 @@
 # 变更日志
 
+## [Unreleased] - 待发布
+
+**升级前必读（破坏性变更）**
+- **工作流收敛到单 SKILL**：`src/core/workflows/skills/` 下除 `pg-auto-pilot` 外的 11 个 SKILL（pg-define / pg-propose / pg-build / pg-fix-issue / pg-quick-build / pg-regression / pg-verify-and-merge / pg-archive / pg-init-project / pg-browser-testing-with-devtools / pg-systematic-diagnosing）全部移除
+- **slash 命令收敛**：`/1-pg-define` / `/1-pg-grill` / `/2-pg-propose` / `/2b-pg-quick-build` / `/3-pg-build` / `/4-pg-regression` / `/5-pg-fix-issue` / `/6-pg-archive` 全部删除，仅保留 `/0-pg-auto-pilot`
+- **sub-agent 收敛**：`pg-manager` 及 `pg-build/*`、`pg-fix-issue/*`、`pg-quick-build/*`、`pg-regression/*` agent 删除，仅保留 `explore.md`
+- **合并改手动**：`pg-verify-and-merge` 删除后不再有自动合并能力，合并到 default 分支改用手动 `git merge`
+- **`pg-invoke-hook.py` caller 收敛**：`--skill`/`--caller` 可选值仅剩 `pg-agent` / `ad-hoc`；`status` 子命令删除
+- **`project.yaml` schema 段收敛**：`verify_merge` / `flyway` / `propose` / `build` / `regression` 段标记 deprecated（历史 project.yaml 仍可解析，新增不再建议使用）
+
+**新增 / 改进**
+- **describe_env 路由调整**：`describe_env` 产物与日志路由到 `.pg/agent/<session>/`（pg-agent）或 `.pg/ad-hoc/<session>/`（ad-hoc），不再落 `.pg/changes/`
+- **`pg-parse-config.py` 精简**：`WORKFLOW_KEYS` 仅剩 `pg-agent`；pg-verify-and-merge / pg-regression 专用逻辑删除
+- **初始化模板修复**：`pg init` 生成的 placeholder `project.yaml` 的 `roles` 改为数组格式；`pg-run` symlink 权限设置改用 `lstat`，不再因目标缺失崩溃
+- **适配器同步**：opencode / mobile-coder / deepseek-harness 适配器仅渲染 `pg-auto-pilot` 工作流
+
 ## [0.9.4] - 2026-09-12
 
 **改进**

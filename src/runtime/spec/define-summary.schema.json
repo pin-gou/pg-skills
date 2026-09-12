@@ -2,7 +2,7 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://pg-skills.local/spec/define-summary.schema.json",
   "title": "define-summary",
-  "description": "pg-1-define 阶段产出的定界结论（含验证方法）。用户在定界后授权调 describe_env 看真实环境，然后与 agent 共同讨论 V-* 在该环境下的可验证性 / 降级 / 跳过，最后落盘此文件。文件位置: .pg/changes/<change-id>/0-define/define-summary.yaml。pg-propose 阶段 1.8 加载此文件并校验，阶段 2 写作时引用其中已对账过的 V-* 状态。",
+  "description": "定界结论产物（含验证方法），由 pg-1-define 阶段产出（当前工作流已收敛到 pg-auto-pilot，本 schema 保留作为历史产物校验）。文件位置: .pg/changes/<change-id>/0-define/define-summary.yaml。",
   "type": "object",
   "required": [
     "schema_version",

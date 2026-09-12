@@ -28,7 +28,7 @@
         title="🔨 build_rules — 构建期注入提示"
         section-key="build_rules"
         item-label="rule"
-        hint="target_agent 必须是 pg-build/* agent, position: prepend/append"
+        hint="target_agent 必须是已部署的 agent, position: prepend/append"
       />
       <RuleListSection
         v-else-if="activeSection === 'proposal_rules'"
@@ -50,12 +50,7 @@ import ModulesSection from '@/components/sections/ModulesSection.vue'
 import EnvironmentsSection from '@/components/sections/EnvironmentsSection.vue'
 import TracksSection from '@/components/sections/TracksSection.vue'
 import StagesSection from '@/components/sections/StagesSection.vue'
-import FixIssueSection from '@/components/sections/FixIssueSection.vue'
-import RegressionSection from '@/components/sections/RegressionSection.vue'
-import RulesSection from '@/components/sections/RulesSection.vue'
 import RuleListSection from '@/components/sections/RuleListSection.vue'
-import VerifyMergeSection from '@/components/sections/VerifyMergeSection.vue'
-import FlywaySection from '@/components/sections/FlywaySection.vue'
 import GitSection from '@/components/sections/GitSection.vue'
 import TestStrategySection from '@/components/sections/TestStrategySection.vue'
 import CodingStandardsSection from '@/components/sections/CodingStandardsSection.vue'
@@ -74,23 +69,8 @@ const groups = [
     ],
   },
   {
-    id: 'skills', label: 'SKILL 专用', sections: [
-      { id: 'fix_issue', label: 'fix_issue', icon: '🔧' },
-      { id: 'regression', label: 'regression', icon: '📊' },
-    ],
-  },
-  {
     id: 'tools', label: '辅助工具', sections: [
-      { id: 'verify_merge', label: 'verify_merge', icon: '✅' },
-      { id: 'flyway', label: 'flyway', icon: '🗄' },
       { id: 'git', label: 'git', icon: '🌿' },
-    ],
-  },
-  {
-    id: 'ext', label: '扩展', sections: [
-      { id: 'propose.guidelines', label: 'propose.guidelines', icon: '📐' },
-      { id: 'propose.injections', label: 'propose.injections', icon: '📋' },
-      { id: 'build.injections', label: 'build.injections', icon: '🔨' },
     ],
   },
 ]
@@ -102,7 +82,6 @@ const counts = computed<Record<string, number>>(() => {
     environments: Object.keys(data.environments || {}).length,
     tracks: Object.keys(data.tracks || {}).length,
     stages: ((data.stages as unknown[]) || []).length,
-    regression: Object.keys(((data.regression as any)?.suite) || {}).length,
     rules: Object.keys(data.rules || {}).length,
     build_rules: ((data.build_rules as unknown[]) || []).length,
     proposal_rules: ((data.proposal_rules as unknown[]) || []).length,
@@ -119,13 +98,6 @@ const resolvedSection = computed(() => {
     case 'environments': return EnvironmentsSection
     case 'tracks': return TracksSection
     case 'stages': return StagesSection
-    case 'fix_issue': return FixIssueSection
-    case 'regression': return RegressionSection
-    case 'propose.guidelines': return RulesSection
-    case 'propose.injections': return RulesSection
-    case 'build.injections': return RulesSection
-    case 'verify_merge': return VerifyMergeSection
-    case 'flyway': return FlywaySection
     case 'git': return GitSection
     default: return ModulesSection
   }

@@ -29,17 +29,6 @@ TEXT_EXTENSIONS = {
     ".txt",
 }
 MANIFEST_NAME = ".pg-adapter-manifest.json"
-BUILD_COMPLETION_CONTRACT = """Mandatory pg-build completion contract:
-- Treat runner action `done` as a transition, not as final command success.
-- Report the build result to the user and STOP. Do not auto-load
-  `pg-verify-and-merge`: verification and merge happen only when the user
-  explicitly requests them (e.g. "verify 并合并").
-- Only when the user asks for verification/merge, load and execute the native
-  `pg-verify-and-merge` skill, and do not report completion until verification
-  and merge succeed, the current branch is the configured default branch, and
-  the business changes are committed.
-- If an auto-record commit, archive commit, verification, or merge fails,
-  report the failure and stop instead of claiming completion."""
 
 
 def _adapt_text(text: str) -> str:
@@ -76,25 +65,10 @@ def _sha256(data: bytes) -> str:
 def _adapt_tree(
     generated: dict[Path, tuple[bytes, int]],
 ) -> None:
-    completion_targets = {
-        Path("commands/pg-3-build.md"),
-        Path("agents/pg-manager.md"),
-    }
     for relative, (data, mode) in generated.items():
         text = data.decode("utf-8")
         text = _adapt_text(text)
-        if relative in completion_targets:
-            text = _append_completion_contract(text)
         generated[relative] = (text.encode("utf-8"), mode)
-
-
-def _append_completion_contract(text: str) -> str:
-    """Keep Mobile Coder's native command/agent execution from stopping early."""
-
-    marker = "## Mobile Coder completion contract"
-    if marker in text:
-        return text
-    return f"{text.rstrip()}\n\n{marker}\n\n{BUILD_COMPLETION_CONTRACT}\n"
 
 
 def _patch_runtime(generated: dict[Path, tuple[bytes, int]]) -> None:
@@ -103,10 +77,6 @@ def _patch_runtime(generated: dict[Path, tuple[bytes, int]]) -> None:
             (
                 'return project_root / ".pg" / "skills"',
                 'return project_root / ".mobile-coder" / "pg-skills"',
-            ),
-            (
-                '/ ".pg" / "skills" / "src" / "opencode" / "skills"',
-                '/ ".mobile-coder" / "skills"',
             ),
         ),
         Path("pg-skills/src/runtime/lib/pg-run-hook.py"): (
@@ -300,6 +270,6 @@ modifies `mobile-coder.json`.
     def next_steps(self) -> list[str]:
         return [
             "Restart Mobile Coder so it reloads the project adapter.",
-            "Open /skills and confirm pg-init-project and pg-build are listed.",
-            "Load pg-init-project to scan and configure the project.",
+            "Open /skills and confirm pg-auto-pilot is listed.",
+            "Run /0-pg-auto-pilot to start an autonomous implementation task.",
         ]
