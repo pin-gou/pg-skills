@@ -40,7 +40,7 @@ pg-skills 仓库（独立远程）                  您的项目仓库
 # 1. 用 git subtree 把 pg-skills 同步进项目
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
-git subtree add --prefix=.pg/skills pg-skills v0.9.3 --squash
+git subtree add --prefix=.pg/skills pg-skills v0.9.4 --squash
 
 # 2a. 交互式终端可直接运行：自动探测，并要求确认或选择
 python3 .pg/skills/src/runtime/bin/pg init
@@ -117,7 +117,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 ```bash
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
-git subtree add --prefix=.pg/skills pg-skills v0.9.3 --squash
+git subtree add --prefix=.pg/skills pg-skills v0.9.4 --squash
 python3 .pg/skills/src/runtime/bin/pg init
 git add .pg/
 git commit -m "feat: 接入 pg-skills $(cat .pg/skills/VERSION)"
@@ -240,7 +240,8 @@ pg-skills/
 | **0.9.0** | v6 describe_env 协议（env-description.yaml）+ pg-fix-issue 大幅精简 + pg-propose-refine 流程删除 + explore sub-agent + pg-build bootstrap 防御加固 + escalate_threshold 字段删除 |
 | **0.9.1** | define-summary.yaml schema + 定界后环境验证 + env_resource_refs 强引用 + pg-propose 阶段 1.8 + progress-monitor 重构 |
 | **0.9.2** | 合并自动 rebase 防覆盖 + restart 无脚本兜底 + 能力自动对账 + 重新定界 + 质量校验三态 + 初始化体验优化 + 进度预览渲染 |
-| **0.9.3** | 工作流 skill 仅限用户显式触发 + Auto-Pilot 自动驾驶模式 + DeepSeek Harness 集成 + pg-run "更新"Tab —— **当前** |
+| **0.9.3** | 工作流 skill 仅限用户显式触发 + Auto-Pilot 自动驾驶模式 + DeepSeek Harness 集成 + pg-run "更新"Tab |
+| **0.9.4** | pg-run 更新菜单直接选版本 + 分页 + skill 门控规则统一 —— **当前** |
 | **1.0.x** | 生产就绪，在 2+ 外部项目 dogfood（未达） |
 
 ### 升级命令
@@ -250,7 +251,7 @@ pg-skills/
 pg upgrade
 
 # 升级到指定版本
-pg upgrade v0.9.3
+pg upgrade v0.9.4
 
 # 查看远程可用版本
 pg upgrade --list
@@ -351,7 +352,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 # ┌─ pg-run — pg-skills 运行菜单 ──────────────────┐
 # │ Tab: 常用操作|Environment|Instance|Module|更新 │
 # │ 常用操作: 准备并启动 / 停止清理 / 启停所有      │
-# │ 更新   : 检查更新 / 强制更新到指定版本        │
+# │ 更新   : 直接选版本 (main 置顶, 每页10项) + 确认 │
 # └─────────────────────────────────────────────────┘
 
 # 跳过菜单、直达执行 module 操作
