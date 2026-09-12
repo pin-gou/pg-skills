@@ -1,6 +1,6 @@
 ---
 name: pg-archive
-description: 手动归档变更到 .pg/changes/archive/。pg-build 成功时自动归档，失败时不会归档——此 SKILL 专门处理失败后或主动放弃时的手动归档场景。纯被动：只移动目录并输出报告，不做 git 操作、不调其他工作流。未加载 pg-define SKILL 时不得提示用户使用本 SKILL。
+description: 手动归档变更到 .pg/changes/archive/。pg-build 成功时自动归档，失败时不会归档——此 SKILL 专门处理失败后或主动放弃时的手动归档场景。纯被动：只移动目录并输出报告，不做 git 操作、不调其他工作流。与构建无关的日常任务禁止自行加载；未加载 pg-define SKILL 时不得提示用户使用本 SKILL。
 license: MIT
 compatibility: 需要存在 .pg/changes/<change-name>/ 目录
 metadata:

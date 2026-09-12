@@ -1,6 +1,6 @@
 ---
 name: pg-systematic-diagnosing
-description: 系统化问题诊断工作流。用于任何技术问题的系统性分析，定位问题根因但不进行修复。找到根因后输出诊断报告，交给其他 agent 或人工处理修复。未加载 pg-define SKILL 时不得提示用户使用本 SKILL。
+description: 系统化问题诊断工作流。用于任何技术问题的系统性分析，定位问题根因但不进行修复。找到根因后输出诊断报告，交给其他 agent 或人工处理修复。与构建无关的日常任务禁止自行加载；未加载 pg-define SKILL 时不得提示用户使用本 SKILL。
 license: MIT
 compatibility: Works with any codebase
 metadata:

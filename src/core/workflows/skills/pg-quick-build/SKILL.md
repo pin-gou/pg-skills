@@ -1,6 +1,6 @@
 ---
 name: pg-quick-build
-description: 仅当用户显式触发快速构建工作流时使用（`/2b-pg-quick-build` 命令，或用户明确说"直接实现/快速构建"）；与该工作流无关的日常任务禁止自行加载；未加载 pg-define SKILL 时不得提示用户使用本 SKILL。功能：跳过 pg-propose，不生成 proposal.md/design.md/tasks.md，直接构建代码。
+description: 仅当用户显式触发快速构建工作流时使用（`/2b-pg-quick-build` 命令，或用户明确说"直接实现/快速构建"）；与构建无关的日常任务禁止自行加载；未加载 pg-define SKILL 时不得提示用户使用本 SKILL。功能：跳过 pg-propose，不生成 proposal.md/design.md/tasks.md，直接构建代码。
 license: MIT
 compatibility: 需要 `.pg/project.yaml`（schema：modules / environments / tracks / stages）
 metadata:

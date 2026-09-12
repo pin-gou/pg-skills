@@ -1,6 +1,6 @@
 ---
 name: pg-init-project
-description: 在一个新项目里初始化 pg-skills 配置。扫描仓库结构（构建文件、源码组织、多模块布局），生成 `.pg/project.yaml`（modules/environments/tracks/stages，module 的 build/lint/test 命令直接写在 `modules.<m>.<field>` 字段里）、`.pg/hooks/` 下仅服务 environments 维度的 lifecycle shell 脚本（role start/stop/restart + prepare_env/clean_env），以及 `.pg/code-review/` 目录（按语言自动派发的 review profile 集，供 pg-build v2.6 review phase 使用）。在 `pg init` 之后、第一次跑 `pg-propose` / `pg-build` 之前使用。
+description: 在一个新项目里初始化 pg-skills 配置。扫描仓库结构（构建文件、源码组织、多模块布局），生成 `.pg/project.yaml`（modules/environments/tracks/stages，module 的 build/lint/test 命令直接写在 `modules.<m>.<field>` 字段里）、`.pg/hooks/` 下仅服务 environments 维度的 lifecycle shell 脚本（role start/stop/restart + prepare_env/clean_env），以及 `.pg/code-review/` 目录（按语言自动派发的 review profile 集，供 pg-build v2.6 review phase 使用）。在 `pg init` 之后、第一次跑 `pg-propose` / `pg-build` 之前使用。与构建无关的日常任务禁止自行加载；未加载 pg-define SKILL 时不得提示用户使用本 SKILL。
 license: MIT
 compatibility: 项目根目录需要 `.pg/` 目录（已由 `pg init` 创建）和 `.pg/skills/`（已由 `git subtree add` 同步）。
 metadata:

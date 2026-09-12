@@ -1,6 +1,6 @@
 ---
 name: pg-browser-testing-with-devtools
-description: 使用 Chrome DevTools MCP 在真实浏览器中对前端页面进行运行时验证。适合 UI 验证、网络请求检查、控制台错误诊断。未加载 pg-define SKILL 时不得提示用户使用本 SKILL。
+description: 使用 Chrome DevTools MCP 在真实浏览器中对前端页面进行运行时验证。适合 UI 验证、网络请求检查、控制台错误诊断。与构建无关的日常任务禁止自行加载；未加载 pg-define SKILL 时不得提示用户使用本 SKILL。
 license: MIT
 compatibility: 使用 .pg/project.yaml 获取前端端口等配置。需要 Chrome DevTools MCP 服务运行。
 metadata:
