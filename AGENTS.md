@@ -135,19 +135,6 @@ pg-skills/
 │       ├── security/                 # 安全检查
 │       └── vue3/                     # Vue3 检查
 │
-├── tools/                       # 开发者工具
-│   ├── README.md
-│   ├── project-editor.md
-│   └── project-editor/              # Vue 3 GUI 编辑器
-│       ├── src/
-│       │   ├── App.vue
-│       │   ├── views/               # Dashboard/FormView/CanvasView
-│       │   ├── components/          # 14 个 section 编辑器 + 字段组件
-│       │   ├── stores/              # Pinia 状态管理
-│       │   ├── utils/               # 工具函数（yaml/diff/hash/coerce）
-│       │   └── schema/              # 加载器
-│       └── package.json
-│
 └── docs/
     └── index.html
 ```
@@ -244,14 +231,7 @@ pytest
 python3 src/runtime/bin/pg doctor
 ```
 
-### 6.3 启动项目编辑器
-
-```bash
-cd tools/project-editor && pnpm install && pnpm dev    # 端口 3028
-cd tools/project-editor && pnpm build                   # 生产构建
-```
-
-### 6.4 开发约定
+### 6.3 开发约定
 
 - **分支策略**：1.0 之前使用单一线形分支（linear branch），所有变更直接提交到 master
 - **语言兼容性**：所有 Python 代码必须兼容 **Python 3.7+**（包括 3.7、3.8、3.9、3.10、3.11、3.12）。所有文件已统一添加 `from __future__ import annotations`，使 PEP 604 `X | Y` 联合类型语法（如 `str | None`）在注解中安全可用。禁止使用以下仅在更高版本引入的语法或标准库 API：
