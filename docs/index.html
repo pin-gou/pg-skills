@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>品构 pg-skills · 品质，长在结构里</title>
 <style>
-/* ================================================================
-   Starlight-inspired theme (ref: codegraph docs site)
-   ================================================================ */
 :root {
   color-scheme: light;
   --sl-color-black: #ffffff;
@@ -25,7 +22,6 @@
   --sl-color-bg-sidebar: var(--sl-color-gray-1);
   --sl-color-bg-nav: var(--sl-color-gray-2);
 
-  /* legacy aliases (content + inline styles + SVG use these) */
   --bg: var(--sl-color-bg);
   --text: var(--sl-color-text);
   --primary: var(--sl-color-accent);
@@ -43,7 +39,6 @@
   --nav-bg: var(--sl-color-bg-sidebar);
   --shadow: none;
 
-  /* layout */
   --header-h: 3.5rem;
   --sidebar-w: 18.75rem;
   --toc-w: 15rem;
@@ -78,291 +73,123 @@
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
-
 html { scroll-behavior: smooth; }
-
-body {
-  font-family: var(--font);
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.7;
-  font-size: 15.5px;
-}
-
+body { font-family: var(--font); background: var(--bg); color: var(--text); line-height: 1.7; font-size: 15.5px; }
 a { color: var(--primary); text-decoration: none; }
 a:hover { text-decoration: underline; }
 code { font-family: var(--font-mono); }
 
-/* ============================ Progress bar ============================ */
-#progress-bar {
-  position: fixed; top: 0; left: 0; height: 3px; z-index: 1000;
-  background: linear-gradient(90deg, var(--primary), var(--secondary));
-  transition: width 0.15s ease;
-}
+#progress-bar { position: fixed; top: 0; left: 0; height: 3px; z-index: 1000; background: linear-gradient(90deg, var(--primary), var(--secondary)); transition: width 0.15s ease; }
 
-/* ============================ Header ============================ */
 .header {
-  position: sticky; top: 0; z-index: 50;
-  height: var(--header-h);
-  display: flex; align-items: center; gap: 1rem;
-  padding: 0 1.25rem;
-  background: var(--sl-color-bg-nav);
-  border-bottom: 1px solid var(--sl-color-hairline);
+  position: sticky; top: 0; z-index: 50; height: var(--header-h);
+  display: flex; align-items: center; gap: 1rem; padding: 0 1.25rem;
+  background: var(--sl-color-bg-nav); border-bottom: 1px solid var(--sl-color-hairline);
 }
-.site-title {
-  font-size: 1.05rem; font-weight: 700; color: var(--text);
-  display: inline-flex; align-items: center; gap: .45rem;
-  white-space: nowrap;
-}
+.site-title { font-size: 1.05rem; font-weight: 700; color: var(--text); display: inline-flex; align-items: center; gap: .45rem; white-space: nowrap; }
 .site-title:hover { text-decoration: none; }
 .site-title .accent { color: var(--primary); }
-.header-slogan {
-  font-size: .8125rem; color: var(--muted); white-space: nowrap;
-  display: inline-flex; align-items: center;
-}
-.header-slogan::before {
-  content: ''; display: inline-block; width: 1px; height: 1rem;
-  background: var(--sl-color-hairline); margin-right: .85rem; flex-shrink: 0;
-}
-.header-slogan strong {
-  font-weight: 700; color: var(--accent); margin-left: .2rem;
-}
+.header-slogan { font-size: .8125rem; color: var(--muted); white-space: nowrap; display: inline-flex; align-items: center; }
+.header-slogan::before { content: ''; display: inline-block; width: 1px; height: 1rem; background: var(--sl-color-hairline); margin-right: .85rem; flex-shrink: 0; }
+.header-slogan strong { font-weight: 700; color: var(--accent); margin-left: .2rem; }
 .header-right { margin-left: auto; display: flex; align-items: center; gap: .6rem; }
 
 .search-btn {
-  display: inline-flex; align-items: center; gap: .45rem;
-  height: 2rem; padding: 0 .7rem;
+  display: inline-flex; align-items: center; gap: .45rem; height: 2rem; padding: 0 .7rem;
   font-family: var(--font); font-size: .8125rem; color: var(--muted);
-  background: var(--bg); border: 1px solid var(--sl-color-hairline);
-  border-radius: 999px; cursor: pointer;
-  transition: border-color .15s;
+  background: var(--bg); border: 1px solid var(--sl-color-hairline); border-radius: 999px; cursor: pointer; transition: border-color .15s;
 }
 .search-btn:hover { border-color: var(--primary); color: var(--text); }
-.search-btn kbd {
-  font-family: var(--font-mono); font-size: .6875rem;
-  border: 1px solid var(--sl-color-hairline); border-bottom-width: 2px;
-  border-radius: .25rem; padding: .05rem .3rem; color: var(--muted);
-}
+.search-btn kbd { font-family: var(--font-mono); font-size: .6875rem; border: 1px solid var(--sl-color-hairline); border-bottom-width: 2px; border-radius: .25rem; padding: .05rem .3rem; color: var(--muted); }
 
 .cg-navlink { font-size: .875rem; color: var(--muted); }
 .cg-navlink:hover { color: var(--text); text-decoration: none; }
 
-.star-badge {
-  display: inline-flex; align-items: center; gap: .3rem;
-  font-size: .8125rem; color: var(--muted);
-  border: 1px solid var(--sl-color-hairline); border-radius: 999px;
-  padding: .2rem .7rem; white-space: nowrap;
-}
+.star-badge { display: inline-flex; align-items: center; gap: .3rem; font-size: .8125rem; color: var(--muted); border: 1px solid var(--sl-color-hairline); border-radius: 999px; padding: .2rem .7rem; white-space: nowrap; }
 .star-badge:hover { text-decoration: none; border-color: var(--primary); }
 .star-badge .star { color: #f5a623; }
 
-#theme-toggle {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 2rem; height: 2rem;
-  background: var(--bg); border: 1px solid var(--sl-color-hairline);
-  border-radius: .5rem; cursor: pointer; color: var(--muted);
-  transition: color .15s, border-color .15s;
-}
+#theme-toggle { display: inline-flex; align-items: center; justify-content: center; width: 2rem; height: 2rem; background: var(--bg); border: 1px solid var(--sl-color-hairline); border-radius: .5rem; cursor: pointer; color: var(--muted); transition: color .15s, border-color .15s; }
 #theme-toggle:hover { color: var(--text); border-color: var(--primary); }
 
-/* Mobile hamburger */
-.menu-btn {
-  display: none; align-items: center; justify-content: center;
-  width: 2rem; height: 2rem;
-  background: var(--bg); border: 1px solid var(--sl-color-hairline);
-  border-radius: .5rem; cursor: pointer; color: var(--text);
-}
+.menu-btn { display: none; align-items: center; justify-content: center; width: 2rem; height: 2rem; background: var(--bg); border: 1px solid var(--sl-color-hairline); border-radius: .5rem; cursor: pointer; color: var(--text); }
 
-/* ============================ Body grid ============================ */
-.body-grid {
-  display: flex; align-items: flex-start;
-  min-height: calc(100vh - var(--header-h));
-}
+.body-grid { display: flex; align-items: flex-start; min-height: calc(100vh - var(--header-h)); }
 
-/* Sidebar */
-.sidebar {
-  position: sticky; top: var(--header-h);
-  width: var(--sidebar-w); flex-shrink: 0;
-  height: calc(100vh - var(--header-h));
-  overflow-y: auto;
-  background: var(--sl-color-bg-sidebar);
-  border-right: 1px solid var(--sl-color-hairline);
-  padding: 1.25rem 0 2rem;
-}
-.sidebar .group-label {
-  display: block;
-  padding: 1.15rem 1.25rem .35rem;
-  font-size: .6875rem; font-weight: 600; letter-spacing: .08em;
-  text-transform: uppercase; color: var(--muted);
-}
+.sidebar { position: sticky; top: var(--header-h); width: var(--sidebar-w); flex-shrink: 0; height: calc(100vh - var(--header-h)); overflow-y: auto; background: var(--sl-color-bg-sidebar); border-right: 1px solid var(--sl-color-hairline); padding: 1.25rem 0 2rem; }
+.sidebar .group-label { display: block; padding: 1.15rem 1.25rem .35rem; font-size: .6875rem; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
 .sidebar .group-label:first-child { padding-top: .25rem; }
-.sidebar .nav-link {
-  display: block; padding: .34rem 1.25rem;
-  font-size: .875rem; color: var(--sl-color-gray-5);
-  border-left: 2px solid transparent;
-  transition: background .12s, color .12s;
-}
+.sidebar .nav-link { display: block; padding: .34rem 1.25rem; font-size: .875rem; color: var(--sl-color-gray-5); border-left: 2px solid transparent; transition: background .12s, color .12s; }
 .sidebar .nav-link:hover { color: var(--text); text-decoration: none; background: var(--sl-color-bg-nav); }
-.sidebar .nav-link.active {
-  color: var(--primary); background: var(--sl-color-accent-low);
-  border-left-color: var(--primary); font-weight: 500;
-}
+.sidebar .nav-link.active { color: var(--primary); background: var(--sl-color-accent-low); border-left-color: var(--primary); font-weight: 500; }
 .sidebar .sidebar-title { padding: 0 1.25rem .75rem; }
 .sidebar .sidebar-title .site-title { font-size: .95rem; }
 .sidebar::-webkit-scrollbar { width: 4px; }
 .sidebar::-webkit-scrollbar-thumb { background: var(--sl-color-hairline); border-radius: 2px; }
 
-/* Main frame */
-.main-frame {
-  flex: 1; min-width: 0;
-  display: flex; justify-content: center; gap: 1.5rem;
-}
-.main-pane {
-  flex: 1; max-width: var(--content-w); min-width: 0;
-  padding: 2.5rem 2rem 4rem;
-}
+.main-frame { flex: 1; min-width: 0; display: flex; justify-content: center; gap: 1.5rem; }
+.main-pane { flex: 1; max-width: var(--content-w); min-width: 0; padding: 2.5rem 2rem 4rem; }
 
-
-/* Right sidebar (On this page) */
-.right-sidebar {
-  width: var(--toc-w); flex-shrink: 0;
-  position: sticky; top: var(--header-h);
-  height: calc(100vh - var(--header-h));
-  overflow-y: auto;
-  padding: 1.5rem 0 2rem;
-}
-.toc-heading {
-  font-size: .75rem; font-weight: 600; color: var(--text);
-  text-transform: uppercase; letter-spacing: .06em;
-  margin-bottom: .5rem;
-}
+.right-sidebar { width: var(--toc-w); flex-shrink: 0; position: sticky; top: var(--header-h); height: calc(100vh - var(--header-h)); overflow-y: auto; padding: 1.5rem 0 2rem; }
+.toc-heading { font-size: .75rem; font-weight: 600; color: var(--text); text-transform: uppercase; letter-spacing: .06em; margin-bottom: .5rem; }
 #toc-list { list-style: none; border-left: 1px solid var(--sl-color-hairline); margin-left: .5rem; }
-#toc-list a {
-  display: block; padding: .32rem .75rem; margin-left: -1px;
-  font-size: .8125rem; color: var(--muted);
-  border-left: 2px solid transparent;
-  line-height: 1.4;
-}
+#toc-list a { display: block; padding: .32rem .75rem; margin-left: -1px; font-size: .8125rem; color: var(--muted); border-left: 2px solid transparent; line-height: 1.4; }
 #toc-list a:hover { color: var(--text); text-decoration: none; }
 #toc-list a.active { color: var(--primary); border-left-color: var(--primary); }
 #toc-list a.l3 { padding-left: 1.5rem; font-size: .75rem; }
 .right-sidebar::-webkit-scrollbar { width: 4px; }
 .right-sidebar::-webkit-scrollbar-thumb { background: var(--sl-color-hairline); border-radius: 2px; }
 
-/* ============================ Content typography ============================ */
 .section { display: none; }
 .section.active { display: block; animation: fadeInUp .3s ease-out; }
-
-.section h1 {
-  font-size: 1.9rem; font-weight: 700; line-height: 1.3;
-  color: var(--text);
-  border-bottom: 1px solid var(--sl-color-hairline);
-  padding-bottom: .6rem; margin-bottom: 1.25rem;
-}
-.section h2 {
-  font-size: 1.35rem; font-weight: 600; margin: 2.5rem 0 .8rem;
-  scroll-margin-top: calc(var(--header-h) + 2rem);
-}
-.section h3 {
-  font-size: 1.05rem; font-weight: 600; margin: 1.8rem 0 .6rem;
-  color: var(--text);
-  scroll-margin-top: calc(var(--header-h) + 2rem);
-}
+.section h1 { font-size: 1.9rem; font-weight: 700; line-height: 1.3; color: var(--text); border-bottom: 1px solid var(--sl-color-hairline); padding-bottom: .6rem; margin-bottom: 1.25rem; }
+.section h2 { font-size: 1.35rem; font-weight: 600; margin: 2.5rem 0 .8rem; scroll-margin-top: calc(var(--header-h) + 2rem); }
+.section h3 { font-size: 1.05rem; font-weight: 600; margin: 1.8rem 0 .6rem; color: var(--text); scroll-margin-top: calc(var(--header-h) + 2rem); }
 .section h4 { font-size: .95rem; font-weight: 600; margin: 1.2rem 0 .4rem; }
 .section p { margin: .75rem 0; }
 .section ul, .section ol { margin: .75rem 0; padding-left: 1.5rem; }
 .section li { margin: .3rem 0; }
-.section blockquote {
-  border-left: 3px solid var(--sl-color-accent-low); padding-left: 1rem;
-  margin: 1rem 0; color: var(--muted);
-}
+.section blockquote { border-left: 3px solid var(--sl-color-accent-low); padding-left: 1rem; margin: 1rem 0; color: var(--muted); }
 
-/* ============================ Cards ============================ */
-.subsection-card {
-  background: var(--card-bg); border: 1px solid var(--sl-color-hairline);
-  border-radius: .5rem; padding: 1.25rem; margin: 1.5rem 0;
-}
-.subsection-card h2 { margin-top: .5rem; }
-.card {
-  background: var(--card-bg); border: 1px solid var(--sl-color-hairline);
-  border-radius: .5rem; padding: 1.15rem 1.25rem; margin: 1.25rem 0;
-}
+.card { background: var(--card-bg); border: 1px solid var(--sl-color-hairline); border-radius: .5rem; padding: 1.15rem 1.25rem; margin: 1.25rem 0; }
 .tip-card { border-left: 4px solid var(--accent); background: var(--accent-bg); }
 .info-card { border-left: 4px solid var(--primary); background: var(--sl-color-accent-low); }
 .danger-card { border-left: 4px solid var(--danger); background: rgba(239,68,68,.06); }
 [data-theme="dark"] .danger-card { background: rgba(248,113,113,.08); }
 
-/* ============================ Code blocks ============================ */
-pre {
-  background: var(--code-bg); color: var(--code-text);
-  padding: 1rem 1.25rem; border-radius: .5rem;
-  border: 1px solid rgba(148,163,184,.18);
-  overflow-x: auto; font-size: 13px; line-height: 1.65; margin: 1rem 0;
-  position: relative;
-}
-.copy-btn {
-  position: absolute; top: .5rem; right: .5rem;
-  background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
-  color: #94a3b8; padding: .2rem .55rem; border-radius: .25rem;
-  font-size: 11px; font-family: var(--font); cursor: pointer;
-  opacity: 0; transition: opacity .15s, background .15s, color .15s;
-}
+pre { background: var(--code-bg); color: var(--code-text); padding: 1rem 1.25rem; border-radius: .5rem; border: 1px solid rgba(148,163,184,.18); overflow-x: auto; font-size: 13px; line-height: 1.65; margin: 1rem 0; position: relative; }
+.copy-btn { position: absolute; top: .5rem; right: .5rem; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12); color: #94a3b8; padding: .2rem .55rem; border-radius: .25rem; font-size: 11px; font-family: var(--font); cursor: pointer; opacity: 0; transition: opacity .15s, background .15s, color .15s; }
 pre:hover .copy-btn { opacity: 1; }
 .copy-btn:hover { background: rgba(255,255,255,.16); color: #fff; }
 
-/* ============================ Tables ============================ */
 table { width: 100%; border-collapse: collapse; margin: 1rem 0; font-size: .875rem; }
 th, td { padding: .6rem .75rem; text-align: left; border: 1px solid var(--sl-color-hairline); }
 th { background: var(--sl-color-bg-nav); font-weight: 600; }
 tbody tr:nth-child(even) { background: var(--sl-color-gray-1); }
 
-/* ============================ Collapsible QA ============================ */
-.collapse-toggle {
-  cursor: pointer; user-select: none;
-  display: inline-flex; align-items: center; gap: .5rem;
-}
-.collapse-toggle::before {
-  content: ""; width: 0; height: 0;
-  border-left: 5px solid var(--muted); border-top: 4px solid transparent;
-  border-bottom: 4px solid transparent;
-  transition: transform .2s;
-}
+.collapse-toggle { cursor: pointer; user-select: none; display: inline-flex; align-items: center; gap: .5rem; }
+.collapse-toggle::before { content: ""; width: 0; height: 0; border-left: 5px solid var(--muted); border-top: 4px solid transparent; border-bottom: 4px solid transparent; transition: transform .2s; }
 .collapse-toggle.open::before { transform: rotate(90deg); }
 .collapse-body { overflow: hidden; max-height: 0; transition: max-height .3s ease; }
 .collapse-body.open { max-height: 3000px; }
 
-/* ============================ Checkbox checklist ============================ */
 .checklist { list-style: none; padding-left: 0 !important; }
 .checklist li { margin: .4rem 0; display: flex; align-items: flex-start; gap: .5rem; }
 .checklist input[type="checkbox"] { margin-top: 5px; flex-shrink: 0; accent-color: var(--primary); }
 
-/* ============================ SVG containers ============================ */
-.svg-container {
-  background: var(--card-bg); border: 1px solid var(--sl-color-hairline);
-  border-radius: .5rem; padding: 1.25rem; margin: 1.25rem 0;
-  overflow-x: auto; text-align: center;
-}
+.svg-container { background: var(--card-bg); border: 1px solid var(--sl-color-hairline); border-radius: .5rem; padding: 1.25rem; margin: 1.25rem 0; overflow-x: auto; text-align: center; }
 .svg-container svg { max-width: 100%; height: auto; }
 
-/* ============================ Tags ============================ */
-.tag {
-  display: inline-block; padding: 2px 8px; border-radius: 4px;
-  font-size: 11px; font-weight: 600; margin: 2px; line-height: 1.5;
-}
+.tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; margin: 2px; line-height: 1.5; }
 .tag-blue { background: #dbeafe; color: #1d4ed8; }
 .tag-green { background: #d1fae5; color: #065f46; }
-.tag-purple { background: #ede9fe; color: #6d28d9; }
 .tag-red { background: #fee2e2; color: #b91c1c; }
 .tag-yellow { background: #fef3c7; color: #92400e; }
 [data-theme="dark"] .tag-blue { background: #1e3a5f; color: #60a5fa; }
 [data-theme="dark"] .tag-green { background: #064e3b; color: #34d399; }
-[data-theme="dark"] .tag-purple { background: #2e1065; color: #a78bfa; }
 [data-theme="dark"] .tag-red { background: #450a0a; color: #f87171; }
 [data-theme="dark"] .tag-yellow { background: #2a2410; color: #fbbf24; }
 
-.keyword { display: inline-block; font-weight: 600; color: var(--primary); }
-
-/* ============================ Comparison boxes ============================ */
 .compare-row { display: flex; gap: 1rem; margin: 1rem 0; flex-wrap: wrap; }
 .compare-box { flex: 1; min-width: 200px; border-radius: .5rem; padding: 1rem 1.1rem; }
 .compare-box-old { background: rgba(239,68,68,.06); border: 1px solid #fecaca; }
@@ -370,71 +197,28 @@ tbody tr:nth-child(even) { background: var(--sl-color-gray-1); }
 [data-theme="dark"] .compare-box-old { background: rgba(248,113,113,.08); border-color: #450a0a; }
 [data-theme="dark"] .compare-box-new { background: rgba(52,211,153,.08); border-color: #065f46; }
 
-.step-number {
-  display: inline-flex; align-items: center; justify-content: center;
-  width: 24px; height: 24px; border-radius: 50%;
-  background: var(--primary); color: #fff; font-size: 12px; font-weight: 700;
-  flex-shrink: 0;
-}
-.flex-row { display: flex; align-items: flex-start; gap: 10px; }
-.muted-hint { font-size: 11px; color: var(--muted); margin-left: 8px; vertical-align: middle; }
-@media (max-width: 768px) { .muted-hint { display: none; } }
-
-/* ============================ Footer / pagination ============================ */
-.page-footer {
-  margin-top: 3rem; padding-top: 1.25rem;
-  border-top: 1px solid var(--sl-color-hairline);
-  display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
-}
+.page-footer { margin-top: 3rem; padding-top: 1.25rem; border-top: 1px solid var(--sl-color-hairline); display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap; }
 .page-footer .footer-note { font-size: .8125rem; color: var(--muted); }
-.next-link {
-  display: none; align-items: center; gap: .75rem;
-  border: 1px solid var(--sl-color-hairline); border-radius: .5rem;
-  padding: .6rem 1rem; color: var(--text); background: var(--card-bg);
-  text-align: right; max-width: 240px;
-}
+.next-link { display: none; align-items: center; gap: .75rem; border: 1px solid var(--sl-color-hairline); border-radius: .5rem; padding: .6rem 1rem; color: var(--text); background: var(--card-bg); text-align: right; max-width: 240px; }
 .next-link:hover { border-color: var(--primary); text-decoration: none; }
 .next-link .next-label { display: block; font-size: .6875rem; color: var(--muted); }
 .next-link .next-title { display: block; font-weight: 600; font-size: .875rem; }
 .next-link .next-arrow { color: var(--primary); font-size: 1.1rem; flex-shrink: 0; }
 
-/* ============================ Search overlay ============================ */
 #search-overlay { position: fixed; inset: 0; z-index: 200; display: none; }
 #search-overlay.open { display: block; }
 .search-backdrop { position: absolute; inset: 0; background: rgba(0,0,0,.45); }
-.search-dialog {
-  position: relative; margin: 14vh auto 0; width: min(40rem, 92vw);
-  background: var(--bg); border: 1px solid var(--sl-color-hairline);
-  border-radius: .75rem; overflow: hidden;
-  box-shadow: 0 24px 60px rgba(0,0,0,.25);
-  animation: fadeInUp .18s ease-out;
-}
-#search-input {
-  width: 100%; border: none; outline: none;
-  background: transparent; color: var(--text);
-  padding: 1rem 1.25rem; font-size: 1rem;
-  font-family: var(--font);
-  border-bottom: 1px solid var(--sl-color-hairline);
-}
+.search-dialog { position: relative; margin: 14vh auto 0; width: min(40rem, 92vw); background: var(--bg); border: 1px solid var(--sl-color-hairline); border-radius: .75rem; overflow: hidden; box-shadow: 0 24px 60px rgba(0,0,0,.25); animation: fadeInUp .18s ease-out; }
+#search-input { width: 100%; border: none; outline: none; background: transparent; color: var(--text); padding: 1rem 1.25rem; font-size: 1rem; font-family: var(--font); border-bottom: 1px solid var(--sl-color-hairline); }
 #search-results { max-height: 55vh; overflow-y: auto; padding: .5rem; }
-.search-item {
-  display: block; padding: .5rem .75rem; border-radius: .375rem;
-  color: var(--text); font-size: .875rem;
-}
+.search-item { display: block; padding: .5rem .75rem; border-radius: .375rem; color: var(--text); font-size: .875rem; }
 .search-item:hover { background: var(--sl-color-accent-low); text-decoration: none; }
 .search-item small { display: block; color: var(--muted); font-size: .75rem; margin-top: .1rem; }
 .search-empty { padding: 1rem 1.25rem; color: var(--muted); font-size: .875rem; }
 
-/* ============================ Responsive ============================ */
-@media (max-width: 1080px) {
-  .right-sidebar { display: none; }
-}
+@media (max-width: 1080px) { .right-sidebar { display: none; } }
 @media (max-width: 820px) {
-  .sidebar {
-    position: fixed; top: var(--header-h); left: 0; bottom: 0; z-index: 40;
-    transform: translateX(-102%); transition: transform .22s ease;
-    box-shadow: 8px 0 30px rgba(0,0,0,.15);
-  }
+  .sidebar { position: fixed; top: var(--header-h); left: 0; bottom: 0; z-index: 40; transform: translateX(-102%); transition: transform .22s ease; box-shadow: 8px 0 30px rgba(0,0,0,.15); }
   body.menu-open .sidebar { transform: translateX(0); }
   .main-pane { padding: 1.5rem 1.25rem 3rem; }
   .menu-btn { display: inline-flex; }
@@ -443,17 +227,11 @@ tbody tr:nth-child(even) { background: var(--sl-color-gray-1); }
   .sidebar-title, .sidebar-tagline { display: none; }
 }
 @media print {
-  .header, .sidebar, .right-sidebar, #progress-bar, #theme-toggle,
-  .search-btn, .menu-btn, .copy-btn { display: none !important; }
+  .header, .sidebar, .right-sidebar, #progress-bar, #theme-toggle, .search-btn, .menu-btn, .copy-btn { display: none !important; }
   .body-grid { display: block; }
   .section { display: block !important; page-break-inside: avoid; }
 }
-
-/* ============================ Animations ============================ */
-@keyframes fadeInUp {
-  from { opacity: 0; transform: translateY(12px); }
-  to { opacity: 1; transform: translateY(0); }
-}
+@keyframes fadeInUp { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
 </style>
 <!-- Google tag (gtag.js) -->
 <script async src="https://www.googletagmanager.com/gtag/js?id=G-SBQJY7TCWG"></script>
@@ -461,7 +239,6 @@ tbody tr:nth-child(even) { background: var(--sl-color-gray-1); }
   window.dataLayer = window.dataLayer || [];
   function gtag(){dataLayer.push(arguments);}
   gtag('js', new Date());
-
   gtag('config', 'G-SBQJY7TCWG');
 </script>
 </head>
@@ -474,18 +251,18 @@ tbody tr:nth-child(even) { background: var(--sl-color-gray-1); }
     <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M3 6h18M3 12h18M3 18h18"/></svg>
   </button>
   <a href="#sec1" class="site-title"><span class="accent">品构</span> pg-skills</a>
-  <span class="header-slogan">品质，长在结构里 <strong style="margin-left: 20px">SEA 驱动的 AI Coding</strong></span>
+  <span class="header-slogan">品质，长在结构里 <strong style="margin-left:20px">环境驱动的 AI Coding</strong></span>
   <div class="header-right">
     <button class="search-btn" id="search-toggle" aria-label="搜索">
       <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
       <span class="kbd-label">搜索</span>
       <kbd class="kbd-label">Ctrl K</kbd>
     </button>
-    <a class="cg-navlink" href="#sec-appendix">速查卡</a>
-    <a class="star-badge" href="https://github.com/pin-gou/pg-skills" target="_blank" rel="noopener" title="GitHub Stars">
-    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg>
-    <span class="star">★</span>3
-  </a>
+    <a class="cg-navlink" href="#sec6">速查</a>
+    <a class="star-badge" href="https://github.com/pin-gou/pg-skills" target="_blank" rel="noopener" title="GitHub">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor"><path d="M12 .3a12 12 0 0 0-3.8 23.38c.6.12.83-.26.83-.57L9 21.07c-3.34.72-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.08-.74.09-.73.09-.73 1.2.09 1.83 1.24 1.83 1.24 1.08 1.83 2.81 1.3 3.5 1 .1-.78.42-1.31.76-1.61-2.67-.3-5.47-1.33-5.47-5.93 0-1.31.47-2.38 1.24-3.22-.14-.3-.54-1.52.1-3.18 0 0 1-.32 3.3 1.23a11.5 11.5 0 0 1 6 0c2.28-1.55 3.29-1.23 3.29-1.23.64 1.66.24 2.88.12 3.18a4.65 4.65 0 0 1 1.23 3.22c0 4.61-2.8 5.63-5.48 5.92.42.36.81 1.1.81 2.22l-.01 3.29c0 .31.2.69.82.57A12 12 0 0 0 12 .3Z"/></svg>
+      <span class="star">★</span>
+    </a>
     <button id="theme-toggle" aria-label="切换明暗主题"></button>
   </div>
 </div>
@@ -495,29 +272,17 @@ tbody tr:nth-child(even) { background: var(--sl-color-gray-1); }
 <nav class="sidebar" id="sidebar" aria-label="目录">
   <div class="sidebar-title"><a href="#sec1" class="site-title"><span class="accent">品构</span> pg-skills</a></div>
 
-  <span class="group-label">基础概念</span>
-  <a href="#sec1" class="nav-link active">1. 为什么需要</a>
-  <a href="#sec2" class="nav-link">2. 架构全景</a>
+  <span class="group-label">了解</span>
+  <a href="#sec1" class="nav-link active">1. 这是什么</a>
+  <a href="#sec2" class="nav-link">2. 快速接入</a>
 
-  <span class="group-label">新项目接入</span>
-  <a href="#sec3-onboard" class="nav-link">3.1 五步接入</a>
-  <a href="#sec3-yaml" class="nav-link">3.2 project.yaml</a>
-  <a href="#sec3-hook" class="nav-link">3.3 Hook 协议</a>
-  <a href="#sec3-demo" class="nav-link">3.4 执行演示</a>
-  <a href="#sec3-checklist" class="nav-link">3.5 Checklist</a>
+  <span class="group-label">使用</span>
+  <a href="#sec3" class="nav-link">3. project.yaml 配置</a>
+  <a href="#sec4" class="nav-link">4. pg-run 交互菜单</a>
+  <a href="#sec5" class="nav-link">5. pg-auto-pilot 自动驾驶</a>
 
-  <span class="group-label">日常使用</span>
-  <a href="#sec4-overview" class="nav-link">4.1 概述</a>
-  <a href="#sec4-define" class="nav-link">4.2 定界</a>
-  <a href="#sec4-propose" class="nav-link">4.3 提案</a>
-  <a href="#sec4-build" class="nav-link">4.4 构建</a>
-  <a href="#sec5" class="nav-link">5. Bug 修复</a>
-  <a href="#sec6" class="nav-link">6. 回归测试</a>
-  <a href="#sec7" class="nav-link">7. 动手实操</a>
-  <a href="#sec8" class="nav-link">8. 常见问题</a>
-
-  <span class="group-label">附录</span>
-  <a href="#sec-appendix" class="nav-link">参考速查卡</a>
+  <span class="group-label">参考</span>
+  <a href="#sec6" class="nav-link">6. 速查卡</a>
 </nav>
 
 <div class="main-frame">
@@ -526,414 +291,187 @@ tbody tr:nth-child(even) { background: var(--sl-color-gray-1); }
 
 <!-- ============================================================ -->
 <div id="sec1" class="section active">
-<h1>1. 为什么需要品构</h1>
+<h1>1. 这是什么</h1>
+
+<p>pg-skills 是一个<strong>共享能力层</strong>，通过 <code>git subtree</code> 嵌入到你的项目 <code>.pg/skills/</code> 下。它为 AI 编码助手补上它自己看不见的东西——<strong>真实环境的互动方法</strong>。</p>
 
 <div class="card" style="border-left:4px solid var(--primary); font-size:16px; line-height:2; margin-top:8px; padding:18px 22px">
   <p style="margin:0 0 8px">AI 写代码不可怕，可怕的是——<strong>写完没人敢合</strong>。</p>
-  <p style="margin:0">大模型扫得懂整个代码库，却答不上来四个问题：项目怎么构建？在哪个环境验证？什么算"改对了"？每一步谁复核过？</p>
-  <p style="margin:8px 0 0">这些答案代码里没有，但是品构 pg-skills 为 AI 补全了这份空白。</p>
-  <p style="margin:8px 0 0; font-size:13px; color:var(--muted)">品构 = <strong>SEA</strong>-Driven Development（方案 · 环境 · 验收）——SDD 的延伸，三种要素，缺一不可。</p>
+  <p style="margin:0">大模型扫得懂整个代码库，却答不上来：项目怎么构建？在哪个环境验证？什么算"改对了"？这些答案不在代码里，在真实环境里。</p>
 </div>
 
-<h2>1.1 同一个需求，两种命运</h2>
+<h2>它解决什么问题</h2>
 
 <div class="compare-row">
   <div class="compare-box compare-box-old">
-    <h4 style="color:var(--danger)">❌ 盲猜模式</h4>
-    <p>AI 读到代码，但猜构建命令、猜环境地址、猜验收标准——猜对了是运气，猜错了是"写完不敢合"。因为没人说得清它改对了没有、验证过没有。</p>
+    <h4 style="color:var(--danger)">没有 pg-skills</h4>
+    <p>AI 猜构建命令、猜环境地址、猜验收标准。能编译、单测能过，一跑真实服务就崩——"幻觉完成"。</p>
   </div>
   <div class="compare-box compare-box-new">
-    <h4 style="color:var(--success)">✅ 品构模式</h4>
-    <p>先出图纸（propose）→ 按图施工（build）→ 真实环境验证 → 门控打分 → 合入。每一步都有结构兜底，<strong>系统比人先看见问题</strong>。</p>
+    <h4 style="color:var(--success)">有了 pg-skills</h4>
+    <p><code>project.yaml</code> 白纸黑字写清模块/环境/实例/构建命令。hook 协议让 AI 能启动、重启、观察真实服务。自动驾驶模式强制"启动实例并验证结果"才算完成。</p>
   </div>
 </div>
 
-<h2>1.2 一份户口本 + 无人值守的一天</h2>
+<h2>核心概念</h2>
 
-<p><code>project.yaml</code> 就是给 AI 的<strong>户口本</strong>：模块 / 环境 / 实例 / 构建命令 / 验证方式，白纸黑字。故名「品构」——<strong>品质，长在结构里</strong>。AI 不再猜，照章办事。</p>
+<table>
+  <tr><th>概念</th><th>一句话</th></tr>
+  <tr><td><strong>project.yaml</strong></td><td>给 AI 的"户口本"——模块、环境、实例、构建/测试命令，唯一可信源（SSOT）</td></tr>
+  <tr><td><strong>Hook 协议</strong></td><td>环境生命周期接口：prepare_env / start / stop / logs / health_check，注入 PG_* 环境变量，写 result.json，统一审计</td></tr>
+  <tr><td><strong>pg-auto-pilot</strong></td><td>唯一工作流——不限定 LLM 怎么做，只要求：计划含"启动实例并验证结果"；执行前让用户选定环境</td></tr>
+  <tr><td><strong>工具适配器</strong></td><td>核心流程与工具无关，由适配器渲染到 OpenCode / Mobile Coder / DeepSeek Harness</td></tr>
+</table>
+
+<h2>工作方式</h2>
 
 <div class="svg-container">
-<svg viewBox="0 0 720 100" xmlns="http://www.w3.org/2000/svg">
+<svg viewBox="0 0 720 80" xmlns="http://www.w3.org/2000/svg">
   <defs>
     <marker id="ar-tl" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
   </defs>
-  <line x1="40" y1="50" x2="680" y2="50" stroke="#cbd5e1" stroke-width="2"/>
-  <circle cx="40" cy="50" r="6" fill="#2563eb"/>
-  <circle cx="200" cy="50" r="6" fill="#7c3aed"/>
-  <circle cx="400" cy="50" r="6" fill="#ef4444"/>
-  <circle cx="560" cy="50" r="6" fill="#059669"/>
-  <circle cx="680" cy="50" r="6" fill="#10b981"/>
-  <text x="40" y="30" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">说需求</text>
-  <text x="40" y="44" font-size="10" fill="#1d4ed8" text-anchor="middle">你描述</text>
-  <text x="200" y="30" font-size="12" font-weight="700" fill="#6d28d9" text-anchor="middle">出图纸</text>
-  <text x="200" y="44" font-size="10" fill="#6d28d9" text-anchor="middle">propose</text>
-  <text x="400" y="30" font-size="12" font-weight="700" fill="#b91c1c" text-anchor="middle">施工</text>
-  <text x="400" y="44" font-size="10" fill="#b91c1c" text-anchor="middle">build 无人值守</text>
-  <text x="560" y="30" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">验证</text>
-  <text x="560" y="44" font-size="10" fill="#065f46" text-anchor="middle">真实环境</text>
-  <text x="680" y="30" font-size="12" font-weight="700" fill="#047857" text-anchor="middle">合入</text>
-  <text x="680" y="44" font-size="10" fill="#047857" text-anchor="middle">master</text>
-  <text x="40" y="78" font-size="10" fill="#64748b" text-anchor="middle">🤝 你说需求</text>
-  <text x="200" y="78" font-size="10" fill="#64748b" text-anchor="middle">🤝 你看图纸点头</text>
-  <text x="400" y="78" font-size="10" fill="#94a3b8" text-anchor="middle">🤖 完全自动</text>
-  <text x="560" y="78" font-size="10" fill="#94a3b8" text-anchor="middle">🤖 完全自动</text>
-  <text x="680" y="78" font-size="10" fill="#64748b" text-anchor="middle">🤝 你点合并</text>
+  <line x1="40" y1="40" x2="680" y2="40" stroke="#cbd5e1" stroke-width="2"/>
+  <circle cx="40" cy="40" r="6" fill="#2563eb"/>
+  <circle cx="240" cy="40" r="6" fill="#7c3aed"/>
+  <circle cx="440" cy="40" r="6" fill="#059669"/>
+  <circle cx="680" cy="40" r="6" fill="#10b981"/>
+  <text x="40" y="25" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">说需求</text>
+  <text x="240" y="25" font-size="12" font-weight="700" fill="#6d28d9" text-anchor="middle">出计划</text>
+  <text x="440" y="25" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">施工 + 验证</text>
+  <text x="680" y="25" font-size="12" font-weight="700" fill="#047857" text-anchor="middle">合入</text>
+  <text x="40" y="60" font-size="10" fill="#64748b" text-anchor="middle">你描述</text>
+  <text x="240" y="60" font-size="10" fill="#64748b" text-anchor="middle">你点头 + 选环境</text>
+  <text x="440" y="60" font-size="10" fill="#94a3b8" text-anchor="middle">完全自动</text>
+  <text x="680" y="60" font-size="10" fill="#64748b" text-anchor="middle">你 git merge</text>
 </svg>
 </div>
 
-<p>人只做两件事：<strong>说清需求</strong>、<strong>在关键节点点头</strong>。中间那 1-8 小时的实现 + 验证，全部由 pipeline 引擎自动跑完——你不参与。</p>
+<p>人只做两件事：<strong>说清需求</strong>、<strong>在关键节点点头</strong>。中间的实现 + 验证由 AI + hook 协议自动跑完。合并到 default 分支由人手动 <code>git merge</code> 收口。</p>
 
-<h2>1.3 品构的方法论：SEA-Driven Development</h2>
-
-<p>「品构」是品牌，藏着哲学——<strong>品质，长在结构里</strong>。那"结构"具体指什么？答案在它的方法论里：<strong>SEA-Driven Development</strong>（方案 · 环境 · 验收）。</p>
-
-<p>SEA 是对 SDD（Specification-Driven Development）的延伸。SDD 的核心是先写方案再写代码，但传统 SDD 缺两样东西——它不关心真实环境长什么样，也不告诉你"验证通过"是在真环境跑的还是在 mock 里跑的。品构在方案之外加了两个同等级别的支柱，凑成完整的 SEA：</p>
-
-<table>
-  <tr><th>支柱</th><th>是什么</th><th>解决什么问题</th></tr>
-  <tr><td><strong>方案 Spec</strong></td><td>proposal / design / tasks</td><td>做什么、怎么做、怎么验证</td></tr>
-  <tr><td><strong>环境 Environment</strong></td><td>env-description.yaml（describe_env 只读探测）</td><td>真实环境快照——有哪些 DB、版本多少、数据状态如何，不再猜</td></tr>
-  <tr><td><strong>验收 Acceptance</strong></td><td>scenario-*.yaml（Gherkin 场景）</td><td>验收不是在 mock 里跑，而是在真实服务实例上跑 Given / When / Then</td></tr>
-</table>
-
-<p>三根支柱加在一起，才是品构说的"结构"。缺了环境，方案写的是"假设中的环境"；缺了真实验收，验证跑的是"理想中的验证"。只有三者合一，系统才能完整地描述"项目长什么样 → 在哪验证 → 怎么算真通过"。</p>
-
-<p><strong>品质，长在结构里</strong>——SEA 就是那套把抽象"结构"落到实处的三根支柱。</p>
-
-<h2>1.4 为什么敢合</h2>
-
-<p>三步质检，让"敢合"不是靠感觉：</p>
-
-<ul>
-  <li><strong>每步留痕可回放</strong> —— 每个操作都是不可变事件，随时可以复盘</li>
-  <li><strong>验证在真实环境</strong> —— 启动真实服务、跑真实 API、查真实日志，不是 mock 里跑一跑</li>
-  <li><strong>门控打分 ≥80 才放行</strong> —— 5 维加权评分，没评审就不合入，没验证就不交付</li>
-</ul>
-
-<p>交付不是终点。回归发现问题 → 自动修复 → 提交 PR，闭环兜底。</p>
-
-<div class="subsection-card">
-<h2 style="margin-top:16px">使用 pg-skills 的日常体感</h2>
-<p>这是开发者用 pg-skills 跑一次任务（一个会话内可完成的实现任务）时，时间线上大致发生的事：</p>
-
-<ol style="padding-left:20px; margin:8px 0">
-  <li style="margin:12px 0"><strong><code>/0-pg-auto-pilot</code> — 自动驾驶模式</strong><br>
-  与 AI 对齐任务范围，AI 自主规划并执行，但必须遵守两条要求：<br>
-  <span style="font-size:13px;color:var(--muted)">① 实施计划必须含"启动实例并验证编码结果是否达到预期"的步骤；② 执行计划前，先让用户选定环境并确认是否需要准备环境。</span></li>
-
-  <li style="margin:12px 0"><strong>你验收 — 几分钟</strong><br>
-  <span style="font-size:13px;color:var(--muted)">AI 在真实环境中启动实例并验证结果，达不到预期就修复 → 重验，直到通过或上报你。</span></li>
-
-  <li style="margin:12px 0"><strong>合并 — 手动</strong><br>
-  <span style="font-size:13px;color:var(--muted)">合并到 default 分支改用手动 <code>git merge</code>。</span></li>
-</ol>
-
-<div class="card" style="margin-top:8px">
-  <p style="margin:0"><strong>范围说明</strong>：pg-define / pg-propose / pg-build / pg-regression / pg-fix-issue / pg-archive / pg-verify-and-merge 等 SKILL 及对应 <code>/1-pg-define</code> ~ <code>/6-pg-archive</code> 命令已移除。<code>pg-auto-pilot</code> 是当前唯一保留的 SKILL。</p>
-</div>
-</div>
-
-<h2>1.5 AI 在每一步的角色</h2>
-
-<p>「品质，长在结构里」——当前唯一工作流 <code>/0-pg-auto-pilot</code>（自动驾驶模式）：</p>
-
-<table>
-  <tr><th>流程</th><th>AI 角色</th><th>是否署名</th><th>谁兜底</th></tr>
-  <tr>
-    <td><strong>自动驾驶</strong> <code>/0-pg-auto-pilot</code></td>
-    <td><span class="tag tag-green">自主编排</span>：不限定如何规划与执行；计划必须含"启动实例并验证结果"，执行前让用户选定环境并确认准备方式</td>
-    <td>AI 全程规划与执行；每段实现都通过 hooks 协议重启实例并验证</td>
-    <td>真实环境 build/lint/test、health_check、运行时检查；失败 → 修复 → 重验</td>
-  </tr>
-  <tr>
-    <td><strong>合并</strong> 手动 <code>git merge</code></td>
-    <td>不负责自动合并；合并到 default 分支由用户手动执行</td>
-    <td>用户手动操作</td>
-    <td>用户确认</td>
-  </tr>
-</table>
+<h2>仓库结构</h2>
+<pre>
+pg-skills/
+├── src/
+│   ├── core/workflows/        # 工具无关的规范源：1 个 command、1 个 skill、1 个 sub-agent
+│   │   ├── commands/pg-0-auto-pilot.md
+│   │   ├── skills/pg-auto-pilot/
+│   │   ├── agents/explore.md
+│   │   └── scripts/pg-parse-config.py   # SSOT 查询工具
+│   ├── integrations/          # 工具适配器：opencode / mobile_coder / deepseek_harness
+│   └── runtime/               # CLI + hook 执行引擎 + SSOT 规范
+│       ├── bin/               # pg, pg-invoke-hook.py, pg-run, pg-exit, pg-fail
+│       ├── lib/               # hook-helpers.sh, pg-run-hook.py, tui.py
+│       └── spec/              # project.schema.json, error-categories.yaml, hook-env-vars.yaml
+├── examples/shell/hooks/      # 默认 hook 模板
+└── VERSION                    # 0.9.4
+</pre>
 
 <div class="info-card card">
-  <p style="margin:0"><strong>「品质，长在结构里」的内在承诺</strong>：每一段被 AI 写出的代码，<strong>都先定了界、有人审了图、跑过了门控、留了回放</strong>。"可托付"不是流程写在文档里——是流程对每个 commit 都收一次口。</p>
+  <p style="margin:0"><strong>一句话总结</strong>：pg-skills 为 AI 补全真实环境的互动方法——<code>project.yaml</code> 定义"项目长什么样"，hook 协议定义"在哪验证"，pg-auto-pilot 强制"启动实例并验证结果"。</p>
 </div>
-
 </div>
 
 <!-- ============================================================ -->
 <div id="sec2" class="section">
-<h1>2. 架构全景——三层模型</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 我们从结构开始建。一个项目对品构是 3 层：共享能力层 / 项目配置层 / 业务代码层。</p>
+<h1>2. 快速接入</h1>
 
-<h2>2.1 三层架构</h2>
-<div class="svg-container">
-<svg viewBox="0 0 700 400" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <linearGradient id="g1" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#2563eb"/><stop offset="100%" stop-color="#7c3aed"/></linearGradient>
-    <linearGradient id="g2" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#059669"/><stop offset="100%" stop-color="#10b981"/></linearGradient>
-    <linearGradient id="g3" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#d97706"/><stop offset="100%" stop-color="#f59e0b"/></linearGradient>
-  </defs>
-  <!-- L1 -->
-  <rect x="40" y="20" width="620" height="110" rx="10" fill="url(#g1)" opacity="0.15"/>
-  <rect x="40" y="20" width="620" height="110" rx="10" stroke="url(#g1)" stroke-width="2" fill="none"/>
-  <text x="60" y="50" font-size="14" font-weight="700" fill="var(--text)">L1：pg-skills 共享能力层</text>
-  <text x="60" y="72" font-size="12" fill="var(--muted)">.opencode/skills/ 下的 10 个活跃 SKILL 定义（跨项目复用）</text>
-  <rect x="60" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
-  <text x="72" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-propose</text>
-  <rect x="158" y="85" width="116" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
-  <text x="170" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-build</text>
-  <rect x="276" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
-  <text x="288" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-fix-issue</text>
-  <rect x="384" y="85" width="96" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
-  <text x="396" y="104" font-size="12" font-weight="600" fill="var(--text)">pg-regression</text>
-<rect x="492" y="85" width="80" height="28" rx="6" fill="url(#g1)" opacity="0.3"/>
-<text x="504" y="104" font-size="12" font-weight="600" fill="var(--text)">+ 6 个</text>
-
-  <!-- Arrow -->
-  <line x1="350" y1="130" x2="350" y2="150" stroke="var(--muted)" stroke-width="2" marker-end="url(#arrow)"/>
-  <defs><marker id="arrow" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="var(--muted)"/></marker></defs>
-
-  <!-- L2 -->
-  <rect x="40" y="155" width="620" height="110" rx="10" fill="url(#g2)" opacity="0.15"/>
-  <rect x="40" y="155" width="620" height="110" rx="10" stroke="url(#g2)" stroke-width="2" fill="none"/>
-  <text x="60" y="185" font-size="14" font-weight="700" fill="var(--text)">L2：.pg/ 项目配置层（唯一配置来源）</text>
-  <text x="60" y="207" font-size="12" fill="var(--muted)">.pg/project.yaml = 单一可信源，所有 SKILL 以此为驱动</text>
-  <rect x="60" y="220" width="96" height="28" rx="6" fill="url(#g2)" opacity="0.3"/>
-  <text x="72" y="239" font-size="12" font-weight="600" fill="var(--text)">project.yaml</text>
-  <rect x="168" y="220" width="80" height="28" rx="6" fill="url(#g2)" opacity="0.3"/>
-  <text x="176" y="239" font-size="12" font-weight="600" fill="var(--text)">hooks/</text>
-  <rect x="260" y="220" width="96" height="28" rx="6" fill="url(#g2)" opacity="0.3"/>
-  <text x="272" y="239" font-size="12" font-weight="600" fill="var(--text)">changes/</text>
-  <rect x="368" y="220" width="80" height="28" rx="6" fill="url(#g2)" opacity="0.3"/>
-  <text x="376" y="239" font-size="12" font-weight="600" fill="var(--text)">context/</text>
-  <rect x="460" y="220" width="80" height="28" rx="6" fill="url(#g2)" opacity="0.3"/>
-  <text x="468" y="239" font-size="12" font-weight="600" fill="var(--text)">skills/</text>
-
-  <!-- Arrow -->
-  <line x1="350" y1="265" x2="350" y2="285" stroke="var(--muted)" stroke-width="2" marker-end="url(#arrow)"/>
-
-  <!-- L3 -->
-  <rect x="40" y="290" width="620" height="90" rx="10" fill="url(#g3)" opacity="0.15"/>
-  <rect x="40" y="290" width="620" height="90" rx="10" stroke="url(#g3)" stroke-width="2" fill="none"/>
-  <text x="60" y="320" font-size="14" font-weight="700" fill="var(--text)">L3：业务代码层</text>
-  <text x="60" y="342" font-size="12" fill="var(--muted)">你的真实项目代码，不感知 pipeline 机制</text>
-  <rect x="80" y="355" width="120" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
-  <text x="90" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-backend</text>
-  <rect x="210" y="355" width="120" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
-  <text x="220" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-frontend</text>
-  <rect x="340" y="355" width="120" height="22" rx="6" fill="url(#g3)" opacity="0.3"/>
-  <text x="350" y="370" font-size="11" font-weight="600" fill="var(--text)">webvirt-agent</text>
-</svg>
-</div>
-
-<div class="info-card card">
-  <strong>核心原则</strong>：L1 不含任何项目特定知识（无 webvirt、无 pangee）；L2 是项目的<strong>单一可信源</strong>；L3 只关心业务代码。
-</div>
-
-<h2>2.2 项目目录结构</h2>
+<h2>四步接入</h2>
 <pre>
-.pg/
-├── project.yaml                  # 统一配置 SSOT（modules / environments / tracks / stages）
-├── agent/                        # pg-agent caller 路由：LLM agent 会话日志与产物
-│   └── 2026-09-12-fix-login/     # 一次任务一个独立目录（session = &lt;iso-date&gt;-&lt;keyword&gt;）
-│       └── dev-local/logs/       # hook 日志与产物
-├── ad-hoc/                       # ad-hoc caller 路由：用户/agent 直接调 hook
-│   └── auto-<date>-<pid>/        # 留空 --session 时自动生成
-├── hooks/                        # 环境生命周期脚本（仅 environments 维度）
-│   ├── role-backend-start.sh
-│   ├── role-agent-start.sh
-│   ├── env-dev-local-prepare.sh
-│   └── ...
-├── context/                      # 项目上下文快照（AGENTS.md 提取后缓存）
-└── skills/                       # pg-skills 嵌入（git subtree），pg init 在 .opencode/ 创建 symlink
-</pre>
-
-<div class="info-card card">
-  <p style="margin:0"><strong>caller × session 双维度路由</strong>：上面 <code>agent/</code> / <code>ad-hoc/</code> 两个目录由 <code>PG_RUN_CALLER</code> 决定一级目录，由 <code>PG_RUN_SESSION</code> 决定二级目录。runner 自动按调用方身份把日志、PID、result.json 写到对应路径，无需手动指定。<code>changes/</code> / <code>regression/</code> / <code>fix-issue/</code> 等目录已随对应 SKILL 移除。</p>
-</div>
-
-<h2>2.3 四层结构 —— 品质从哪里来</h2>
-
-<p>1.3 节讲了品构的方法论——SEA（方案 · 环境 · 验收）。那这些支柱是靠什么"钉死"的？靠四层结构，层层收紧：</p>
-
-<table>
-  <tr><th>层</th><th>载体</th><th>收紧什么</th><th>解决什么问题</th></tr>
-  <tr>
-    <td><strong>项目结构</strong></td>
-    <td><code>project.yaml</code></td>
-    <td>模块 / 环境 / 实例 / 构建命令</td>
-    <td>不再猜"项目长什么样"</td>
-  </tr>
-  <tr>
-    <td><strong>流程结构</strong></td>
-    <td>stages × tracks × TDRVG</td>
-    <td>先做什么、再做什么、最后门控</td>
-    <td>不再猜"够不够"</td>
-  </tr>
-  <tr>
-    <td><strong>产物结构</strong></td>
-    <td>schema / template / 校验脚本</td>
-    <td>每个文件该长什么样、该含什么字段</td>
-    <td>不再猜"写没写全"</td>
-  </tr>
-  <tr>
-    <td><strong>证据结构</strong></td>
-    <td>事件溯源 <code>pipeline.events</code></td>
-    <td>每步操作不可变、可回放</td>
-    <td>不再猜"谁干了什么"</td>
-  </tr>
-</table>
-
-<p>每一层都是系统可以自动执行的契约，不是需要人记的规则。四层合在一起，才让"品质"这个抽象词变成可操作、可验证、可回放的具体机制。</p>
-
-<p><strong>品质，长在结构里</strong>——就是 SEA 三大支柱，被四层结构层层收紧的结果。</p>
-
-<h2>2.4 AGENTS.md 的角色</h2>
-<p>AGENTS.md 是 AI 的"入职手册"——包含项目的技术栈、包结构、数据库约定、编码风格、路径规范等。pg-auto-pilot 直接通读 AGENTS.md 提取上下文作为 LLM 约束。</p>
-</div>
-
-<!-- ============================================================ -->
-<div id="sec3-onboard" class="section">
-<h1>3. 新项目接入——Two Pillars</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:4px">「品质，长在结构里」—— 我们先把骨架钉死在项目里。骨架对，AI 在里面写代码就是"合结构"的；骨架错，AI 写得越多越危险。</p>
-<p class="muted">接入新项目，最重要的三件事：<strong>写对 project.yaml</strong> + <strong>写对 hooks</strong> + <strong>写对 <code>.pg/code-review/</code></strong></p>
-
-<h2>3.1 五步接入</h2>
-<div class="card">
-<ol>
-  <li><strong>配置 opencode 模型路由</strong>——pg-skills 使用三个路由别名
-    <code>pg-router/pg-associate</code>（轻量）、<code>pg-router/pg-expert</code>（主力）、
-    <code>pg-router/pg-master</code>（规划），需在 <code>opencode.json</code> 中映射到实际模型。
-    推荐使用 <a href="https://github.com/zhangzhongnan/omniroute">omniroute</a>
-    或 <a href="https://github.com/PinGou/9router">9router</a> 等工具进行模型路由选择。</li>
-  <li><strong>git subtree 拉入 pg-skills</strong>（含 <code>.pg/skills/examples/code-review/</code> 模板：default / java-spring / go / vue3 / security 五个 profile）</li>
-  <li><strong>pg init 生成骨架 + symlink</strong></li>
-  <li><strong>重启 opencode</strong>（加载 slash commands + skills + sub-agents）</li>
-  <li><strong>运行 <code>/0-pg-auto-pilot</code></strong>（自动驾驶模式：自主规划、启动实例并验证、执行前选定环境）</li>
-</ol>
-</div>
-
-<pre>
-<span style="color:#94a3b8"># ① 在 opencode.json 中配置模型路由</span>
-<span style="color:#94a3b8"># 使用 omniroute / 9router 映射三模型：</span>
-<span style="color:#94a3b8">#   pg-router/pg-associate → minimax-m2.7（轻量）</span>
-<span style="color:#94a3b8">#   pg-router/pg-expert    → deepseek-v4-flash（主力）</span>
-<span style="color:#94a3b8">#   pg-router/pg-master    → deepseek-v4-pro 或 minimax-m3（规划）</span>
-<span style="color:#94a3b8"></span>
-<span style="color:#94a3b8"># ② 用 git subtree 把 pg-skills 同步进项目</span>
+<span style="color:#94a3b8"># ① git subtree 拉入 pg-skills（版本号与 VERSION 一致）</span>
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
 git subtree add --prefix=.pg/skills pg-skills v0.9.4 --squash
 
-<span style="color:#94a3b8"># ③ 跑 pg init 创建 .pg/ 骨架 + .opencode/ symlink</span>
+<span style="color:#94a3b8"># ② 初始化骨架 + 安装工具适配器</span>
 python3 .pg/skills/src/runtime/bin/pg init
 
-<span style="color:#94a3b8"># ④ 重启 opencode 后，运行 /0-pg-auto-pilot</span>
-<span style="color:#94a3b8">#    （Phase 1 扫仓库 → Phase 2 写 .pg/project.yaml → Phase 2.5 按 language 派发 review profile → Phase 3 写 .pg/hooks/ → Phase 4 doctor 校验）</span>
-<span style="color:#94a3b8"># ⑤ 验证</span>
+<span style="color:#94a3b8">#    非交互环境（CI）必须显式指定工具</span>
+python3 .pg/skills/src/runtime/bin/pg init --non-interactive --tool opencode
+
+<span style="color:#94a3b8"># ③ 重启开发工具，加载新的 command/skill/agent</span>
+
+<span style="color:#94a3b8"># ④ 验证接入</span>
 python3 .pg/skills/src/runtime/bin/pg doctor
 </pre>
 
+<h2>pg init 工具选择规则</h2>
+<ul>
+  <li>传入 <code>--tool</code>：直接安装指定适配器，不做探测</li>
+  <li>未传且只检测到一个工具：显示依据，要求确认</li>
+  <li>未传且检测到多个：列出候选项，由用户选择</li>
+  <li>CI / 非交互环境：必须传 <code>--tool</code>，否则失败</li>
+</ul>
+
+<table>
+  <tr><th>flag</th><th>用途</th></tr>
+  <tr><td><code>--tool &lt;id&gt;</code></td><td>显式安装适配器（opencode / mobile-coder / deepseek-harness）</td></tr>
+  <tr><td><code>--list-tools</code></td><td>列出当前支持的开发工具</td></tr>
+  <tr><td><code>--non-interactive</code></td><td>禁止提示；必须显式 <code>--tool</code></td></tr>
+  <tr><td><code>-y / --yes</code></td><td>只探测到一个工具时免确认</td></tr>
+  <tr><td><code>--no-tool-config</code></td><td>仅初始化 .pg/ 骨架，不安装工具适配</td></tr>
+</table>
+
+<h2>接入后的 .pg/ 骨架</h2>
+<pre>
+.pg/
+├── project.yaml              # 配置 SSOT（modules / environments）
+├── hooks/                    # 环境生命周期脚本
+├── agent/                    # pg-agent 日志与产物
+├── ad-hoc/                   # ad-hoc 调用日志
+├── context/                  # 项目上下文（agent-protocol.md 等）
+├── skills/                   # 嵌入的 pg-skills
+└── runs/                     # 运行记录
+</pre>
+
+<h2>接入 Checklist</h2>
+<div class="card">
+<ul class="checklist">
+  <li><input type="checkbox"> <code>git subtree add --prefix=.pg/skills pg-skills v0.9.4 --squash</code></li>
+  <li><input type="checkbox"> <code>pg init</code> 生成骨架 + 渲染工具适配</li>
+  <li><input type="checkbox"> <code>pg doctor</code> 校验通过</li>
+  <li><input type="checkbox"> 核对 project.yaml：modules / environments 与真实项目一致</li>
+  <li><input type="checkbox"> 核对 hooks：每个 role 的 start/stop/logs，每个 env 的 prepare_env/clean_env</li>
+  <li><input type="checkbox"> 重启开发工具，运行 <code>/0-pg-auto-pilot</code> 跑通一次</li>
+</ul>
+</div>
+
 <div class="tip-card card">
-  <strong>讲师强调</strong>：接入新项目最重要的三件事就是 <strong>① 写对 project.yaml（骨架）</strong>、<strong>② 写对 hooks（血肉）</strong>、<strong>③ 写对 <code>.pg/code-review/</code>（review phase 的语言特异检查项源头）</strong>。这三件不对，AI 再怎么跑 pipeline 都是错的。
+  <strong>接入最重要的两件事</strong>：写对 <code>project.yaml</code>（骨架）、写对 hooks（血肉）。这两件不对，AI 再怎么跑都是错的。
 </div>
 </div>
 
 <!-- ============================================================ -->
-<div id="sec3-yaml" class="section">
-<h1>3.2 project.yaml —— 六段结构</h1>
+<div id="sec3" class="section">
+<h1>3. project.yaml 配置</h1>
 
-<div class="svg-container">
-<svg viewBox="0 0 720 420" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arr-down" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
-  </defs>
+<p><code>project.yaml</code> 是给 AI 的"户口本"——唯一可信源。Agent <strong>必须</strong>通过 <code>pg-parse-config.py</code> 读取，禁止直接读 YAML。</p>
 
-  <!-- ======== Layer 2: workflow-specific ======== -->
+<h2>两段核心配置</h2>
 
-  <!-- pg-build container -->
-  <rect x="36" y="60" width="200" height="152" rx="8" fill="#f5f3ff" stroke="#7c3aed" stroke-width="1.5"/>
-  <text x="136" y="82" font-size="12" font-weight="700" fill="#6d28d9" text-anchor="middle">pg-build 专用</text>
-
-  <rect x="56" y="95" width="160" height="42" rx="6" fill="#ede9fe" stroke="#7c3aed" stroke-width="1.5"/>
-  <text x="136" y="115" font-size="13" font-weight="600" fill="#6d28d9" text-anchor="middle">tracks</text>
-  <text x="136" y="131" font-size="11" fill="#64748b" text-anchor="middle">TDRVG 循环编排（含可选 R）</text>
-
-  <rect x="56" y="148" width="160" height="42" rx="6" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="136" y="168" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">stages</text>
-  <text x="136" y="184" font-size="11" fill="#64748b" text-anchor="middle">Pipeline 阶段编排</text>
-
-  <!-- pg-fix-issue container -->
-  <rect x="260" y="60" width="200" height="152" rx="8" fill="#fef2f2" stroke="#ef4444" stroke-width="1.5"/>
-  <text x="360" y="82" font-size="12" font-weight="700" fill="#b91c1c" text-anchor="middle">pg-fix-issue 专用</text>
-
-  <rect x="280" y="110" width="160" height="42" rx="6" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
-  <text x="360" y="130" font-size="13" font-weight="600" fill="#b91c1c" text-anchor="middle">fix_issue</text>
-  <text x="360" y="146" font-size="11" fill="#64748b" text-anchor="middle">Bug 修复参数</text>
-
-  <!-- pg-regression container -->
-  <rect x="484" y="60" width="200" height="152" rx="8" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
-  <text x="584" y="82" font-size="12" font-weight="700" fill="#4338ca" text-anchor="middle">pg-regression 专用</text>
-
-  <rect x="504" y="110" width="160" height="42" rx="6" fill="#e0e7ff" stroke="#6366f1" stroke-width="1.5"/>
-  <text x="584" y="130" font-size="13" font-weight="600" fill="#4338ca" text-anchor="middle">regression</text>
-  <text x="584" y="146" font-size="11" fill="#64748b" text-anchor="middle">回归测试套件</text>
-
-  <!-- Arrow from each workflow down to shared config -->
-  <line x1="136" y1="212" x2="136" y2="243" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-down)"/>
-  <line x1="360" y1="212" x2="360" y2="243" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-down)"/>
-  <line x1="584" y1="212" x2="584" y2="243" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="4,3" marker-end="url(#arr-down)"/>
-
-  <!-- ======== Layer 1: 公共配置 ======== -->
-  <rect x="36" y="250" width="648" height="90" rx="10" fill="#ecfdf5" stroke="#059669" stroke-width="2"/>
-  <rect x="36" y="250" width="648" height="26" rx="10" fill="#059669"/>
-  <rect x="36" y="265" width="648" height="11" fill="#059669"/>
-  <text x="360" y="268" font-size="12" font-weight="700" fill="#fff" text-anchor="middle">公共配置（所有 workflow 共享）</text>
-
-  <rect x="56" y="285" width="290" height="42" rx="6" fill="#dbeafe" stroke="#2563eb" stroke-width="1.5"/>
-  <text x="201" y="305" font-size="13" font-weight="600" fill="#1d4ed8" text-anchor="middle">modules</text>
-  <text x="201" y="321" font-size="11" fill="#64748b" text-anchor="middle">代码模块 + build/lint/test 命令</text>
-
-  <rect x="376" y="285" width="290" height="42" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
-  <text x="521" y="305" font-size="13" font-weight="600" fill="#065f46" text-anchor="middle">environments</text>
-  <text x="521" y="321" font-size="11" fill="#64748b" text-anchor="middle">运行时拓扑 + describe_env + role 启停动作</text>
-
-  <!-- ======== Footer ======== -->
-  <text x="36" y="375" font-size="11" fill="#64748b">补充字段：verify_merge / flyway.migration_path / git.default_branch / build_rules</text>
-
-  <rect x="36" y="385" width="648" height="30" rx="6" fill="#f8fafc" stroke="#e2e8f0" stroke-width="1"/>
-  <text x="48" y="404" font-size="11" font-family="monospace" fill="#2563eb">python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-agent</text>
-  <text x="475" y="404" font-size="11" fill="#64748b">exit code ≠ 0 → 修复 project.yaml</text>
-</svg>
-</div>
-
-<h3>modules 段</h3>
+<h3>modules — 代码模块 + build/lint/test 命令</h3>
 <pre>
 modules:
   backend:
     root: webvirt-backend
     language: java
-    code_review_profiles: [security] <span style="color:#94a3b8"># 可选 opt-in；java/go/proto 默认 security，ts/py 默认 standard，shell 默认 none</span>
-    build: .pg/hooks/backend-build.sh     <span style="color:#94a3b8"># 虽在 hooks/ 下，但不走 hook 协议</span>
-    lint: cd webvirt-backend && mvn checkstyle:check  <span style="color:#94a3b8"># 也可能 inline</span>
+    build: .pg/hooks/backend-build.sh
+    lint: cd webvirt-backend &amp;&amp; mvn checkstyle:check
     test:
-      unit: .pg/hooks/backend-test.sh
-      integration:
-        cmd: .pg/hooks/backend-test.sh
-        timeout_seconds: 3600
+      unit: { cmd: .pg/hooks/backend-test.sh, timeout_seconds: 3600 }
 </pre>
 
-<div class="info-card card">
-  <p style="margin:0"><strong>review 派发机制</strong>：review phase 由 <code>pg-build</code> 读取 <code>.pg/code-review.yaml</code> 全局 + module language 自动派发（Union 合并语义）。Security profile 由 <code>pg-init-project</code> Phase 2.5 推一份 <code>.pg/code-review/security/</code> 后，在 <code>.pg/code-review.yaml</code> 中通过 union 合并拾起；按需在 <code>modules.&lt;m&gt;.code_review_profiles</code> 中追加 opt-in profile。是否派发 review 由 <code>tracks.&lt;id&gt;.code_review_enabled</code> 控制（默认 true；simple track 自动 false）。</p>
+<div class="danger-card card">
+  <strong>注意</strong>：<code>modules.build</code> 虽然可以指向 <code>.pg/hooks/</code> 下的脚本，但它被 runner 当作<strong>普通 shell 命令</strong>执行——没有 PG_* 注入，不走 hook 协议。是否走 hook 取决于配置在 project.yaml 的<strong>哪个位置</strong>，不在于是不是脚本文件。
 </div>
 
-<h3>environments 段</h3>
+<h3>environments — 运行时拓扑 + 启停动作</h3>
 <pre>
 environments:
   dev-local:
     description: "本机全栈开发"
-    describe_env: { script: .pg/hooks/env-dev-local-describe.sh, timeout_seconds: 120 }
     prepare_env:  { script: .pg/hooks/env-dev-local-prepare.sh, timeout_seconds: 300 }
     clean_env:    { script: .pg/hooks/env-dev-local-clean.sh, timeout_seconds: 120 }
+    describe_env: { script: .pg/hooks/env-dev-local-describe.sh, timeout_seconds: 120 }
     roles:
       - name: backend
         instances:
@@ -942,821 +480,248 @@ environments:
           start: { script: .pg/hooks/role-backend-start.sh, timeout_seconds: 300 }
           stop:  { script: .pg/hooks/role-backend-stop.sh, timeout_seconds: 30 }
           logs:  { script: .pg/hooks/role-backend-logs.sh, args: ["{lines:100}"] }
-</pre>
-
-<h3>tracks + stages 段</h3>
-<pre>
-<span style="color:#94a3b8"># tracks：定义在哪些 modules 上跑 TDRVG 循环（含 review 子阶段，由 pg-build 派发）</span>
-tracks:
-  backend:
-    modules: [backend, agent-proto]
-    max_fix_retries: 5
-    <span style="color:#94a3b8"># review profile 由 .pg/code-review.yaml + module language 自动派发</span>
-  agent:
-    modules: [agent, agent-proto]
-  frontend:
-    modules: [frontend]
-  proto-gen:
-    type: simple                       <span style="color:#94a3b8"># simple track 自动跳过 review 阶段</span>
-
-<span style="color:#94a3b8"># stages：定义 pipeline 阶段编排（on_conditions 决定 change 是否进入该 stage）</span>
-stages:
-  - name: prepare-env-scripts
-    tracks: [backend, agent, frontend]
-    test_key: unit
-    on_conditions:                       <span style="color:#94a3b8"># 仅当改动命中 .pg/hooks/ 才启用</span>
-      - any_change_in: ["\\.pg/hooks/.*\\.sh$"]
-  - name: dev
-    tracks: [backend, agent, openapi-gen, frontend]
-    test_key: unit
-    gate: all_pass
-    environment:
-      required: true
+          health_check: { url: http://localhost:9080/health }
 </pre>
 
 <div class="info-card card">
-  <strong>tracks 字段速查</strong>：
-  <ul style="margin:8px 0 0; padding-left:20px">
-    <li><code>modules</code>：本 track 关联的 module id 列表（runner 用此定位 build/lint/test 命令）</li>
-    <li><code>max_fix_retries</code>：verify→fix 子 pipeline 的总次数上限（默认 5）</li>
-    <li><code>type</code>：<code>standard</code>（默认，TDRVG 四阶段 + 可选 review）/ <code>simple</code>（commands 列表直跑，自动跳过 review）/ <code>scenario</code>（真实集成场景测试，独立 scenario-prepare/execute/fix 三阶段，不参与 gate）</li>
-    <li><code>code_review_enabled</code>：是否派发 <code>pg-build/review</code> agent。propose 阶段由 <code>pg-gen-tasks-skeleton.py</code> 按 manifest 的 <code>phases.review</code> 是否存在决定 tasks.md 含 4 还是 5 sub（不含 review 即 silent skip）；simple track 自动跳过 review</li>
-    <li><code>code_review_profiles</code>：⚠ <strong>已废弃，runner 不读取</strong>。profile 派发仅依赖 <code>.pg/code-review.yaml</code> 全局 + module language 自动派发。</li>
-    <li><code>type: scenario</code>：独立三阶段（prepare/execute/fix），不参与 gate assessment。</li>
+  <p style="margin:0"><strong>v0.9.2 破坏性变更</strong>：<code>roles</code> 已由键值对改为<strong>数组格式</strong>（<code>[{name, ...}]</code>），旧写法将解析失败。</p>
+</div>
+
+<h2>SSOT 查询 — pg-parse-config.py</h2>
+<p>Agent 必须通过此工具读取配置：</p>
+<table>
+  <tr><th>目的</th><th>命令</th></tr>
+  <tr><td>拿全部 modules + environments</td><td><code>pg-parse-config.py pg-agent</code></td></tr>
+  <tr><td>拿单个模块 build 命令</td><td><code>pg-parse-config.py --resolve-module-build &lt;module&gt;</code></td></tr>
+  <tr><td>拿单个模块 test_key</td><td><code>pg-parse-config.py --resolve-module-test &lt;module&gt; &lt;test_key&gt;</code></td></tr>
+  <tr><td>拿环境的 role 信息</td><td><code>pg-parse-config.py --resolve-env &lt;env&gt;</code></td></tr>
+  <tr><td>拿单值</td><td><code>pg-parse-config.py --key &lt;dotted.path&gt;</code></td></tr>
+  <tr><td>拿子树</td><td><code>pg-parse-config.py --prefix &lt;top-level-key&gt;</code></td></tr>
+</table>
+
+<div class="danger-card card">
+  <ul style="margin:0;padding-left:20px">
+    <li>禁止直接读 <code>.pg/project.yaml</code>——绕过 SSOT 可能拿到 stale 副本</li>
+    <li>不要用已移除的 skill 模式调用（如 <code>pg-build</code> / <code>pg-propose</code>）——只有 <code>pg-agent</code> 是 agent 专用入口</li>
   </ul>
 </div>
-</div>
 
-<!-- ============================================================ -->
-<div id="sec3-hook" class="section">
-<h1>3.3 Hook 协议详解</h1>
-
-<h2>两条铁律</h2>
-<div class="card">
+<h2>Hook 协议边界</h2>
 <table>
-  <tr><th>维度</th><th>走 hook 协议？</th><th>配置位置</th><th>调度方式</th></tr>
+  <tr><th>维度</th><th>走 hook 协议？</th><th>配置位置</th></tr>
   <tr>
-    <td><strong>Environments</strong><br><span style="font-size:12px;color:var(--muted)">prepare_env / clean_env / role start/stop/logs</span></td>
-    <td><span class="tag tag-green">✅ 走 hook</span></td>
+    <td><strong>Environments</strong><br><span style="font-size:12px;color:var(--muted)">prepare_env / clean_env / describe_env / role start·stop·logs·health_check</span></td>
+    <td><span class="tag tag-green">走 hook</span></td>
     <td><code>.pg/hooks/&lt;name&gt;.sh</code></td>
-    <td><code>./pg-run</code>（用户）/ <code>pg-invoke-hook.py</code>（agent）统一入口</td>
   </tr>
   <tr>
     <td><strong>Modules</strong><br><span style="font-size:12px;color:var(--muted)">build / lint / test</span></td>
-    <td><span class="tag tag-red">❌ 不走 hook</span></td>
+    <td><span class="tag tag-red">不走 hook</span></td>
     <td><code>project.yaml modules.&lt;m&gt;.{build,lint,test}</code></td>
-    <td>Runner 直接 <code>timeout N bash -c '&lt;cmd&gt;'</code></td>
   </tr>
 </table>
-</div>
 
-<div class="danger-card card">
-  <strong>⚠ 常见误区</strong>：module 命令虽然可以是 <code>.pg/hooks/backend-build.sh</code> 这样指向脚本文件，但它是被 runner 当作<strong>普通 shell 命令</strong>执行的——没有 <code>PG_*</code> 注入，不走 hook 生命周期。是否走 hook 协议取决于配置在 project.yaml 的<strong>哪个位置</strong>，不在于是不是脚本文件。
-</div>
-
-<h2>Hook 标准模板</h2>
+<h2>Hook 调用 — 必须走 pg-invoke-hook.py</h2>
 <pre>
-<span style="color:#94a3b8">#!/usr/bin/env bash</span>
-<span style="color:#94a3b8"># .pg/hooks/role-backend-start.sh</span>
-set -uo pipefail
+<span style="color:#94a3b8"># agent 调用（固定 --caller pg-agent + 一次性 session）</span>
+python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
+  --caller pg-agent --session "$SESSION_ID" \
+  --env dev-local --role backend --instance backend-1 --action start
 
-<span style="color:#94a3b8"># === 1. 加载 hook-helpers（必须）===</span>
-<span style="color:#f59e0b">source</span> <span style="color:#10b981">"$PG_SKILLS_PATH/src/runtime/lib/hook-helpers.sh"</span>
-<span style="color:#f59e0b">trap</span> <span style="color:#10b981">'pg_fail_on_error $? $LINENO'</span> ERR
-
-<span style="color:#94a3b8"># === 2. 业务逻辑 ===</span>
-start_backend() { ... }
-
-<span style="color:#94a3b8"># === 3. 报告结果 ===</span>
-DURATION=$(($(date +%s) - START))
-<span style="color:#f59e0b">pg_exit</span> --status=pass --duration=$DURATION
-
-<span style="color:#94a3b8"># 失败时用 pg_fail：</span>
-<span style="color:#94a3b8"># pg_fail --category=test_failure --code=PG-E-0601 \</span>
-<span style="color:#94a3b8">#         --message="mvn test failed" --agent-recoverable=true</span>
-</pre>
-
-<h2>注入的环境变量（v5 协议）</h2>
-<table>
-  <tr><th>变量</th><th>说明</th><th>适用范围</th></tr>
-  <tr><td><code>PG_SKILLS_PATH</code></td><td>pg-skills 根路径</td><td>全部</td></tr>
-  <tr><td><code>PG_PROJECT_ROOT</code></td><td>项目根路径</td><td>全部</td></tr>
-  <tr><td><code>PG_RUN_CALLER</code></td><td>调用方身份（pg-agent / ad-hoc）</td><td>全部</td></tr>
-  <tr><td><code>PG_RUN_SESSION</code></td><td>session 名（与 caller 正交）</td><td>全部</td></tr>
-  <tr><td><code>PG_HOOK_LOG_DIR</code></td><td>hook 派生的业务日志目录（预拼绝对路径）</td><td>全部</td></tr>
-  <tr><td><code>PG_LOG_FILE</code></td><td>hook 自身 stdout/stderr 目标路径</td><td>全部</td></tr>
-  <tr><td><code>PG_RESULT_FILE</code></td><td>写 result.json 的路径</td><td>全部</td></tr>
-  <tr><td><code>PG_STAGE</code></td><td>当前 stage 名</td><td>全部</td></tr>
-  <tr><td><code>PG_ENV</code></td><td>当前 environment（dev-local / dev-3tier）</td><td>全部</td></tr>
-  <tr><td><code>PG_ROLE</code></td><td>role 名</td><td>role action 时</td></tr>
-  <tr><td><code>PG_INSTANCE_NAME</code></td><td>instance 名</td><td>role action 时</td></tr>
-  <tr><td><code>PG_INSTANCE_HOST</code></td><td>instance host</td><td>role action 时</td></tr>
-</table>
-<p style="font-size:13px;color:var(--muted)">v4 之前曾用 <code>PG_SKILL_NAME</code> / <code>PG_CHANGE_NAME</code>，现已统一为 <code>PG_RUN_CALLER</code> / <code>PG_RUN_SESSION</code>。模块维度（build / lint / test）不走 hook 协议，<code>PG_MODULE</code> / <code>PG_MODULE_ROOT</code> 已被移除。</p>
-
-<h2>两套入口：用户用 ./pg-run，agent/skill 用 pg-invoke-hook.py</h2>
-<p>hooks 操作有两套入口，使用场景不同：</p>
-<ul>
-  <li><strong>用户手工操作</strong>：<code>./pg-run</code> — 交互式菜单，无需记参数</li>
-  <li><strong>Agent / SKILL 编排流</strong>：<code>pg-invoke-hook.py</code> — 底层 CLI，传入完整参数</li>
-</ul>
-
-<p><code>pg-invoke-hook.py</code> 是底层 CLI，LLM 和 runner <strong>不直接调用 hook 脚本</strong>，通过它统一调度：</p>
-
-<pre>
-<span style="color:#94a3b8"># pg-agent（pg-auto-pilot）内部调用（用户请用 ./pg-run）</span>
-python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-  --session 2026-09-12-fix-login \
-  --env dev-local \
-  --role backend \
-  --instance backend-1 \
-  --action start \
-  --caller pg-agent
-
-<span style="color:#94a3b8"># 用户手工查看日志</span>
+<span style="color:#94a3b8"># 用户手工：pg-run 交互菜单或 CLI 直达</span>
 ./pg-run --env dev-local --role backend --instance backend-1 --action logs --tail-lines 20
 </pre>
 
-<h2>错误 Category 枚举（SSOT）</h2>
+<div class="danger-card card">
+  <strong>禁止</strong>：直接 <code>bash .pg/hooks/role-backend-start.sh</code>——绕过协议、缺 PG_* 注入、不写 result.json、审计不可见。
+</div>
+
+<h2>日志路由</h2>
 <table>
-  <tr><th>category</th><th>severity</th><th>agent-recoverable</th><th>用途</th></tr>
-  <tr><td><code>prereq_missing</code></td><td><span class="tag tag-red">blocked</span></td><td>false</td><td>缺前置命令/库</td></tr>
-  <tr><td><code>port_in_use</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>端口占用</td></tr>
-  <tr><td><code>timeout</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>操作超时</td></tr>
-  <tr><td><code>health_check_fail</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>健康检查失败</td></tr>
-  <tr><td><code>dependency_not_ready</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>依赖未就绪</td></tr>
-  <tr><td><code>network</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>SSH/HTTP/DNS 失败</td></tr>
-  <tr><td><code>test_failure</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>true</td><td>测试断言失败</td></tr>
-  <tr><td><code>config_invalid</code></td><td><span class="tag tag-red">blocked</span></td><td>false</td><td>配置错误</td></tr>
-  <tr><td><code>invariant_violation</code></td><td><span class="tag tag-red">blocked</span></td><td>true</td><td>跨模块不变量违反</td></tr>
+  <tr><th>caller</th><th>session 形式</th><th>日志路径</th></tr>
+  <tr><td><code>pg-agent</code></td><td><code>&lt;iso-date&gt;-&lt;keyword&gt;</code>（如 2026-09-12-fix-login）</td><td><code>.pg/agent/&lt;session&gt;/&lt;env&gt;/logs/</code></td></tr>
+  <tr><td><code>ad-hoc</code></td><td>留空自动生成 <code>auto-&lt;date&gt;-&lt;pid&gt;</code></td><td><code>.pg/ad-hoc/&lt;session&gt;/&lt;env&gt;/logs/</code></td></tr>
 </table>
+
+<h2>action 速查</h2>
+<table>
+  <tr><th>级别</th><th>action</th><th>参数要求</th></tr>
+  <tr><td>per-role</td><td><code>start / stop / restart / logs / tail / health_check</code></td><td><code>--role</code> + <code>--instance</code></td></tr>
+  <tr><td>env-level</td><td><code>prepare_env / clean_env / describe_env / restart_all_instances</code></td><td>忽略 role/instance</td></tr>
+</table>
+
 </div>
 
 <!-- ============================================================ -->
-<div id="sec3-demo" class="section">
-<h1>3.4 执行演示——运行 hooks</h1>
+<div id="sec4" class="section">
+<h1>4. pg-run 交互菜单</h1>
 
-<h2>演示 1：使用 pg-run 交互菜单（用户首选）</h2>
+<p><code>./pg-run</code> 是用户操作环境与模块的<strong>首选入口</strong>——无需记住 CLI 参数，逐级菜单引导选择并执行。内部自动走 hook 协议（<code>--caller ad-hoc --session manual</code>），与 agent 调用同一套机制。</p>
+
+<h2>五个 Tab</h2>
+<table>
+  <tr><th>Tab</th><th>快捷键</th><th>功能</th></tr>
+  <tr><td><strong>常用操作</strong></td><td><code>f</code></td><td>一键组合：准备环境并启动所有实例 / 停止所有实例并清理 / 启动所有实例 / 停止所有实例</td></tr>
+  <tr><td><strong>Environment</strong></td><td><code>e</code></td><td>环境级操作：prepare_env / describe_env / clean_env</td></tr>
+  <tr><td><strong>Instance</strong></td><td><code>i</code></td><td>实例级操作：选 role → 选 instance → start / stop / health_check / logs / tail</td></tr>
+  <tr><td><strong>Module</strong></td><td><code>m</code></td><td>模块操作：选 module → build / lint / test.*</td></tr>
+  <tr><td><strong>更新</strong></td><td><code>u</code></td><td>查看当前版本、列出远程可用版本（main 置顶、每页 10 项）、选中后 y/N 确认强制更新</td></tr>
+</table>
+
+<div class="info-card card">
+  <p style="margin:0">启动后先选环境（env），再进入 Tab 菜单。<strong>Tab 键</strong>或快捷字母切换 Tab，<strong>数字键</strong>选择条目，<strong>b</strong> 返回上一级，<strong>c</strong> 换环境，<strong>q</strong> 退出。</p>
+</div>
+
+<h2>交互模式</h2>
 <pre>
 <span style="color:#94a3b8"># 启动交互菜单</span>
 ./pg-run
-<span style="color:#94a3b8"># ┌─ pg-run — pg-skills 运行菜单 ───────────────────┐</span>
-<span style="color:#94a3b8"># │  1) 启动所有实例         一键启动所有角色实例    │</span>
-<span style="color:#94a3b8"># │  2) 停止所有实例         一键停止所有角色实例    │</span>
-<span style="color:#94a3b8"># │  3) 准备环境并启动所有   先准备环境再启动所有    │</span>
-<span style="color:#94a3b8"># │  4) Module 操作          build/lint/test 编译检查│</span>
-<span style="color:#94a3b8"># │  5) Environment 操作     prepare_env/clean_env   │</span>
-<span style="color:#94a3b8"># │  6) Role 操作            start/stop/logs/tail    │</span>
-<span style="color:#94a3b8"># └──────────────────────────────────────────────────┘</span>
 
-<span style="color:#94a3b8"># 跳过菜单直达</span>
-./pg-run --module backend --action test.unit
+<span style="color:#94a3b8"># 启动后先选环境，然后进入五 Tab 菜单：</span>
+<span style="color:#94a3b8"># ┌─ pg-run — dev-local ────────────────────┐</span>
+<span style="color:#94a3b8"># │ Tab: 常用操作|Environment|Instance|Module|更新 │</span>
+<span style="color:#94a3b8"># │ 常用操作: 准备并启动 / 停止并清理 / ...        │</span>
+<span style="color:#94a3b8"># └─────────────────────────────────────────┘</span>
+</pre>
+
+<h2>CLI 直达模式</h2>
+<p>跳过菜单，直接执行操作。参数齐全时 <code>pg-run</code> 不会进入交互模式：</p>
+<pre>
+<span style="color:#94a3b8"># 常用操作</span>
+./pg-run --env dev-local --action prepare_env_and_start
 ./pg-run --env dev-local --action start_all_instances
+./pg-run --env dev-local --action stop_all_instances
+
+<span style="color:#94a3b8"># 环境级操作</span>
+./pg-run --env dev-local --action prepare_env
+./pg-run --env dev-local --action clean_env
+./pg-run --env dev-local --action describe_env
+
+<span style="color:#94a3b8"># 实例级操作（需 --role + --instance）</span>
 ./pg-run --env dev-local --role backend --instance backend-1 --action start
+./pg-run --env dev-local --role backend --instance backend-1 --action stop
+./pg-run --env dev-local --role backend --instance backend-1 --action logs
+
+<span style="color:#94a3b8"># 模块操作</span>
+./pg-run --module backend --action build
+./pg-run --module backend --action test.unit
+
+<span style="color:#94a3b8"># 直接执行 shell 命令（不走 hook 协议，不注入 PG_*，仅供调试）</span>
 ./pg-run --cmd "curl -s localhost:9080/health"
 </pre>
 
-<h2>演示 2：查看 logs（安全无害）</h2>
-<pre>
-<span style="color:#94a3b8"># 查看 backend 日志（只读操作，不启动服务）</span>
-./pg-run --env dev-local --role backend --instance backend-1 --action logs --tail-lines 10
-</pre>
-
-<h2>演示 3：完整启停一个 role</h2>
-<pre>
-<span style="color:#94a3b8"># 启动 backend（讲师演示，学员可不执行）</span>
-./pg-run --env dev-local --role backend --instance backend-1 --action start
-
-<span style="color:#94a3b8"># 停止 backend</span>
-./pg-run --env dev-local --role backend --instance backend-1 --action stop
-
-<span style="color:#94a3b8"># 准备环境（prepare_env）</span>
-./pg-run --env dev-local --action prepare_env
-
-<span style="color:#94a3b8"># 清理环境（clean_env）</span>
-./pg-run --env dev-local --action clean_env
-
-<span style="color:#94a3b8"># 如果想深入调试，底层 CLI 等价于：</span>
-<span style="color:#94a3b8"># python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook --session ...</span>
-</pre>
-
-<h2>演示 4：读取 workflow config</h2>
-<pre>
-<span style="color:#94a3b8"># 查看 pg-agent（pg-auto-pilot 的 SSOT 查询入口）需要读取的配置段</span>
-python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-agent
-
-<span style="color:#94a3b8"># 细粒度取值</span>
-python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-module-build backend
-python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-env dev-local
-</pre>
-
-<div class="info-card card">
-  <strong>讲师提问</strong>：为什么不直接用 bash 跑 hook 脚本，而要用 <code>./pg-run</code> 或 <code>pg-invoke-hook.py</code>？<br>
-  <strong>答案</strong>：因为 hook 协议需要注入 <code>PG_*</code> 环境变量、写 <code>result.json</code>、标准化错误分类。直接跑脚本会丢失这些上下文。用户首选 <code>./pg-run</code>（交互菜单 + CLI 直达），agent 内部用 <code>pg-invoke-hook.py</code> 精细控制 session 和参数。
-</div>
-</div>
-
-<!-- ============================================================ -->
-<div id="sec3-checklist" class="section">
-<h1>3.5 新项目接入 Checklist</h1>
-
 <div class="tip-card card">
-  <p style="margin:0">接入流程（<code>git subtree</code> → <code>pg init</code> → <code>/0-pg-auto-pilot</code>）会<strong>自动生成 project.yaml 与 hooks 骨架</strong>。但 AI 推断可能与实际项目有偏差，需要人工核对产物准确性，并通过 <code>./pg-run</code> 对所有 hooks 做端到端测试验证。</p>
+  <strong>小提示</strong>：<code>logs</code> 是只读操作，适合用来验证 hook 脚本是否正常加载。<code>describe_env</code> 同样只读，不启停服务、不写 DB，产出 <code>env-description.yaml</code>。两者都安全无害。
 </div>
 
-<div class="card">
-<ul class="checklist">
-  <li><input type="checkbox"> <code>git subtree</code> 拉入 pg-skills → <code>.pg/skills/</code>（含 <code>examples/code-review/</code> 模板目录）</li>
-  <li><input type="checkbox"> <code>pg init</code> 生成骨架 + symlink</li>
-  <li><input type="checkbox"> <code>pg doctor</code> 校验（含 <code>hooks/lib/common.sh</code> 检查）</li>
-  <li><input type="checkbox"> 核对 project.yaml：modules / environments / tracks / stages 是否准确</li>
-  <li><input type="checkbox"> 每个 role 的 start / stop / logs 脚本：业务命令是否准确</li>
-  <li><input type="checkbox"> 每个 env 的 prepare_env / clean_env 脚本：环境准备/清理逻辑是否对</li>
-  <li><input type="checkbox"> lib/common.sh 是否复制到 <code>.pg/hooks/lib/</code></li>
-  <li style="margin-top:12px"><strong>通过 pg-run 验证 hooks</strong></li>
-  <li><input type="checkbox" style="margin-left:24px"> <code>pg doctor</code> 校验（含 <code>hooks/lib/common.sh</code> 检查）</li>
-  <li><input type="checkbox" style="margin-left:24px"> 人工 grep 验证 <code>.pg/code-review/&lt;language&gt;/</code> 检查项细则文件存在（doctor 不覆盖）</li>
-  <li><input type="checkbox" style="margin-left:24px"> <code>./pg-run --module &lt;m&gt; --action build/lint/test.&lt;key&gt;</code> 验证 module 命令直跑</li>
-  <li><input type="checkbox" style="margin-left:24px"> <code>./pg-run --env &lt;env&gt; --role &lt;role&gt; --instance &lt;i&gt; --action logs</code> 验证 hook 可加载（只读）</li>
-  <li><input type="checkbox" style="margin-left:24px"> 菜单 <strong>"准备环境并启动所有实例"</strong> → <strong>"停止所有实例并清理环境"</strong> 一键验证所有角色 + 环境级 hook（便捷）</li>
-  <li><input type="checkbox" style="margin-left:24px"> 或单独验证：<code>./pg-run --env &lt;env&gt; --role &lt;role&gt; --instance &lt;i&gt; --action start/stop</code> + <code>./pg-run --env &lt;env&gt; --action prepare_env / clean_env</code></li>
-  <li style="margin-top:12px"><strong>配置 opencode 模型路由</strong></li>
-  <li><input type="checkbox" style="margin-left:24px"> opencode.json 中配置 model.router，将 pg-router/pg-associate / pg-expert / pg-master 映射到实际 LLM 模型（如 minimax-m2.7 / deepseek-v4-flash / deepseek-v4-pro 等）</li>
-  <li><input type="checkbox" style="margin-left:24px"> 推荐使用 omniroute 或 9router 管理模型路由</li>
-</ul>
-</div>
-
-<div class="tip-card card">
-  <strong>关键提醒</strong>：project.yaml 的 <code>modules.&lt;m&gt;.build</code> 字段可以直接指向 <code>.pg/hooks/</code> 下的脚本——比如 <code>backend-build.sh</code> 虽然是一个脚本文件，但它<strong>不在 hook 协议中</strong>，而是被 runner 当作普通 shell 命令执行。<strong>不要被"脚本在 hooks 目录下"误导</strong>，是否走 hook 协议取决于它在 project.yaml 的哪个位置。
-</div>
-</div>
-
-<!-- ============================================================ -->
-<!-- 4.1 概述 -->
- <div id="sec4-overview" class="section">
-<h1>4. 日常开发工作流</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 当前唯一工作流是 <code>/0-pg-auto-pilot</code>（自动驾驶模式）。本章 4.2~4.5 描述的 define/propose/build/regression/fix-issue 流程及其 <code>/1-pg-define</code> ~ <code>/6-pg-archive</code> 命令<strong>已移除</strong>，仅保留为历史说明。</p>
-
-<div class="tip-card card">
-<p><strong>当前使用方式</strong>：运行 <code>/0-pg-auto-pilot</code>，AI 自主规划与执行；实施计划必须包含"启动实例并验证编码结果是否达到预期"的步骤，执行计划前让用户选定环境并确认环境准备方式。合并到 default 分支改用手动 <code>git merge</code>。</p>
-</div>
-
-<h2>4.1 概述 —— 全景路线图</h2>
-
-<div class="svg-container">
-<svg viewBox="0 0 760 280" xmlns="http://www.w3.org/2000/svg">
-  <defs>
-    <marker id="arr-r" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker>
-  </defs>
-
-  <!-- 标准流 -->
-  <rect x="30" y="40" width="490" height="60" rx="30" fill="none" stroke="#2563eb" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <text x="275" y="28" font-size="12" font-weight="700" fill="#2563eb" text-anchor="middle">标准流（正经功能开发）</text>
-  <circle cx="80" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
-  <text x="80" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">1</text>
-  <text x="80" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Define</text>
-  <text x="80" y="118" font-size="10" fill="#64748b" text-anchor="middle">/1-pg-define</text>
-
-  <line x1="102" y1="70" x2="158" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
-
-  <circle cx="180" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
-  <text x="180" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">2</text>
-  <text x="180" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Propose</text>
-  <text x="180" y="118" font-size="10" fill="#64748b" text-anchor="middle">/2-pg-propose</text>
-
-  <line x1="202" y1="70" x2="258" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
-
-  <circle cx="280" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
-  <text x="280" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">3</text>
-  <text x="280" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Review</text>
-  <text x="280" y="118" font-size="10" fill="#64748b" text-anchor="middle">自动校验</text>
-
-  <line x1="302" y1="70" x2="358" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
-
-  <circle cx="380" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
-  <text x="380" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">4</text>
-  <text x="380" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Build</text>
-  <text x="380" y="118" font-size="10" fill="#64748b" text-anchor="middle">/3-pg-build</text>
-
-  <line x1="402" y1="70" x2="458" y2="70" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
-
-  <circle cx="480" cy="70" r="22" fill="#dbeafe" stroke="#2563eb" stroke-width="2"/>
-  <text x="480" y="74" font-size="12" font-weight="700" fill="#1d4ed8" text-anchor="middle">5</text>
-  <text x="480" y="105" font-size="11" font-weight="600" fill="#1d4ed8" text-anchor="middle">Merge</text>
-  <text x="480" y="118" font-size="10" fill="#64748b" text-anchor="middle">verify-and-merge</text>
-
-  <!-- 快捷流 -->
-  <rect x="30" y="160" width="320" height="60" rx="30" fill="none" stroke="#059669" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <text x="190" y="148" font-size="12" font-weight="700" fill="#059669" text-anchor="middle">快捷流（小改动，不切分支）</text>
-  <circle cx="60" cy="190" r="22" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
-  <text x="60" y="194" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">1</text>
-  <text x="60" y="225" font-size="11" font-weight="600" fill="#065f46" text-anchor="middle">Define</text>
-  <text x="60" y="238" font-size="10" fill="#64748b" text-anchor="middle">/1-pg-define</text>
-
-  <line x1="82" y1="190" x2="138" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
-
-  <circle cx="160" cy="190" r="22" fill="#d1fae5" stroke="#059669" stroke-width="2"/>
-  <text x="160" y="194" font-size="12" font-weight="700" fill="#065f46" text-anchor="middle">Q</text>
-  <text x="160" y="225" font-size="11" font-weight="600" fill="#065f46" text-anchor="middle">Quick-build</text>
-  <text x="160" y="238" font-size="10" fill="#64748b" text-anchor="middle">/2b-pg-quick-build</text>
-
-  <text x="200" y="174" font-size="10" fill="#64748b" font-style="italic">→ master</text>
-  <text x="200" y="186" font-size="9" fill="#94a3b8">（不切分支，</text>
-  <text x="200" y="197" font-size="9" fill="#94a3b8">直接 commit）</text>
-
-  <!-- 修复/回归流 -->
-  <rect x="380" y="160" width="340" height="60" rx="30" fill="none" stroke="#ea580c" stroke-width="1.5" stroke-dasharray="4,3"/>
-  <text x="550" y="148" font-size="12" font-weight="700" fill="#ea580c" text-anchor="middle">修复/回归流</text>
-  <circle cx="420" cy="190" r="22" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
-  <text x="420" y="194" font-size="12" font-weight="700" fill="#9a3412" text-anchor="middle">R</text>
-  <text x="420" y="225" font-size="11" font-weight="600" fill="#9a3412" text-anchor="middle">Regression</text>
-  <text x="420" y="238" font-size="10" fill="#64748b" text-anchor="middle">/4-pg-regression</text>
-
-  <line x1="442" y1="190" x2="498" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
-  <circle cx="520" cy="190" r="22" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
-  <text x="520" y="194" font-size="12" font-weight="700" fill="#9a3412" text-anchor="middle">F</text>
-  <text x="520" y="225" font-size="11" font-weight="600" fill="#9a3412" text-anchor="middle">Fix-issue</text>
-  <text x="520" y="238" font-size="10" fill="#64748b" text-anchor="middle">/5-pg-fix-issue</text>
-
-  <line x1="542" y1="190" x2="618" y2="190" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#arr-r)"/>
-  <circle cx="640" cy="190" r="22" fill="#ffedd5" stroke="#ea580c" stroke-width="2"/>
-  <text x="640" y="194" font-size="12" font-weight="700" fill="#9a3412" text-anchor="middle">PR</text>
-  <text x="640" y="225" font-size="11" font-weight="600" fill="#9a3412" text-anchor="middle">PR</text>
-
-  <text x="380" y="270" font-size="11" fill="#64748b" text-anchor="middle">三路径共享同一个 .pg/project.yaml 与 hooks 基础设施</text>
-</svg>
-</div>
-
-<h3>输入/输出对照表</h3>
-<table>
-  <tr><th>阶段</th><th>入口</th><th>输入</th><th>输出</th></tr>
-  <tr><td>1. 定界</td><td><code>/1-pg-define</code></td><td>模糊需求</td><td>边界清单 + scope summary + <strong>define-summary.yaml</strong></td></tr>
-  <tr><td>2. 提案</td><td><code>/2-pg-propose</code></td><td>边界 + project.yaml + .pg/code-review/</td><td>proposal + design + tasks + <strong>execution-manifest.yaml</strong></td></tr>
-  <tr><td>3. 构建</td><td><code>/3-pg-build</code></td><td>设计文档 + execution-manifest.yaml + project.yaml</td><td>代码 + 测试 + 报告（含 review 阶段产物）+ 自动归档</td></tr>
-  <tr><td>4. 合并</td><td><code>pg-verify-and-merge</code></td><td>feature branch</td><td>合入 master</td></tr>
-</table>
-</div>
-
-<!-- ============================================================ -->
-<!-- 4.2 定界 -->
-<div id="sec4-define" class="section">
-<h1>4.2 定界 —— `/1-pg-define`</h1>
-
-<p style="color:var(--muted); font-style:italic"><strong>定界</strong>：把用户脑海里的需求，和代码库里的真实代码"撞"在一起，通过多轮对话把方案与实施边界聊清楚的过程。</p>
-
-<p><code>/1-pg-define</code> 是一段自由对话，不是固定流程——没有脚本、没有强制产物。AI 是思考伙伴，陪你把三件事聊明白：</p>
-
-<ol>
-  <li><strong>需求 × 现实代码</strong> —— 不空谈，把想法落到代码库里：相关模块在哪、有没有同类实现、会动到谁</li>
-  <li><strong>方案与边界</strong> —— 做什么 / 不做什么、影响范围多大、怎么算做完（完成标准）</li>
-  <li><strong>真实环境验收</strong> —— 边界聊定后，讨论这个需求将来在真实环境里怎么验收（见下文「环境验证」）</li>
-</ol>
-
-<p>这条探索有红线：<strong>只讨论、不写代码</strong>。AI 不做实现，正式产物由后续 <code>/2-pg-propose</code> 生成。</p>
-
-<h2>输入 → 产出</h2>
-
-<p><strong>输入</strong>：用户的原始想法——可以很模糊（"实时协作"）、可以是具体问题、也可以是两个方案的比较，甚至没有参数直接开聊。</p>
-<p><strong>产出</strong>：口头对齐的 scope summary（边界 + 完成标准）。定界本身<strong>不落盘</strong>；唯一例外是结尾的「环境验证」，会落盘一份 <code>define-summary.yaml</code>（+ 只读探测产物 <code>env-description.yaml</code>），直接供 <code>/2-pg-propose</code> 使用。</p>
-
-<h2>定界后的环境验证</h2>
-
-<p>定界收尾时，AI 会带你把「将来怎么验收」讨论清楚——这是唯一会落盘、会调用 hook 的环节，目的是提前确认环境里有没有验收要的依赖（初始化数据、第三方服务等），免得 propose 时才发现缺东西。流程很轻：</p>
-
-<ol>
-  <li><strong>定 change-id + 选环境</strong> —— 给这次变更起个名（如 <code>add-bucket-s3-info</code>），并选一个目标 <code>environment</code></li>
-  <li><strong>只读探测真实环境</strong> —— 通过 describe_env 探测（不启停服务、不写 DB），产出 <code>env-description.yaml</code></li>
-  <li><strong>逐个验收点讨论</strong> —— 每个 V-* 需要环境提供什么能力（DB、对象存储、多租户…）、环境里有没有、缺了怎么降级，最终标记为 <code>verifiable</code>（可验证）/ <code>degraded</code>（降级）/ <code>skipped</code>（跳过）</li>
-  <li><strong>落盘并校验</strong> —— 写入 <code>define-summary.yaml</code>，过一遍机械校验</li>
-</ol>
-
-<div class="danger-card card">
-  <h4 style="margin:0 0 8px">红线</h4>
-  <ul style="margin:0;padding-left:20px">
-    <li>未经用户确认，不落盘、不调 hook</li>
-    <li>验收讨论不滑向实现细节（那是 design.md 的事）</li>
-    <li>不硬编码 IP / hostname / 端口，一律用 <code>{env.…}</code> 占位</li>
-  </ul>
-</div>
-
-<h2>定界之后，去哪？</h2>
-
-<p>环境验证通过后，AI 会用两个 <code>question</code> 跟你确认，不替你决定方向：</p>
-
-<ul>
-  <li><strong>Q1</strong> —— 验证方案够了吗？不够就回去继续细化；够了就进入下一步</li>
-  <li><strong>Q2</strong> —— 下一步走哪条路？</li>
-</ul>
-
-<table>
-  <tr><th>路径</th><th>适用</th></tr>
-  <tr><td><code>/2-pg-propose</code>（推荐）</td><td>正经功能、跨模块、需要设计评审</td></tr>
-  <tr><td><code>/2b-pg-quick-build</code></td><td>明确小改动、≤8 tasks、单 module</td></tr>
-  <tr><td>直接实施</td><td>改文案/样式，无需任何 SKILL</td></tr>
-</table>
-</div>
-
-<!-- ============================================================ -->
-<!-- 4.3 提案 -->
-<div id="sec4-propose" class="section">
-<h1>4.3 提案 —— `/2-pg-propose`</h1>
-
-<p style="color:var(--muted); font-style:italic"><strong>提案</strong>：把定界聊出来的边界，变成一套"施工图纸"——proposal（做什么 / 为什么）、design（怎么做 / 怎么验证）、tasks（分步施工单）、manifest（执行清单）、scenario（端到端验收脚本）。图纸齐了，pg-build 就能无人值守施工。</p>
-
-<p>这一段 AI 主要在<strong>写文档</strong>：不碰业务代码、不跑测试、不起服务。它把定界对话里的结论整理成一套结构化产物，落到 <code>.pg/changes/&lt;change-id&gt;/</code> 下。</p>
-
-<h2>输入 → 产出</h2>
-
-<p><strong>输入</strong>：定界产物（scope summary + define-summary.yaml）+ <code>.pg/project.yaml</code>（模块命令 / stages / environments 定义）</p>
-<p><strong>产出</strong>：5 份必填 + 按需扩展——</p>
-
-<table>
-  <tr><th>文件</th><th>一句话解释</th></tr>
-  <tr><td><code>proposal.md</code></td><td>做什么、为什么做（变更范围与理由）</td></tr>
-  <tr><td><code>design.md</code></td><td>怎么做、怎么验证（接口设计 + V-* 验收标准）</td></tr>
-  <tr><td><code>tasks.md</code></td><td>分步施工单：按 stage × track 切好的实施步骤，带进度 checkbox，支持断点续做</td></tr>
-  <tr><td><code>execution-manifest.yaml</code></td><td>施工清单：stage 顺序、track 列表、选好的 environment——pg-build 的"总指挥"</td></tr>
-  <tr><td><code>1-propose-review/on-conditions-eval.md</code></td><td>哪些 stage/track 启用、要不要 scenario 的决策记录（SSOT）</td></tr>
-  <tr><td><code>scenario-&lt;track&gt;.yaml</code>（按需）</td><td>端到端验收脚本（Gherkin），在真实环境里跑给需求做最终验收</td></tr>
-</table>
-
-<h2>三个关键决策</h2>
-
-<p>写图纸的过程中，AI 要定三件事：</p>
-
-<ol>
-  <li><strong>哪些步骤要跑</strong> —— 用 <code>on_conditions</code> 规则判断：只改了 OpenAPI 注解，就没必要重跑 hooks 相关步骤。命中就启用、没命中就跳过，避免每个变更都跑全流程</li>
-  <li><strong>在哪个环境跑</strong> —— 按 <code>selection_rules</code> 给每个 stage 选一个 environment（如 dev-local / dev-3tier）写进 manifest。环境选错要等 build 阶段才会暴露，所以这里得想清楚</li>
-  <li><strong>要不要端到端验收</strong> —— 跨模块联调 / 新 API / 多角色协作的变更，启用 scenario track 写 Gherkin 脚本；纯单模块改动（文档、SQL、单个 API）就不需要</li>
-</ol>
-
-<h2>一切都基于真实环境</h2>
-
-<p>图纸里的每个验收点（V-*）都锚定真实环境，不靠想象：</p>
-
-<ul>
-  <li><strong>env-description.yaml</strong> —— 定界阶段 describe_env 探测出的环境资源清单（有哪些 DB、缓存、第三方服务、数据状态）。所有产物写验收时都要引用它，不允许拿"环境未就绪"当借口跳过</li>
-  <li><strong>define-summary.yaml</strong> —— 定界阶段和用户聊好的每个 V-* 的验收方式（<code>verifiable</code> 可验证 / <code>degraded</code> 降级 / <code>skipped</code> 跳过），这里直接沿用，不再重新讨论</li>
-</ul>
-
-<h2>一次机械校验把关</h2>
-
-<p>所有产物写完，跑 <code>pg-validate-proposal.py</code> 做唯一校验：文件是否齐全、占位符有没有漏填、tasks / manifest / scenario 三份产物是否对得上。不过就不放行，修复到通过为止。校验通过后，就可以喊 <code>/3-pg-build</code> 开工了。</p>
-</div>
-
-<!-- ============================================================ -->
-<!-- 4.4 构建 -->
-<div id="sec4-build" class="section">
-<h1>4.4 构建 —— `/3-pg-build`（基于事件溯源引擎）</h1>
-
-<p style="color:var(--muted); font-style:italic">"图纸审完了，Runner 开始施工。<strong>人只做一件事</strong>：执行命令等结果。"</p>
-
-<h2>一句话理解</h2>
-
-<p><code>/3-pg-build</code> 是<strong>施工阶段</strong>。它读取 propose 画好的图纸，按 <code>execution-manifest.yaml</code> 的编排，把「写代码 → 跑测试 → 审查 → 验证 → 打分」全部自动跑完。AI 在过程中反复做一件简单的事：</p>
-
-<ol>
-  <li><strong>问 Runner 下一步做什么</strong>（next）——Runner 说派哪个 sub-agent，就派哪个</li>
-  <li><strong>派 sub-agent 干活</strong>——写测试、写代码、审查、验证……每个阶段一个专门的 agent</li>
-  <li><strong>记录结果</strong>（record）——写进 <code>pipeline.events</code>（append-only 事件流）</li>
-  <li><strong>回到第 1 步</strong>——直到 Runner 说 <strong>done</strong>（触发合并）或 <strong>workflow_failed</strong>（需要人工介入）</li>
-</ol>
-
-<p>这套循环由<strong>事件溯源</strong>驱动：每一步都是一个不可变事件，状态随时从事件流重新推导。好处是——跑挂了能精确恢复到断点，不从头再来。</p>
-
-<h2>三种干活方式（track）</h2>
-
-<p>不同性质的活，用不同的 track 类型（propose 阶段已在图纸里标好）：</p>
-
-<table>
-  <tr><th>类型</th><th>怎么干</th><th>适合</th></tr>
-  <tr><td><code>standard</code>（默认）</td><td>sub-agent 按 TDRVG 五阶段走，质量门把关</td><td>正经功能开发、跨模块改动</td></tr>
-  <tr><td><code>simple</code></td><td>按命令列表直接跑，命令 exit 0 即通过</td><td>代码生成、文档同步、模板替换等纯机械活</td></tr>
-  <tr><td><code>scenario</code></td><td>启动真实环境，跑 Gherkin 场景，跑通过为止</td><td>跨模块联调、端到端验收</td></tr>
-</table>
-
-<h2>质量把关：TDRVG 五阶段</h2>
-
-<p>standard track 默认走 5 步，每步一个专门的 sub-agent：</p>
-
-<ol>
-  <li><strong>T · Test（红）</strong> —— 先写测试，让失败先发生</li>
-  <li><strong>D · Dev（绿）</strong> —— 实现代码，让测试变绿</li>
-  <li><strong>R · Review</strong> —— 静态审查：实现和设计对得上吗？有没有范围蔓延？模式一不一致？发现问题 → fix-review 修复后重审</li>
-  <li><strong>V · Verify</strong> —— 运行时验证：启动服务，逐项跑 design.md 里的 V-* 验收点。不过 → fix 修复后重跑</li>
-  <li><strong>G · Gate</strong> —— 5 维加权打分，总分 ≥80 才放行</li>
-</ol>
-
-<p>其中 review / verify / gate 三个质量门可按需关闭（纯文档改动就没必要上全套），但 <strong>verify 和 gate 至少留一个</strong>，免得没有质量把关。修复循环都有次数上限（<code>max_fix_retries</code>），修不动就终止，把问题交给用户，不硬扛。</p>
-
-<h2>打分门（gate-score）</h2>
-
-<p>gate 不看"过 / 不过"这种二值，而是按 5 个维度打分，总分 <strong>≥80 通过</strong>：</p>
-
-<table>
-  <tr><th>维度</th><th>权重</th><th>看什么</th></tr>
-  <tr><td>correctness</td><td>35%</td><td>行为符合提案吗？测试覆盖关键路径吗？</td></tr>
-  <tr><td>security</td><td>25%</td><td>权限校验、敏感信息、依赖漏洞</td></tr>
-  <tr><td>maintainability</td><td>15%</td><td>命名规范、模块边界、日志规范</td></tr>
-  <tr><td>performance</td><td>15%</td><td>关键路径延迟、N+1 查询、资源占用</td></tr>
-  <tr><td>spec_coverage</td><td>10%</td><td>design 的验收点都被覆盖了吗？</td></tr>
-</table>
-
-<p>不够 80 分，就把弱项交给 fix-gate 定向补；补不动就走人工评审。各 track 的评分汇总成 <code>gate-assessment.md</code>——final-gate 没有它就<strong>不放行</strong>，保证"没评审就不合入"。</p>
-
-<h2>真实环境，真实验收</h2>
-
-<p>需要环境的 stage，Runner 进出都会自动 <code>prepare_env</code> / <code>clean_env</code>，不用人插手。scenario 验收更是在<strong>真实服务实例</strong>上跑：先重启实例，再执行 Gherkin 场景（Given / When / Then），失败就派 scenario-fix 诊断修复后重跑，跑通过为止。每个验收点（V-*）早在定界阶段就和用户确认过<strong>可验证 / 降级 / 跳过</strong>，这里照做即可。</p>
-
-<h2>失败与恢复</h2>
-
-<p>跑挂了不慌：Runner 用事件流 + tasks.md 的 checkbox 记住进度，重跑时从<strong>第一个没打勾的章节</strong>接着干，而不是从头再来。只有修到"修不动"（循环次数耗尽、环境漂移 / 设计漂移）才终止，把决定权交回给用户。</p>
-
-<h2>收尾</h2>
-
-<p>所有 track 完成后，final-gate 做跨 track 的最终门控。通过后 Runner 自动收尾：每步提交代码、归档到 <code>changes/archive/</code>，然后触发 <code>pg-verify-and-merge</code> 完成合并。至此一次变更走完「定界 → 提案 → 构建 → 合并」全流程。</p>
-
-<div class="subsection-card">
-<h2>4.5 流程差异速查表</h2>
-
-<table>
-  <tr><th></th><th>标准流</th><th>快捷流</th><th>修复流</th><th>回归流</th></tr>
-  <tr><td>入口</td><td><code>/2-pg-propose</code> + <code>/3-pg-build</code></td><td><code>/2b-pg-quick-build</code></td><td><code>/5-pg-fix-issue</code></td><td><code>/4-pg-regression</code></td></tr>
-  <tr><td>设计文档</td><td>4 份</td><td>零产物落盘</td><td>仅诊断报告</td><td>仅问题清单</td></tr>
-  <tr><td>change 目录</td><td>是</td><td>否</td><td>否</td><td>否</td></tr>
-  <tr><td>人工参与</td><td>提案 review</td><td>无</td><td>确认复现方案</td><td>无</td></tr>
-  <tr><td>适用场景</td><td>正经开发、跨模块、涉 DB</td><td>小改动、单模块、≤8 tasks</td><td>Bug 修复</td><td>回归测试</td></tr>
-</table>
-</div>
 </div>
 
 <!-- ============================================================ -->
 <div id="sec5" class="section">
-<h1>5. Bug 修复工作流</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— LLM 自主完成：诊断 → 修复 → 真实环境验证。本 SKILL 只提供 LLM 无法自行发现的 pg-* 基础设施协议。</p>
+<h1>5. pg-auto-pilot 自动驾驶</h1>
 
-<h2>5.1 一句话理解</h2>
+<p><code>/0-pg-auto-pilot</code> 是当前唯一保留的工作流。它不限定 LLM 如何规划与执行，只提<strong>两条要求</strong>：</p>
 
-<p><code>/5-pg-fix-issue</code> 是<strong>修 Bug</strong> 的流程。核心不是"改完交差"，而是<strong>用真实环境证明修好了</strong>。与传统方式最大的区别：</p>
-
-<div class="compare-row">
-  <div class="compare-box compare-box-old">
-    <h4 style="color:var(--danger)">传统修复</h4>
-    <p>人工看日志 → 猜根因 → 改代码 → 提交 → CI 跑测试 → 修得对不对完全看人品</p>
-  </div>
-  <div class="compare-box compare-box-new">
-    <h4 style="color:var(--success)">pg-skills 修复</h4>
-    <p>配置加载 + 环境探测 → 系统化诊断 → 展示方案 → 用户确认 → 修复 → 真实环境验证 → 收尾留证据</p>
-  </div>
-</div>
-
-<h2>5.2 五步流程</h2>
-
-<ol>
-  <li><strong>启动准备</strong> —— 加载配置（模块命令、环境定义），并用 describe_env <strong>只读探测</strong>目标环境（不启停服务），拿到环境全貌：有哪些服务、DB 通不通、数据在不在</li>
-  <li><strong>诊断</strong> —— 对照环境信息和代码探索，定位根因</li>
-  <li><strong>展示方案</strong> —— 根因分析 + 修复计划 + 验证方式，<strong>等用户确认后才动手</strong></li>
-  <li><strong>修复</strong> —— 改代码</li>
-  <li><strong>验证（硬性）</strong> —— 启动受影响服务 → 真实 API 调用 → 查服务日志 → 跑单测，修到通过为止</li>
-</ol>
-
-<div class="danger-card card">
-  <h4 style="margin:0 0 8px">验证是硬性要求，不是可选项</h4>
-  <ul style="margin:0;padding-left:20px">
-    <li>环境起不来 → <strong>必须</strong>明说"未做端到端验证"，不糊弄</li>
-    <li>验证命令的输出<strong>原样</strong>给用户看，不润色</li>
-    <li>验证不过 → 继续修，直到通过，或如实报告无法修复</li>
+<div class="card">
+  <h3 style="margin-top:0">要求 1：实施计划必须包含"启动实例并验证结果"</h3>
+  <ul>
+    <li>启动实例：在选定的环境中把对应 role 的实例跑起来（走 hooks 协议）</li>
+    <li><strong>改完代码必须重启实例</strong>：即使实例已在运行，也不得跳过 start/restart——不重启的话运行中的进程仍持有旧代码</li>
+    <li>验证结果：手段不限——build / lint / test、health_check、运行时检查等</li>
+    <li>验证不通过 → 修复 → 重验，直到通过或上报用户</li>
   </ul>
 </div>
 
-<h2>5.3 收尾要求</h2>
+<div class="card">
+  <h3 style="margin-top:0">要求 2：执行计划前，先让用户选定环境并确认准备方式</h3>
+  <ul>
+    <li><strong>选定环境</strong>：哪个 env（如 dev-local）</li>
+    <li><strong>是否需要准备环境</strong>：需要 → prepare_env 后再启动；已就绪 → 跳过准备，直接启动</li>
+  </ul>
+</div>
 
-<ul>
-  <li>不留 DIAG / 临时日志 / 临时脚本</li>
-  <li><code>git diff</code> 只含目标文件的变更</li>
-  <li>向用户交代三件事：<strong>根因 + 改了什么 + 验证证据</strong></li>
-</ul>
-
-<h2>5.4 两条红线</h2>
-
-<ul>
-  <li><strong>占位符</strong> —— host / port / role / instance 一律从 <code>project.yaml</code> 读，禁止硬编码 <code>localhost:9080</code> 这类示例值</li>
-  <li><strong>hook 调用</strong> —— 必须走 <code>pg-invoke-hook.py</code> 协议（带审计 / 日志 / 超时），禁止直接 <code>bash .pg/hooks/*.sh</code></li>
-</ul>
+<h2>典型流程（仅供参考，可自由裁剪）</h2>
+<pre>
+0. 明确任务范围 → 形成实施计划（必须含"启动实例 + 验证结果"）
+1. 执行前：请用户选定环境 + 确认是否需要准备环境
+   → 需要准备 → prepare_env（env-level）
+   → 已就绪 → 跳过准备，直接下一步
+2. 启动所需实例：--action start（--role ... --instance ...）
+   → 改完代码后必须 restart（或 stop+start）再启动
+   → health_check 通过才算就绪
+3. 执行编码工作 + 验证：build/lint/test、运行时检查等
+   → 失败 → 修复 → 重验
+4. [可选] 收尾：--action logs / tail 确认运行日志无异常
+5. 汇总报告：改动内容、验证结果、hook 日志位置
+</pre>
 
 <div class="info-card card">
-  <strong>触发方式</strong>：在 opencode 中输入 <code>/5-pg-fix-issue</code>，然后描述问题。例如：<br>
-  <code>用户创建 VM 时，状态一直 CREATING 不变成 RUNNING</code>
+  <strong>使用边界</strong>：不要求落盘 proposal/design/tasks、不派发 sub-agent、不定义阶段状态机、不负责合并（用手动 <code>git merge</code>）。
 </div>
+
+<h2>Hook 失败时的处理</h2>
+<table>
+  <tr><th>category</th><th>severity</th><th>agent 处理</th></tr>
+  <tr><td><code>port_in_use</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>解除端口冲突后重试</td></tr>
+  <tr><td><code>timeout</code> / <code>network</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>指数退避重试</td></tr>
+  <tr><td><code>health_check_fail</code> / <code>dependency_not_ready</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>等待再重试</td></tr>
+  <tr><td><code>test_failure</code> / <code>build_failure</code></td><td><span class="tag tag-yellow">recoverable</span></td><td>定位修复后重试</td></tr>
+  <tr><td><code>prereq_missing</code> / <code>config_invalid</code> / <code>permission_denied</code> / <code>resource_exhausted</code></td><td><span class="tag tag-red">blocked</span></td><td>上报用户，不自行绕过</td></tr>
+  <tr><td><code>db_migration_fail</code> / <code>invariant_violation</code></td><td><span class="tag tag-red">blocked</span></td><td>上报用户</td></tr>
+</table>
+
+<div class="danger-card card">
+  <strong>红线</strong>：禁止直接 <code>bash .pg/hooks/*.sh</code>；禁止硬编码 host/port（一律从 project.yaml 读）；任务结束必须换新 session-id。
+</div>
+
 </div>
 
 <!-- ============================================================ -->
 <div id="sec6" class="section">
-<h1>6. 回归测试与问题闭环</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 改动后必须能取证复盘。回归失败自动分类（A/B/C）、边界守门、已知问题留痕，问题清单 + JSON 化全在 <code>.pg/regression/</code>。</p>
+<h1>6. 速查卡</h1>
 
-<h2>6.1 回归流流程</h2>
-<div class="svg-container">
-<svg viewBox="0 0 650 120" xmlns="http://www.w3.org/2000/svg">
-  <rect x="10" y="20" width="130" height="50" rx="8" fill="#2563eb"/>
-  <text x="75" y="45" font-size="13" font-weight="600" fill="#fff" text-anchor="middle">按 suite 声明</text>
-  <text x="75" y="62" font-size="11" fill="#fff" text-anchor="middle">启动环境 + 跑测试</text>
+<h2>命令速查</h2>
+<table>
+  <tr><th>命令</th><th>功能</th></tr>
+  <tr><td><code>/0-pg-auto-pilot</code></td><td>自动驾驶模式（唯一工作流）</td></tr>
+  <tr><td><code>pg init [--tool &lt;id&gt;] [--non-interactive]</code></td><td>初始化 .pg/ + 安装工具适配器</td></tr>
+  <tr><td><code>pg doctor</code></td><td>校验接入状态与 project.yaml</td></tr>
+  <tr><td><code>pg upgrade [version|--list|--force|--interactive]</code></td><td>升级 pg-skills（默认 main）</td></tr>
+  <tr><td><code>./pg-run</code></td><td>交互式菜单（常用操作 | Environment | Instance | Module | 更新）</td></tr>
+  <tr><td><code>pg-invoke-hook.py</code></td><td>Hook 统一入口（agent 必须使用）</td></tr>
+  <tr><td><code>pg-parse-config.py pg-agent</code></td><td>SSOT 查询入口（agent 必须使用）</td></tr>
+</table>
 
-  <line x1="140" y1="45" x2="165" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#a5)"/>
-  <defs><marker id="a5" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="6" markerHeight="6" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
-
-  <rect x="170" y="20" width="130" height="50" rx="8" fill="#7c3aed"/>
-  <text x="235" y="45" font-size="13" font-weight="600" fill="#fff" text-anchor="middle">每个失败单元</text>
-  <text x="235" y="62" font-size="11" fill="#fff" text-anchor="middle">调度 fix-test agent</text>
-
-  <line x1="300" y1="45" x2="325" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#a5)"/>
-
-  <rect x="330" y="20" width="130" height="50" rx="8" fill="#059669"/>
-  <text x="395" y="45" font-size="13" font-weight="600" fill="#fff" text-anchor="middle">输出 JSON 问题清单</text>
-  <text x="395" y="62" font-size="11" fill="#fff" text-anchor="middle">→ known-issues.md</text>
-
-  <line x1="460" y1="45" x2="485" y2="45" stroke="#94a3b8" stroke-width="2" marker-end="url(#a5)"/>
-
-  <rect x="490" y="20" width="130" height="50" rx="8" fill="#10b981"/>
-  <text x="555" y="45" font-size="13" font-weight="600" fill="#fff" text-anchor="middle">可选：修复</text>
-  <text x="555" y="62" font-size="11" fill="#fff" text-anchor="middle">pg-fix-regression-runner</text>
-</svg>
-</div>
-
-<h2>6.2 测试失败分流</h2>
-<div class="svg-container">
-<svg viewBox="0 0 600 130" xmlns="http://www.w3.org/2000/svg">
-  <ellipse cx="300" cy="20" rx="100" ry="18" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
-  <text x="300" y="25" font-size="13" font-weight="600" fill="#92400e" text-anchor="middle">test 失败</text>
-
-  <line x1="220" y1="38" x2="150" y2="65" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a6)"/>
-  <defs><marker id="a6" viewBox="0 0 10 10" refX="5" refY="5" markerWidth="5" markerHeight="5" orient="auto"><path d="M0,0 L10,5 L0,10 z" fill="#94a3b8"/></marker></defs>
-  <text x="150" y="58" font-size="11" fill="#10b981" text-anchor="middle">测试脚本错了？</text>
-  <rect x="60" y="70" width="180" height="40" rx="6" fill="#d1fae5" stroke="#059669" stroke-width="1.5"/>
-  <text x="150" y="90" font-size="12" font-weight="600" fill="#065f46" text-anchor="middle">fix-test agent</text>
-  <text x="150" y="105" font-size="11" fill="#065f46" text-anchor="middle">自动修复测试脚本</text>
-
-  <line x1="380" y1="38" x2="450" y2="65" stroke="#94a3b8" stroke-width="1.5" marker-end="url(#a6)"/>
-  <text x="450" y="58" font-size="11" fill="#ef4444" text-anchor="middle">生产代码有 bug？</text>
-  <rect x="360" y="70" width="180" height="40" rx="6" fill="#fee2e2" stroke="#ef4444" stroke-width="1.5"/>
-  <text x="450" y="90" font-size="12" font-weight="600" fill="#b91c1c" text-anchor="middle">known-issues.md 记录</text>
-  <text x="450" y="105" font-size="11" fill="#b91c1c" text-anchor="middle">后续 /5-pg-fix-issue 处理</text>
-</svg>
-</div>
-
-<h2>6.3 regression.suite 配置声明</h2>
+<h2>关键路径</h2>
 <pre>
-regression:
-  suite:
-    frontend:
-      environment:
-        name: dev-local
-        required_roles: [backend, agent, frontend]
-      module: frontend
-      test_keys: [e2e]
-
-    backend:
-      environment:
-        name: dev-local
-        required_roles: [backend, agent]
-      module: backend
-      test_keys: [unit]
-
-    agent:
-      environment:
-        name: dev-3tier
-        required_roles: [backend, agent]
-      module: agent
-      test_keys: [unit]
+配置 SSOT：      .pg/project.yaml
+SSOT 查询：      python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-agent
+检查接入：        python3 .pg/skills/src/runtime/bin/pg doctor
+操作 hooks（用户）：  ./pg-run --env &lt;E&gt; --role &lt;R&gt; --instance &lt;I&gt; --action &lt;A&gt;
+操作 hooks（agent）： python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
+                      --caller pg-agent --session &lt;S&gt; --env &lt;E&gt; --role &lt;R&gt; \
+                      --instance &lt;I&gt; --action &lt;A&gt;
+日志（agent）：   .pg/agent/&lt;session&gt;/&lt;env&gt;/logs/
+日志（ad-hoc）：  .pg/ad-hoc/&lt;session&gt;/&lt;env&gt;/logs/
 </pre>
-</div>
 
-<!-- ============================================================ -->
-<div id="sec7" class="section">
-<h1>7. 动手实操</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 让我们亲手跑一遍整个闭环。从 pg doctor 到 propose → build → regression → fix-issue，亲身验一遍"可托付"的全套契约。</p>
-
-<h2>练习 1：环境感知（15min）</h2>
-<div class="card">
-<pre>
-<span style="color:#94a3b8"># 检查 pg-skills 是否接入正常</span>
-python3 .pg/skills/src/runtime/bin/pg doctor
-
-<span style="color:#94a3b8"># 读取 workflow config</span>
-python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-agent
-
-<span style="color:#94a3b8"># 查看 propose 参考文档</span>
-ls .opencode/skills/pg-propose/references/
-</pre>
-<p><strong>目标</strong>：熟悉 pg 基础命令和文档位置。</p>
-</div>
-
-<h2>练习 2：快捷构建——改前端文案（15min）</h2>
-<div class="card">
-<p>在 opencode 中执行：</p>
-<pre>
-/2b-pg-quick-build
-描述：把登录页的 "登录" 按钮文案改为 "立即登录"，把 "注册" 改为 "免费注册"
-</pre>
-<p><strong>目标</strong>：体验快捷流——不写设计文档直接改代码。</p>
-<div class="tip-card card" style="margin-top:8px">
-  快捷流适合 ≤8 tasks、≤8 文件、单 module 的小改动。如果觉得不合适，直接退出改用标准流。
-</div>
-</div>
-
-<h2>练习 3：完整标准流——加一个 RPC 端点（20min）</h2>
-<div class="card">
-<p>在 opencode 中执行：</p>
-<pre>
-/2-pg-propose change-name=add-health-check-rpc
-描述：在 agent 端新增一个 HealthCheck RPC，backend 端定时调用检测 agent 存活
-</pre>
-<p><strong>目标</strong>：</p>
-<ul>
-  <li>观察 proposal / design / tasks 的生成过程</li>
-  <li>理解 stages × tracks  的展开逻辑</li>
-  <li>读懂 <code>on-conditions-eval.md</code> 评估记录与 scenario_tracks_decision SSOT</li>
-</ul>
-</div>
-
-<h2>练习 4：模拟一次 fix-issue（10min）</h2>
-<div class="card">
-<p>在 opencode 中执行：</p>
-<pre>
-/5-pg-fix-issue
-描述：agent 启动时如果 libvirtd 未运行，报错信息是英文堆栈，需要改为中文提示
-</pre>
-<p><strong>目标</strong>：熟悉 fix-issue 的扁平流程（启动 → 诊断 → 展示方案 → 修复 → 验证 → 收尾）。</p>
-</div>
-</div>
-
-<!-- ============================================================ -->
-<div id="sec8" class="section">
-<h1>8. 常见问题与排查</h1>
-<p style="color:var(--muted); font-style:italic; margin-bottom:8px">「品质，长在结构里」—— 卡壳时不要靠猜。pipeline.events + tasks.md checkbox + journal 都是客观记录，错误分类写在 <code>error-categories.yaml</code> 里。先取证，再动手。</p>
-
-<h2>Q&A</h2>
+<h2>常见问题</h2>
 
 <div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle open"><strong>Build 跑到一半失败了怎么办？</strong></div>
+  <div class="collapse-toggle open"><strong>接入后要重启开发工具吗？</strong></div>
   <div class="collapse-body open">
-    <p>查看 <code>.pg/changes/&lt;name&gt;/2-build/*.md</code> 中的报告。gate 或 verify 报告会写明失败原因。修复后重跑 <code>/3-pg-build</code>。</p>
+    <p>要。工具需要重启才会加载新的 command / skill / agent。没重启就看不到 <code>/0-pg-auto-pilot</code>。</p>
   </div>
 </div>
 
 <div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle"><strong>怎么知道当前 pipeline 跑到哪一步了？</strong></div>
-  <div class="collapse-body">
-    <p>查看 <code>.pg/changes/&lt;name&gt;/2-build/pipeline.events</code>（append-only JSONL），或调 <code>pg-pipeline-runner.py progress &lt;change&gt;</code> 看人类可读摘要。</p>
-  </div>
-</div>
-
-<div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle"><strong>提案产出后想改一两处，怎么改？</strong></div>
-  <div class="collapse-body">
-    <p>直接编辑对应的 markdown / yaml 产物（<code>proposal.md</code> / <code>design.md</code> / <code>tasks.md</code> / <code>scenario-&lt;track&gt;.yaml</code> / <code>execution-manifest.yaml</code>）即可；如果改了 <code>design.md</code> 的接口、数据结构或 stage/tracks 编排，必须重跑 <code>/2-pg-propose</code> 让 <code>execution-manifest.yaml</code> 重新生成。</p>
-  </div>
-</div>
-
-<div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle"><strong>怎么新增一个回归测试套件？</strong></div>
-  <div class="collapse-body">
-    <p>编辑 <code>.pg/project.yaml</code> 的 <code>regression.suite</code> 段，增加一个新 suite 配置：</p>
-<pre>
-regression:
-  suite:
-    my-new-suite:
-      environment:
-        name: dev-local
-        required_roles: []
-      module: backend
-      test_keys: [unit]
-</pre>
-  </div>
-</div>
-
-<div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle"><strong>怎么加一个测试环境（比如 staging）？</strong></div>
-  <div class="collapse-body">
-    <p>编辑 <code>.pg/project.yaml</code> 的 <code>environments</code> 段，新增一个环境 + 各 role 的 actions。然后为该环境编写对应的 hook 脚本（prepare_env / clean_env / role start/stop/logs）。</p>
-  </div>
-</div>
-
-<div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle"><strong>pg-skills 版本怎么升级？</strong></div>
+  <div class="collapse-toggle"><strong>怎么升级 pg-skills？</strong></div>
   <div class="collapse-body">
 <pre>
-<span style="color:#94a3b8"># 升级到最新版</span>
-pg upgrade
-
-<span style="color:#94a3b8"># 升级到指定版</span>
-pg upgrade v0.9.1
-
-<span style="color:#94a3b8"># 查看远程可用版本</span>
-pg upgrade --list
-
-<span style="color:#94a3b8"># 校验</span>
-pg doctor
+pg upgrade            <span style="color:#94a3b8"># 升级到最新 main</span>
+pg upgrade v0.9.4     <span style="color:#94a3b8"># 升级到指定 tag</span>
+pg upgrade --list     <span style="color:#94a3b8"># 查看远程可用版本</span>
+pg doctor             <span style="color:#94a3b8"># 升级后校验</span>
 </pre>
   </div>
 </div>
@@ -1764,113 +729,45 @@ pg doctor
 <div class="card" onclick="toggleQA(this)">
   <div class="collapse-toggle"><strong>怎么验证 hooks 写得对不对？</strong></div>
   <div class="collapse-body">
-    <p>用 <code>./pg-run</code> 的 <code>logs</code> 动作（只读操作，安全无害）验证 hook 脚本是否能正常加载并执行：</p>
+    <p>用 <code>./pg-run</code> 的 logs 动作（只读，安全）验证 hook 能正常加载；再 start/stop 一个 role 做端到端验证：</p>
 <pre>
 ./pg-run --env dev-local --role backend --instance backend-1 --action logs --tail-lines 10
+./pg-run --env dev-local --role backend --instance backend-1 --action start
+./pg-run --env dev-local --role backend --instance backend-1 --action stop
 </pre>
   </div>
 </div>
 
 <div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle"><strong>module 命令和 hook 脚本的区别到底是什么？</strong></div>
+  <div class="collapse-toggle"><strong>日志找不到，去哪找？</strong></div>
   <div class="collapse-body">
-    <p>核心区别两点：</p>
-    <ol>
-      <li><strong>是否有 PG_* 注入</strong>：hook 脚本有 <code>$PG_ROLE</code>、<code>$PG_ENV</code> 等；module 命令没有</li>
-      <li><strong>错误处理方式</strong>：hook 脚本用 <code>pg_exit</code> / <code>pg_fail</code> 写 result.json；module 命令只看 exit code</li>
-    </ol>
-    <p>判断标准很简单：看它在 project.yaml 中配置在<strong>哪个位置</strong>——modules 下的都是 module 命令，environments 下的都是 hook。</p>
+    <p>agent 调用：<code>.pg/agent/&lt;session&gt;/&lt;env&gt;/logs/</code>；ad-hoc 调用：<code>.pg/ad-hoc/&lt;session&gt;/&lt;env&gt;/logs/</code>。多半是 session-id 拼错或跨任务复用。不要去找 <code>scripts/logs/</code>——那只是兜底路径。</p>
   </div>
 </div>
 
 <div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle"><strong>propose 之后只改了一行产品描述，要不要再 propose 一遍？</strong></div>
+  <div class="collapse-toggle"><strong>module 命令和 hook 脚本的区别？</strong></div>
   <div class="collapse-body">
-    <p>文案 / 术语 / 数字这类纯文档微调，直接编辑对应的 markdown 产物即可；如果改了 <code>design.md</code> 的接口、数据结构或 stage/tracks 编排，必须重跑 <code>/2-pg-propose</code> 让 <code>execution-manifest.yaml</code> 重新生成。</p>
+    <p>看它在 project.yaml 中的位置：<code>modules</code> 下的都是 module 命令（无 PG_* 注入，只看 exit code）；<code>environments</code> 下的都是 hook（有 PG_* 注入，写 result.json）。</p>
   </div>
 </div>
 
 <div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle"><strong>feat/pg/&lt;change&gt; 分支要 push 吗？要不要 PR？</strong></div>
+  <div class="collapse-toggle"><strong>hook 报错 "environment not found" 或 "role not defined"？</strong></div>
   <div class="collapse-body">
-    <p>pg-build 完成后会自动调 <code>pg-verify-and-merge</code> 模拟合 master → 真合 master；本机操作不必手动 push。<strong>多机协作时</strong>仍需 <code>git push origin feat/pg/&lt;change&gt;</code> 让 CI 跑；<code>pg-verify-and-merge</code> 处理实际的合并逻辑。</p>
-  </div>
-</div>
-
-<div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle"><strong>从 0.7.x 升 0.8.x 后，旧 change 还能 build 吗？</strong></div>
-  <div class="collapse-body">
-    <p>可以。0.8.x 向后兼容 0.7.x 的 <code>execution-manifest.yaml</code> 形态；但<strong>含 review 子阶段的 tasks.md</strong>需要用 <code>pg-gen-tasks-skeleton.py --selected-stages</code> 重新生成一次，章节号 N 会重排（下游消费方必须读 sections JSON 的 N 值，不要硬编码）。0.8.2 新增 manifest v3（<code>enabled</code> 必填字段），旧 manifest 升级后需补充该字段。具体迁移步骤见 <code>pg upgrade</code> 升级日志。</p>
-  </div>
-</div>
-
-<div class="card" onclick="toggleQA(this)">
-  <div class="collapse-toggle"><strong>多人同时跑 pg-init-project 谁最后说了算？</strong></div>
-  <div class="collapse-body">
-    <p><code>pg init</code> 幂等可重跑；但 <code>pg-init-project</code> 是 AI 推断，<strong>生成完一定要人工 review</strong>（参见 §3.5 checklist "人工核对自动产物" 段）。建议先在分支跑一次 → PR 合 master → 其他人 rebase。<code>.pg/code-review/</code> 目录 Phase 2.5 幂等，不会自动覆盖已存在文件。</p>
-  </div>
-</div>
-</div>
-
-<!-- ============================================================ -->
-<div id="sec-appendix" class="section">
-<h1>附录：参考速查卡</h1>
-
-<h2>命令速查</h2>
-<table>
-  <tr><th>命令</th><th>功能</th></tr>
-  <tr><td><code>/1-pg-define</code></td><td>定界——扫描边界</td></tr>
-  <tr><td><code>/2-pg-propose</code></td><td>提案——生成设计文档，产出后直接进入 build</td></tr>
-  <tr><td><code>/2b-pg-quick-build</code></td><td>小改动直接编码</td></tr>
-  <tr><td><code>/3-pg-build</code></td><td>构建——pipeline 实现（事件溯源引擎）</td></tr>
-  <tr><td><code>/4-pg-regression</code></td><td>回归——跑全量测试</td></tr>
-  <tr><td><code>/5-pg-fix-issue</code></td><td>修复——系统化修 bug</td></tr>
-  <tr><td><code>/6-pg-archive</code></td><td>归档已完成变更</td></tr>
-  <tr><td><code>./pg-run</code></td><td>交互式菜单运行（module/env/role 操作）</td></tr>
-</table>
-
-<h2>关键路径</h2>
 <pre>
-配置 SSOT：        .pg/project.yaml
-解读命令：         python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py pg-agent
-检查接入：         python3 .pg/skills/src/runtime/bin/pg doctor
-升级：             pg upgrade
-操作 hooks（用户）：   ./pg-run --env &lt;E&gt; --role &lt;R&gt; --instance &lt;I&gt; --action &lt;A&gt;
-操作 hooks（agent）：  python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
-                        --session &lt;S&gt; --env &lt;E&gt; --role &lt;R&gt; --instance &lt;I&gt; --action &lt;A&gt;
+python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --prefix environments
 </pre>
+    <p>大概率是 env 名 / role 名写错，或 <code>--caller pg-agent</code> 忘了传 <code>--session</code>。</p>
+  </div>
+</div>
 
-<h2>产物速查</h2>
-<pre>
-.pg/changes/&lt;name&gt;/
-├── proposal.md            ← 做什么、为什么
-├── design.md              ← 怎么做、验证标准
-├── tasks.md               ← stages × tracks 任务矩阵（含可选 review sub）
-├── execution-manifest.yaml ← 编排清单 + stages[i].environment SSOT
-├── 1-propose-review/
-│   └── on-conditions-eval.md ← on_conditions 评估复核 + scenario_tracks_decision SSOT
-└── 2-build/               ← pipeline 产物
-    ├── *.md               ← 各 track 的 review/fix-review/verify/fix/gate 报告
-    └── final-gate-assessment.md
-</pre>
+</div><!-- /section sec6 -->
 
-<h2>错误分类速查</h2>
-<table>
-  <tr><th>Category</th><th>Severity</th><th>Recoverable</th></tr>
-  <tr><td>prereq_missing</td><td>blocked</td><td>否</td></tr>
-  <tr><td>port_in_use</td><td>recoverable</td><td>是</td></tr>
-  <tr><td>timeout</td><td>recoverable</td><td>是</td></tr>
-  <tr><td>test_failure</td><td>recoverable</td><td>是</td></tr>
-  <tr><td>config_invalid</td><td>blocked</td><td>否</td></tr>
-  <tr><td>invariant_violation</td><td>blocked</td><td>是</td></tr>
-</table>
-
-</div><!-- /section (sec-appendix) -->
-
-</main><!-- /content -->
+</main>
 
 <footer class="page-footer">
-  <p class="footer-note"><strong>品构</strong> pg-skills · 「品质，长在结构里」 · 更多文档见 <code>.pg/skills/README.md</code></p>
+  <p class="footer-note"><strong>品构</strong> pg-skills v0.9.4 · 「品质，长在结构里」 · 更多文档见 <code>.pg/skills/README.md</code></p>
   <a href="#" class="next-link" id="next-link">
     <span><span class="next-label">下一节</span><span class="next-title"></span></span>
     <span class="next-arrow">→</span>
@@ -1892,7 +789,6 @@ pg doctor
     <div id="search-results"></div>
   </div>
 </div>
-
 <script>
 (function () {
   'use strict';
@@ -1901,10 +797,7 @@ pg doctor
 
   const navLinks = $$('.sidebar .nav-link');
   const sections = $$('.section');
-  const headerH = () => {
-    const el = document.querySelector('.header');
-    return el ? el.offsetHeight : 56;
-  };
+  const headerH = () => { const el = document.querySelector('.header'); return el ? el.offsetHeight : 56; };
 
   /* ============ Theme ============ */
   const themeToggle = $('#theme-toggle');
@@ -1921,9 +814,7 @@ pg doctor
   let savedTheme = null;
   try { savedTheme = localStorage.getItem('pg-theme'); } catch (e) {}
   setTheme(savedTheme || (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light'));
-  themeToggle.addEventListener('click', () => {
-    setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark');
-  });
+  themeToggle.addEventListener('click', () => { setTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); });
 
   /* ============ Progress bar ============ */
   window.addEventListener('scroll', () => {
@@ -1934,19 +825,15 @@ pg doctor
   /* ============ Heading ids ============ */
   function assignHeadingId(h) {
     let base = (h.textContent || '').trim().toLowerCase()
-      .replace(/<[^>]+>/g, '')
-      .replace(/[^\w\u4e00-\u9fa5]+/g, '-')
+      .replace(/<[^>]+>/g, '').replace(/[^\w\u4e00-\u9fa5]+/g, '-')
       .replace(/^-+|-+$/g, '').slice(0, 50) || 'heading';
     let id = base, n = 1;
     while (document.getElementById(id)) id = base + '-' + (++n);
-    h.id = id;
-    return id;
+    h.id = id; return id;
   }
 
   /* ============ Navigation ============ */
-  function activateNav(hash) {
-    navLinks.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + hash));
-  }
+  function activateNav(hash) { navLinks.forEach(l => l.classList.toggle('active', l.getAttribute('href') === '#' + hash)); }
   function showSection(id) {
     const target = document.getElementById(id);
     if (!target) return;
@@ -1966,29 +853,25 @@ pg doctor
     });
   }
 
-  // Any unhandled in-page anchor link → SPA navigation
   $$('a[href^="#"]').forEach(a => {
     if (a.classList.contains('nav-link') || a.classList.contains('search-item')) return;
     if (a.closest('#toc-list') || a === $('#next-link')) return;
     a.addEventListener('click', (e) => {
       const href = a.getAttribute('href');
       if (!href || href === '#') return;
-      e.preventDefault();
-      showSection(href.slice(1));
+      e.preventDefault(); showSection(href.slice(1));
     });
   });
 
-  // Sidebar links
   navLinks.forEach(link => {
     link.addEventListener('click', (e) => {
       const href = link.getAttribute('href');
       if (!href || href.startsWith('http') || link.hasAttribute('target')) return;
-      e.preventDefault();
-      showSection(href.slice(1));
+      e.preventDefault(); showSection(href.slice(1));
     });
   });
 
-  /* ============ Scroll spy (sidebar highlight) ============ */
+  /* ============ Scroll spy ============ */
   const spyObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
       if (!entry.isIntersecting) return;
@@ -2000,7 +883,7 @@ pg doctor
   }, { threshold: 0.2 });
   sections.forEach(s => spyObserver.observe(s));
 
-  /* ============ TOC (On this page) ============ */
+  /* ============ TOC ============ */
   const tocList = $('#toc-list');
   const tocObserver = new IntersectionObserver((entries) => {
     entries.forEach(entry => {
@@ -2010,24 +893,20 @@ pg doctor
     });
   }, { rootMargin: '-64px 0px -70% 0px', threshold: 0 });
   function updateToc(section) {
-    tocList.innerHTML = '';
-    tocObserver.disconnect();
+    tocList.innerHTML = ''; tocObserver.disconnect();
     if (!section) return;
     section.querySelectorAll('h2, h3').forEach(h => {
       if (!h.id) assignHeadingId(h);
       const li = document.createElement('li');
       const a = document.createElement('a');
-      a.href = '#' + h.id;
-      a.textContent = h.textContent.trim();
+      a.href = '#' + h.id; a.textContent = h.textContent.trim();
       if (h.tagName === 'H3') a.classList.add('l3');
       a.addEventListener('click', (e) => { e.preventDefault(); showSection(h.id); });
-      li.appendChild(a);
-      tocList.appendChild(li);
-      tocObserver.observe(h);
+      li.appendChild(a); tocList.appendChild(li); tocObserver.observe(h);
     });
   }
 
-  /* ============ Pagination (下一节) ============ */
+  /* ============ Pagination ============ */
   const nextLink = $('#next-link');
   function updateNext() {
     const order = navLinks.map(l => l.getAttribute('href')).filter(h => h && h.startsWith('#'));
@@ -2039,12 +918,9 @@ pg doctor
     if (target) {
       nextLink.style.display = 'inline-flex';
       nextLink.href = nextHref;
-      nextLink.querySelector('.next-title').textContent =
-        (target.querySelector('h1') || { textContent: '' }).textContent.trim();
+      nextLink.querySelector('.next-title').textContent = (target.querySelector('h1') || { textContent: '' }).textContent.trim();
       nextLink.onclick = (e) => { e.preventDefault(); showSection(nextHref.slice(1)); };
-    } else {
-      nextLink.style.display = 'none';
-    }
+    } else { nextLink.style.display = 'none'; }
   }
 
   /* ============ Mobile menu ============ */
@@ -2062,8 +938,7 @@ pg doctor
   /* ============ Copy buttons ============ */
   $$('pre').forEach(pre => {
     const btn = document.createElement('button');
-    btn.className = 'copy-btn';
-    btn.textContent = '复制';
+    btn.className = 'copy-btn'; btn.textContent = '复制';
     btn.onclick = () => {
       const clone = pre.cloneNode(true);
       const cb = clone.querySelector('.copy-btn');
@@ -2081,9 +956,7 @@ pg doctor
     let saved = null;
     try { saved = localStorage.getItem(key); } catch (e) {}
     if (saved === 'true') cb.checked = true;
-    cb.addEventListener('change', () => {
-      try { localStorage.setItem(key, cb.checked); } catch (e) {}
-    });
+    cb.addEventListener('change', () => { try { localStorage.setItem(key, cb.checked); } catch (e) {} });
   });
 
   /* ============ Search (Ctrl+K) ============ */
@@ -2095,9 +968,7 @@ pg doctor
     searchIndex = [];
     navLinks.forEach(l => {
       const href = l.getAttribute('href');
-      if (href && href.startsWith('#')) {
-        searchIndex.push({ title: l.textContent.trim(), sub: '章节', href: href });
-      }
+      if (href && href.startsWith('#')) searchIndex.push({ title: l.textContent.trim(), sub: '章节', href: href });
     });
     sections.forEach(sec => {
       const secTitle = sec.querySelector('h1') ? sec.querySelector('h1').textContent.trim() : '';
@@ -2107,39 +978,19 @@ pg doctor
       });
     });
   }
-  function openSearch() {
-    searchOverlay.classList.add('open');
-    runSearch('');
-    setTimeout(() => searchInput.focus(), 30);
-  }
-  function closeSearch() {
-    searchOverlay.classList.remove('open');
-    searchInput.value = '';
-  }
+  function openSearch() { searchOverlay.classList.add('open'); runSearch(''); setTimeout(() => searchInput.focus(), 30); }
+  function closeSearch() { searchOverlay.classList.remove('open'); searchInput.value = ''; }
   function runSearch(q) {
     const ql = q.trim().toLowerCase();
-    if (!ql) {
-      searchResults.innerHTML = '<div class="search-empty">输入关键词，检索章节与标题…</div>';
-      return;
-    }
-    const hits = searchIndex.filter(it =>
-      it.title.toLowerCase().includes(ql) || it.sub.toLowerCase().includes(ql)
-    ).slice(0, 30);
-    if (!hits.length) {
-      searchResults.innerHTML = '<div class="search-empty">没有匹配结果</div>';
-      return;
-    }
+    if (!ql) { searchResults.innerHTML = '<div class="search-empty">输入关键词，检索章节与标题…</div>'; return; }
+    const hits = searchIndex.filter(it => it.title.toLowerCase().includes(ql) || it.sub.toLowerCase().includes(ql)).slice(0, 30);
+    if (!hits.length) { searchResults.innerHTML = '<div class="search-empty">没有匹配结果</div>'; return; }
     searchResults.innerHTML = '';
     hits.forEach(it => {
       const a = document.createElement('a');
-      a.className = 'search-item';
-      a.href = it.href;
+      a.className = 'search-item'; a.href = it.href;
       a.innerHTML = '<span>' + it.title.replace(/</g, '&lt;') + '</span><small>' + it.sub.replace(/</g, '&lt;') + '</small>';
-      a.addEventListener('click', (e) => {
-        e.preventDefault();
-        closeSearch();
-        showSection(it.href.slice(1));
-      });
+      a.addEventListener('click', (e) => { e.preventDefault(); closeSearch(); showSection(it.href.slice(1)); });
       searchResults.appendChild(a);
     });
   }
@@ -2147,16 +998,10 @@ pg doctor
   $('#search-backdrop').addEventListener('click', closeSearch);
   searchInput.addEventListener('input', () => runSearch(searchInput.value));
   searchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Enter') {
-      const first = searchResults.querySelector('.search-item');
-      if (first) { e.preventDefault(); first.click(); }
-    }
+    if (e.key === 'Enter') { const first = searchResults.querySelector('.search-item'); if (first) { e.preventDefault(); first.click(); } }
   });
   document.addEventListener('keydown', (e) => {
-    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
-      e.preventDefault();
-      openSearch();
-    }
+    if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') { e.preventDefault(); openSearch(); }
     if (e.key === 'Escape') { closeSearch(); closeMenu(); }
   });
 
@@ -2176,8 +1021,7 @@ pg doctor
     sections.forEach(s => s.classList.remove('active'));
     parentSection.classList.add('active');
     activateNav(parentSection.id);
-    updateToc(parentSection);
-    updateNext();
+    updateToc(parentSection); updateNext();
     requestAnimationFrame(() => {
       const h1 = parentSection.querySelector('h1');
       const scrollEl = h1 || parentSection;
