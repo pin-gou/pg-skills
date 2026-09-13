@@ -1,12 +1,12 @@
 # 变更日志
 
-## [Unreleased] - 待发布
+## [1.0.0] - 2026-09-13
 
 **升级前必读（破坏性变更）**
 - **`describe_env` 协议移除**：`project.yaml` 不再接受 `environments.<env>.describe_env`；`pg-invoke-hook.py --action describe_env` 已删除；`env-description.schema.json`、`describe-env.sh` 模板及 `PG_CHANGE_ID` / `PG_OUTPUT_PATH` 环境变量一并移除。仍声明 describe_env 的 project.yaml 需删除该段才能通过校验；依赖环境探测产物的流程需改用 `prepare_env` / `clean_env` hook
 - **`project.yaml` 移除 `tracks` / `stages` 段**：schema 不再接受这两个顶层键，`pg doctor` 也不再把它们列为必填。仍在使用 tracks/stages 编排的 project.yaml 需删除这两段后才能通过校验（当前工作流已收敛到 pg-auto-pilot，运行时只消费 modules + environments）
 - **`project.yaml` 移除死字段**：`verify_merge`、`git`（含 `default_branch`）、action 级 `host` / `hosts` / `parallel`、`instance.libvirt_uri` 不再被 schema 接受。这些字段此前从未被运行时读取，但已声明它们的 project.yaml 需删除后才能通过校验
-- **工作流收敛到单 SKILL**：`src/core/workflows/skills/` 下除 `pg-auto-pilot` 外的 11 个 SKILL（pg-define / pg-propose / pg-build / pg-fix-issue / pg-quick-build / pg-regression / pg-verify-and-merge / pg-archive / pg-init-project / pg-browser-testing-with-devtools / pg-systematic-diagnosing）全部移除
+- **工作流收敛到单 SKILL**：`src/core/workflows/skills/` 下除 `pg-auto-pilot` 外的 10 个 SKILL（pg-define / pg-propose / pg-build / pg-fix-issue / pg-quick-build / pg-regression / pg-verify-and-merge / pg-archive / pg-browser-testing-with-devtools / pg-systematic-diagnosing）全部移除；`pg-init-project` 随之重写（见"新增 / 改进"）
 - **slash 命令收敛**：`/1-pg-define` / `/1-pg-grill` / `/2-pg-propose` / `/2b-pg-quick-build` / `/3-pg-build` / `/4-pg-regression` / `/5-pg-fix-issue` / `/6-pg-archive` 全部删除，仅保留 `/0-pg-auto-pilot`
 - **sub-agent 收敛**：`pg-manager` 及 `pg-build/*`、`pg-fix-issue/*`、`pg-quick-build/*`、`pg-regression/*` agent 删除，仅保留 `explore.md`
 - **合并改手动**：`pg-verify-and-merge` 删除后不再有自动合并能力，合并到 default 分支改用手动 `git merge`
@@ -14,11 +14,14 @@
 - **`project.yaml` schema 段收敛**：`verify_merge` / `flyway` / `propose` / `build` / `regression` 段标记 deprecated（历史 project.yaml 仍可解析，新增不再建议使用）
 
 **新增 / 改进**
+- **`pg-init-project` 重写（v1.0）**：对齐 pg-auto-pilot 单工作流——不再生成 tracks / stages / code-review，caller 仅 `pg-agent` / `ad-hoc`，保留 Phase 5 AGENTS.md drift 检测与 agent-protocol 注入
 - **`pg-parse-config.py` 精简**：`WORKFLOW_KEYS` 仅剩 `pg-agent`；pg-verify-and-merge / pg-regression 专用逻辑删除
 - **初始化模板修复**：`pg init` 生成的 placeholder `project.yaml` 的 `roles` 改为数组格式；`pg-run` symlink 权限设置改用 `lstat`，不再因目标缺失崩溃
 - **适配器同步**：opencode / mobile-coder / deepseek-harness 适配器仅渲染 `pg-auto-pilot` 工作流
+- **官网文档重写**：`docs/index.html` 精简为 6 章并新增 pg-run 使用章节
 
 **死代码清理**
+- **移除开发者工具 `tools/project-editor`**：随工作流收敛删除（其编辑对象 tracks / stages 已不存在）
 - **移除孤儿脚本 `pg-parse-test-results.py`**：无任何调用方与测试，测试结果解析职责由各模块 `test` 命令直接承担
 - **移除历史迁移工具链**：`migrate-define-summary.py`、`define-summary.schema.json`、`define-summary.example.yaml` 及其单测——迁移对象所属 SKILL 已移除，无 CLI 入口
 - **移除 `pg-parse-config.py` 失效的脚本校验**：其校验路径读取不存在的 `pipeline` 键，永远返回成功（"VALIDATION BLOCKING" 承诺实际从未生效），连同死分支 `resolved_actions` 一并删除，行为无变化

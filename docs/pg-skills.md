@@ -106,7 +106,7 @@ AI 把改动内容、验证结果、hook 日志位置汇总给你确认。达不
 ```bash
 # 1. 拉入 pg-skills
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
-git subtree add --prefix=.pg/skills pg-skills v0.9.4 --squash
+git subtree add --prefix=.pg/skills pg-skills v1.0.0 --squash
 
 # 2. 初始化骨架
 python3 .pg/skills/src/runtime/bin/pg init
