@@ -14,7 +14,6 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
 import re
 import select
@@ -452,7 +451,6 @@ def resolve_module_actions(
     if isinstance(tests, dict):
         for key in tests:
             label = f"test.{key}"
-            desc = {}.get(key, key)
             actions.append((label, f"测试 ({key})", tests[key]))
     return actions
 
@@ -1110,7 +1108,6 @@ def _exec_module_action(
         print(f"  {module_selected}.{action_name} 没有可执行的命令")
         pause()
         return
-    module_root = project_root / (mods[module_selected].get("root", "."))
     log_dir = project_root / ".pg" / "runs"
     log_dir.mkdir(parents=True, exist_ok=True)
     env = {
@@ -1170,12 +1167,10 @@ def _exec_instance_action(
         action_name = act_names[act_idx]
     elif inst_selected is None:
         inst = instances[idx]
-        action_name = None
-        if action_name is None:
-            _run_role_instance_actions(
-                env_name, role_selected, inst, role_cfg, project_root
-            )
-            return
+        _run_role_instance_actions(
+            env_name, role_selected, inst, role_cfg, project_root
+        )
+        return
     else:
         inst = next((i for i in instances if i["name"] == inst_selected), None)
         if not inst:
@@ -1450,7 +1445,6 @@ def direct_exec(args: argparse.Namespace, config: dict, project_root: Path) -> i
                 f"Error: {args.module}.{args.action} has no executable command\n"
             )
             return 1
-        module_root = project_root / (mods[args.module].get("root", "."))
         log_dir = project_root / ".pg" / "runs"
         log_dir.mkdir(parents=True, exist_ok=True)
         env = {

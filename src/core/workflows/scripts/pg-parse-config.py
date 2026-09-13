@@ -10,21 +10,10 @@ Usage:
   python3 pg-parse-config.py                          # Full config (debug)
   python3 pg-parse-config.py --key backend.port       # Single value
   python3 pg-parse-config.py --prefix backend         # Subtree as JSON
-
-  Validation:
-  After producing the config JSON on stdout, this script validates that
-  every `bash <path>.sh` reference inside any track/phase command field
-  points to a file that actually exists. If any referenced script is
-  missing, the script writes a `VALIDATION BLOCKING:` report to stderr
-  and exits with code 1. This causes the calling bash command to fail,
-  so the LLM naturally stops and the user must fix .pg/project.yaml
-  before retrying. The stdout JSON is still emitted (for backward
-  compatibility) but downstream code should not run.
 """
 
 import json
 import os
-import re
 import shlex
 import sys
 
@@ -78,18 +67,6 @@ WORKFLOW_KEYS = {
     # skill 内部状态. agent 走 --resolve-* / --key / --prefix 取细粒度值.
     "pg-agent": ["modules", "environments"],
 }
-
-
-
-# Command-bearing fields that may reference bash scripts. Used to scan
-# every module's build/lint/test commands for `bash <path>.sh` invocations.
-COMMAND_FIELDS = (
-    "build", "lint",
-)
-
-# Regex: match `bash <path>.sh` where path is non-whitespace and not a
-# shell operator. Captures the script path in group 1.
-BASH_SCRIPT_RE = re.compile(r"\bbash\s+([^\s|&;]+\.sh)\b")
 
 
 def load():
@@ -272,14 +249,7 @@ def filter_by_workflow(data, workflow):
     keys = WORKFLOW_KEYS.get(workflow)
     if keys is None:
         return data
-    # resolved_actions is computed, not a raw key
-    has_resolved = "resolved_actions" in keys
-    result_keys = [k for k in keys if k != "resolved_actions"]
-    result = {k: data[k] for k in result_keys if k in data}
-    if has_resolved:
-        envs = data.get("environments") or {}
-        result["resolved_actions"] = compute_resolved_actions(envs)
-    return result
+    return {k: data[k] for k in keys if k in data}
 
 
 def inject_meta(data):
@@ -317,60 +287,6 @@ def emit_cwd_policy_notice(json_only: bool = False):
     print(notice, file=sys.stderr)
 
 
-def find_script_candidates(script_path, track_root):
-    """Return candidate absolute-or-project-relative paths for a script.
-
-    The conventional layout in .pg/project.yaml uses three patterns:
-      1. bare relative path (resolved against project root)
-      2. `<root>/<script>` (resolved against the track root, e.g. when
-         the user runs the command from the project root with the track
-         as the working directory)
-      3. `<root>/../<script>` (the `cd <root> && bash ../scripts/...`
-         convention used by backend/frontend)
-    """
-    root = (track_root or "").rstrip("/")
-    return [
-        script_path,
-        os.path.join(root, script_path) if root else script_path,
-        os.path.join(root, "..", script_path) if root else script_path,
-    ]
-
-
-def validate_scripts(data):
-    """Walk every track/phase command field and verify bash script paths.
-
-    Returns a list of error dicts. Empty list means all references resolve.
-    Non-bash commands (mvn, go, pnpm, curl, ...) are skipped because
-    their target is a system tool, not a file we can existence-check.
-    """
-    errors = []
-    tracks = ((data.get("pipeline") or {}).get("tracks") or {})
-    for tid, t in tracks.items():
-        if not isinstance(t, dict):
-            continue
-        root = t.get("root")
-        for field in COMMAND_FIELDS:
-            cmd = t.get(field)
-            if isinstance(cmd, list):
-                cmds_to_check = [c for c in cmd if isinstance(c, str)]
-            elif isinstance(cmd, str):
-                cmds_to_check = [cmd]
-            else:
-                continue
-            for cmd_str in cmds_to_check:
-                for m in BASH_SCRIPT_RE.finditer(cmd_str):
-                    script = m.group(1)
-                    candidates = find_script_candidates(script, root)
-                    if not any(os.path.exists(c) for c in candidates):
-                        errors.append({
-                            "track": tid,
-                            "field": field,
-                            "script": script,
-                            "candidates": candidates,
-                        })
-    return errors
-
-
 def main():
     data = load()
     args = sys.argv[1:]
@@ -384,17 +300,14 @@ def main():
     if not args:
         print(json.dumps(inject_meta(data), indent=2, ensure_ascii=False))
         emit_cwd_policy_notice(json_only=json_only)
-        _run_validation(data)
         return
 
     # First positional arg as workflow name
     if args[0] in WORKFLOW_KEYS:
-        sub_args = args[1:]
         filtered = filter_by_workflow(data, args[0])
 
         print(json.dumps(inject_meta(filtered), indent=2, ensure_ascii=False))
         emit_cwd_policy_notice(json_only=json_only)
-        _run_validation(data)
         return
 
     i = 0
@@ -440,37 +353,6 @@ def main():
         else:
             print(json.dumps({"error": f"Unknown argument: {args[i]}"}, ensure_ascii=False))
             i += 1
-
-
-def _run_validation(data):
-    """Emit validation report to stderr and exit non-zero on failure.
-
-    Called after stdout output to keep behavior observable for callers
-    that pipe/redirect stdout. The validation is blocking: any missing
-    script aborts the workflow via non-zero exit so the LLM stops.
-    """
-    errors = validate_scripts(data)
-    if errors:
-        print("VALIDATION BLOCKING: config validation failed:",
-              file=sys.stderr)
-        for e in errors:
-            if "script" in e:
-                print(
-                    f"  - track={e['track']} field={e['field']} script={e['script']} "
-                    f"(candidates tried: {e['candidates']})",
-                    file=sys.stderr,
-                )
-            else:
-                print(
-                    f"  - field={e['field']} value={e.get('value', '')} reason={e['reason']}",
-                    file=sys.stderr,
-                )
-        print(
-            "\nFix .pg/project.yaml so every `bash <path>.sh` reference "
-            "points to an existing script, then re-run.",
-            file=sys.stderr,
-        )
-        sys.exit(1)
 
 
 if __name__ == "__main__":

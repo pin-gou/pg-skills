@@ -69,7 +69,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 - `--caller` **固定 `pg-agent`**，日志路由到 `.pg/agent/<session>/<env>/logs/`
 - action 分两类：
   - per-role：`start / stop / restart / logs / tail / health_check`（需 `--role` + `--instance`）
-  - env-level：`prepare_env / clean_env / describe_env / restart_all_instances`（忽略 role/instance）
+  - env-level：`prepare_env / clean_env / restart_all_instances`（忽略 role/instance）
 - session-id 格式 `<iso-date>-<keyword>`，一次任务复用同一个，任务结束换新（否则污染审计目录）
 
 ### 错误分类

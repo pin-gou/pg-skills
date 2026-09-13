@@ -62,9 +62,11 @@ pg-skills 仓库（独立远程）               您的项目仓库
 /0-pg-auto-pilot
 ```
 
-> **pg-auto-pilot 是当前唯一保留的 SKILL**：pg-define / pg-propose / pg-build / pg-fix-issue / pg-quick-build / pg-regression / pg-verify-and-merge / pg-archive 等已移除。合并到 default 分支不再由 SKILL 负责，改用手动 `git merge`。
+> **当前 SKILL 仅两个**：`pg-auto-pilot`（自动驾驶）与 `pg-init-project`（项目初始化）。pg-define / pg-propose / pg-build / pg-fix-issue / pg-quick-build / pg-regression / pg-verify-and-merge / pg-archive 等已移除。合并到 default 分支不再由 SKILL 负责，改用手动 `git merge`。
 >
 > **pg-auto-pilot** 是自动驾驶模式——LLM 可自主加载。它不限定 LLM 如何规划与执行，只要求实施计划含"启动实例并验证结果"步骤、执行前让用户选定环境并确认环境准备方式。
+>
+> **pg-init-project** 是项目初始化 SKILL——仅在用户显式要求时由 LLM 加载（禁止自行加载或主动提示）。它扫描仓库后生成 `.pg/project.yaml` + `.pg/hooks/`，并注入 `.pg/context/agent-protocol.md`（`pg init` 不安装此文件，`pg doctor` 的 `context_protocol_present` 检查依赖它）。
 
 ---
 
@@ -82,15 +84,15 @@ pg-skills/
 │   │   ├── commands/             # 1 个 slash command 定义
 │   │   │   └── pg-0-auto-pilot.md      # 自动驾驶模式（壳子，调用 pg-auto-pilot skill）
 │   │   │
-│   │   ├── skills/               # 1 个 SKILL.md 定义
-│   │   │   └── pg-auto-pilot/          # 自动驾驶模式：不限定 LLM 编排，仅要求计划含验证、执行前确认环境
+│   │   ├── skills/               # 2 个 SKILL.md 定义
+│   │   │   ├── pg-auto-pilot/          # 自动驾驶模式：不限定 LLM 编排，仅要求计划含验证、执行前确认环境
+│   │   │   └── pg-init-project/        # 项目初始化：扫描仓库 → project.yaml + hooks + agent-protocol 注入
 │   │   │
 │   │   ├── agents/               # 子 agent 定义
 │   │   │   └── explore.md               # 代码探索子 agent
 │   │   │
 │   │   └── scripts/              # 共享工具脚本
 │   │       ├── pg-parse-config.py        # SSOT 查询工具
-│   │       ├── pg-parse-test-results.py  # 测试结果解析
 │   │       └── tests/                    # 脚本测试
 │   │
 │   └── runtime/                  # 运行时层
@@ -114,7 +116,7 @@ pg-skills/
 │       └── tests/               # 运行时层测试
 │
 ├── examples/                    # 模板与示例
-│   ├── shell/
+│   └── shell/
 │   │   ├── agent-protocol.md          # Agent 协议 SSOT（必读）
 │   │   ├── agents-md-patches.md       # AGENTS.md 漂移检测与修补指南
 │   │   └── hooks/                     # 默认 hook 模板（7 文件）
@@ -126,14 +128,6 @@ pg-skills/
 │   │       ├── role-health-check.sh
 │   │       ├── lib/common.sh          # 共享 hook 库（236 行）
 │   │       └── tests/
-│   │
-│   └── code-review/            # 代码审查 profile 定义
-│       ├── code-review.yaml          # 5 个 profile（default/go/java-spring/security/vue3）
-│       ├── default/                  # 5 个检查项
-│       ├── go/                       # Go 特定检查
-│       ├── java-spring/              # Java/Spring 检查
-│       ├── security/                 # 安全检查
-│       └── vue3/                     # Vue3 检查
 │
 └── docs/
     └── index.html
@@ -159,10 +153,8 @@ pg-skills/
 | 文件 | 职责 |
 |------|------|
 | `src/runtime/spec/error-categories.yaml` | 14 个错误分类：severity（recoverable/blocked）、agent-recoverable、retry_strategy |
-| `src/runtime/spec/hook-env-vars.yaml` | PG_* 环境变量 SSOT（v5）：always_injected（3 个）+ spec_injected（9 个）+ removed（5 个） |
-| `src/runtime/spec/project.schema.json` | `.pg/project.yaml` 的 JSON Schema（draft-07，556 行） |
-| `src/runtime/spec/env-description.schema.json` | `.pg/agent/<session>/env-description.yaml` 的 JSON Schema（6 段 + relations，474 行） |
-| `src/runtime/spec/define-summary.schema.json` | 历史定界产物 define-summary.yaml 的 JSON Schema（schema v1，163 行，仅兼容校验） |
+| `src/runtime/spec/hook-env-vars.yaml` | PG_* 环境变量 SSOT（v7）：always_injected（3 个）+ spec_injected（11 个）+ removed（5 个） |
+| `src/runtime/spec/project.schema.json` | `.pg/project.yaml` 的 JSON Schema（draft-07，208 行） |
 
 ### 4.3 Skill 层
 

@@ -6,7 +6,6 @@ import hashlib
 import json
 import os
 import re
-import stat
 from pathlib import Path
 
 from ..base import (

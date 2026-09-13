@@ -26,7 +26,7 @@ def validate_project_yaml(project_yaml: Path, schema: Path) -> None:
     try:
         import jsonschema  # type: ignore
     except ImportError:
-        for required in ("modules", "environments", "tracks", "stages"):
+        for required in ("modules", "environments"):
             if required not in data:
                 raise ValueError(f"missing required field: {required}")
         return

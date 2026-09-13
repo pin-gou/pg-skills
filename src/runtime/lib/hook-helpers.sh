@@ -26,20 +26,6 @@ if [[ -z "${PG_SKILLS_PATH:-}" ]]; then
 fi
 PG_ERROR_CATEGORIES="$PG_SKILLS_PATH/src/runtime/spec/error-categories.yaml"
 
-# ----- 参数解析辅助 -----
-_pg_parse_kv() {
-    # 把 --key=value / --key value 解析为 KEY=VALUE
-    local prefix="$1"
-    shift
-    while [[ $# -gt 0 ]]; do
-        case "$1" in
-            --${prefix}=*) echo "${1#--${prefix}=}"; return 0 ;;
-            --${prefix}) echo "$2"; return 0 ;;
-        esac
-        shift
-    done
-}
-
 # ----- category 校验 -----
 pg_validate_category() {
     local cat="$1"

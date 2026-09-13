@@ -33,9 +33,3 @@ def render_workflow_text(
         raise WorkflowRenderError(f"{source}: missing adapter variables: {names}")
 
     return TOKEN_PATTERN.sub(lambda match: variables[match.group(1)], text)
-
-
-def unresolved_workflow_tokens(text: str) -> tuple[str, ...]:
-    """Return unresolved token names for validation and tests."""
-
-    return tuple(sorted({match.group(1) for match in TOKEN_PATTERN.finditer(text)}))

@@ -2,9 +2,9 @@
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "https://pg-skills.local/spec/project.schema.json",
   "title": "pg-skills project.yaml",
-  "description": "项目级 SSOT 配置. v3.0: 4 段结构 (modules / environments / tracks / stages). environments 下每个 role 带 lifecycle actions (start/stop), environment 级带 cross-role orchestration actions (health/verify). 当前工作流收敛到 pg-auto-pilot (pg-agent): 运行时 (pg-invoke-hook.py) 只消费 modules + environments, tracks/stages 作为历史编排段保留在 schema 中.",
+  "description": "项目级 SSOT 配置. environments 下每个 role 带 lifecycle actions (start/stop), environment 级带 cross-role orchestration actions (health/verify). 当前工作流收敛到 pg-auto-pilot (pg-agent): 运行时 (pg-invoke-hook.py) 只消费 modules + environments.",
   "type": "object",
-  "required": ["schema", "modules", "environments", "tracks", "stages"],
+  "required": ["schema", "modules", "environments"],
   "additionalProperties": false,
   "properties": {
     "schema": {
@@ -31,35 +31,6 @@
       "additionalProperties": { "$ref": "#/definitions/environment" }
     },
 
-    "tracks": {
-      "type": "object",
-      "description": "TDV 循环编排: 在哪些 module 上跑, 跑几次, 失败怎么分派.",
-      "minProperties": 1,
-      "additionalProperties": { "$ref": "#/definitions/track" }
-    },
-
-    "stages": {
-      "type": "array",
-      "description": "阶段编排: pipeline 分几个阶段, 阶段内哪些 track 并行, gate 条件.",
-      "minItems": 1,
-      "items": { "$ref": "#/definitions/stage" }
-    },
-
-    "verify_merge": {
-      "type": "object",
-      "description": "已废弃 (pg-verify-and-merge SKILL 已移除). 合并请用手动 git merge.",
-      "deprecated": true,
-      "additionalProperties": false,
-      "properties": {}
-    },
-    "git": {
-      "type": "object",
-      "description": "Git 仓库配置. default_branch 用于合并/回归指引.",
-      "additionalProperties": false,
-      "properties": {
-        "default_branch": { "type": "string", "minLength": 1, "description": "主分支名 (master / main)" }
-      }
-    },
     "regression": { "$ref": "#/definitions/regression" }
   },
 
@@ -122,34 +93,23 @@
           "maximum": 65535,
           "description": "端口. 可选: agent 实例通过 SSH 远程启动时可省略 (host 上 agent 由 systemd 拉起). 若提供, 同 host 内同 role 的 port 必须唯一, runner 启动时校验."
         },
-        "libvirt_uri": { "type": "string", "description": "agent 专用: libvirt 连接 URI" },
         "description": { "type": "string", "description": "实例描述, 例如登录示例 URL. 仅供 LLM 阅读, runner 不解析." }
       }
     },
 
     "environment": {
       "type": "object",
-      "description": "环境定义: role × host × instance topology + per-role lifecycle actions + cross-role orchestration + env-level lifecycle hooks (prepare_env / describe_env / clean_env). prepare_env 与 describe_env 独立: prepare_env 真实执行环境准备动作, describe_env 只读探测并产出 env-description.yaml 供 pg-auto-pilot (pg-agent) 作为实现计划/验证的输入.",
+      "description": "环境定义: role × host × instance topology + per-role lifecycle actions + cross-role orchestration + env-level lifecycle hooks (prepare_env / clean_env). prepare_env 真实执行环境准备动作.",
       "required": ["roles"],
       "additionalProperties": false,
       "properties": {
         "description": { "type": "string" },
         "prepare_env": {
-          "description": "env 级生命周期 hook: 启动该 env 前的准备工作 (db migrate / seed / dependencies). runner 在 environment.required=true 的 stage 开头调一次.",
+          "description": "env 级生命周期 hook: 启动该 env 前的准备工作 (db migrate / seed / dependencies). 由 pg-agent (pg-auto-pilot) 在选定 environment 后调用.",
           "$ref": "#/definitions/env_lifecycle_action"
         },
-        "describe_env": {
-          "type": "object",
-          "description": "env 级描述脚本: 只读探测当前环境状态, 输出 env-description.yaml. 由 pg-agent (pg-auto-pilot) 在选定 environment 后调用. 不依赖 prepare_env (两脚本独立维护). 其产出描述的是 prepare_env 成功执行后该 env 的预期基线状态. 必须显式声明, 无默认值.",
-          "required": ["script"],
-          "additionalProperties": false,
-          "properties": {
-            "script": { "type": "string", "minLength": 1, "description": "describe_env 脚本路径, 相对 project.yaml" },
-            "timeout_seconds": { "type": "integer", "minimum": 1, "description": "执行超时 (秒), 默认 60" }
-          }
-        },
         "clean_env": {
-          "description": "env 级生命周期 hook: 跑完该 env 后的清理工作 (drop temp data / stop services). runner 在 environment.required=true 的 stage 结尾调一次.",
+          "description": "env 级生命周期 hook: 跑完该 env 后的清理工作 (drop temp data / stop services). 由 pg-agent (pg-auto-pilot) 在环境使用完毕后调用.",
           "$ref": "#/definitions/env_lifecycle_action"
         },
         "roles": {
@@ -192,12 +152,6 @@
       "description": "单条部署动作",
       "additionalProperties": false,
       "properties": {
-        "host":     { "type": "string", "description": "执行 host, 支持模板 {instance.host}" },
-        "hosts":    {
-          "type": "string",
-          "description": "单 host 简写, 等价于 hosts: ['<value>'] 但支持模板 {instance.host}. 若需多 host 并行, 改用 array 形态."
-        },
-        "parallel": { "type": "boolean", "default": false, "description": "hosts 列表下是否并行" },
         "script":   { "type": "string", "description": "执行的脚本路径或命令" },
         "args":     {
           "type": "array",
@@ -211,21 +165,14 @@
           "description": "True=runner 等待 hook 进程结束 (proc.wait), 超时走 SIGTERM→SIGKILL; False=fire-and-forget, hook 后台跑, SIGKILL 不算失败. pg-invoke-hook.py:554 读取, pg-run-hook.py:285/315 据此切换行为. CLI --no-wait-for-bg / --wait-for-completion 可临时覆盖."
         },
         "description": { "type": "string", "description": "动作语义说明, 仅供 LLM 阅读" }
-      },
-      "anyOf": [
-        { "required": ["host"]  },
-        { "required": ["hosts"] }
-      ]
+      }
     },
 
     "env_lifecycle_action": {
       "type": "object",
-      "description": "环境级生命周期 hook (prepare_env / clean_env). 与 action 的区别: host/hosts 可选 (环境级不需要指定执行主机).",
+      "description": "环境级生命周期 hook (prepare_env / clean_env). 与 action 的区别: 环境级不需要指定执行主机.",
       "additionalProperties": false,
       "properties": {
-        "host":     { "type": "string", "description": "执行 host, 可选 (环境级 hook 通常不需要)" },
-        "hosts":    { "type": "string", "description": "单 host 简写, 可选" },
-        "parallel": { "type": "boolean", "default": false, "description": "hosts 列表下是否并行" },
         "script":   { "type": "string", "description": "执行的脚本路径或命令" },
         "args":     {
           "type": "array",
@@ -239,148 +186,6 @@
           "description": "True=runner 等待 hook 进程结束 (proc.wait), 超时走 SIGTERM→SIGKILL; False=fire-and-forget, hook 后台跑, SIGKILL 不算失败."
         },
         "description": { "type": "string", "description": "动作语义说明, 仅供 LLM 阅读" }
-      }
-    },
-
-    "track": {
-      "type": "object",
-      "description": "TDV 循环编排. test/dev 各做一次, verify 失败后进入 fix→verify 循环 (上限 max_fix_retries), 超限后跳过强制 gate. v3.0 simple type 必须带 commands 而非 modules (schema 仅放宽 required, runner 强校验).",
-      "additionalProperties": false,
-      "minProperties": 1,
-      "properties": {
-        "type": {
-          "type": "string",
-          "enum": ["standard", "simple", "scenario"],
-          "default": "standard",
-          "description": "standard=完整 TDVG 序列 (test→dev→verify→gate); simple=跳过所有 sub-agent, runner 直接串行执行 tracks.<id>.commands 列表; scenario=按结构化 Scenario 执行端到端用户旅程验证 (对应 scenario-test 类 track). 失败时按命令 on_failure 策略处理 (默认 workflow_failed 整体终止)."
-        },
-        "lint": {
-          "type": "object",
-          "description": "Track-level lint override. 缺省时 fallback 到 tracks.<t>.modules[0] 的 module.lint. 字段值是 normalize 后的 executable_command 形态 (cmd + 可选 timeout_seconds).",
-          "additionalProperties": false,
-          "required": ["cmd"],
-          "properties": {
-            "cmd":            { "type": "string", "minLength": 1, "description": "shell 命令" },
-            "timeout_seconds": { "type": "integer", "minimum": 1, "description": "覆盖 module.timeout_seconds" }
-          }
-        },
-        "modules": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "该 track 可写入的 module 列表. 空数组表示此 track 不写代码 (如 real-integration)."
-        },
-        "commands": {
-          "type": "array",
-          "description": "simple 类型 track 的命令列表. 仅 type=simple 时生效. 每条可以是 string (简写, 等价于 {cmd: <string>, on_failure: fail, timeout_seconds: null}) 或对象 (完整控制).",
-          "items": {
-            "oneOf": [
-              { "type": "string", "description": "简写: 等价于 {cmd: <string>}, on_failure 默认 fail." },
-              {
-                "type": "object",
-                "additionalProperties": false,
-                "properties": {
-                  "cmd": {
-                    "type": "string",
-                    "minLength": 1,
-                    "description": "要执行的 bash 命令. 必须非空."
-                  },
-                  "timeout_seconds": {
-                    "type": ["integer", "null"],
-                    "minimum": 1,
-                    "description": "单条命令超时 (秒). null 表示使用 track.timeout_seconds 默认值, 再 null 表示不超时."
-                  },
-                  "on_failure": {
-                    "type": "string",
-                    "enum": ["fail", "continue", "retry"],
-                    "default": "fail",
-                    "description": "命令失败的处置策略. fail=终止整个 pipeline (workflow_failed); continue=记录 warn 并继续跑下一条; retry=立即重试 retry_max 次再按 fail 处理."
-                  },
-                  "retry_max": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "default": 2,
-                    "description": "on_failure=retry 时的最大重试次数. 仅 retry 策略生效."
-                  },
-                  "retry_timeout_seconds": {
-                    "type": ["integer", "null"],
-                    "minimum": 1,
-                    "description": "每次重试时使用的 timeout_seconds. null = 沿用 command.timeout_seconds. 用于给重试单独更短超时, 防止 hang 的命令拖太久."
-                  }
-                },
-                "required": ["cmd"]
-              }
-            ]
-          }
-        },
-        "timeout_seconds": {
-          "type": ["integer", "null"],
-          "minimum": 1,
-          "default": 1800,
-          "description": "simple track 默认命令超时 (秒), 作为 command.timeout_seconds=null 时的回退值. 再 null 表示不超时 (危险, 可能永久 hang). 默认 1800s = 30min."
-        },
-        "max_fix_retries": { "type": "integer", "minimum": 1, "default": 5, "description": "verify→fix 循环最大重试次数. T/D 只做一次, verify 失败后进入 fix→verify→fix 循环, 直到通过或达到此上限. 达到上限后强制进 gate 评估." },
-        "max_fail_retries": { "type": "integer", "minimum": 1, "default": 3, "description": "subagent (test/dev/gate) 单次失败后的重派次数. 区别于 max_fix_retries (verify 失败循环)." },
-        "max_gate_fix_retries": { "type": "integer", "minimum": 1, "default": 2, "description": "gate FAIL 后 fix-gate agent 的最大重试次数." },
-        "code_review_enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "v3.x: 关闭此 track 的 review 阶段 (静态代码审查). 历史编排段保留, 当前运行时不再消费. 默认 true."
-        },
-        "verify_enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "v3.4 新增: 关闭此 track 的 verify 阶段. SSOT=project.yaml, 派生到 manifest phase_prompts.verify 存在与否. 关闭后 fix 循环不触发 (fix 由 verify.escalate 触发). 默认 true. 至少 verify 或 gate 必有其一 (pg-validate-proposal.py 强制约束)."
-        },
-        "gate_enabled": {
-          "type": "boolean",
-          "default": true,
-          "description": "v3.4 新增: 关闭此 track 的 gate 阶段. 关闭后 fix-gate 循环不触发 (fix-gate 由 gate.fail 触发). final-gate 不受影响 (跨 track 的最终 gate, 不读本字段). 默认 true. 至少 verify 或 gate 必有其一."
-        },
-        "on_conditions": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "本 track 是否启用的自然语言规则. 任一命中即启用 track (OR 语义). 字段缺省 = track 视为常驻. 历史编排段保留, 当前运行时不再消费."
-        },
-        "description":  { "type": "string" }
-      }
-    },
-
-    "stage": {
-      "type": "object",
-      "description": "阶段编排: 按 stages 顺序执行, 每 stage 内 track 按列表顺序依次执行 (非并发).",
-      "required": ["name", "tracks"],
-      "additionalProperties": false,
-      "properties": {
-        "name":                  { "type": "string", "pattern": "^[a-z][a-z0-9-]*$" },
-        "tracks":                { "type": "array", "minItems": 1, "items": { "type": "string" } },
-        "environment": {
-          "type": "object",
-          "additionalProperties": false,
-          "description": "stage 所需的运行环境配置.",
-          "properties": {
-            "required": {
-              "type": "boolean",
-              "default": true,
-              "description": "true=runner 启动 stage 的 environment (调 environments.<env>.prepare_env + per-role actions.start); false=纯单元/模拟测试, runner 不启停服务, 仅跑 modules.<m>.test.unit / test.integration(mocked). dev-isolated / dev-frontend=false; dev-mock-integration / real-integration=true."
-            },
-            "selection_rules": {
-              "type": "array",
-              "items": { "type": "string" },
-              "description": "per-change environment 选择规则 (自然语言). 历史编排段保留, 当前运行时不再消费."
-            }
-          }
-        },
-        "gate":                  {
-          "type": "string",
-          "enum": ["all_pass", "any_pass", "no_gate"],
-          "default": "all_pass"
-        },
-        "on_conditions": {
-          "type": "array",
-          "items": { "type": "string" },
-          "description": "本 stage 是否启用的自然语言规则. 任一命中即启用 stage (OR 语义). 字段缺省 = stage 视为常驻. 历史编排段保留, 当前运行时不再消费."
-        },
-        "description": { "type": "string" }
       }
     },
 

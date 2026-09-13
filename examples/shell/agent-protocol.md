@@ -5,7 +5,7 @@
 
 ## §1 SSOT 查询（pg-parse-config.py pg-agent）
 
-LLM agent **必须**通过 `pg-parse-config.py pg-agent` workflow 拿 SSOT——这是为 agent 设计的专用入口, 只暴露 `modules` + `environments` 两段顶层数据, 不混入 `tracks` / `stages` / `fix_issue` 等 skill 内部状态。
+LLM agent **必须**通过 `pg-parse-config.py pg-agent` workflow 拿 SSOT——这是为 agent 设计的专用入口, 只暴露 `modules` + `environments` 两段顶层数据。
 
 | 想做的事 | 命令 |
 |---|---|
@@ -14,7 +14,7 @@ LLM agent **必须**通过 `pg-parse-config.py pg-agent` workflow 拿 SSOT——
 | 拿单个模块的某 test_key | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-module-test <module> <test_key>` |
 | 拿环境的 start/stop/logs | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --resolve-env <env>` |
 | 拿单值（如 backend port） | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --key environments.<env>.roles.backend.instances.0.port` |
-| 拿子树（如所有 tracks） | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --prefix tracks` |
+| 拿子树（如所有 modules） | `python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --prefix modules` |
 
 ⚠️ **不要**用带 skill 名的调用（`pg-propose` / `pg-build` / `pg-regression` 等已移除）——只有 `pg-agent` 是 agent 专用入口。
 
@@ -45,7 +45,6 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 - `--session` 由 agent 自己生成（见 §2.5），一次任务用同一个。
 - `--env` / `--role` / `--action` / `--instance` 必须先通过 `pg-parse-config.py pg-agent` 拿到 SSOT，再具体填。
 - action 取值：`start` / `stop` / `restart` / `logs` / `tail` / `health_check`（如已声明）。
-- `describe_env` 是 env-level 只读探测 action（不传 `--role` / `--instance`），产出 `env-description.yaml`。其描述的是 prepare_env **成功执行后**该环境的预期基线状态——pg-auto-pilot 实际执行时会先 prepare_env 确保成功，再启动实例并验证。LLM 应以此基线判断可验证性。
 
 ⚠️ **禁止**直接 `bash .pg/hooks/role-backend-start.sh backend backend-1`——审计员 `grep "pg-agent" .pg/agent/<session>/...` 找不到这条记录。
 

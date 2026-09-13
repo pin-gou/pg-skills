@@ -438,7 +438,7 @@ fi
 pg_exit --status=pass
 ```
 
-#### 7.1.5 注入的环境变量（v5 SSOT）
+#### 7.1.5 注入的环境变量（v7 SSOT）
 
 **机器可读 SSOT**：`.pg/skills/src/runtime/spec/hook-env-vars.yaml`。
 本节表格与 YAML 文件双向同步，一致性由 `tests/test_hook_env_vars_ssot.py` 校验。
@@ -462,6 +462,7 @@ pg_exit --status=pass
 | `PG_ROLE` | `role` | per-role | role 名 |
 | `PG_INSTANCE_NAME` | `instance_name` | per-role | instance 名 |
 | `PG_INSTANCE_HOST` | `instance_host` | per-role | instance host |
+| `PG_INSTANCE_PORT` | `instance_port` | per-role | 实例声明的端口号（instances[].port） |
 | `PG_HOOK_TYPE` | `hook_type` | 全部 | hook 类型（start / stop / logs / tail / prepare_env / clean_env） |
 | `PG_HOOK_LOG_DIR` | `hook_log_dir` | 全部 | 预拼日志绝对目录（lib/common.sh:pg_resolve_paths 优先信任） |
 | `PG_LOG_FILE` | `log_path` | 全部 | hook stdout/stderr 目标路径 |
@@ -565,7 +566,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 | `--env` | ✅ | 必须在 project.yaml `environments` 列表中 |
 | `--role` | ✅² | backend / frontend / agent。`start/stop/logs/tail` 必填；`prepare_env/clean_env` 忽略 |
 | `--instance` | ✅² | 必须在 `environments.<env>.roles.<role>.instances[]` 中 |
-| `--action` | ✅ | per-role: `start / stop / restart / logs / tail / health_check`；env-level: `prepare_env / clean_env / describe_env / restart_all_instances` |
+| `--action` | ✅ | per-role: `start / stop / restart / logs / tail / health_check`；env-level: `prepare_env / clean_env / restart_all_instances` |
 | `--stage` | ❌ | 默认 `manual`；用于 spec.stage 标记 |
 | `--tail-lines` | ❌ | 仅 `--action logs\|tail` 生效 |
 | `--skill` / `--caller` | ❌ | 调用方身份，**硬缺省 `ad-hoc`**。pg-agent（pg-auto-pilot）必须显式标注 |

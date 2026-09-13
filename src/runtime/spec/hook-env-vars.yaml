@@ -1,5 +1,5 @@
 # .pg/skills/src/runtime/spec/hook-env-vars.yaml
-# Hook 协议环境变量 SSOT (v5).
+# Hook 协议环境变量 SSOT (v7).
 #
 # 协议边界: 本 SSOT 仅覆盖 environments 维度 (env-level prepare_env/clean_env +
 # per-role start/stop/logs/tail). modules 维度的 build/lint/test 不走 hook 协议,
@@ -10,7 +10,7 @@
 #   2. .pg/skills/README.md §7.1.5 (人类阅读版表格)
 #   3. 一致性测试: src/runtime/tests/test_hook_env_vars_ssot.py
 
-version: 6
+version: 7
 scope: environments
 
 # 硬注入: pg-run-hook.py:build_env 必填, 与 spec 无关
@@ -75,17 +75,6 @@ spec_injected:
   - name: PG_RESULT_FILE
     spec_key: hook_result_path
     description: hook 写 result.json 的路径
-  - name: PG_CHANGE_ID
-    spec_key: change_id
-    description: |
-      change-id (v6 新增). 仅 describe_env 必填: 用于脚本写入 env-description.yaml.
-      其他 action 可省略, 仍注入 PG_RUN_SESSION (向后兼容).
-  - name: PG_OUTPUT_PATH
-    spec_key: output_path
-    description: |
-      describe_env 输出文件绝对路径 (v6 新增). describe_env 必填, 其他 action 不注入.
-      pg-invoke-hook.py 按 caller 路由: pg-agent → .pg/agent/<session>/,
-      ad-hoc → .pg/ad-hoc/<session>/.
 
 # 已废弃, 不再注入 (旧 hook 必须改为新名)
 removed:

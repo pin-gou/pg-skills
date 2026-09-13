@@ -471,7 +471,6 @@ environments:
     description: "本机全栈开发"
     prepare_env:  { script: .pg/hooks/env-dev-local-prepare.sh, timeout_seconds: 300 }
     clean_env:    { script: .pg/hooks/env-dev-local-clean.sh, timeout_seconds: 120 }
-    describe_env: { script: .pg/hooks/env-dev-local-describe.sh, timeout_seconds: 120 }
     roles:
       - name: backend
         instances:
@@ -510,7 +509,7 @@ environments:
 <table>
   <tr><th>维度</th><th>走 hook 协议？</th><th>配置位置</th></tr>
   <tr>
-    <td><strong>Environments</strong><br><span style="font-size:12px;color:var(--muted)">prepare_env / clean_env / describe_env / role start·stop·logs·health_check</span></td>
+    <td><strong>Environments</strong><br><span style="font-size:12px;color:var(--muted)">prepare_env / clean_env / role start·stop·logs·health_check</span></td>
     <td><span class="tag tag-green">走 hook</span></td>
     <td><code>.pg/hooks/&lt;name&gt;.sh</code></td>
   </tr>
@@ -547,7 +546,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 <table>
   <tr><th>级别</th><th>action</th><th>参数要求</th></tr>
   <tr><td>per-role</td><td><code>start / stop / restart / logs / tail / health_check</code></td><td><code>--role</code> + <code>--instance</code></td></tr>
-  <tr><td>env-level</td><td><code>prepare_env / clean_env / describe_env / restart_all_instances</code></td><td>忽略 role/instance</td></tr>
+  <tr><td>env-level</td><td><code>prepare_env / clean_env / restart_all_instances</code></td><td>忽略 role/instance</td></tr>
 </table>
 
 </div>
@@ -562,7 +561,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 <table>
   <tr><th>Tab</th><th>快捷键</th><th>功能</th></tr>
   <tr><td><strong>常用操作</strong></td><td><code>f</code></td><td>一键组合：准备环境并启动所有实例 / 停止所有实例并清理 / 启动所有实例 / 停止所有实例</td></tr>
-  <tr><td><strong>Environment</strong></td><td><code>e</code></td><td>环境级操作：prepare_env / describe_env / clean_env</td></tr>
+  <tr><td><strong>Environment</strong></td><td><code>e</code></td><td>环境级操作：prepare_env / clean_env</td></tr>
   <tr><td><strong>Instance</strong></td><td><code>i</code></td><td>实例级操作：选 role → 选 instance → start / stop / health_check / logs / tail</td></tr>
   <tr><td><strong>Module</strong></td><td><code>m</code></td><td>模块操作：选 module → build / lint / test.*</td></tr>
   <tr><td><strong>更新</strong></td><td><code>u</code></td><td>查看当前版本、列出远程可用版本（main 置顶、每页 10 项）、选中后 y/N 确认强制更新</td></tr>
@@ -595,7 +594,6 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 <span style="color:#94a3b8"># 环境级操作</span>
 ./pg-run --env dev-local --action prepare_env
 ./pg-run --env dev-local --action clean_env
-./pg-run --env dev-local --action describe_env
 
 <span style="color:#94a3b8"># 实例级操作（需 --role + --instance）</span>
 ./pg-run --env dev-local --role backend --instance backend-1 --action start
@@ -611,7 +609,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
 </pre>
 
 <div class="tip-card card">
-  <strong>小提示</strong>：<code>logs</code> 是只读操作，适合用来验证 hook 脚本是否正常加载。<code>describe_env</code> 同样只读，不启停服务、不写 DB，产出 <code>env-description.yaml</code>。两者都安全无害。
+  <strong>小提示</strong>：<code>logs</code> 是只读操作，适合用来验证 hook 脚本是否正常加载。安全无害，不启停服务、不写 DB。
 </div>
 
 </div>

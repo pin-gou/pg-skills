@@ -328,7 +328,7 @@ def ensure_project_skeleton(project_root: Path) -> None:
 def generate_project_yaml(project_root: Path) -> str:
     name = project_root.name
     return f"""# pg-skills project declaration
-# Edit this file to declare real modules, environments, tracks, and stages.
+# Edit this file to declare real modules and environments.
 # Schema: .pg/skills/src/runtime/spec/project.schema.json
 
 schema: spec-driven
@@ -348,17 +348,4 @@ environments:
           - name: placeholder-1
             host: localhost
             port: 9999
-tracks:
-  placeholder:
-    modules: [placeholder]
-    max_fail_retries: 1
-    max_fix_retries: 1
-    description: "Placeholder track; replace after defining real modules."
-stages:
-  - name: placeholder
-    tracks: [placeholder]
-    gate: all_pass
-    environment:
-      required: false
-    description: "Placeholder stage; replace after defining real modules."
 """
