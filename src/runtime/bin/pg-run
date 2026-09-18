@@ -14,10 +14,14 @@
 from __future__ import annotations
 
 import argparse
+import atexit
+import datetime
+import json
 import os
 import re
 import select
 import shlex
+import signal
 import subprocess
 import sys
 import time
@@ -349,6 +353,174 @@ def pause():
         pass
 
 
+# ----- 上次状态记忆 & 单实例锁 -----
+
+_PG_RUN_DIR = "runs"
+_PG_RUN_LOCK_FILE = "pg-run.lock"
+_PG_RUN_STATE_FILE = "pg-run-state.json"
+
+
+def _runs_dir(project_root: Path) -> Path:
+    d = project_root / ".pg" / _PG_RUN_DIR
+    d.mkdir(parents=True, exist_ok=True)
+    return d
+
+
+def _pid_alive(pid: int) -> bool:
+    if pid <= 0:
+        return False
+    try:
+        os.kill(pid, 0)
+    except ProcessLookupError:
+        return False
+    except PermissionError:
+        return True
+    except OSError:
+        return False
+    return True
+
+
+def _kill_pg_run_process(pid: int) -> None:
+    for sig in (signal.SIGTERM, signal.SIGKILL):
+        try:
+            os.kill(pid, sig)
+        except ProcessLookupError:
+            return
+        except PermissionError:
+            return
+        time.sleep(0.5)
+        if not _pid_alive(pid):
+            return
+
+
+def _read_lock_holder(lock_path: Path) -> int | None:
+    try:
+        return int(lock_path.read_text(encoding="utf-8").strip())
+    except (OSError, ValueError):
+        return None
+
+
+def _acquire_menu_lock(project_root: Path) -> tuple[bool, bool]:
+    """获取单实例锁.
+
+    返回 (持有锁, 退出). 持有锁=False 且 退出=True 表示用户选择退出;
+    持有锁=False 且 退出=False 表示锁创建失败.
+    """
+    lock_path = _runs_dir(project_root) / _PG_RUN_LOCK_FILE
+    while True:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            holder = _read_lock_holder(lock_path)
+            if holder and _pid_alive(holder):
+                print()
+                print(_c("1;36", "=" * 60))
+                print(_c("1;33", "  已有 pg-run 菜单程序在运行"))
+                print(_c("1;36", "=" * 60))
+                print(f"  运行中进程 PID: {holder}")
+                print()
+                print("  请选择:")
+                print("    f) 强制退出已在运行的 pg-run 并接管")
+                print("    q) 退出，不启动新的 pg-run")
+                print()
+                while True:
+                    sys.stdout.write("  请选择 [f/q]: ")
+                    sys.stdout.flush()
+                    try:
+                        ch = input().strip().lower()
+                    except (EOFError, KeyboardInterrupt):
+                        print()
+                        return False, True
+                    if ch in ("f", "q"):
+                        break
+                    print(f"  无效输入: {ch}")
+                if ch == "q":
+                    return False, True
+                _kill_pg_run_process(holder)
+                try:
+                    lock_path.unlink()
+                except OSError:
+                    pass
+                continue
+            try:
+                lock_path.unlink()
+            except OSError:
+                pass
+            continue
+        except OSError as e:
+            print(f"  错误: 无法创建锁文件 {lock_path}: {e}")
+            return False, False
+        with os.fdopen(fd, "w") as f:
+            f.write(str(os.getpid()))
+        return True, False
+
+
+def _release_menu_lock(project_root: Path) -> None:
+    lock_path = _runs_dir(project_root) / _PG_RUN_LOCK_FILE
+    try:
+        if _read_lock_holder(lock_path) == os.getpid():
+            lock_path.unlink()
+    except OSError:
+        pass
+
+
+def _load_menu_state(project_root: Path) -> dict:
+    path = _runs_dir(project_root) / _PG_RUN_STATE_FILE
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return data if isinstance(data, dict) else {}
+
+
+def _save_menu_state(project_root: Path, state: dict) -> None:
+    path = _runs_dir(project_root) / _PG_RUN_STATE_FILE
+    try:
+        path.write_text(
+            json.dumps(state, ensure_ascii=False, indent=2), encoding="utf-8"
+        )
+    except OSError as e:
+        print(f"  警告: 无法保存 pg-run 状态 {path}: {e}")
+
+
+def _menu_state(
+    env_name: str,
+    tab: int,
+    module: str | None,
+    role: str | None,
+    instance: str | None,
+) -> dict:
+    return {
+        "env": env_name,
+        "tab": tab,
+        "module": module,
+        "role": role,
+        "instance": instance,
+    }
+
+
+def _valid_str_key(value: Any, container: dict) -> str | None:
+    if isinstance(value, str) and value in container:
+        return value
+    return None
+
+
+def _restore_instance_selection(
+    config: dict, env_name: str, role: Any, instance: Any
+) -> tuple[str | None, str | None]:
+    cfg = config.get("environments", {}).get(env_name, {})
+    roles = cfg.get("roles", [])
+    role_cfg = next(
+        (r for r in roles if r.get("name") == role), None
+    ) if isinstance(role, str) else None
+    if role_cfg is None:
+        return None, None
+    inst_names = {i.get("name") for i in (role_cfg.get("instances") or [])}
+    if isinstance(instance, str) and instance in inst_names:
+        return role, instance
+    return role, None
+
+
 def _action_label(action_name: str) -> str:
     mapping = {
         "start": "启动",
@@ -368,7 +540,16 @@ def _action_label(action_name: str) -> str:
     return action_name
 
 
-def _print_exec_stats(action_label: str, results: list[dict]) -> None:
+def _fmt_dt(dt: datetime.datetime) -> str:
+    return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _print_exec_stats(
+    action_label: str,
+    results: list[dict],
+    start_time: datetime.datetime | None = None,
+    end_time: datetime.datetime | None = None,
+) -> None:
     if not results:
         return
     total = sum(r["duration"] for r in results)
@@ -380,6 +561,10 @@ def _print_exec_stats(action_label: str, results: list[dict]) -> None:
     print(_c("1;36", "=" * 60))
     print(f"  总计: {total:.1f}s")
     print(_c("1", f"  成功: {succeeded}") + f" | 失败: {failed}")
+    if start_time is not None:
+        print(f"  开始时间: {_fmt_dt(start_time)}")
+        if end_time is not None:
+            print(f"  结束时间: {_fmt_dt(end_time)}")
     print("  " + "-" * 40)
     for r in results:
         color = "32" if r["ok"] else "31"
@@ -472,6 +657,9 @@ def _run_env_start_all(
 
     hook = find_invoke_hook(project_root)
     overall_start = time.time()
+    start_dt = datetime.datetime.now()
+    if prep_duration > 0:
+        start_dt -= datetime.timedelta(seconds=prep_duration)
     results = []
     action_label = "启动"
     output_prep = prep_duration > 0
@@ -542,6 +730,7 @@ def _run_env_start_all(
             )
 
     overall_elapsed = time.time() - overall_start + prep_duration
+    end_dt = datetime.datetime.now()
     succeeded = sum(1 for r in results if r["ok"])
     failed = len(results) - succeeded
     print()
@@ -550,6 +739,8 @@ def _run_env_start_all(
     print(_c("1;36", "=" * 60))
     print(f"  总计: {overall_elapsed:.1f}s")
     print(_c("1", f"  成功: {succeeded}") + f" | 失败: {failed}")
+    print(f"  开始时间: {_fmt_dt(start_dt)}")
+    print(f"  结束时间: {_fmt_dt(end_dt)}")
     print(_c("2", "  启动顺序: 按 project.yaml 书写顺序启动"))
     if results:
         print("  " + "-" * 40)
@@ -582,6 +773,7 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path, suppress_sta
 
     hook = find_invoke_hook(project_root)
     overall_start = time.time()
+    start_dt = datetime.datetime.now()
     results = []
     action_label = "停止"
 
@@ -651,6 +843,7 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path, suppress_sta
             )
 
     overall_elapsed = time.time() - overall_start
+    end_dt = datetime.datetime.now()
     if not suppress_stats:
         succeeded = sum(1 for r in results if r["ok"])
         failed = len(results) - succeeded
@@ -660,6 +853,8 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path, suppress_sta
         print(_c("1;36", "=" * 60))
         print(f"  总计: {overall_elapsed:.1f}s")
         print(_c("1", f"  成功: {succeeded}") + f" | 失败: {failed}")
+        print(f"  开始时间: {_fmt_dt(start_dt)}")
+        print(f"  结束时间: {_fmt_dt(end_dt)}")
         print(_c("2", "  停止顺序: 按 project.yaml 书写顺序逆序停止"))
         if results:
             print("  " + "-" * 40)
@@ -681,12 +876,15 @@ def _run_env_stop_all(env_name: str, cfg: dict, project_root: Path, suppress_sta
 # ----- 主菜单快捷函数 -----
 
 
-def _pick_env(config: dict) -> tuple:
+def _pick_env(config: dict, restore_env: str | None = None) -> tuple:
     envs = env_items(config)
     names = sorted(envs.keys())
     if not names:
         print("  没有定义 environments")
         return None, 0
+    if restore_env in names:
+        print(_c("2", f"  记住上次环境: {restore_env} (可在常用操作/Environment 中切换)"))
+        return restore_env, 0
     if len(names) == 1:
         return names[0], 0
     items = [(n, envs[n].get("description", "")) for n in names]
@@ -939,10 +1137,13 @@ def _exec_update_action(idx: int, project_root: Path, term: Term):
     cmd = (
         f"python3 {shlex.quote(str(pg_cli))} upgrade {shlex.quote(target)} --force"
     )
+    start_dt = datetime.datetime.now()
     rc = run_shell(cmd, cwd=project_root)
     _print_exec_stats(
         f"强制更新到 {target}",
         [{"label": f"强制更新到 {target}", "duration": 0.0, "ok": rc == 0}],
+        start_dt,
+        datetime.datetime.now(),
     )
     pause()
 
@@ -980,6 +1181,7 @@ def _exec_quick_action(idx: int, env_name: str, config: dict, project_root: Path
             print("  准备环境失败，跳过启动所有实例")
     elif idx == 1:
         hook = find_invoke_hook(project_root)
+        start_dt = datetime.datetime.now()
         print()
         print(_c("1;36", "=" * 60))
         print(_c("1;33", f"  停止所有实例并清理环境: {env_name}"))
@@ -1033,7 +1235,7 @@ def _exec_quick_action(idx: int, env_name: str, config: dict, project_root: Path
             "duration": clean_duration,
             "ok": clean_ok,
         })
-        _print_exec_stats("停止 + 清理", all_results)
+        _print_exec_stats("停止 + 清理", all_results, start_dt, datetime.datetime.now())
     elif idx == 2:
         _run_env_start_all(env_name, cfg, project_root)
     elif idx == 3:
@@ -1067,6 +1269,7 @@ def _exec_env_action(idx: int, env_name: str, config: dict, project_root: Path):
         print(f"  session: {session_id} (写入 .pg/ad-hoc/{session_id}/env-description.yaml)")
 
     start = time.time()
+    start_dt = datetime.datetime.now()
     if hook.is_file():
         cmd = (
             f"python3 {shlex.quote(str(hook))} invoke-hook"
@@ -1085,7 +1288,12 @@ def _exec_env_action(idx: int, env_name: str, config: dict, project_root: Path):
         else:
             rc = -1
     elapsed = time.time() - start
-    _print_exec_stats(a_label, [{"label": label, "duration": elapsed, "ok": rc == 0}])
+    _print_exec_stats(
+        a_label,
+        [{"label": label, "duration": elapsed, "ok": rc == 0}],
+        start_dt,
+        datetime.datetime.now(),
+    )
     pause()
 
 
@@ -1132,9 +1340,15 @@ def _exec_module_action(
     print(f"    workdir: {project_root}")
 
     start = time.time()
+    start_dt = datetime.datetime.now()
     rc = run_shell(cmd, cwd=project_root, timeout=timeout, extra_env=env)
     elapsed = time.time() - start
-    _print_exec_stats(a_label, [{"label": label, "duration": elapsed, "ok": rc == 0}])
+    _print_exec_stats(
+        a_label,
+        [{"label": label, "duration": elapsed, "ok": rc == 0}],
+        start_dt,
+        datetime.datetime.now(),
+    )
     pause()
 
 
@@ -1207,6 +1421,7 @@ def _run_single_action(
     print(_c("1;36", "=" * 60))
 
     start = time.time()
+    start_dt = datetime.datetime.now()
     if hook.is_file():
         cmd = (
             f"python3 {shlex.quote(str(hook))} invoke-hook"
@@ -1236,7 +1451,12 @@ def _run_single_action(
         else:
             rc = -1
     elapsed = time.time() - start
-    _print_exec_stats(a_label, [{"label": label, "duration": elapsed, "ok": rc == 0}])
+    _print_exec_stats(
+        a_label,
+        [{"label": label, "duration": elapsed, "ok": rc == 0}],
+        start_dt,
+        datetime.datetime.now(),
+    )
     pause()
 
 
@@ -1263,14 +1483,22 @@ def _run_role_instance_actions(
 
 
 def tabbed_main_menu(config: dict, project_root: Path):
-    env_name, env_height = _pick_env(config)
+    saved = _load_menu_state(project_root)
+    env_name, env_height = _pick_env(config, restore_env=saved.get("env"))
     if env_name is None:
         return
 
-    current_tab = 0
-    module_selected: str | None = None
-    role_selected: str | None = None
-    inst_selected: str | None = None
+    current_tab = saved.get("tab", 0)
+    if (
+        not isinstance(current_tab, int)
+        or isinstance(current_tab, bool)
+        or not 0 <= current_tab < len(TAB_NAMES)
+    ):
+        current_tab = 0
+    module_selected = _valid_str_key(saved.get("module"), module_items(config))
+    role_selected, inst_selected = _restore_instance_selection(
+        config, env_name, saved.get("role"), saved.get("instance")
+    )
     executed_action = False
     prev_height = env_height
 
@@ -1313,6 +1541,16 @@ def tabbed_main_menu(config: dict, project_root: Path):
             prev_height = height
 
             if action == "q":
+                _save_menu_state(
+                    project_root,
+                    _menu_state(
+                        env_name,
+                        current_tab,
+                        module_selected,
+                        role_selected,
+                        inst_selected,
+                    ),
+                )
                 break
             elif action == "c":
                 t.up_and_clear(height)
@@ -1397,6 +1635,17 @@ def tabbed_main_menu(config: dict, project_root: Path):
                     t.save()
                     t.flush()
                     executed_action = True
+
+            _save_menu_state(
+                project_root,
+                _menu_state(
+                    env_name,
+                    current_tab,
+                    module_selected,
+                    role_selected,
+                    inst_selected,
+                ),
+            )
 
 
 # ----- 非交互模式（CLI flags 直达） -----
@@ -1567,7 +1816,14 @@ def main():
     if has_direct:
         sys.exit(direct_exec(args, config, project_root))
 
-    tabbed_main_menu(config, project_root)
+    acquired, quitting = _acquire_menu_lock(project_root)
+    if not acquired:
+        sys.exit(0 if quitting else 1)
+    atexit.register(_release_menu_lock, project_root)
+    try:
+        tabbed_main_menu(config, project_root)
+    finally:
+        _release_menu_lock(project_root)
     sys.exit(0)
 
 
