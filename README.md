@@ -98,7 +98,7 @@ python3 .pg/skills/src/runtime/bin/pg init --list-tools
 ```
 .opencode/
 ├── agents/   <── symlinks: explore.md
-├── commands/ <── symlinks: pg-0-auto-pilot.md
+├── commands/ <── symlinks: 0-pg-auto-pilot.md
 ├── skills/   <── symlinks: pg-auto-pilot/
 └── (无 scripts/ —— pg-skills 的 scripts/ 不通过 symlink 暴露)
 ```

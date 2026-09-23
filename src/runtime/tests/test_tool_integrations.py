@@ -246,7 +246,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
             / "core"
             / "workflows"
             / "commands"
-            / "pg-0-auto-pilot.md"
+            / "0-pg-auto-pilot.md"
         )
         source_before = source_command.read_bytes()
 
@@ -255,7 +255,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
         )
 
         mobile = self.project / ".mobile-coder"
-        self.assertTrue((mobile / "commands" / "pg-0-auto-pilot.md").is_file())
+        self.assertTrue((mobile / "commands" / "0-pg-auto-pilot.md").is_file())
         self.assertTrue((mobile / "skills" / "pg-auto-pilot" / "SKILL.md").is_file())
         self.assertTrue((mobile / "agents" / "explore.md").is_file())
         self.assertTrue(
@@ -268,7 +268,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
 
         self.assertFalse((mobile / "mobile-coder.json").exists())
 
-        auto_pilot_command = (mobile / "commands" / "pg-0-auto-pilot.md").read_text(
+        auto_pilot_command = (mobile / "commands" / "0-pg-auto-pilot.md").read_text(
             encoding="utf-8"
         )
         self.assertIn("0-pg-auto-pilot", auto_pilot_command)
@@ -330,7 +330,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
         context = IntegrationContext(self.project, REPO_ROOT)
         integration.install(context)
 
-        command = self.project / ".mobile-coder" / "commands" / "pg-0-auto-pilot.md"
+        command = self.project / ".mobile-coder" / "commands" / "0-pg-auto-pilot.md"
         command.write_text("custom command\n", encoding="utf-8")
         custom = self.project / ".mobile-coder" / "commands" / "my-command.md"
         custom.write_text("custom project command\n", encoding="utf-8")
@@ -355,7 +355,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
         # rendered surface path. The target does not exist on disk.
         mobile = self.project / ".mobile-coder"
         mobile.mkdir()
-        target = mobile / "commands" / "pg-0-auto-pilot.md"
+        target = mobile / "commands" / "0-pg-auto-pilot.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.symlink_to("/nonexistent/path/that/does/not/exist")
 
@@ -395,7 +395,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
         # file content would otherwise satisfy the "below source_root" check.
         old_root = self.project / "_old_pg_skills" / "src" / "core" / "workflows"
         (old_root / "commands").mkdir(parents=True, exist_ok=True)
-        old_command = old_root / "commands" / "pg-0-auto-pilot.md"
+        old_command = old_root / "commands" / "0-pg-auto-pilot.md"
         old_command.write_text(
             "stale content from a removed pg-skills checkout\n",
             encoding="utf-8",
@@ -403,7 +403,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
 
         mobile = self.project / ".mobile-coder"
         mobile.mkdir()
-        target = mobile / "commands" / "pg-0-auto-pilot.md"
+        target = mobile / "commands" / "0-pg-auto-pilot.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.symlink_to(old_command)
 
@@ -431,7 +431,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
 
         mobile = self.project / ".mobile-coder"
         mobile.mkdir()
-        target = mobile / "commands" / "pg-0-auto-pilot.md"
+        target = mobile / "commands" / "0-pg-auto-pilot.md"
         target.parent.mkdir(parents=True, exist_ok=True)
         target.symlink_to(user_file)
 
@@ -444,7 +444,7 @@ class TestMobileCoderIntegration(unittest.TestCase):
         # No "preserved" warning for this file (silent overwrite contract).
         self.assertFalse(
             any(
-                "pg-0-auto-pilot.md" in warning
+                "0-pg-auto-pilot.md" in warning
                 for warning in result.warnings
                 if "preserved" in warning
             ),
@@ -469,7 +469,7 @@ class TestDeepSeekHarnessIntegration(unittest.TestCase):
         self._install()
 
         harness = self.project / ".dsh"
-        self.assertTrue((harness / "commands" / "pg-0-auto-pilot.md").is_file())
+        self.assertTrue((harness / "commands" / "0-pg-auto-pilot.md").is_file())
         self.assertTrue((harness / "agents" / "explore.md").is_file())
         self.assertTrue((harness / "bridge" / "index.ts").is_file())
         self.assertTrue((harness / "cordis.patch.yml").is_file())
@@ -500,7 +500,7 @@ class TestDeepSeekHarnessIntegration(unittest.TestCase):
         self.assertIn("invocation.agent.followup", bridge)
         self.assertIn(r".join('\n\n')", bridge)
         self.assertNotIn("@deepseek-ai/", bridge)
-        self.assertIn('"name": "pg-0-auto-pilot"', bridge)
+        self.assertIn('"name": "0-pg-auto-pilot"', bridge)
         self.assertIn(
             (
                 self.project / ".dsh" / "bridge" / "index.ts"
@@ -541,7 +541,7 @@ class TestDeepSeekHarnessIntegration(unittest.TestCase):
         self._install()
 
         command = (
-            self.project / ".dsh" / "commands" / "pg-0-auto-pilot.md"
+            self.project / ".dsh" / "commands" / "0-pg-auto-pilot.md"
         ).read_text(encoding="utf-8")
         agent = (
             self.project / ".dsh" / "agents" / "explore.md"
@@ -564,7 +564,7 @@ class TestDeepSeekHarnessIntegration(unittest.TestCase):
         self._install()
 
         harness = self.project / ".dsh"
-        auto_pilot_command = (harness / "commands" / "pg-0-auto-pilot.md").read_text(
+        auto_pilot_command = (harness / "commands" / "0-pg-auto-pilot.md").read_text(
             encoding="utf-8"
         )
         self.assertIn("0-pg-auto-pilot", auto_pilot_command)
@@ -573,11 +573,11 @@ class TestDeepSeekHarnessIntegration(unittest.TestCase):
         self.assertTrue((harness / "skills" / "pg-auto-pilot" / "SKILL.md").is_file())
 
         bridge = (harness / "bridge" / "index.ts").read_text(encoding="utf-8")
-        self.assertIn("pg-0-auto-pilot", bridge)
+        self.assertIn("0-pg-auto-pilot", bridge)
 
     def test_reinstall_preserves_modified_generated_and_custom_files(self):
         self._install()
-        command = self.project / ".dsh" / "commands" / "pg-0-auto-pilot.md"
+        command = self.project / ".dsh" / "commands" / "0-pg-auto-pilot.md"
         command.write_text("custom command\n", encoding="utf-8")
         custom = self.project / ".dsh" / "commands" / "custom.md"
         custom.write_text("custom project command\n", encoding="utf-8")
@@ -657,7 +657,7 @@ class TestOpenCodeIntegration(unittest.TestCase):
         self._install()
 
         auto_pilot_command = (
-            self.project / ".opencode" / "commands" / "pg-0-auto-pilot.md"
+            self.project / ".opencode" / "commands" / "0-pg-auto-pilot.md"
         ).read_text(encoding="utf-8")
         auto_pilot_skill = (
             self.project / ".opencode" / "skills" / "pg-auto-pilot" / "SKILL.md"
@@ -677,7 +677,7 @@ class TestOpenCodeIntegration(unittest.TestCase):
     def test_reinstall_is_idempotent_and_preserves_custom_paths(self):
         self._install()
         build_command = (
-            self.project / ".opencode" / "commands" / "pg-0-auto-pilot.md"
+            self.project / ".opencode" / "commands" / "0-pg-auto-pilot.md"
         )
         build_command.unlink()
         build_command.write_text("custom build command\n", encoding="utf-8")
@@ -692,7 +692,7 @@ class TestOpenCodeIntegration(unittest.TestCase):
         )
         self.assertEqual(custom.read_text(encoding="utf-8"), "project command\n")
         self.assertTrue(
-            any("pg-0-auto-pilot.md" in warning for warning in result.warnings)
+            any("0-pg-auto-pilot.md" in warning for warning in result.warnings)
         )
 
     def test_legacy_pg_skills_link_is_migrated(self):
@@ -722,7 +722,7 @@ class TestOpenCodeIntegration(unittest.TestCase):
         crashes with FileNotFoundError because Python follows symlinks
         on open()."""
         self._install()
-        target = self.project / ".opencode" / "commands" / "pg-0-auto-pilot.md"
+        target = self.project / ".opencode" / "commands" / "0-pg-auto-pilot.md"
         target.unlink()
         target.symlink_to("/nonexistent/path/that/does/not/exist")
 
@@ -745,11 +745,11 @@ class TestOpenCodeIntegration(unittest.TestCase):
         ``_is_below(source_root)`` check missed these and crashed on
         write."""
         self._install()
-        target = self.project / ".opencode" / "commands" / "pg-0-auto-pilot.md"
+        target = self.project / ".opencode" / "commands" / "0-pg-auto-pilot.md"
 
         old_root = self.project / "_old_pg_skills" / "src" / "core" / "workflows"
         (old_root / "commands").mkdir(parents=True, exist_ok=True)
-        old_command = old_root / "commands" / "pg-0-auto-pilot.md"
+        old_command = old_root / "commands" / "0-pg-auto-pilot.md"
         old_command.write_text(
             "stale content from a removed pg-skills checkout\n",
             encoding="utf-8",
@@ -775,7 +775,7 @@ class TestOpenCodeIntegration(unittest.TestCase):
         pg-skills). No ``preserved`` warning is emitted for the
         replacement itself."""
         self._install()
-        target = self.project / ".opencode" / "commands" / "pg-0-auto-pilot.md"
+        target = self.project / ".opencode" / "commands" / "0-pg-auto-pilot.md"
 
         user_file = self.project / "user-content.md"
         user_file.write_text("# user content\n", encoding="utf-8")
@@ -792,7 +792,7 @@ class TestOpenCodeIntegration(unittest.TestCase):
         # Silent overwrite contract: no "preserved" warning for this file.
         self.assertFalse(
             any(
-                "pg-0-auto-pilot.md" in warning
+                "0-pg-auto-pilot.md" in warning
                 for warning in result.warnings
                 if "preserved" in warning
             ),
@@ -855,7 +855,7 @@ class TestCli(unittest.TestCase):
             self.assertEqual(completed.returncode, 0, completed.stderr)
             mobile = project / ".mobile-coder"
             self.assertFalse((mobile / "mobile-coder.json").exists())
-            self.assertTrue((mobile / "commands" / "pg-0-auto-pilot.md").is_file())
+            self.assertTrue((mobile / "commands" / "0-pg-auto-pilot.md").is_file())
             self.assertTrue((mobile / "agents" / "explore.md").is_file())
             self.assertTrue((mobile / "skills" / "pg-auto-pilot" / "SKILL.md").is_file())
             self.assertFalse((project / ".agents").exists())
@@ -887,7 +887,7 @@ class TestCli(unittest.TestCase):
                 (project / ".dsh" / "skills" / "pg-auto-pilot" / "SKILL.md").is_file()
             )
             self.assertTrue(
-                (project / ".dsh" / "commands" / "pg-0-auto-pilot.md").is_file()
+                (project / ".dsh" / "commands" / "0-pg-auto-pilot.md").is_file()
             )
             self.assertTrue(
                 (project / ".dsh" / "agents" / "explore.md").is_file()
@@ -930,7 +930,7 @@ class TestCli(unittest.TestCase):
             if sys.platform == "win32":
                 self.assertTrue((project / "pg-run.cmd").is_file())
             self.assertTrue(
-                (project / ".opencode" / "commands" / "pg-0-auto-pilot.md").is_file()
+                (project / ".opencode" / "commands" / "0-pg-auto-pilot.md").is_file()
             )
             self.assertTrue(
                 (project / ".opencode" / "agents" / "explore.md").is_file()

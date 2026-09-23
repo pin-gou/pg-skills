@@ -89,12 +89,17 @@ def _frontmatter(text: str) -> dict[str, str]:
 
 
 def _harness_command_name(name: str) -> str:
-    """Convert numbered pg command names to DeepSeek Harness-safe names."""
+    """Convert numbered pg command names to DeepSeek Harness-safe names.
+
+    Numbered pg commands (``<n>-pg-<rest>``) already embed the ``pg-`` namespace
+    inside the prefix, so they pass through unchanged and register as
+    ``/<n>-pg-<rest>`` in the bridge. Other commands get the ``pg-`` prefix
+    prepended so the bridge consistently exposes a single ``pg-*`` namespace.
+    """
     if re.fullmatch(r"[a-z][a-z0-9_-]*", name):
         return name
-    numbered = re.fullmatch(r"(\d+[a-z]?)-pg-(.+)", name)
-    if numbered:
-        return f"pg-{numbered.group(1)}-{numbered.group(2)}"
+    if re.fullmatch(r"(\d+[a-z]?)-pg-(.+)", name):
+        return name
     return f"pg-{name}"
 
 

@@ -82,7 +82,7 @@ pg-skills/
 ├── src/
 │   ├── core/workflows/            # Skill & Agent 层（工具无关）
 │   │   ├── commands/             # 1 个 slash command 定义
-│   │   │   └── pg-0-auto-pilot.md      # 自动驾驶模式（壳子，调用 pg-auto-pilot skill）
+│   │   │   └── 0-pg-auto-pilot.md      # 自动驾驶模式（壳子，调用 pg-auto-pilot skill）
 │   │   │
 │   │   ├── skills/               # 2 个 SKILL.md 定义
 │   │   │   ├── pg-auto-pilot/          # 自动驾驶模式：不限定 LLM 编排，仅要求计划含验证、执行前确认环境
