@@ -40,7 +40,7 @@ pg-skills 仓库（独立远程）                  您的项目仓库
 # 1. 用 git subtree 把 pg-skills 同步进项目
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
-git subtree add --prefix=.pg/skills pg-skills v1.0.0 --squash
+git subtree add --prefix=.pg/skills pg-skills v1.0.1 --squash
 
 # 2a. 交互式终端可直接运行：自动探测，并要求确认或选择
 python3 .pg/skills/src/runtime/bin/pg init
@@ -114,7 +114,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 ```bash
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
-git subtree add --prefix=.pg/skills pg-skills v1.0.0 --squash
+git subtree add --prefix=.pg/skills pg-skills v1.0.1 --squash
 python3 .pg/skills/src/runtime/bin/pg init
 git add .pg/
 git commit -m "feat: 接入 pg-skills $(cat .pg/skills/VERSION)"
@@ -205,7 +205,8 @@ pg-skills/
 | **0.9.2** | 合并自动 rebase 防覆盖 + restart 无脚本兜底 + 能力自动对账 + 重新定界 + 质量校验三态 + 初始化体验优化 + 进度预览渲染 |
 | **0.9.3** | 工作流 skill 仅限用户显式触发 + Auto-Pilot 自动驾驶模式 + DeepSeek Harness 集成 + pg-run "更新"Tab |
 | **0.9.4** | pg-run 更新菜单直接选版本 + 分页 + skill 门控规则统一 |
-| **1.0.0** | 工作流收敛到单一 pg-auto-pilot + describe_env 协议移除 + tracks/stages 清理 + pg-init-project 重写 —— **当前** |
+| **1.0.0** | 工作流收敛到单一 pg-auto-pilot + describe_env 协议移除 + tracks/stages 清理 + pg-init-project 重写 |
+| **1.0.1** | pg-run 起止时间汇总 + 记住上次选择 + 单实例锁 + DSH 命令命名对齐 —— **当前** |
 
 ### 升级命令
 
@@ -214,7 +215,7 @@ pg-skills/
 pg upgrade
 
 # 升级到指定版本
-pg upgrade v1.0.0
+pg upgrade v1.0.1
 
 # 查看远程可用版本
 pg upgrade --list
@@ -334,6 +335,8 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 # pg-run 内部自动调 pg-invoke-hook.py (无 --session, 留空 → ad-hoc 自动生成 auto-<date>-<pid>)
 # caller 缺省 'ad-hoc', session 自动生成
 ```
+
+> pg-run 会记住上次的环境与菜单项（存于 `.pg/runs/pg-run-state.json`），下次启动自动恢复；同一项目同时只允许运行一个菜单（锁文件 `.pg/runs/pg-run.lock`），检测到已有实例时可选择强制接管或退出。所有操作的汇总面板均显示"开始时间 / 结束时间"。
 
 **场景 C：agent 不经 SKILL 直接调用（ad-hoc 调试）**
 

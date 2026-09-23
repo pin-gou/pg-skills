@@ -1,5 +1,16 @@
 # 变更日志
 
+## [1.0.1] - 2026-09-24
+
+**升级前必读**
+- **auto-pilot 命令文件名变更**：命令源文件由 `pg-0-auto-pilot.md` 重命名为 `0-pg-auto-pilot.md`，与 frontmatter 的 `name` 及触发词 `/0-pg-auto-pilot` 保持一致（触发词不变）。升级后请重新执行一次 `pg init`：旧命令文件会被清理、新文件自动生成，避免遗留失效的软链接
+
+**改进**
+- **pg-run 汇总显示起止时间**：启动、停止、环境、模块、更新等所有操作的汇总面板新增"开始时间 / 结束时间"（`YYYY-MM-DD HH:MM:SS`），方便回看操作时间窗口
+- **pg-run 记住上次选择**：下次启动自动恢复上次的环境、Tab、role/instance 与 module，无需每次重选；状态保存在 `.pg/runs/pg-run-state.json`
+- **pg-run 单实例锁**：同一项目同时只允许一个 pg-run 菜单运行；检测到已有实例时提示强制接管（f）或退出（q），过期锁自动清理
+- **DeepSeek Harness 命令命名对齐**：编号命令（如 `0-pg-auto-pilot`）在 DSH 桥接中不再被加多余的 `pg-` 前缀，统一注册为 `/0-pg-auto-pilot`，与 OpenCode / Mobile Coder 行为一致
+
 ## [1.0.0] - 2026-09-13
 
 **升级前必读（破坏性变更）**

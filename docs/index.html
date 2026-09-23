@@ -363,7 +363,7 @@ pg-skills/
 │       ├── lib/               # hook-helpers.sh, pg-run-hook.py, tui.py
 │       └── spec/              # project.schema.json, error-categories.yaml, hook-env-vars.yaml
 ├── examples/shell/hooks/      # 默认 hook 模板
-└── VERSION                    # 1.0.0
+└── VERSION                    # 1.0.1
 </pre>
 
 <div class="info-card card">
@@ -380,7 +380,7 @@ pg-skills/
 <span style="color:#94a3b8"># ① git subtree 拉入 pg-skills（版本号与 VERSION 一致）</span>
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git fetch pg-skills
-git subtree add --prefix=.pg/skills pg-skills v1.0.0 --squash
+git subtree add --prefix=.pg/skills pg-skills v1.0.1 --squash
 
 <span style="color:#94a3b8"># ② 初始化骨架 + 安装工具适配器</span>
 python3 .pg/skills/src/runtime/bin/pg init
@@ -426,7 +426,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 <h2>接入 Checklist</h2>
 <div class="card">
 <ul class="checklist">
-  <li><input type="checkbox"> <code>git subtree add --prefix=.pg/skills pg-skills v1.0.0 --squash</code></li>
+  <li><input type="checkbox"> <code>git subtree add --prefix=.pg/skills pg-skills v1.0.1 --squash</code></li>
   <li><input type="checkbox"> <code>pg init</code> 生成骨架 + 渲染工具适配</li>
   <li><input type="checkbox"> <code>pg doctor</code> 校验通过</li>
   <li><input type="checkbox"> 核对 project.yaml：modules / environments 与真实项目一致</li>
@@ -612,6 +612,10 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
   <strong>小提示</strong>：<code>logs</code> 是只读操作，适合用来验证 hook 脚本是否正常加载。安全无害，不启停服务、不写 DB。
 </div>
 
+<div class="info-card card">
+  <p style="margin:0"><strong>状态记忆与单实例</strong>：pg-run 会记住上次的环境与菜单项（Tab、role/instance、module，存于 <code>.pg/runs/pg-run-state.json</code>），下次启动自动恢复；同一项目同时只允许运行一个菜单（<code>.pg/runs/pg-run.lock</code>），检测到已有实例时可选择强制接管或退出。所有操作的汇总面板均显示"开始时间 / 结束时间"。</p>
+</div>
+
 </div>
 
 <!-- ============================================================ -->
@@ -717,7 +721,7 @@ SSOT 查询：      python3 .pg/skills/src/core/workflows/scripts/pg-parse-confi
   <div class="collapse-body">
 <pre>
 pg upgrade            <span style="color:#94a3b8"># 升级到最新 main</span>
-pg upgrade v1.0.0     <span style="color:#94a3b8"># 升级到指定 tag</span>
+pg upgrade v1.0.1     <span style="color:#94a3b8"># 升级到指定 tag</span>
 pg upgrade --list     <span style="color:#94a3b8"># 查看远程可用版本</span>
 pg doctor             <span style="color:#94a3b8"># 升级后校验</span>
 </pre>
@@ -765,7 +769,7 @@ python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --prefix enviro
 </main>
 
 <footer class="page-footer">
-  <p class="footer-note"><strong>品构</strong> pg-skills v1.0.0 · 「品质，长在结构里」 · 更多文档见 <code>.pg/skills/README.md</code></p>
+  <p class="footer-note"><strong>品构</strong> pg-skills v1.0.1 · 「品质，长在结构里」 · 更多文档见 <code>.pg/skills/README.md</code></p>
   <a href="#" class="next-link" id="next-link">
     <span><span class="next-label">下一节</span><span class="next-title"></span></span>
     <span class="next-arrow">→</span>
