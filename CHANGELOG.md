@@ -3,7 +3,7 @@
 ## [1.0.1] - 2026-09-24
 
 **升级前必读**
-- **auto-pilot 命令文件名变更**：命令源文件由 `pg-0-auto-pilot.md` 重命名为 `0-pg-auto-pilot.md`，与 frontmatter 的 `name` 及触发词 `/0-pg-auto-pilot` 保持一致（触发词不变）。升级后请重新执行一次 `pg init`：旧命令文件会被清理、新文件自动生成，避免遗留失效的软链接
+- **auto-pilot 命令文件名变更**：命令源文件由 `pg-0-auto-pilot.md` 重命名为 `0-pg-auto-pilot.md`，与 frontmatter 的 `name` 及触发词 `/0-pg-auto-pilot` 保持一致（触发词不变）。升级到 v1.0.1 后，建议重新执行一次 `pg init`，让适配器按新文件名生成命令入口，避免残留旧符号链接
 
 **改进**
 - **pg-run 汇总显示起止时间**：启动、停止、环境、模块、更新等所有操作的汇总面板新增"开始时间 / 结束时间"（`YYYY-MM-DD HH:MM:SS`），方便回看操作时间窗口
