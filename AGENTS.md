@@ -1,6 +1,6 @@
 # pg-skills AGENTS.md
 
-> v0.9.0 — L1（Level 1）capability layer for AI-driven development workflows.
+> v1.0.2 — L1（Level 1）capability layer for AI-driven development workflows.
 > 跨项目、语言无关的共享能力层，为 pg-* slash commands、agent 和 pipeline runner 提供底层支持。
 
 ---

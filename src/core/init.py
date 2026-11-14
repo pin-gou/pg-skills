@@ -191,7 +191,7 @@ def initialize_project(
         output("    git config remote.pg-skills.tagOpt --no-tags")
         output(
             "    git subtree add --prefix=.pg/skills pg-skills "
-            "refs/tags/v1.0.1 --squash"
+            "refs/tags/v1.0.2 --squash"
         )
         return 1
 

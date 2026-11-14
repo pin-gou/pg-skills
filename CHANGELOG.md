@@ -1,9 +1,9 @@
 # 变更日志
 
-## [Unreleased]
+## [1.0.2] - 2026-11-14
 
 **升级前必读（接入命令变更）**
-- **接入命令不再把 pg-skills 的版本 tag 导入项目**：接入命令由 `git fetch pg-skills` + `git subtree add ... pg-skills v1.0.1 --squash` 改为 `git config remote.pg-skills.tagOpt --no-tags` + `git subtree add ... pg-skills refs/tags/v1.0.1 --squash`。旧写法会把 pg-skills 的十几个版本 tag 复制进项目的 tag 命名空间，一旦 CI 执行 `git push --tags`，pg-skills 的全部提交会在项目**远端**变成可达，所有 clone 都要下载这段历史。已接入的项目补执行一次 `git config remote.pg-skills.tagOpt --no-tags` 即可；已经导入的 tag 用 `git tag -d <tag>` 清理
+- **接入命令不再把 pg-skills 的版本 tag 导入项目**：接入命令由 `git fetch pg-skills` + `git subtree add ... pg-skills v<ver> --squash`（直接给 tag 名）改为 `git config remote.pg-skills.tagOpt --no-tags` + `git subtree add ... pg-skills refs/tags/v<ver> --squash`。旧写法会把 pg-skills 的十几个版本 tag 复制进项目的 tag 命名空间，一旦 CI 执行 `git push --tags`，pg-skills 的全部提交会在项目**远端**变成可达，所有 clone 都要下载这段历史。已接入的项目补执行一次 `git config remote.pg-skills.tagOpt --no-tags` 即可；已经导入的 tag 用 `git tag -d <tag>` 清理
 
 **修复**
 - **`pg upgrade` 默认升级目标改为 `v1` 分支**：pg-skills 远端的默认分支是 `v1`（`main` 已删除）。`pg upgrade` 不带参数、`pg-run` 更新 Tab 的置顶项、以及文档里的等价命令都统一到 `v1`

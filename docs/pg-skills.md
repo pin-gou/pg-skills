@@ -107,7 +107,7 @@ AI 把改动内容、验证结果、hook 日志位置汇总给你确认。达不
 # 1. 拉入 pg-skills（tagOpt --no-tags：不把上游版本 tag 灌进项目）
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git config remote.pg-skills.tagOpt --no-tags
-git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash
+git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.2 --squash
 
 # 2. 初始化骨架
 python3 .pg/skills/src/runtime/bin/pg init

@@ -363,7 +363,7 @@ pg-skills/
 │       ├── lib/               # hook-helpers.sh, pg-run-hook.py, tui.py
 │       └── spec/              # project.schema.json, error-categories.yaml, hook-env-vars.yaml
 ├── examples/shell/hooks/      # 默认 hook 模板
-└── VERSION                    # 1.0.1
+└── VERSION                    # 1.0.2
 </pre>
 
 <div class="info-card card">
@@ -381,7 +381,7 @@ pg-skills/
 <span style="color:#94a3b8">#    tagOpt --no-tags：不把上游版本 tag 灌进项目 tag 命名空间</span>
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git config remote.pg-skills.tagOpt --no-tags
-git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash
+git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.2 --squash
 
 <span style="color:#94a3b8"># ② 初始化骨架 + 安装工具适配器</span>
 python3 .pg/skills/src/runtime/bin/pg init
@@ -428,7 +428,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 <div class="card">
 <ul class="checklist">
   <li><input type="checkbox"> <code>git remote add pg-skills git@github.com:pin-gou/pg-skills.git</code> + <code>git config remote.pg-skills.tagOpt --no-tags</code></li>
-  <li><input type="checkbox"> <code>git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash</code></li>
+  <li><input type="checkbox"> <code>git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.2 --squash</code></li>
   <li><input type="checkbox"> <code>pg init</code> 生成骨架 + 渲染工具适配</li>
   <li><input type="checkbox"> <code>pg doctor</code> 校验通过</li>
   <li><input type="checkbox"> 核对 project.yaml：modules / environments 与真实项目一致</li>
@@ -723,7 +723,7 @@ SSOT 查询：      python3 .pg/skills/src/core/workflows/scripts/pg-parse-confi
   <div class="collapse-body">
 <pre>
 pg upgrade            <span style="color:#94a3b8"># 升级到最新 v1 分支</span>
-pg upgrade v1.0.1     <span style="color:#94a3b8"># 升级到指定 tag</span>
+pg upgrade v1.0.2     <span style="color:#94a3b8"># 升级到指定 tag</span>
 pg upgrade --list     <span style="color:#94a3b8"># 查看远程可用版本</span>
 pg doctor             <span style="color:#94a3b8"># 升级后校验</span>
 </pre>
@@ -779,7 +779,7 @@ python3 .pg/skills/src/core/workflows/scripts/pg-parse-config.py --prefix enviro
 </main>
 
 <footer class="page-footer">
-  <p class="footer-note"><strong>品构</strong> pg-skills v1.0.1 · 「品质，长在结构里」 · 更多文档见 <code>.pg/skills/README.md</code></p>
+  <p class="footer-note"><strong>品构</strong> pg-skills v1.0.2 · 「品质，长在结构里」 · 更多文档见 <code>.pg/skills/README.md</code></p>
   <a href="#" class="next-link" id="next-link">
     <span><span class="next-label">下一节</span><span class="next-title"></span></span>
     <span class="next-arrow">→</span>

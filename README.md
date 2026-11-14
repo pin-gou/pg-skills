@@ -42,7 +42,7 @@ pg-skills 仓库（独立远程）                  您的项目仓库
 #    用 refs/tags/<ver> 指定版本，只取这一个版本，不落本地 tag
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git config remote.pg-skills.tagOpt --no-tags
-git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash
+git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.2 --squash
 
 # 2a. 交互式终端可直接运行：自动探测，并要求确认或选择
 python3 .pg/skills/src/runtime/bin/pg init
@@ -116,7 +116,7 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 ```bash
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
 git config remote.pg-skills.tagOpt --no-tags
-git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash
+git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.2 --squash
 python3 .pg/skills/src/runtime/bin/pg init
 git add .pg/
 git commit -m "feat: 接入 pg-skills $(cat .pg/skills/VERSION)"
@@ -133,7 +133,7 @@ pg-skills 自身的几百个提交不会出现在项目历史里；代价是 `gi
 
 | 现象 | 说明 | 规避方式 |
 |------|------|----------|
-| **tag 污染** | `git fetch pg-skills` 会把 pg-skills 的十几个版本 tag（`v0.x…v1.0.1`）复制进项目的 tag 命名空间。一旦 CI 里跑了 `git push --tags`，这些 tag 会把上游全部提交变成项目**远端**可达，所有人 clone 都要下载 | 接入时 `git config remote.pg-skills.tagOpt --no-tags`，并用 `refs/tags/<ver>` 指定版本（本文档的做法）。`pg upgrade` / `pg upgrade --list` 内部同样使用 `--no-tags` 与 `ls-remote`，不会重新引入 tag |
+| **tag 污染** | `git fetch pg-skills` 会把 pg-skills 的十几个版本 tag（`v0.x…v1.0.2`）复制进项目的 tag 命名空间。一旦 CI 里跑了 `git push --tags`，这些 tag 会把上游全部提交变成项目**远端**可达，所有人 clone 都要下载 | 接入时 `git config remote.pg-skills.tagOpt --no-tags`，并用 `refs/tags/<ver>` 指定版本（本文档的做法）。`pg upgrade` / `pg upgrade --list` 内部同样使用 `--no-tags` 与 `ls-remote`，不会重新引入 tag |
 | **对象库变大** | `git fetch` 会把上游历史对象下载到本地 `.git`，并经 `refs/remotes/pg-skills/*` 保持可达（量级几 MB） | 一般可接受；确需清理见下方 |
 | **blame 失真** | squash 后 `.pg/skills/` 没有逐行历史 | 需要溯源时查 pg-skills 仓库 |
 
@@ -152,7 +152,7 @@ git reflog expire --expire=now --all && git gc --prune=now
 
 ```
 pg-skills/
-├── VERSION                       # semver （当前: 0.9.1）
+├── VERSION                       # semver （当前: 1.0.2）
 ├── CHANGELOG.md
 ├── README.md                     # 本文件
 ├── src/
@@ -230,7 +230,8 @@ pg-skills/
 | **0.9.3** | 工作流 skill 仅限用户显式触发 + Auto-Pilot 自动驾驶模式 + DeepSeek Harness 集成 + pg-run "更新"Tab |
 | **0.9.4** | pg-run 更新菜单直接选版本 + 分页 + skill 门控规则统一 |
 | **1.0.0** | 工作流收敛到单一 pg-auto-pilot + describe_env 协议移除 + tracks/stages 清理 + pg-init-project 重写 |
-| **1.0.1** | pg-run 起止时间汇总 + 记住上次选择 + 单实例锁 + DSH 命令命名对齐 —— **当前** |
+| **1.0.1** | pg-run 起止时间汇总 + 记住上次选择 + 单实例锁 + DSH 命令命名对齐 |
+| **1.0.2** | 接入/升级不再导入上游版本 tag + 默认升级分支改为 v1 分支 —— **当前** |
 
 ### 升级命令
 
@@ -239,7 +240,7 @@ pg-skills/
 pg upgrade
 
 # 升级到指定版本
-pg upgrade v1.0.1
+pg upgrade v1.0.2
 
 # 查看远程可用版本
 pg upgrade --list

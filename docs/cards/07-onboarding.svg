@@ -10,7 +10,7 @@
     <rect width="680" height="130" rx="16" fill="#1e293b" stroke="#60a5fa"/>
     <text x="30" y="40" font-size="16" font-weight="700" fill="#60a5fa">STEP 1 · 同步（不引入上游 tag）</text>
     <text x="30" y="72" font-size="14" fill="#f8fafc" font-family="ui-monospace, monospace">git config remote.pg-skills.tagOpt --no-tags</text>
-    <text x="30" y="102" font-size="14" fill="#f8fafc" font-family="ui-monospace, monospace">git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash</text>
+    <text x="30" y="102" font-size="14" fill="#f8fafc" font-family="ui-monospace, monospace">git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.2 --squash</text>
   </g>
 
   <g transform="translate(60 470)">
