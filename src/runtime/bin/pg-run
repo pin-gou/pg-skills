@@ -978,6 +978,8 @@ def _build_instance_items(
 
 
 _PG_SKILLS_OFFICIAL_REPO = "https://github.com/pin-gou/pg-skills.git"
+# pg-skills 远端的默认分支（发布都在这条分支上，顶层置顶项）
+_UPDATE_DEFAULT_REF = "v1"
 _UPDATE_TAGS_CACHE: dict = {"ts": 0.0, "tags": [], "error": ""}
 _update_targets: list = []
 _UPDATE_PAGE_SIZE = 10
@@ -1032,11 +1034,13 @@ def _version_sort_key(tag: str) -> tuple:
 
 
 def _build_update_targets(tags: list) -> list:
-    """main 在最前, 其余版本号从新到旧."""
+    """默认分支置顶, 其余版本号从新到旧."""
     versions = sorted(
-        (t for t in tags if t != "main"), key=_version_sort_key, reverse=True
+        (t for t in tags if t != _UPDATE_DEFAULT_REF),
+        key=_version_sort_key,
+        reverse=True,
     )
-    return ["main"] + versions
+    return [_UPDATE_DEFAULT_REF] + versions
 
 
 def _current_version(project_root: Path) -> str:
@@ -1072,8 +1076,8 @@ def _load_update_items(project_root: Path) -> list:
     for t in _update_targets:
         if t == current_tag:
             desc = "← 当前版本"
-        elif t == "main":
-            desc = "main 分支 (最新代码)"
+        elif t == _UPDATE_DEFAULT_REF:
+            desc = f"{_UPDATE_DEFAULT_REF} 分支 (最新代码)"
         else:
             desc = "强制更新到此版本"
         items.append((t, desc))

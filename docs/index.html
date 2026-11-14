@@ -378,9 +378,10 @@ pg-skills/
 <h2>四步接入</h2>
 <pre>
 <span style="color:#94a3b8"># ① git subtree 拉入 pg-skills（版本号与 VERSION 一致）</span>
+<span style="color:#94a3b8">#    tagOpt --no-tags：不把上游版本 tag 灌进项目 tag 命名空间</span>
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
-git fetch pg-skills
-git subtree add --prefix=.pg/skills pg-skills v1.0.1 --squash
+git config remote.pg-skills.tagOpt --no-tags
+git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash
 
 <span style="color:#94a3b8"># ② 初始化骨架 + 安装工具适配器</span>
 python3 .pg/skills/src/runtime/bin/pg init
@@ -426,7 +427,8 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 <h2>接入 Checklist</h2>
 <div class="card">
 <ul class="checklist">
-  <li><input type="checkbox"> <code>git subtree add --prefix=.pg/skills pg-skills v1.0.1 --squash</code></li>
+  <li><input type="checkbox"> <code>git remote add pg-skills git@github.com:pin-gou/pg-skills.git</code> + <code>git config remote.pg-skills.tagOpt --no-tags</code></li>
+  <li><input type="checkbox"> <code>git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash</code></li>
   <li><input type="checkbox"> <code>pg init</code> 生成骨架 + 渲染工具适配</li>
   <li><input type="checkbox"> <code>pg doctor</code> 校验通过</li>
   <li><input type="checkbox"> 核对 project.yaml：modules / environments 与真实项目一致</li>
@@ -564,7 +566,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
   <tr><td><strong>Environment</strong></td><td><code>e</code></td><td>环境级操作：prepare_env / clean_env</td></tr>
   <tr><td><strong>Instance</strong></td><td><code>i</code></td><td>实例级操作：选 role → 选 instance → start / stop / health_check / logs / tail</td></tr>
   <tr><td><strong>Module</strong></td><td><code>m</code></td><td>模块操作：选 module → build / lint / test.*</td></tr>
-  <tr><td><strong>更新</strong></td><td><code>u</code></td><td>查看当前版本、列出远程可用版本（main 置顶、每页 10 项）、选中后 y/N 确认强制更新</td></tr>
+  <tr><td><strong>更新</strong></td><td><code>u</code></td><td>查看当前版本、列出远程可用版本（v1 置顶、每页 10 项）、选中后 y/N 确认强制更新</td></tr>
 </table>
 
 <div class="info-card card">
@@ -688,7 +690,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py \
   <tr><td><code>/0-pg-auto-pilot</code></td><td>自动驾驶模式（唯一工作流）</td></tr>
   <tr><td><code>pg init [--tool &lt;id&gt;] [--non-interactive]</code></td><td>初始化 .pg/ + 安装工具适配器</td></tr>
   <tr><td><code>pg doctor</code></td><td>校验接入状态与 project.yaml</td></tr>
-  <tr><td><code>pg upgrade [version|--list|--force|--interactive]</code></td><td>升级 pg-skills（默认 main）</td></tr>
+  <tr><td><code>pg upgrade [version|--list|--force|--interactive]</code></td><td>升级 pg-skills（默认 v1 分支）</td></tr>
   <tr><td><code>./pg-run</code></td><td>交互式菜单（常用操作 | Environment | Instance | Module | 更新）</td></tr>
   <tr><td><code>pg-invoke-hook.py</code></td><td>Hook 统一入口（agent 必须使用）</td></tr>
   <tr><td><code>pg-parse-config.py pg-agent</code></td><td>SSOT 查询入口（agent 必须使用）</td></tr>
@@ -720,11 +722,19 @@ SSOT 查询：      python3 .pg/skills/src/core/workflows/scripts/pg-parse-confi
   <div class="collapse-toggle"><strong>怎么升级 pg-skills？</strong></div>
   <div class="collapse-body">
 <pre>
-pg upgrade            <span style="color:#94a3b8"># 升级到最新 main</span>
+pg upgrade            <span style="color:#94a3b8"># 升级到最新 v1 分支</span>
 pg upgrade v1.0.1     <span style="color:#94a3b8"># 升级到指定 tag</span>
 pg upgrade --list     <span style="color:#94a3b8"># 查看远程可用版本</span>
 pg doctor             <span style="color:#94a3b8"># 升级后校验</span>
 </pre>
+  </div>
+</div>
+
+<div class="card" onclick="toggleQA(this)">
+  <div class="collapse-toggle"><strong>接入会把 pg-skills 的提交历史带进我的仓库吗？</strong></div>
+  <div class="collapse-body">
+    <p>不会。<code>--squash</code> 把上游历史折叠成 1 个快照提交，<code>git log</code> 只多 2 个提交（squashed + merge），之后每次 <code>pg upgrade</code> 也是 +2，pg-skills 自身的几百个提交不会进来。</p>
+    <p>要注意的是 <strong>tag</strong>：<code>git fetch pg-skills</code> 会把 pg-skills 的十几个版本 tag 复制进项目的 tag 命名空间，一旦 CI 跑 <code>git push --tags</code>，这些 tag 会让上游全部提交在项目<strong>远端</strong>变成可达，所有人 clone 都要下载。按接入步骤加 <code>git config remote.pg-skills.tagOpt --no-tags</code>、并用 <code>refs/tags/&lt;ver&gt;</code> 指定版本即可规避（<code>pg upgrade</code> 内部已经这么做）。</p>
   </div>
 </div>
 

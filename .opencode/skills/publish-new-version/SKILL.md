@@ -29,7 +29,7 @@ metadata:
 | `gh` 已认证 | `gh auth status` 返回已登录 | 终止并让用户先登录 |
 | 目标版本号 | semver 格式，高于当前 `VERSION`，且 `git tag` 中不存在 | 终止并报告 |
 | 工作区状态 | 待发布变更已提交（先做 release commit 再发版） | 提示先提交 |
-| 远程可写 | `git remote -v` 有 origin，且当前在默认分支（main） | 终止并报告 |
+| 远程可写 | `git remote -v` 有 origin，且当前在默认分支（v1） | 终止并报告 |
 
 ---
 
@@ -66,20 +66,20 @@ git diff v0.9.2..HEAD --stat                       # 代码量/文件面
 
 **2.3 同步版本号引用**
 
-更新 VERSION 时，必须同步修改所有文档/代码中 `git subtree add --prefix=.pg/skills pg-skills v<old> --squash` 命令中的版本号为**新版本**（把 `v<old>` 全部替换为 `v<new>`）。当前受影响文件：
+更新 VERSION 时，必须同步修改所有文档/代码中 `git subtree add --prefix=.pg/skills pg-skills refs/tags/v<old> --squash` 命令里的版本号为**新版本**（把 `v<old>` 全部替换为 `v<new>`）。当前受影响文件：
 
 | 文件 | 说明 |
 |------|------|
-| `README.md` | 第 43、119 行附近的 subtree 安装命令 |
-| `docs/index.html` | 第 894 行附近的 subtree 命令 |
-| `docs/pg-skills.md` | 第 126 行附近的 subtree 命令 |
-| `docs/cards/07-onboarding.svg` | 第 12 行 SVG 中的 subtree 命令 |
-| `src/core/init.py` | 第 188 行 `pg init` 输出的安装提示 |
+| `README.md` | §2 四步接入的 subtree 安装命令、一次性命令速览 |
+| `docs/index.html` | §2 快速接入的命令块 + 接入 Checklist |
+| `docs/pg-skills.md` | 接入命令块 |
+| `docs/cards/07-onboarding.svg` | STEP 1 中的 subtree 命令 |
+| `src/core/init.py` | `.pg/` 缺失时 `pg init` 输出的安装提示 |
 
 用 grep 全仓库核对没有遗漏：
 
 ```bash
-grep -rn "pg-skills v[0-9]" README.md docs/ src/core/ --include="*.md" --include="*.html" --include="*.svg" --include="*.py"
+grep -rn "refs/tags/v[0-9]" README.md docs/ src/core/ --include="*.md" --include="*.html" --include="*.svg" --include="*.py"
 ```
 
 **2.4 更新其他文档**
@@ -88,15 +88,15 @@ grep -rn "pg-skills v[0-9]" README.md docs/ src/core/ --include="*.md" --include
 
 **2.5 提交并推送**
 
-将版本号 + 文档变更合入一个提交，并推送到 remote，确保 release commit 在远程 main 分支上可见（否则下方 tag 会指向一个远程不存在的孤悬 commit）：
+将版本号 + 文档变更合入一个提交，并推送到 remote，确保 release commit 在远程 v1 分支上可见（否则下方 tag 会指向一个远程不存在的孤悬 commit）：
 
 ```bash
 git add VERSION CHANGELOG.md README.md docs/ src/core/init.py
 git commit -m "changelog: 补充 v0.9.3 全量变更"
-git push origin main
+git push origin v1
 ```
 
-> 只有用户明确要求时才可在此过程中附带提交代码变更。步骤 3 打 tag 前，确认本次 commit 已在远程（`git log origin/main -1 --oneline` 与本地 HEAD 一致）。
+> 只有用户明确要求时才可在此过程中附带提交代码变更。步骤 3 打 tag 前，确认本次 commit 已在远程（`git log origin/v1 -1 --oneline` 与本地 HEAD 一致）。
 
 ### 步骤 3：创建 tag 并推送 remote
 
@@ -131,8 +131,8 @@ gh release view v0.9.3
 
 - [ ] `VERSION` 文件为新版本号（无 `v` 前缀）
 - [ ] `CHANGELOG.md` 顶部有 `## [<新版本>] - <日期>` section，所有 commit 的用户可见变更已覆盖
-- [ ] `grep -rn "pg-skills v[0-9]"` 中所有 subtree 引用均已更新为新版本
-- [ ] release commit 已推送（`git log origin/main -1 --oneline` 与本地 HEAD 一致）
+- [ ] `grep -rn "refs/tags/v[0-9]"` 中所有 subtree 引用均已更新为新版本
+- [ ] release commit 已推送（`git log origin/v1 -1 --oneline` 与本地 HEAD 一致）
 - [ ] tag `v<新版本>` 已推送（`git ls-remote --tags origin` 可见）
 - [ ] `gh release view v<新版本>` 正常返回，release notes 完整
 

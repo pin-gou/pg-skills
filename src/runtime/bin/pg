@@ -4,8 +4,8 @@
 Subcommands:
     pg init              Ensure .pg/ structure + selected tool integration
     pg doctor            Validate .pg/ structure and project.yaml
-    pg upgrade [version] Upgrade pg-skills (指定版本 tag 或默认 main)
-    pg upgrade --list     Fetch remote tags, list available versions
+    pg upgrade [version] Upgrade pg-skills (指定版本 tag 或默认 v1 分支)
+    pg upgrade --list     List remote versions (ls-remote, no local tags)
 
 Usage:
     python3 pg <subcommand> [options]
@@ -99,13 +99,13 @@ def cmd_doctor(args) -> int:
     return run_doctor(find_project_root(), find_pg_skills_root())
 
 
-# ----- subcommand: upgrade (--list / --interactive / [version] 默认 main) -----
+# ----- subcommand: upgrade (--list / --interactive / [version] 默认 v1 分支) -----
 
 def cmd_upgrade(args) -> int:
     """Upgrade pg-skills via git subtree.
 
     Modes:
-        --list:         Fetch remote tags, list available versions
+        --list:         ls-remote 列出远程版本 (不写入本地 tag)
         --interactive:  列出冲突文件, 让用户逐文件决策 (overwrite / keep-mine / abort)
         (默认):         执行 git subtree pull, 版本号自动补 v 前缀
     """
@@ -126,7 +126,7 @@ def cmd_upgrade(args) -> int:
 
 def _normalize_ref(version: str | None) -> str:
     if version is None:
-        return 'main'
+        return 'v1'
     if re.fullmatch(r'\d+(\.\d+)*', version):
         return f'v{version}'
     return version
@@ -138,8 +138,48 @@ def _to_tag_ref(ref: str) -> str:
     return ref
 
 
+def _disable_tag_following(project_root: Path, remote: str = 'pg-skills') -> None:
+    """关闭该 remote 的 tag 自动跟随.
+
+    git fetch 默认会把与取回对象相关的 tag 一并抓到本地。pg-skills 有十几个
+    版本 tag，一旦落到项目的 tag 命名空间，`git push --tags` 就会把上游全部
+    提交变成项目远端可达，所有 clone 都要下载这段历史。
+    """
+    subprocess.run(
+        ['git', '-C', str(project_root), 'config', f'remote.{remote}.tagOpt', '--no-tags'],
+        capture_output=True, text=True,
+    )
+
+
+def _version_sort_key(tag: str) -> tuple:
+    return tuple(int(part) for part in re.findall(r'\d+', tag))
+
+
+def _parse_remote_version_tags(output: str) -> list:
+    """从 `git ls-remote --tags` 输出中提取版本 tag (去重, 升序).
+
+    annotated tag 会同时出现 `refs/tags/v1.0.0` 与 `refs/tags/v1.0.0^{}`，
+    后者是 peeled 提交，需要去掉后再去重。
+    """
+    versions = set()
+    for line in output.splitlines():
+        parts = line.split('\t')
+        if len(parts) != 2:
+            continue
+        name = parts[1].strip()
+        if name.endswith('^{}'):
+            name = name[:-3]
+        if not name.startswith('refs/tags/'):
+            continue
+        tag = name[len('refs/tags/'):]
+        if not re.match(r'^v?\d+\.\d+', tag):
+            continue
+        versions.add(tag if tag.startswith('v') else f'v{tag}')
+    return sorted(versions, key=_version_sort_key)
+
+
 def _upgrade_check(project_root: Path, current: str) -> int:
-    """Fetch remote tags, 列出可用版本."""
+    """列出远程可用版本 (ls-remote, 不落本地 tag)."""
     remote = 'pg-skills'
     check = subprocess.run(
         ['git', '-C', str(project_root), 'remote', 'get-url', remote],
@@ -150,20 +190,21 @@ def _upgrade_check(project_root: Path, current: str) -> int:
         print(f'  Run: git remote add {remote} git@github.com:pin-gou/pg-skills.git')
         return 1
 
-    subprocess.run(
-        ['git', '-C', str(project_root), 'fetch', remote, '--tags'],
-        capture_output=True, text=True,
-    )
+    _disable_tag_following(project_root, remote)
 
-    result = subprocess.run(
-        ['git', '-C', str(project_root), 'tag', '-l', 'v*'],
+    listed = subprocess.run(
+        ['git', '-C', str(project_root), 'ls-remote', '--tags', remote],
         capture_output=True, text=True,
     )
-    tags = [t for t in result.stdout.strip().split('\n') if t]
+    if listed.returncode != 0:
+        print(f'ERROR: git ls-remote failed: {listed.stderr.strip()[-300:]}')
+        return 1
+
+    tags = _parse_remote_version_tags(listed.stdout)
 
     current_tag = f'v{current}' if not current.startswith('v') else current
     print(f'Current: {current_tag}')
-    for t in sorted(tags):
+    for t in tags:
         marker = '  ← current' if t == current_tag else ''
         print(f'  {t}{marker}')
     return 0
@@ -174,7 +215,7 @@ def _compute_changed_files(project_root: Path, ref: str) -> list:
     remote = 'pg-skills'
     fetch_ref = _to_tag_ref(ref)
     subprocess.run(
-        ['git', '-C', str(project_root), 'fetch', remote, fetch_ref],
+        ['git', '-C', str(project_root), 'fetch', '--no-tags', remote, fetch_ref],
         capture_output=True, text=True,
     )
     result = subprocess.run(
@@ -199,9 +240,11 @@ def _upgrade_pull(project_root: Path, current: str, ref: str, force: bool = Fals
     )
     if check.returncode != 0:
         print(f'ERROR: remote "{remote}" not configured.')
-        print(f'  Run: git remote add {remote} https://github.com/pin-gou/pg-skills.git')
-        print(f'  Run: git fetch {remote}')
+        print(f'  Run: git remote add {remote} git@github.com:pin-gou/pg-skills.git')
+        print(f'  Run: git config remote.{remote}.tagOpt --no-tags')
         return 1
+
+    _disable_tag_following(project_root, remote)
 
     if force:
         return _upgrade_by_copy(project_root, project_root / prefix, ref)
@@ -402,8 +445,8 @@ def main():
     # upgrade (--list / --interactive / [version] 默认 main)
     p_upgrade = subparsers.add_parser('upgrade', help='Upgrade pg-skills via git subtree')
     p_upgrade.add_argument('version', nargs='?', default=None,
-                           help='Version tag to upgrade to (e.g., 0.2.0). Default: main')
-    p_upgrade.add_argument('--list', action='store_true', help='Fetch remote tags, list available versions')
+                           help='Version tag to upgrade to (e.g., 0.2.0). Default: v1')
+    p_upgrade.add_argument('--list', action='store_true', help='List remote versions via ls-remote (no local tags)')
     p_upgrade.add_argument('--interactive', action='store_true', help='Show conflict files before upgrade')
     p_upgrade.add_argument('--force', action='store_true', help='Stash working tree modifications before pull')
     p_upgrade.set_defaults(func=cmd_upgrade)

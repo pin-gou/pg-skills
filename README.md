@@ -38,9 +38,11 @@ pg-skills 仓库（独立远程）                  您的项目仓库
 
 ```bash
 # 1. 用 git subtree 把 pg-skills 同步进项目
+#    tagOpt --no-tags 防止 pg-skills 的十几个版本 tag 落进项目的 tag 命名空间；
+#    用 refs/tags/<ver> 指定版本，只取这一个版本，不落本地 tag
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
-git fetch pg-skills
-git subtree add --prefix=.pg/skills pg-skills v1.0.1 --squash
+git config remote.pg-skills.tagOpt --no-tags
+git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash
 
 # 2a. 交互式终端可直接运行：自动探测，并要求确认或选择
 python3 .pg/skills/src/runtime/bin/pg init
@@ -113,11 +115,33 @@ python3 .pg/skills/src/runtime/bin/pg doctor
 
 ```bash
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
-git fetch pg-skills
-git subtree add --prefix=.pg/skills pg-skills v1.0.1 --squash
+git config remote.pg-skills.tagOpt --no-tags
+git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash
 python3 .pg/skills/src/runtime/bin/pg init
 git add .pg/
 git commit -m "feat: 接入 pg-skills $(cat .pg/skills/VERSION)"
+```
+
+### 接入会不会把 pg-skills 的提交历史带进项目仓库？
+
+**不会。** `--squash` 把上游全部历史折叠成 1 个快照提交，`git log` 只多 **2 个提交**
+（1 个 `Squashed ...` + 1 个 `Merge commit ...`），后续每次 `pg upgrade` 也是 +2。
+pg-skills 自身的几百个提交不会出现在项目历史里；代价是 `git blame .pg/skills` 会把所有行
+归到那个快照提交，需要逐行溯源时去 pg-skills 仓库查。
+
+有三个容易被忽略的副作用，上面的接入命令已经规避了其中两个：
+
+| 现象 | 说明 | 规避方式 |
+|------|------|----------|
+| **tag 污染** | `git fetch pg-skills` 会把 pg-skills 的十几个版本 tag（`v0.x…v1.0.1`）复制进项目的 tag 命名空间。一旦 CI 里跑了 `git push --tags`，这些 tag 会把上游全部提交变成项目**远端**可达，所有人 clone 都要下载 | 接入时 `git config remote.pg-skills.tagOpt --no-tags`，并用 `refs/tags/<ver>` 指定版本（本文档的做法）。`pg upgrade` / `pg upgrade --list` 内部同样使用 `--no-tags` 与 `ls-remote`，不会重新引入 tag |
+| **对象库变大** | `git fetch` 会把上游历史对象下载到本地 `.git`，并经 `refs/remotes/pg-skills/*` 保持可达（量级几 MB） | 一般可接受；确需清理见下方 |
+| **blame 失真** | squash 后 `.pg/skills/` 没有逐行历史 | 需要溯源时查 pg-skills 仓库 |
+
+如果要彻底回收上游历史对象（一般不需要；清理后 `pg upgrade` 前要重新 `git remote add`）：
+
+```bash
+git remote remove pg-skills
+git reflog expire --expire=now --all && git gc --prune=now
 ```
 
 ---
@@ -211,7 +235,7 @@ pg-skills/
 ### 升级命令
 
 ```bash
-# 升级到最新版（main）
+# 升级到最新版（v1 分支）
 pg upgrade
 
 # 升级到指定版本
@@ -230,7 +254,10 @@ pg upgrade --interactive
 pg doctor
 ```
 
-`pg upgrade` 等价于 `git subtree pull --prefix=.pg/skills pg-skills main --squash`。
+`pg upgrade` 等价于 `git subtree pull --prefix=.pg/skills pg-skills v1 --squash`
+（`v1` 是 pg-skills 远端的默认分支，发布都在这条分支上）。
+按版本升级也可写成 `git subtree pull --prefix=.pg/skills pg-skills refs/tags/v<ver> --squash`
+（`refs/tags/` 形式可避免上游 tag 落到本地 tag 命名空间）。
 
 > 注意：0.1.x 阶段 hook 脚本里 `source $PG_SKILLS_PATH/...` **手动写死绝对路径**。0.2.x 之后 subtree 嵌入，自动用相对路径 `.pg/skills/...`。
 
@@ -314,7 +341,7 @@ python3 .pg/skills/src/runtime/bin/pg-invoke-hook.py invoke-hook \
 # ┌─ pg-run — pg-skills 运行菜单 ──────────────────┐
 # │ Tab: 常用操作|Environment|Instance|Module|更新 │
 # │ 常用操作: 准备并启动 / 停止清理 / 启停所有      │
-# │ 更新   : 直接选版本 (main 置顶, 每页10项) + 确认 │
+# │ 更新   : 直接选版本 (v1 置顶, 每页10项) + 确认  │
 # └─────────────────────────────────────────────────┘
 
 # 跳过菜单、直达执行 module 操作

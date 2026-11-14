@@ -7,30 +7,31 @@
   <text x="60" y="270" font-size="22" fill="#94a3b8">把 pg-skills 接入你的项目</text>
 
   <g transform="translate(60 320)">
-    <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#60a5fa"/>
-    <text x="30" y="40" font-size="16" font-weight="700" fill="#60a5fa">STEP 1 · 同步</text>
-    <text x="30" y="75" font-size="16" fill="#f8fafc" font-family="ui-monospace, monospace">git subtree add --prefix=.pg/skills pg-skills v1.0.1</text>
+    <rect width="680" height="130" rx="16" fill="#1e293b" stroke="#60a5fa"/>
+    <text x="30" y="40" font-size="16" font-weight="700" fill="#60a5fa">STEP 1 · 同步（不引入上游 tag）</text>
+    <text x="30" y="72" font-size="14" fill="#f8fafc" font-family="ui-monospace, monospace">git config remote.pg-skills.tagOpt --no-tags</text>
+    <text x="30" y="102" font-size="14" fill="#f8fafc" font-family="ui-monospace, monospace">git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash</text>
   </g>
 
-  <g transform="translate(60 440)">
+  <g transform="translate(60 470)">
     <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#a78bfa"/>
     <text x="30" y="40" font-size="16" font-weight="700" fill="#a78bfa">STEP 2 · 初始化</text>
     <text x="30" y="75" font-size="16" fill="#f8fafc" font-family="ui-monospace, monospace">python3 .pg/skills/src/runtime/bin/pg init</text>
   </g>
 
-  <g transform="translate(60 560)">
+  <g transform="translate(60 590)">
     <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#fbbf24"/>
     <text x="30" y="40" font-size="16" font-weight="700" fill="#fbbf24">STEP 3 · 重启 opencode</text>
     <text x="30" y="75" font-size="16" fill="#f8fafc">加载 8 个 slash command + 11 个 SKILL</text>
   </g>
 
-  <g transform="translate(60 680)">
+  <g transform="translate(60 710)">
     <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#10b981"/>
     <text x="30" y="40" font-size="16" font-weight="700" fill="#10b981">STEP 4 · 使用</text>
     <text x="30" y="75" font-size="16" fill="#f8fafc">运行 /0-pg-auto-pilot 自动驾驶模式</text>
   </g>
 
-  <g transform="translate(60 800)">
+  <g transform="translate(60 830)">
     <rect width="680" height="100" rx="16" fill="#1e293b" stroke="#ef4444"/>
     <text x="30" y="40" font-size="16" font-weight="700" fill="#ef4444">STEP 5 · 校验</text>
     <text x="30" y="75" font-size="16" fill="#f8fafc" font-family="ui-monospace, monospace">python3 .pg/skills/src/runtime/bin/pg doctor</text>

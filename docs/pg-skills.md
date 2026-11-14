@@ -104,9 +104,10 @@ AI 把改动内容、验证结果、hook 日志位置汇总给你确认。达不
 ## 接入一个新项目有多简单？
 
 ```bash
-# 1. 拉入 pg-skills
+# 1. 拉入 pg-skills（tagOpt --no-tags：不把上游版本 tag 灌进项目）
 git remote add pg-skills git@github.com:pin-gou/pg-skills.git
-git subtree add --prefix=.pg/skills pg-skills v1.0.1 --squash
+git config remote.pg-skills.tagOpt --no-tags
+git subtree add --prefix=.pg/skills pg-skills refs/tags/v1.0.1 --squash
 
 # 2. 初始化骨架
 python3 .pg/skills/src/runtime/bin/pg init
@@ -115,6 +116,8 @@ python3 .pg/skills/src/runtime/bin/pg init
 # 4. 验证
 python3 .pg/skills/src/runtime/bin/pg doctor
 ```
+
+接入只会在项目历史里留下 2 个提交（squashed 快照 + merge），pg-skills 自身的提交历史不会进来。
 
 接入后，`pg init` 生成 `project.yaml`（你的项目"户口本"）+ hooks（环境生命周期脚本）骨架。你只需要核对一遍 AI 生成的产物是否正确。
 

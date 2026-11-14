@@ -185,7 +185,14 @@ def initialize_project(
         output(f"ERROR: .pg/ not found at {pg_dir}.")
         output("  .pg/skills must be present before running pg init.")
         output("  If pg-skills has not been synced, run:")
-        output("    git subtree add --prefix=.pg/skills pg-skills v1.0.1 --squash")
+        output(
+            "    git remote add pg-skills git@github.com:pin-gou/pg-skills.git"
+        )
+        output("    git config remote.pg-skills.tagOpt --no-tags")
+        output(
+            "    git subtree add --prefix=.pg/skills pg-skills "
+            "refs/tags/v1.0.1 --squash"
+        )
         return 1
 
     integration = None

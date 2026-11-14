@@ -243,7 +243,7 @@ python3 src/runtime/bin/pg doctor
 - **命名规范**：全小写 + 下划线（snake_case），见 v0.5.x 迁移
 - **hook 脚本**：`set -uo pipefail`（不加 `-e`），由 `hook-helpers.sh` trap ERR 控制
 - **版本管理**：semver，见 `VERSION` 文件
-  - **同步要求**：更新 VERSION 时，必须同步修改所有文档/代码中 `git subtree add --prefix=.pg/skills pg-skills v<old> --squash` 命令中的版本号为新版本。当前受影响文件：`README.md`、`docs/index.html`、`docs/pg-skills.md`、`docs/cards/07-onboarding.svg`、`src/core/init.py`。
+  - **同步要求**：更新 VERSION 时，必须同步修改所有文档/代码中 `git subtree add --prefix=.pg/skills pg-skills refs/tags/v<old> --squash` 命令里的版本号为新版本。当前受影响文件：`README.md`、`docs/index.html`、`docs/pg-skills.md`、`docs/cards/07-onboarding.svg`、`src/core/init.py`。
 - **变更日志**：每个版本在 `CHANGELOG.md` 顶部新增一个 section，标题为 `[<版本>] - <发布日期>`，版本号与日期和 `VERSION` 文件保持一致。撰写要求：
   - **从用户视角撰写**：简明扼要，写"变更对用户的影响"（用户得到什么、需要做什么），不要罗列实现细节、函数名或内部机制
   - **破坏性变更优先**：需要用户主动修改的内容（如 project.yaml 格式、命令/字段变更）放在最前，标注"升级前必读"，明确说明改什么
