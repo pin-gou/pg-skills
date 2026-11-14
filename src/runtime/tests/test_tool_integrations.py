@@ -956,6 +956,9 @@ class TestCli(unittest.TestCase):
             )
             self.assertEqual(doctor.returncode, 0, doctor.stdout + doctor.stderr)
             self.assertIn(".pg/project.yaml schema valid", doctor.stdout)
+            # agent-protocol 由 pg-init-project 注入，pg init 不安装该文件；
+            # 提示必须指向正确入口，否则用户会白跑一次 pg init
+            self.assertIn("pg-init-project", doctor.stdout)
 
 
 if __name__ == "__main__":

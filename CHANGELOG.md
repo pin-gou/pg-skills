@@ -1,5 +1,10 @@
 # 变更日志
 
+## [Unreleased]
+
+**修复**
+- **`pg doctor` 的 agent-protocol 提示改为指向正确入口**：缺 `.pg/context/agent-protocol.md` 时不再提示"重跑 `pg init`"（`pg init` 不安装该文件），改为提示运行 `pg-init-project` skill 注入
+
 ## [1.0.2] - 2026-11-14
 
 **升级前必读（接入命令变更）**
